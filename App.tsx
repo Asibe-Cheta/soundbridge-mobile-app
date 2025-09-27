@@ -1,5 +1,6 @@
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
+import { View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -17,10 +18,25 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import AudioPlayerScreen from './src/screens/AudioPlayerScreen';
 import CreatorProfileScreen from './src/screens/CreatorProfileScreen';
 import CreatorSetupScreen from './src/screens/CreatorSetupScreen';
+import PrivacySecurityScreen from './src/screens/PrivacySecurityScreen';
+import ChangePasswordScreen from './src/screens/ChangePasswordScreen';
+import NotificationSettingsScreen from './src/screens/NotificationSettingsScreen';
+import ThemeSettingsScreen from './src/screens/ThemeSettingsScreen';
+import HelpSupportScreen from './src/screens/HelpSupportScreen';
+import AboutScreen from './src/screens/AboutScreen';
+import TermsOfServiceScreen from './src/screens/TermsOfServiceScreen';
+import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
+import PaymentMethodsScreen from './src/screens/PaymentMethodsScreen';
+import UpgradeScreen from './src/screens/UpgradeScreen';
+import BillingScreen from './src/screens/BillingScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { AudioPlayerProvider } from './src/contexts/AudioPlayerContext';
+import { ThemeProvider } from './src/contexts/ThemeContext';
+
+// Import components
+import MiniPlayer from './src/components/MiniPlayer';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -102,32 +118,48 @@ function AppNavigator() {
   }
 
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      {!user ? (
-        <Stack.Screen name="Auth" component={AuthScreen} />
-             ) : (
-               <>
-                 <Stack.Screen name="MainTabs" component={MainTabs} />
-                 <Stack.Screen name="AudioPlayer" component={AudioPlayerScreen} />
-                 <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} />
-                 <Stack.Screen name="CreatorSetup" component={CreatorSetupScreen} />
-               </>
-             )}
-    </Stack.Navigator>
+    <View style={{ flex: 1 }}>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {!user ? (
+          <Stack.Screen name="Auth" component={AuthScreen} />
+               ) : (
+                 <>
+                   <Stack.Screen name="MainTabs" component={MainTabs} />
+                   <Stack.Screen name="AudioPlayer" component={AudioPlayerScreen} />
+                   <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} />
+                   <Stack.Screen name="CreatorSetup" component={CreatorSetupScreen} />
+                   <Stack.Screen name="PrivacySecurity" component={PrivacySecurityScreen} />
+                   <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
+                   <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
+                   <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
+                   <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
+                            <Stack.Screen name="About" component={AboutScreen} />
+                            <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
+                            <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+                            <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
+                            <Stack.Screen name="Upgrade" component={UpgradeScreen} />
+                            <Stack.Screen name="Billing" component={BillingScreen} />
+                 </>
+               )}
+      </Stack.Navigator>
+      {user && <MiniPlayer />}
+    </View>
   );
 }
 
 export default function App() {
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <AudioPlayerProvider>
-          <NavigationContainer>
-            <StatusBar style="light" backgroundColor="#1A1A1A" />
-            <AppNavigator />
-          </NavigationContainer>
-        </AudioPlayerProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <AudioPlayerProvider>
+            <NavigationContainer>
+              <StatusBar style="light" backgroundColor="#1A1A1A" />
+              <AppNavigator />
+            </NavigationContainer>
+          </AudioPlayerProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }

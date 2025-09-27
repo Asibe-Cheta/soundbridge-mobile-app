@@ -311,7 +311,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
             onPress={() => play(track)}
           >
             <Image 
-              source={{ uri: track.cover_image_url || track.artwork_url || track.cover_art_url || 'https://via.placeholder.com/60' }}
+              source={{ uri: track.cover_image_url || track.artwork_url || 'https://via.placeholder.com/60' }}
               style={styles.queueItemImage}
             />
             <View style={styles.queueItemInfo}>
@@ -386,7 +386,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
           ]}
         >
           <Image 
-            source={{ uri: currentTrack.cover_image_url || currentTrack.artwork_url || currentTrack.cover_art_url || 'https://via.placeholder.com/300' }}
+            source={{ uri: currentTrack.cover_image_url || currentTrack.artwork_url || 'https://via.placeholder.com/300' }}
             style={styles.albumArt}
           />
           <View style={styles.albumArtOverlay} />

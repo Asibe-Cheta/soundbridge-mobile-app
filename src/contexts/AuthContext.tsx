@@ -15,6 +15,7 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<{ success: boolean; error?: any }>;
   updatePassword: (newPassword: string) => Promise<{ success: boolean; error?: any }>;
   resendConfirmation: (email: string) => Promise<{ success: boolean; error?: any }>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -294,6 +295,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
+  const refreshUser = async () => {
+    try {
+      const { success, session } = await authService.getSession();
+      if (success && session) {
+        setSession(session);
+        setUser(session.user);
+      }
+    } catch (err) {
+      console.error('Error refreshing user:', err);
+    }
+  };
+
   const value: AuthContextType = {
     user,
     session,
@@ -306,6 +319,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     resetPassword,
     updatePassword,
     resendConfirmation,
+    refreshUser,
   };
 
   return (

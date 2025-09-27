@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { db } from '../lib/supabase';
 
@@ -68,6 +69,7 @@ interface Event {
 export default function HomeScreen() {
   const { user } = useAuth();
   const { play, addToQueue } = useAudioPlayer();
+  const { theme } = useTheme();
   const navigation = useNavigation();
   const [refreshing, setRefreshing] = useState(false);
   
@@ -260,8 +262,8 @@ export default function HomeScreen() {
         otherRecentTracks.forEach(t => addToQueue(t));
       }
       
-      // Navigate to AudioPlayerScreen to show full player
-      navigation.navigate('AudioPlayer' as never);
+      // Mini player will now handle showing the currently playing track
+      // Navigation to full player is handled by mini player expand button
     } catch (error) {
       console.error('Error playing track:', error);
       Alert.alert('Playback Error', 'Failed to play the track. Please try again.');
@@ -347,8 +349,8 @@ export default function HomeScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView 
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
+      <ScrollView
         style={styles.scrollView}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -379,10 +381,10 @@ export default function HomeScreen() {
           <View style={styles.creatorBannerContent}>
             <View style={styles.creatorBannerLeft}>
               <Ionicons name="star" size={20} color="#DC2626" />
-              <Text style={styles.creatorBannerTitle}>Share Your Sound</Text>
+              <Text style={[styles.creatorBannerTitle, { color: theme.colors.text }]}>Share Your Sound</Text>
             </View>
             <View style={styles.creatorBannerRight}>
-              <Text style={styles.creatorBannerSubtitle}>Get support from fans</Text>
+              <Text style={[styles.creatorBannerSubtitle, { color: theme.colors.textSecondary }]}>Get support from fans</Text>
               <Ionicons name="chevron-forward" size={16} color="#DC2626" />
             </View>
           </View>
@@ -417,7 +419,7 @@ export default function HomeScreen() {
             style={styles.sectionTitleContainer}
             onPress={() => setIsTrendingExpanded(!isTrendingExpanded)}
           >
-            <Text style={styles.sectionTitle}>Trending Now</Text>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Trending Now</Text>
             <Ionicons 
               name={isTrendingExpanded ? "chevron-up" : "chevron-down"} 
               size={16} 
@@ -444,8 +446,8 @@ export default function HomeScreen() {
                     onPress={() => handleTrackPress(track)}
                   >
                     <View style={styles.trackCover}>
-                  {(track.cover_image_url || track.artwork_url || track.cover_art_url) ? (
-                    <Image source={{ uri: track.cover_image_url || track.artwork_url || track.cover_art_url }} style={styles.trackImage} />
+                  {(track.cover_image_url || track.artwork_url) ? (
+                    <Image source={{ uri: track.cover_image_url || track.artwork_url }} style={styles.trackImage} />
                       ) : (
                         <View style={styles.defaultTrackImage}>
                           <Ionicons name="musical-notes" size={32} color="#666" />
@@ -455,10 +457,10 @@ export default function HomeScreen() {
                         <Ionicons name="play" size={16} color="#FFFFFF" />
                       </View>
                     </View>
-                    <Text style={styles.trackTitle} numberOfLines={1}>
+                    <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
                       {track.title}
                     </Text>
-                    <Text style={styles.trackArtist} numberOfLines={1}>
+                    <Text style={[styles.trackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                       {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
                     </Text>
                     <Text style={styles.trackDuration}>
@@ -484,7 +486,7 @@ export default function HomeScreen() {
             style={styles.sectionTitleContainer}
             onPress={navigateToRecentMusic}
           >
-            <Text style={styles.sectionTitle}>Recent Music</Text>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Music</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={navigateToRecentMusic}>
             <Ionicons name="chevron-forward" size={16} color="#DC2626" />
@@ -504,13 +506,18 @@ export default function HomeScreen() {
                 onPress={() => handleTrackPress(track)}
               >
                 <View style={styles.trackRowCover}>
-                  {(track.cover_image_url || track.artwork_url || track.cover_art_url) ? (
-                    <Image source={{ uri: track.cover_image_url || track.artwork_url || track.cover_art_url }} style={styles.trackRowImage} />
-                  ) : (
-                    <View style={styles.defaultTrackRowImage}>
-                      <Ionicons name="musical-notes" size={20} color="#666" />
-                    </View>
-                  )}
+                  {(() => {
+                    const imageUrl = track.cover_image_url || track.artwork_url;
+                    console.log(`🖼️ HomeScreen track "${track.title}" - cover_image_url: ${track.cover_image_url}, artwork_url: ${track.artwork_url}, final: ${imageUrl}`);
+                    
+                    return imageUrl ? (
+                      <Image source={{ uri: imageUrl }} style={styles.trackRowImage} />
+                    ) : (
+                      <View style={styles.defaultTrackRowImage}>
+                        <Ionicons name="musical-notes" size={20} color="#666" />
+                      </View>
+                    );
+                  })()}
                 </View>
                 <View style={styles.trackRowInfo}>
                   <Text style={styles.trackRowTitle} numberOfLines={1}>
@@ -521,7 +528,7 @@ export default function HomeScreen() {
                   </Text>
                 </View>
                 <View style={styles.trackRowActions}>
-                  <TouchableOpacity style={styles.playButton}>
+                  <TouchableOpacity style={styles.playButton} onPress={() => handleTrackPress(track)}>
                     <Ionicons name="play" size={16} color="#DC2626" />
                   </TouchableOpacity>
                   <Text style={styles.trackRowDuration}>
@@ -546,7 +553,7 @@ export default function HomeScreen() {
             style={styles.sectionTitleContainer}
             onPress={navigateToHotCreators}
           >
-            <Text style={styles.sectionTitle}>Hot Creators</Text>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Hot Creators</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={navigateToHotCreators}>
             <Ionicons name="chevron-forward" size={16} color="#DC2626" />
@@ -574,7 +581,7 @@ export default function HomeScreen() {
                     </View>
                   )}
                 </View>
-                <Text style={styles.creatorName} numberOfLines={1}>
+                <Text style={[styles.creatorName, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                   {creator?.display_name || creator?.username || 'Unknown Creator'}
                 </Text>
                 <Text style={styles.creatorUsername} numberOfLines={1}>
@@ -601,7 +608,7 @@ export default function HomeScreen() {
             style={styles.sectionTitleContainer}
             onPress={navigateToEvents}
           >
-            <Text style={styles.sectionTitle}>Upcoming Events</Text>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Upcoming Events</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={navigateToEvents}>
             <Ionicons name="chevron-forward" size={16} color="#DC2626" />
@@ -630,7 +637,7 @@ export default function HomeScreen() {
                   )}
                 </View>
                 <View style={styles.eventInfo}>
-                  <Text style={styles.eventTitle} numberOfLines={2}>
+                  <Text style={[styles.eventTitle, { color: theme.colors.text }]} numberOfLines={2}>
                     {event.title}
                   </Text>
                   <Text style={styles.eventDate}>

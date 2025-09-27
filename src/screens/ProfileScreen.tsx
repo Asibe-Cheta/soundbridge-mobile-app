@@ -12,12 +12,17 @@ import {
   Alert,
   Switch,
   RefreshControl,
+  ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../lib/supabase';
+import * as ImagePicker from 'expo-image-picker';
+import { useAudioPlayer } from '../contexts/AudioPlayerContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 
 const { width } = Dimensions.get('window');
@@ -64,7 +69,9 @@ interface UserTrack {
 }
 
 export default function ProfileScreen() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, updatePassword, refreshUser } = useAuth();
+  const { autoPlay, toggleAutoPlay } = useAudioPlayer();
+  const { theme } = useTheme();
   const navigation = useNavigation();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserStats | null>(null);
@@ -74,10 +81,9 @@ export default function ProfileScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [darkModeEnabled, setDarkModeEnabled] = useState(true);
-  const [autoPlayEnabled, setAutoPlayEnabled] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingProfile, setEditingProfile] = useState<Partial<UserProfile>>({});
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   useEffect(() => {
     loadProfileData();
@@ -245,6 +251,8 @@ export default function ProfileScreen() {
         console.log('✅ Profile updated successfully');
         // Update local state
         setProfile(prev => prev ? { ...prev, ...editingProfile } : null);
+        // Refresh user data across the app
+        await refreshUser();
         setIsEditing(false);
         Alert.alert('Success', 'Profile updated successfully!');
       } else {
@@ -260,6 +268,105 @@ export default function ProfileScreen() {
   const handleCancelEdit = () => {
     setIsEditing(false);
     setEditingProfile({});
+  };
+
+  const handleChangeAvatar = () => {
+    Alert.alert(
+      'Change Profile Picture',
+      'Choose how you want to update your profile picture',
+      [
+        { text: 'Camera', onPress: () => updateAvatar('camera') },
+        { text: 'Gallery', onPress: () => updateAvatar('gallery') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const updateAvatar = async (source: 'camera' | 'gallery') => {
+    if (!user?.id) return;
+
+    try {
+      setAvatarUploading(true);
+
+      // Request permissions
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'We need camera roll permissions to select a profile picture.');
+        return;
+      }
+
+      let result;
+      if (source === 'camera') {
+        const cameraStatus = await ImagePicker.requestCameraPermissionsAsync();
+        if (cameraStatus.status !== 'granted') {
+          Alert.alert('Permission Required', 'We need camera permissions to take a photo.');
+          return;
+        }
+        result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+      } else {
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+      }
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        
+        // Validate file size (5MB limit)
+        if (asset.fileSize && asset.fileSize > 5 * 1024 * 1024) {
+          Alert.alert('File Too Large', 'Profile pictures must be under 5MB');
+          return;
+        }
+
+        // Prepare file for upload
+        const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
+        const mimeType = {
+          'jpg': 'image/jpeg',
+          'jpeg': 'image/jpeg',
+          'png': 'image/png',
+          'webp': 'image/webp'
+        }[fileExt] || 'image/jpeg';
+
+        const file = {
+          uri: asset.uri,
+          name: `avatar_${Date.now()}.${fileExt}`,
+          type: mimeType
+        };
+
+        // Upload to Supabase
+        const uploadResult = await db.uploadImage(user.id, file, 'avatars');
+        
+        if (!uploadResult.success) {
+          Alert.alert('Upload Failed', 'Failed to upload profile picture');
+          return;
+        }
+
+        // Update profile with new avatar URL
+        const updateResult = await db.updateProfileAvatar(user.id, uploadResult.data!.url);
+        
+        if (updateResult.success && updateResult.data) {
+          setProfile(updateResult.data);
+          // Refresh user data across the app
+          await refreshUser();
+          Alert.alert('Success', 'Profile picture updated successfully');
+        } else {
+          Alert.alert('Error', 'Failed to update profile picture');
+        }
+      }
+    } catch (error) {
+      console.error('Error updating avatar:', error);
+      Alert.alert('Error', 'Failed to update profile picture');
+    } finally {
+      setAvatarUploading(false);
+    }
   };
 
   const handleSignOut = async () => {
@@ -303,41 +410,66 @@ export default function ProfileScreen() {
 
   // Settings handlers
   const handlePrivacySecurity = () => {
-    Alert.alert('Privacy & Security', 'Privacy settings will be available soon!');
+    navigation.navigate('PrivacySecurity' as never);
   };
 
   const handleChangePassword = () => {
-    Alert.alert('Change Password', 'Please use the Forgot Password option on the login screen for now.');
+    navigation.navigate('ChangePassword' as never);
   };
 
   const handleNotificationSettings = () => {
-    Alert.alert('Notifications', 'Notification settings updated locally. Full sync will be available soon!');
+    navigation.navigate('NotificationSettings' as never);
   };
 
   // Support & About handlers
   const handleHelpSupport = () => {
-    Alert.alert('Help & Support', 'Visit soundbridge.com/support for help, or email support@soundbridge.com');
+    Alert.alert(
+      'Help & Support',
+      'Choose how you\'d like to get help',
+      [
+        { text: 'In-App Help', onPress: () => navigation.navigate('HelpSupport' as never) },
+        { text: 'Visit Website', onPress: () => Linking.openURL('https://soundbridge.live/support') },
+        { text: 'Email Support', onPress: () => Linking.openURL('mailto:support@soundbridge.live') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
   };
 
   const handleTermsOfService = () => {
-    Alert.alert('Terms of Service', 'Visit soundbridge.com/terms to read our Terms of Service');
+    Alert.alert(
+      'Terms of Service',
+      'Choose how you\'d like to view our terms',
+      [
+        { text: 'In-App View', onPress: () => navigation.navigate('TermsOfService' as never) },
+        { text: 'Open Website', onPress: () => Linking.openURL('https://soundbridge.live/legal/terms') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
   };
 
   const handlePrivacyPolicy = () => {
-    Alert.alert('Privacy Policy', 'Visit soundbridge.com/privacy to read our Privacy Policy');
+    Alert.alert(
+      'Privacy Policy',
+      'Choose how you\'d like to view our privacy policy',
+      [
+        { text: 'In-App View', onPress: () => navigation.navigate('PrivacyPolicy' as never) },
+        { text: 'Open Website', onPress: () => Linking.openURL('https://soundbridge.live/legal/privacy') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
   };
 
   const handleAbout = () => {
-    Alert.alert('About SoundBridge', 'SoundBridge v1.0.0\nThe social platform for music creators and listeners.\n\nBuilt with ❤️ by the SoundBridge team.');
+    navigation.navigate('About' as never);
   };
 
   // Payout Settings handlers
   const handlePaymentMethods = () => {
-    Alert.alert('Payment Methods', 'Connect your bank account or PayPal for payouts. Feature coming soon!');
+    navigation.navigate('PaymentMethods' as never);
   };
 
   const handlePayoutSchedule = () => {
-    Alert.alert('Payout Schedule', 'Set up automatic weekly or monthly payouts. Feature coming soon!');
+    navigation.navigate('Billing' as never);
   };
 
   const handleTaxInfo = () => {
@@ -365,6 +497,7 @@ export default function ProfileScreen() {
   const renderOverviewTab = () => (
     <ScrollView 
       style={styles.tabContent}
+      contentContainerStyle={{ paddingBottom: 300 }} // Extra space for mini player
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
@@ -426,11 +559,63 @@ export default function ProfileScreen() {
           <Text style={styles.actionText}>Create Playlist</Text>
         </TouchableOpacity>
       </View>
+
+      {/* My Tracks (matching web app) */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>My Tracks</Text>
+        {userTracks.length > 0 ? (
+          userTracks.slice(0, 5).map((track) => (
+            <View key={track.id} style={styles.trackItem}>
+              <View style={styles.trackImageContainer}>
+                {track.artwork_url ? (
+                  <Image source={{ uri: track.artwork_url }} style={styles.trackImage} />
+                ) : (
+                  <View style={[styles.trackImage, styles.trackImagePlaceholder]}>
+                    <Ionicons name="musical-notes" size={20} color="#666" />
+                  </View>
+                )}
+              </View>
+              
+              <View style={styles.trackInfo}>
+                <Text style={styles.trackTitle} numberOfLines={1}>
+                  {track.title}
+                </Text>
+                <View style={styles.trackStats}>
+                  <Ionicons name="play" size={12} color="#666" />
+                  <Text style={styles.trackStatText}>{formatNumber(track.play_count || 0)}</Text>
+                  <Ionicons name="heart" size={12} color="#666" style={{ marginLeft: 8 }} />
+                  <Text style={styles.trackStatText}>{formatNumber(track.likes_count || 0)}</Text>
+                </View>
+              </View>
+              
+              <TouchableOpacity style={styles.trackMenu}>
+                <Ionicons name="ellipsis-horizontal" size={20} color="#666" />
+              </TouchableOpacity>
+            </View>
+          ))
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateText}>No tracks yet</Text>
+            <Text style={styles.emptyStateSubtext}>Upload your first track to get started!</Text>
+          </View>
+        )}
+        
+        {userTracks.length > 5 && (
+          <TouchableOpacity style={styles.viewAllButton}>
+            <Text style={styles.viewAllText}>View All Tracks</Text>
+            <Ionicons name="arrow-forward" size={16} color="#DC2626" />
+          </TouchableOpacity>
+        )}
+      </View>
     </ScrollView>
   );
 
   const renderEarningsTab = () => (
-    <ScrollView style={styles.tabContent} showsVerticalScrollIndicator={false}>
+    <ScrollView 
+      style={styles.tabContent} 
+      contentContainerStyle={{ paddingBottom: 300 }} // Extra space for mini player
+      showsVerticalScrollIndicator={false}
+    >
       {/* Earnings Overview */}
       <View style={styles.earningsOverview}>
         <Text style={styles.earningsTotal}>${stats?.total_earnings?.toFixed(2) || '0.00'}</Text>
@@ -442,7 +627,16 @@ export default function ProfileScreen() {
 
       {/* Earnings Breakdown */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Earnings Breakdown</Text>
+        <View style={styles.earningsHeader}>
+          <Text style={styles.sectionTitle}>Earnings Breakdown</Text>
+          <TouchableOpacity 
+            style={styles.upgradeButton}
+            onPress={() => navigation.navigate('Upgrade' as never)}
+          >
+            <Ionicons name="rocket" size={16} color="#FFFFFF" />
+            <Text style={styles.upgradeButtonText}>Upgrade</Text>
+          </TouchableOpacity>
+        </View>
         <View style={styles.earningsItem}>
           <Ionicons name="heart" size={20} color="#DC2626" />
           <View style={styles.earningsItemContent}>
@@ -489,7 +683,11 @@ export default function ProfileScreen() {
   );
 
   const renderSettingsTab = () => (
-    <ScrollView style={styles.tabContent} showsVerticalScrollIndicator={false}>
+    <ScrollView 
+      style={styles.tabContent} 
+      contentContainerStyle={{ paddingBottom: 300 }} // Extra space for mini player
+      showsVerticalScrollIndicator={false}
+    >
       {/* Account Settings */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Account</Text>
@@ -525,28 +723,21 @@ export default function ProfileScreen() {
             thumbColor={notificationsEnabled ? '#FFFFFF' : '#f4f3f4'}
           />
         </View>
-        <View style={styles.settingRow}>
-          <View style={styles.settingInfo}>
-            <Ionicons name="moon" size={20} color="#666" />
-            <Text style={styles.settingText}>Dark Mode</Text>
-          </View>
-          <Switch
-            value={darkModeEnabled}
-            onValueChange={setDarkModeEnabled}
-            trackColor={{ false: '#767577', true: '#DC2626' }}
-            thumbColor={darkModeEnabled ? '#FFFFFF' : '#f4f3f4'}
-          />
-        </View>
+        <TouchableOpacity style={styles.settingButton} onPress={() => navigation.navigate('ThemeSettings' as never)}>
+          <Ionicons name="moon" size={20} color="#666" />
+          <Text style={styles.settingText}>Theme Settings</Text>
+          <Ionicons name="chevron-forward" size={16} color="#666" />
+        </TouchableOpacity>
         <View style={styles.settingRow}>
           <View style={styles.settingInfo}>
             <Ionicons name="play-circle" size={20} color="#666" />
             <Text style={styles.settingText}>Auto-play</Text>
           </View>
           <Switch
-            value={autoPlayEnabled}
-            onValueChange={setAutoPlayEnabled}
+            value={autoPlay}
+            onValueChange={toggleAutoPlay}
             trackColor={{ false: '#767577', true: '#DC2626' }}
-            thumbColor={autoPlayEnabled ? '#FFFFFF' : '#f4f3f4'}
+            thumbColor={autoPlay ? '#FFFFFF' : '#f4f3f4'}
           />
         </View>
       </View>
@@ -592,8 +783,8 @@ export default function ProfileScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
+      <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} />
       
       {/* Header */}
       <View style={styles.header}>
@@ -630,7 +821,7 @@ export default function ProfileScreen() {
           style={styles.profileBanner}
         >
           <View style={styles.profileContent}>
-            <View style={styles.avatarContainer}>
+            <TouchableOpacity style={styles.avatarContainer} onPress={handleChangeAvatar} disabled={avatarUploading}>
               {profile?.avatar_url ? (
                 <Image
                   source={{ uri: profile.avatar_url }}
@@ -641,12 +832,23 @@ export default function ProfileScreen() {
                   <Ionicons name="person" size={40} color="#666" />
                 </View>
               )}
+              
+              {avatarUploading && (
+                <View style={styles.avatarOverlay}>
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                </View>
+              )}
+              
+              <View style={styles.avatarEditButton}>
+                <Ionicons name="camera" size={16} color="#FFFFFF" />
+              </View>
+              
               {profile?.is_verified && (
                 <View style={styles.verifiedBadge}>
                   <Ionicons name="checkmark" size={12} color="#FFFFFF" />
                 </View>
               )}
-            </View>
+            </TouchableOpacity>
             
             <View style={styles.profileInfo}>
               {isEditing ? (
@@ -1059,5 +1261,105 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 14,
     textAlign: 'center',
+  },
+  // Track-related styles (matching web app)
+  trackItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  trackImageContainer: {
+    marginRight: 12,
+  },
+  trackImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  trackImagePlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  trackInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  trackTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  trackStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  trackStatText: {
+    color: '#666',
+    fontSize: 12,
+    marginLeft: 4,
+  },
+  trackMenu: {
+    padding: 8,
+  },
+  viewAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginTop: 8,
+  },
+  viewAllText: {
+    color: '#DC2626',
+    fontSize: 14,
+    fontWeight: '600',
+    marginRight: 4,
+  },
+  earningsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  upgradeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 4,
+  },
+  upgradeButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  // Avatar upload styles
+  avatarOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarEditButton: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: '#DC2626',
+    borderRadius: 12,
+    padding: 4,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
   },
 });

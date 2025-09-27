@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { db } from '../lib/supabase';
 
@@ -86,6 +87,7 @@ type TabType = 'Music' | 'Artists' | 'Events' | 'Playlists';
 export default function DiscoverScreen() {
   const { user } = useAuth();
   const { play, addToQueue } = useAudioPlayer();
+  const { theme } = useTheme();
   const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState<TabType>('Music');
   const [searchQuery, setSearchQuery] = useState('');
@@ -264,8 +266,8 @@ export default function DiscoverScreen() {
         otherTracks.forEach(t => addToQueue(t));
       }
       
-      // Navigate to AudioPlayerScreen to show full player
-      navigation.navigate('AudioPlayer' as never);
+      // Mini player will now handle showing the currently playing track
+      // Navigation to full player is handled by mini player expand button
     } catch (error) {
       console.error('Failed to play track:', error);
       Alert.alert('Playback Error', 'Failed to play track');
@@ -377,8 +379,8 @@ export default function DiscoverScreen() {
             {recentTracks.slice(0, 5).map((track) => (
               <TouchableOpacity key={track.id} style={styles.trackRow} onPress={() => handleTrackPress(track)}>
                 <View style={styles.trackRowCover}>
-                  {(track.cover_image_url || track.artwork_url || track.cover_art_url) ? (
-                    <Image source={{ uri: track.cover_image_url || track.artwork_url || track.cover_art_url }} style={styles.trackRowImage} />
+                  {(track.cover_image_url || track.artwork_url) ? (
+                    <Image source={{ uri: track.cover_image_url || track.artwork_url }} style={styles.trackRowImage} />
                   ) : (
                     <View style={styles.defaultTrackRowImage}>
                       <Ionicons name="musical-notes" size={20} color="#666" />
@@ -390,7 +392,7 @@ export default function DiscoverScreen() {
                   <Text style={styles.trackRowArtist} numberOfLines={1}>by {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}</Text>
                 </View>
                 <View style={styles.trackRowActions}>
-                  <TouchableOpacity style={styles.playButton}>
+                  <TouchableOpacity style={styles.playButton} onPress={() => handleTrackPress(track)}>
                     <Ionicons name="play" size={16} color="#DC2626" />
                   </TouchableOpacity>
                   <Text style={styles.trackRowDuration}>{formatDuration(track.duration)}</Text>
@@ -538,8 +540,8 @@ export default function DiscoverScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
+      <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} />
       
       {/* Header */}
       <View style={styles.header}>
@@ -557,9 +559,9 @@ export default function DiscoverScreen() {
         <View style={styles.searchBar}>
           <Ionicons name="search" size={20} color="rgba(255, 255, 255, 0.6)" />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { backgroundColor: theme.colors.surface, color: theme.colors.text }]}
             placeholder="Search for creators, music, events..."
-            placeholderTextColor="rgba(255, 255, 255, 0.6)"
+            placeholderTextColor={theme.colors.textSecondary}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />

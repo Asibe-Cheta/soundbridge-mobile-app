@@ -291,7 +291,28 @@ export const db = {
       
       if (error) throw error;
       
-      return { success: true, data, error: null };
+      console.log('🎵 Raw recent tracks data:', JSON.stringify(data?.slice(0, 1), null, 2)); // Log first track for debugging
+      
+      // Transform data to ensure proper URL format and add cover art
+      const transformedData = data?.map(track => {
+        console.log(`🎵 Processing recent track: ${track.title}, file_url: ${track.file_url}, cover_art_url: ${track.cover_art_url}, duration: ${track.duration}`);
+        
+        const transformed = {
+          ...track,
+          audio_url: track.file_url, // Map file_url to audio_url for compatibility
+          cover_image_url: track.cover_art_url || 'https://picsum.photos/300/300?random=' + track.id, // Map cover_art_url to cover_image_url for compatibility
+          // Web app uses likes_count, comments_count, shares_count (already correct)
+          plays_count: track.play_count,
+          // Keep original URLs as they should already be complete
+          file_url: track.file_url,
+          artwork_url: track.cover_art_url || 'https://picsum.photos/300/300?random=' + track.id, // Map to artwork_url for mobile compatibility
+        };
+        
+        console.log(`🎵 Transformed recent track - audio_url: ${transformed.audio_url}, cover_image_url: ${transformed.cover_image_url}, cover_art_url: ${track.cover_art_url}`);
+        return transformed;
+      });
+      
+      return { success: true, data: transformedData, error: null };
     } catch (error) {
       console.error('Get audio tracks error:', error);
       return { success: false, data: null, error };
@@ -313,24 +334,24 @@ export const db = {
       
       if (error) throw error;
       
-      console.log('🎵 Raw trending tracks data:', data?.slice(0, 1)); // Log first track for debugging
+      console.log('🎵 Raw trending tracks data:', JSON.stringify(data?.slice(0, 1), null, 2)); // Log first track for debugging
       
       // Transform data to ensure proper URL format and add cover art
       const transformedData = data?.map(track => {
-        console.log(`🎵 Processing track: ${track.title}, file_url: ${track.file_url}, artwork_url: ${track.artwork_url}`);
+        console.log(`🎵 Processing track: ${track.title}, file_url: ${track.file_url}, cover_art_url: ${track.cover_art_url}, duration: ${track.duration}`);
         
         const transformed = {
           ...track,
           audio_url: track.file_url, // Map file_url to audio_url for compatibility
-          cover_image_url: track.cover_art_url || track.artwork_url, // Check both field names for cover art
-          likes_count: track.like_count,
+          cover_image_url: track.cover_art_url || 'https://picsum.photos/300/300?random=' + track.id, // Map cover_art_url to cover_image_url for compatibility
+          // Web app uses likes_count, comments_count, shares_count (already correct)
           plays_count: track.play_count,
           // Keep original URLs as they should already be complete
           file_url: track.file_url,
-          artwork_url: track.cover_art_url || track.artwork_url, // Map cover_art_url to artwork_url for compatibility
+          artwork_url: track.cover_art_url || 'https://picsum.photos/300/300?random=' + track.id, // Map to artwork_url for mobile compatibility
         };
         
-        console.log(`🎵 Transformed track - audio_url: ${transformed.audio_url}, cover_image_url: ${transformed.cover_image_url}`);
+        console.log(`🎵 Transformed track - audio_url: ${transformed.audio_url}, cover_image_url: ${transformed.cover_image_url}, cover_art_url: ${track.cover_art_url}`);
         return transformed;
       });
       
@@ -402,12 +423,11 @@ export const db = {
       const transformedData = data?.map(track => ({
         ...track,
         audio_url: track.file_url, // Map file_url to audio_url for compatibility
-        cover_image_url: track.artwork_url, // Map artwork_url to cover_image_url for compatibility
-        likes_count: track.like_count,
+        cover_image_url: track.cover_art_url, // Map cover_art_url to cover_image_url for compatibility
         plays_count: track.play_count,
         // Ensure proper Supabase signed URLs for storage files
         file_url: track.file_url ? this.getStorageUrl('audio-tracks', track.file_url) : null,
-        artwork_url: track.artwork_url ? this.getStorageUrl('cover-art', track.artwork_url) : null,
+        artwork_url: track.cover_art_url ? this.getStorageUrl('cover-art', track.cover_art_url) : null,
       }));
       
       return { success: true, data: transformedData, error: null };
@@ -562,12 +582,11 @@ export const db = {
       const transformedData = data?.map(track => ({
         ...track,
         audio_url: track.file_url, // Map file_url to audio_url for compatibility
-        cover_image_url: track.artwork_url, // Map artwork_url to cover_image_url for compatibility
-        likes_count: track.like_count,
+        cover_image_url: track.cover_art_url, // Map cover_art_url to cover_image_url for compatibility
         plays_count: track.play_count,
         // Ensure proper Supabase signed URLs for storage files
         file_url: track.file_url ? this.getStorageUrl('audio-tracks', track.file_url) : null,
-        artwork_url: track.artwork_url ? this.getStorageUrl('cover-art', track.artwork_url) : null,
+        artwork_url: track.cover_art_url ? this.getStorageUrl('cover-art', track.cover_art_url) : null,
       }));
       
       return { success: true, data: transformedData, error: null };
@@ -853,11 +872,22 @@ export const db = {
 
   async uploadImage(userId: string, file: { uri: string; name: string; type: string }, bucket = 'cover-art') {
     try {
-      console.log('🖼️ Uploading image:', file.name);
+      console.log('🖼️ Uploading image:', file.name, 'Type:', file.type);
       
-      // Create a unique filename
-      const fileExt = file.name.split('.').pop();
+      // Ensure proper file extension and MIME type
+      const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg';
       const fileName = `${userId}/${Date.now()}.${fileExt}`;
+      
+      // Validate and set proper MIME type
+      const validMimeTypes = {
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg', 
+        'png': 'image/png',
+        'webp': 'image/webp'
+      };
+      
+      const contentType = validMimeTypes[fileExt as keyof typeof validMimeTypes] || 'image/jpeg';
+      console.log('🖼️ Using MIME type:', contentType, 'for extension:', fileExt);
       
       // For React Native, read file as binary data
       const response = await fetch(file.uri);
@@ -868,7 +898,7 @@ export const db = {
       const { data, error } = await supabase.storage
         .from(bucket)
         .upload(fileName, uint8Array, {
-          contentType: file.type,
+          contentType: contentType, // Use validated MIME type
           upsert: false
         });
       
@@ -887,21 +917,16 @@ export const db = {
     }
   },
 
-  // Create audio track record
+  // Create audio track record (matching web app schema)
   async createAudioTrack(userId: string, trackData: {
     title: string;
     description?: string | null;
     file_url: string;
-    cover_art_url?: string | null;
+    cover_art_url?: string | null; // Web app uses cover_art_url
     duration?: number;
     tags?: string | null;
     is_public?: boolean;
-    // Music-specific fields
-    artist_name?: string;
     genre?: string | null;
-    // Podcast-specific fields  
-    episode_number?: string;
-    podcast_category?: string | null;
   }) {
     try {
       console.log('🎵 Creating audio track record:', trackData.title);
@@ -911,24 +936,16 @@ export const db = {
         description: trackData.description,
         creator_id: userId,
         file_url: trackData.file_url,
-        cover_art_url: trackData.cover_art_url,
+        cover_art_url: trackData.cover_art_url, // Web app field name
         duration: trackData.duration || 0,
-        tags: trackData.tags,
+        tags: trackData.tags ? trackData.tags.split(',').map(tag => tag.trim()) : null,
         is_public: trackData.is_public !== false, // Default to true
         play_count: 0,
-        likes_count: 0,
-        comments_count: 0,
-        shares_count: 0,
-        created_at: new Date().toISOString(),
-        // Content-specific fields
-        ...(trackData.artist_name ? { 
-          artist_name: trackData.artist_name,
-          genre: trackData.genre 
-        } : {}),
-        ...(trackData.episode_number ? {
-          episode_number: trackData.episode_number,
-          podcast_category: trackData.podcast_category
-        } : {})
+        likes_count: 0, // Web app field name
+        comments_count: 0, // Web app field name
+        shares_count: 0, // Web app field name
+        genre: trackData.genre,
+        created_at: new Date().toISOString()
       };
 
       const { data, error } = await supabase

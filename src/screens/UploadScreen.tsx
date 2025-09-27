@@ -204,12 +204,21 @@ export default function UploadScreen() {
 
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
+        // Ensure proper MIME type and file extension
+        const fileExtension = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
+        const mimeType = {
+          'jpg': 'image/jpeg',
+          'jpeg': 'image/jpeg',
+          'png': 'image/png',
+          'webp': 'image/webp'
+        }[fileExtension] || 'image/jpeg';
+        
         setFormData(prev => ({ 
           ...prev, 
           coverImage: {
             uri: asset.uri,
-            name: asset.fileName || `cover_${Date.now()}.jpg`,
-            type: asset.type || 'image/jpeg'
+            name: asset.fileName || `cover_${Date.now()}.${fileExtension}`,
+            type: mimeType
           }
         }));
       }
@@ -310,22 +319,27 @@ export default function UploadScreen() {
       // Step 3: Create track record in database (10% of progress)
       const tagsArray = formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
       
+      // Prepare description with content-specific information
+      let enhancedDescription = formData.description.trim();
+      if (formData.contentType === 'music' && formData.artistName.trim()) {
+        enhancedDescription = enhancedDescription 
+          ? `Artist: ${formData.artistName.trim()}\n\n${enhancedDescription}`
+          : `Artist: ${formData.artistName.trim()}`;
+      } else if (formData.contentType === 'podcast' && formData.episodeNumber.trim()) {
+        enhancedDescription = enhancedDescription
+          ? `Episode ${formData.episodeNumber.trim()}\n\n${enhancedDescription}`
+          : `Episode ${formData.episodeNumber.trim()}`;
+      }
+      
       const trackData = {
         title: formData.title.trim(),
-        description: formData.description.trim() || null,
+        description: enhancedDescription || null,
         file_url: audioUploadResult.data!.url,
-        cover_art_url: artworkUrl,
+        cover_art_url: artworkUrl, // Web app field name
         duration: 0, // TODO: Extract duration from audio file
         tags: tagsArray.length > 0 ? tagsArray.join(',') : null,
         is_public: formData.privacy === 'public',
-        // Content-specific fields
-        ...(formData.contentType === 'music' ? {
-          artist_name: formData.artistName.trim(),
-          genre: formData.genre || null,
-        } : {
-          episode_number: formData.episodeNumber.trim(),
-          podcast_category: formData.podcastCategory || null,
-        })
+        genre: formData.contentType === 'music' ? formData.genre : formData.podcastCategory
       };
       
       const trackResult = await db.createAudioTrack(user.id, trackData);

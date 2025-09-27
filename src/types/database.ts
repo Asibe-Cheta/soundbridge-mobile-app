@@ -81,24 +81,16 @@ export interface Database {
           creator_id: string
           description: string | null
           genre: string | null
-          sub_genre: string | null
           duration: number | null
           file_url: string | null
-          artwork_url: string | null
-          waveform_url: string | null
-          share_count: number
-          comment_count: number
-          is_public: boolean
+          cover_art_url: string | null
           play_count: number
-          like_count: number
-          download_count: number
-          is_explicit: boolean
-          is_featured: boolean
+          likes_count: number
+          comments_count: number
+          shares_count: number
+          is_public: boolean
           tags: string[] | null
-          metadata: Json | null
           created_at: string
-          updated_at: string
-          deleted_at: string | null
         }
         Insert: {
           id?: string
@@ -106,24 +98,16 @@ export interface Database {
           creator_id: string
           description?: string | null
           genre?: string | null
-          sub_genre?: string | null
           duration?: number | null
           file_url?: string | null
-          artwork_url?: string | null
-          waveform_url?: string | null
-          share_count?: number
-          comment_count?: number
-          is_public?: boolean
+          cover_art_url?: string | null
           play_count?: number
-          like_count?: number
-          download_count?: number
-          is_explicit?: boolean
-          is_featured?: boolean
+          likes_count?: number
+          comments_count?: number
+          shares_count?: number
+          is_public?: boolean
           tags?: string[] | null
-          metadata?: Json | null
           created_at?: string
-          updated_at?: string
-          deleted_at?: string | null
         }
         Update: {
           id?: string

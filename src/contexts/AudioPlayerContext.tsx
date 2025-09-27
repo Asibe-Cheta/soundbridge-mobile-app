@@ -38,8 +38,10 @@ interface AudioPlayerContextType {
   volume: number;
   isShuffled: boolean;
   isRepeat: boolean;
+  autoPlay: boolean;
   toggleShuffle: () => void;
   toggleRepeat: () => void;
+  toggleAutoPlay: () => void;
   playNext: () => Promise<void>;
   playPrevious: () => Promise<void>;
   queue: AudioTrack[];
@@ -63,6 +65,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   const [volume, setVolumeState] = useState(1);
   const [isShuffled, setIsShuffled] = useState(false);
   const [isRepeat, setIsRepeat] = useState(false);
+  const [autoPlay, setAutoPlay] = useState(true);
   const [queue, setQueue] = useState<AudioTrack[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,7 +114,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
         try {
           const status = await soundRef.current.getStatusAsync();
           if (status.isLoaded && status.positionMillis !== undefined) {
-            setPosition(status.positionMillis);
+            setPosition(Math.floor(status.positionMillis / 1000)); // Convert milliseconds to seconds
           }
         } catch (err) {
           console.error('Failed to get position:', err);
@@ -130,17 +133,22 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   // Audio status handler
   const onPlaybackStatusUpdate = (status: AVPlaybackStatus) => {
     if (status.isLoaded) {
-      setDuration(status.durationMillis || 0);
-      setPosition(status.positionMillis || 0);
+      setDuration(Math.floor((status.durationMillis || 0) / 1000)); // Convert milliseconds to seconds
+      setPosition(Math.floor((status.positionMillis || 0) / 1000)); // Convert milliseconds to seconds
       
       if (status.didJustFinish && !status.isLooping) {
-        // Track finished, play next if repeat is off
+        // Track finished, handle based on repeat and auto-play settings
         if (isRepeat) {
           // Replay current track
           soundRef.current?.replayAsync();
-        } else {
-          // Play next track in queue
+        } else if (autoPlay && queue.length > 0) {
+          // Auto-play next track in queue
           playNext();
+        } else {
+          // Stop playback if auto-play is disabled or no tracks in queue
+          setIsPlaying(false);
+          setIsPaused(false);
+          stopPositionTracking();
         }
       }
     } else if (status.error) {
@@ -351,15 +359,6 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     }
   };
 
-  const toggleShuffle = () => {
-    setIsShuffled(!isShuffled);
-    console.log('Shuffle toggled:', !isShuffled);
-  };
-
-  const toggleRepeat = () => {
-    setIsRepeat(!isRepeat);
-    console.log('Repeat toggled:', !isRepeat);
-  };
 
   const playNext = async () => {
     if (queue.length === 0) return;
@@ -412,6 +411,21 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     console.log('Queue cleared');
   };
 
+  const toggleShuffle = () => {
+    setIsShuffled(prev => !prev);
+    console.log('Shuffle toggled:', !isShuffled);
+  };
+
+  const toggleRepeat = () => {
+    setIsRepeat(prev => !prev);
+    console.log('Repeat toggled:', !isRepeat);
+  };
+
+  const toggleAutoPlay = () => {
+    setAutoPlay(prev => !prev);
+    console.log('Auto-play toggled:', !autoPlay);
+  };
+
   const value: AudioPlayerContextType = {
     currentTrack,
     isPlaying,
@@ -429,8 +443,10 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     volume,
     isShuffled,
     isRepeat,
+    autoPlay,
     toggleShuffle,
     toggleRepeat,
+    toggleAutoPlay,
     playNext,
     playPrevious,
     queue,
