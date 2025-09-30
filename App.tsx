@@ -29,6 +29,11 @@ import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
 import PaymentMethodsScreen from './src/screens/PaymentMethodsScreen';
 import UpgradeScreen from './src/screens/UpgradeScreen';
 import BillingScreen from './src/screens/BillingScreen';
+import WalletScreen from './src/screens/WalletScreen';
+import TransactionHistoryScreen from './src/screens/TransactionHistoryScreen';
+import WithdrawalScreen from './src/screens/WithdrawalScreen';
+import WithdrawalMethodsScreen from './src/screens/WithdrawalMethodsScreen';
+import AddWithdrawalMethodScreen from './src/screens/AddWithdrawalMethodScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -139,6 +144,11 @@ function AppNavigator() {
                             <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
                             <Stack.Screen name="Upgrade" component={UpgradeScreen} />
                             <Stack.Screen name="Billing" component={BillingScreen} />
+                            <Stack.Screen name="Wallet" component={WalletScreen} />
+                            <Stack.Screen name="TransactionHistory" component={TransactionHistoryScreen} />
+                            <Stack.Screen name="Withdrawal" component={WithdrawalScreen} />
+                            <Stack.Screen name="WithdrawalMethods" component={WithdrawalMethodsScreen} />
+                            <Stack.Screen name="AddWithdrawalMethod" component={AddWithdrawalMethodScreen} />
                  </>
                )}
       </Stack.Navigator>

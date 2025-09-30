@@ -35,17 +35,17 @@ const lightTheme: Theme = {
   isDark: false,
   colors: {
     primary: '#DC2626',
-    background: '#FFFFFF',
-    surface: '#F8F9FA',
-    card: '#FFFFFF',
-    text: '#000000',
-    textSecondary: '#6B7280',
-    border: '#E5E7EB',
+    background: '#F2F2F7', // Apple Music's light background
+    surface: '#FFFFFF', // Clean white for cards
+    card: '#FFFFFF', // White cards with shadows
+    text: '#000000', // Pure black text
+    textSecondary: '#8E8E93', // Apple's secondary text color
+    border: '#D1D1D6', // Apple's border color
     accent: '#EC4899',
-    success: '#10B981',
-    warning: '#F59E0B',
-    error: '#EF4444',
-    overlay: 'rgba(0, 0, 0, 0.5)',
+    success: '#34C759', // Apple's green
+    warning: '#FF9500', // Apple's orange
+    error: '#FF3B30', // Apple's red
+    overlay: 'rgba(0, 0, 0, 0.4)',
   },
 };
 

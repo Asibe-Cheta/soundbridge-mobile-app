@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { walletService, WalletBalance } from '../services/WalletService';
 
 interface SubscriptionData {
   tier: 'free' | 'pro' | 'enterprise';
@@ -55,7 +56,7 @@ interface BillingHistory {
 
 export default function BillingScreen() {
   const navigation = useNavigation();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const { theme } = useTheme();
   
   const [loading, setLoading] = useState(true);
@@ -63,6 +64,7 @@ export default function BillingScreen() {
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [revenue, setRevenue] = useState<RevenueData | null>(null);
   const [billingHistory, setBillingHistory] = useState<BillingHistory[]>([]);
+  const [walletData, setWalletData] = useState<WalletBalance | null>(null);
 
   useEffect(() => {
     loadBillingData();
@@ -72,7 +74,18 @@ export default function BillingScreen() {
     try {
       setLoading(true);
       
-      // TODO: Implement actual API calls
+      // Load wallet data if user is logged in
+      if (session) {
+        try {
+          const walletBalance = await walletService.getWalletBalance(session);
+          setWalletData(walletBalance);
+        } catch (error) {
+          console.error('Error loading wallet data:', error);
+          // Don't fail the whole screen if wallet fails
+        }
+      }
+      
+      // TODO: Implement actual API calls for billing data
       // Mock data for now
       setTimeout(() => {
         setSubscription({
@@ -461,6 +474,61 @@ export default function BillingScreen() {
           </View>
         )}
 
+        {/* Digital Wallet */}
+        {walletData && (
+          <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+            <View style={styles.cardHeader}>
+              <Text style={[styles.cardTitle, { color: theme.colors.text }]}>Digital Wallet</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Wallet' as never)}>
+                <Ionicons name="wallet" size={20} color="#8B5CF6" />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.walletInfo}>
+              <View style={styles.walletBalance}>
+                <Text style={[styles.walletLabel, { color: theme.colors.textSecondary }]}>Available Balance</Text>
+                <Text style={[styles.walletAmount, { color: theme.colors.text }]}>
+                  {walletService.formatAmount(walletData.balance, walletData.currency)}
+                </Text>
+              </View>
+              
+              <View style={styles.walletStatus}>
+                <Text style={[styles.walletLabel, { color: theme.colors.textSecondary }]}>Status</Text>
+                <View style={styles.walletStatusBadge}>
+                  <View style={[
+                    styles.walletStatusDot, 
+                    { backgroundColor: walletData.balance > 0 ? theme.colors.success : theme.colors.textSecondary }
+                  ]} />
+                  <Text style={[
+                    styles.walletStatusText, 
+                    { color: walletData.balance > 0 ? theme.colors.success : theme.colors.textSecondary }
+                  ]}>
+                    {walletData.balance > 0 ? 'Active' : 'Empty'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.walletActions}>
+              <TouchableOpacity 
+                style={[styles.walletButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                onPress={() => navigation.navigate('Wallet' as never)}
+              >
+                <Ionicons name="wallet" size={16} color={theme.colors.text} />
+                <Text style={[styles.walletButtonText, { color: theme.colors.text }]}>View Wallet</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.walletButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                onPress={() => navigation.navigate('TransactionHistory' as never)}
+              >
+                <Ionicons name="list" size={16} color={theme.colors.text} />
+                <Text style={[styles.walletButtonText, { color: theme.colors.text }]}>Transactions</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* Billing History */}
         <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
           <Text style={[styles.cardTitle, { color: theme.colors.text }]}>Billing History</Text>
@@ -745,5 +813,57 @@ const styles = StyleSheet.create({
   emptyHistoryText: {
     fontSize: 14,
     marginTop: 16,
+  },
+  walletInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  walletBalance: {
+    flex: 1,
+  },
+  walletStatus: {
+    alignItems: 'flex-end',
+  },
+  walletLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  walletAmount: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  walletStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  walletStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  walletStatusText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  walletActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  walletButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
+  },
+  walletButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

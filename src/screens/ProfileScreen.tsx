@@ -472,6 +472,10 @@ export default function ProfileScreen() {
     navigation.navigate('Billing' as never);
   };
 
+  const handleWallet = () => {
+    navigation.navigate('Wallet' as never);
+  };
+
   const handleTaxInfo = () => {
     Alert.alert('Tax Information', 'Upload tax documents for compliance. Feature coming soon!');
   };
@@ -663,6 +667,11 @@ export default function ProfileScreen() {
       {/* Payout Settings */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Payout Settings</Text>
+        <TouchableOpacity style={styles.settingButton} onPress={handleWallet}>
+          <Ionicons name="wallet" size={20} color="#8B5CF6" />
+          <Text style={styles.settingText}>Digital Wallet</Text>
+          <Ionicons name="chevron-forward" size={16} color="#666" />
+        </TouchableOpacity>
         <TouchableOpacity style={styles.settingButton} onPress={handlePaymentMethods}>
           <Ionicons name="card" size={20} color="#666" />
           <Text style={styles.settingText}>Payment Methods</Text>

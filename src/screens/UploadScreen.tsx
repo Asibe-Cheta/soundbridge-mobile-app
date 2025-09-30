@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { db } from '../lib/supabase';
 
 const { width } = Dimensions.get('window');
@@ -45,6 +46,7 @@ interface UploadFormData {
 
 export default function UploadScreen() {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [formData, setFormData] = useState<UploadFormData>({
@@ -384,32 +386,34 @@ export default function UploadScreen() {
   };
 
   const ContentTypeSelector = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Content Type</Text>
+    <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Content Type</Text>
       <View style={styles.contentTypeContainer}>
         <TouchableOpacity
           style={[
             styles.contentTypeOption,
-            formData.contentType === 'music' && styles.contentTypeSelected
+            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+            formData.contentType === 'music' && { borderColor: theme.colors.primary, borderWidth: 2 }
           ]}
           onPress={() => handleInputChange('contentType', 'music')}
         >
-          <View style={[styles.contentTypeIcon, { backgroundColor: '#DC2626' }]}>
+          <View style={[styles.contentTypeIcon, { backgroundColor: theme.colors.primary }]}>
             <Ionicons name="musical-notes" size={24} color="white" />
           </View>
           <View style={styles.contentTypeText}>
-            <Text style={styles.contentTypeLabel}>Music Track</Text>
-            <Text style={styles.contentTypeDescription}>Upload your music, beats, or audio tracks</Text>
+            <Text style={[styles.contentTypeLabel, { color: theme.colors.text }]}>Music Track</Text>
+            <Text style={[styles.contentTypeDescription, { color: theme.colors.textSecondary }]}>Upload your music, beats, or audio tracks</Text>
           </View>
           {formData.contentType === 'music' && (
-            <Ionicons name="checkmark-circle" size={24} color="#10B981" />
+            <Ionicons name="checkmark-circle" size={24} color={theme.colors.success} />
           )}
         </TouchableOpacity>
 
         <TouchableOpacity
           style={[
             styles.contentTypeOption,
-            formData.contentType === 'podcast' && styles.contentTypeSelected
+            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+            formData.contentType === 'podcast' && { borderColor: theme.colors.primary, borderWidth: 2 }
           ]}
           onPress={() => handleInputChange('contentType', 'podcast')}
         >
@@ -417,11 +421,11 @@ export default function UploadScreen() {
             <Ionicons name="mic" size={24} color="white" />
           </View>
           <View style={styles.contentTypeText}>
-            <Text style={styles.contentTypeLabel}>Podcast Episode</Text>
-            <Text style={styles.contentTypeDescription}>Share your podcast episodes and audio content</Text>
+            <Text style={[styles.contentTypeLabel, { color: theme.colors.text }]}>Podcast Episode</Text>
+            <Text style={[styles.contentTypeDescription, { color: theme.colors.textSecondary }]}>Share your podcast episodes and audio content</Text>
           </View>
           {formData.contentType === 'podcast' && (
-            <Ionicons name="checkmark-circle" size={24} color="#10B981" />
+            <Ionicons name="checkmark-circle" size={24} color={theme.colors.success} />
           )}
         </TouchableOpacity>
       </View>
@@ -429,39 +433,39 @@ export default function UploadScreen() {
   );
 
   const renderFileUpload = (type: 'coverImage' | 'audioFile', title: string, fileUri?: { uri: string; name: string } | null) => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+    <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>{title}</Text>
       {fileUri ? (
-        <View style={styles.filePreview}>
+        <View style={[styles.filePreview, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
           <View style={styles.fileInfo}>
             <Ionicons 
               name={type === 'coverImage' ? 'image' : 'musical-notes'} 
               size={24} 
-              color="#10B981" 
+              color={theme.colors.success} 
             />
-            <Text style={styles.fileName}>{fileUri.name}</Text>
+            <Text style={[styles.fileName, { color: theme.colors.text }]}>{fileUri.name}</Text>
           </View>
           <TouchableOpacity
             style={styles.removeButton}
             onPress={() => setFormData(prev => ({ ...prev, [type]: null }))}
           >
-            <Ionicons name="close" size={20} color="#EF4444" />
+            <Ionicons name="close" size={20} color={theme.colors.error} />
           </TouchableOpacity>
         </View>
       ) : (
         <TouchableOpacity
-          style={styles.uploadButton}
+          style={[styles.uploadButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
           onPress={type === 'coverImage' ? pickCoverImage : pickAudioFile}
         >
           <Ionicons 
             name={type === 'coverImage' ? 'camera' : 'document'} 
             size={32} 
-            color="rgba(255, 255, 255, 0.6)" 
+            color={theme.colors.textSecondary} 
           />
-          <Text style={styles.uploadButtonText}>
+          <Text style={[styles.uploadButtonText, { color: theme.colors.text }]}>
             {type === 'coverImage' ? 'Select Cover Image' : 'Select Audio File'}
           </Text>
-          <Text style={styles.uploadButtonSubtext}>
+          <Text style={[styles.uploadButtonSubtext, { color: theme.colors.textSecondary }]}>
             {type === 'coverImage' ? 'JPG, PNG (Max 10MB)' : 'MP3, WAV, M4A, AAC, OGG, FLAC (Max 100MB)'}
           </Text>
         </TouchableOpacity>
@@ -470,16 +474,13 @@ export default function UploadScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="rgba(0, 0, 0, 0.1)" translucent />
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} />
       
-      <LinearGradient
-        colors={['#1a1a1a', '#0f0f0f']}
-        style={styles.gradient}
-      >
+      <View style={[styles.gradient, { backgroundColor: theme.colors.background }]}>
         {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Upload Content</Text>
+        <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Upload Content</Text>
           <TouchableOpacity
             style={[styles.publishButton, isUploading && styles.publishButtonDisabled]}
             onPress={handleUpload}
@@ -504,11 +505,11 @@ export default function UploadScreen() {
             <View style={styles.progressBar}>
               <View style={[styles.progressFill, { width: `${uploadProgress}%` }]} />
             </View>
-            <Text style={styles.progressText}>{uploadProgress}%</Text>
+            <Text style={[styles.progressText, { color: theme.colors.text }]}>{uploadProgress}%</Text>
           </View>
         )}
 
-        <ScrollView 
+      <ScrollView 
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -520,26 +521,26 @@ export default function UploadScreen() {
           {renderFileUpload('audioFile', 'Audio File *', formData.audioFile)}
           
           {/* Basic Information */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Basic Information</Text>
+          <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Basic Information</Text>
             
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Title *</Text>
+              <Text style={[styles.label, { color: theme.colors.text }]}>Title *</Text>
               <TextInput
-                style={styles.textInput}
+                style={[styles.textInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
                 placeholder={`Enter ${formData.contentType} title`}
-                placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                placeholderTextColor={theme.colors.textSecondary}
                 value={formData.title}
                 onChangeText={(value) => handleInputChange('title', value)}
               />
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Description</Text>
+              <Text style={[styles.label, { color: theme.colors.text }]}>Description</Text>
               <TextInput
-                style={[styles.textInput, styles.textArea]}
+                style={[styles.textInput, styles.textArea, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
                 placeholder={`Describe your ${formData.contentType}...`}
-                placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                placeholderTextColor={theme.colors.textSecondary}
                 value={formData.description}
                 onChangeText={(value) => handleInputChange('description', value)}
                 multiline
@@ -551,56 +552,58 @@ export default function UploadScreen() {
             {formData.contentType === 'music' ? (
               <>
                 <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Artist Name *</Text>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>Artist Name *</Text>
                   <TextInput
-                    style={styles.textInput}
+                    style={[styles.textInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
                     placeholder="Enter artist name"
-                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    placeholderTextColor={theme.colors.textSecondary}
                     value={formData.artistName}
                     onChangeText={(value) => handleInputChange('artistName', value)}
                   />
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Genre</Text>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>Genre</Text>
                   <View style={styles.genreContainer}>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                      {genres.map((genre) => (
-                        <TouchableOpacity
-                          key={genre}
-                          style={[
-                            styles.genreChip,
-                            formData.genre === genre && styles.genreChipSelected
-                          ]}
-                          onPress={() => handleInputChange('genre', genre)}
-                        >
-                          <Text style={[
-                            styles.genreChipText,
-                            formData.genre === genre && styles.genreChipTextSelected
-                          ]}>
-                            {genre}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  </View>
-                </View>
+        {genres.map((genre) => (
+          <TouchableOpacity
+            key={genre}
+            style={[
+              styles.genreChip,
+              { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+              formData.genre === genre && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }
+            ]}
+            onPress={() => handleInputChange('genre', genre)}
+          >
+            <Text style={[
+              styles.genreChipText,
+              { color: theme.colors.text },
+              formData.genre === genre && { color: '#FFFFFF' }
+            ]}>
+              {genre}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+            </View>
               </>
             ) : (
               <>
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Episode Number *</Text>
-                  <TextInput
-                    style={styles.textInput}
+          <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>Episode Number *</Text>
+            <TextInput
+                    style={[styles.textInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
                     placeholder="e.g., Episode 1"
-                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    placeholderTextColor={theme.colors.textSecondary}
                     value={formData.episodeNumber}
                     onChangeText={(value) => handleInputChange('episodeNumber', value)}
-                  />
-                </View>
+            />
+          </View>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Category</Text>
+          <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>Category</Text>
                   <View style={styles.genreContainer}>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                       {podcastCategories.map((category) => (
@@ -608,13 +611,15 @@ export default function UploadScreen() {
                           key={category}
                           style={[
                             styles.genreChip,
-                            formData.podcastCategory === category && styles.genreChipSelected
+                            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                            formData.podcastCategory === category && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }
                           ]}
                           onPress={() => handleInputChange('podcastCategory', category)}
                         >
                           <Text style={[
                             styles.genreChipText,
-                            formData.podcastCategory === category && styles.genreChipTextSelected
+                            { color: theme.colors.text },
+                            formData.podcastCategory === category && { color: '#FFFFFF' }
                           ]}>
                             {category}
                           </Text>
@@ -622,55 +627,56 @@ export default function UploadScreen() {
                       ))}
                     </ScrollView>
                   </View>
-                </View>
+          </View>
               </>
             )}
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Tags</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder="Enter tags separated by commas"
-                placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                value={formData.tags}
+          <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: theme.colors.text }]}>Tags</Text>
+            <TextInput
+                style={[styles.textInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
+              placeholder="Enter tags separated by commas"
+                placeholderTextColor={theme.colors.textSecondary}
+              value={formData.tags}
                 onChangeText={(value) => handleInputChange('tags', value)}
-              />
-            </View>
+            />
           </View>
+        </View>
 
-          {/* Privacy Settings */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Privacy Settings</Text>
+        {/* Privacy Settings */}
+        <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Privacy Settings</Text>
             <View style={styles.privacyContainer}>
               {[
                 { value: 'public', label: 'Public', description: 'Anyone can view' },
                 { value: 'followers', label: 'Followers Only', description: 'Only your followers can view' },
                 { value: 'private', label: 'Private', description: 'Only you can view' }
               ].map((option) => (
-                <TouchableOpacity
+          <TouchableOpacity
                   key={option.value}
                   style={[
                     styles.privacyOption,
-                    formData.privacy === option.value && styles.privacyOptionSelected
+                    { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                    formData.privacy === option.value && { borderColor: theme.colors.primary, borderWidth: 2 }
                   ]}
                   onPress={() => handleInputChange('privacy', option.value)}
-                >
-                  <View style={styles.privacyOptionContent}>
-                    <Text style={styles.privacyOptionLabel}>{option.label}</Text>
-                    <Text style={styles.privacyOptionDescription}>{option.description}</Text>
-                  </View>
+          >
+            <View style={styles.privacyOptionContent}>
+                    <Text style={[styles.privacyOptionLabel, { color: theme.colors.text }]}>{option.label}</Text>
+                    <Text style={[styles.privacyOptionDescription, { color: theme.colors.textSecondary }]}>{option.description}</Text>
+              </View>
                   {formData.privacy === option.value && (
-                    <Ionicons name="checkmark-circle" size={20} color="#10B981" />
-                  )}
-                </TouchableOpacity>
+                    <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} />
+                )}
+          </TouchableOpacity>
               ))}
             </View>
           </View>
 
           {/* Cover Art */}
           {renderFileUpload('coverImage', 'Cover Art (Optional)', formData.coverImage)}
-        </ScrollView>
-      </LinearGradient>
+      </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -678,7 +684,6 @@ export default function UploadScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
   },
   gradient: {
     flex: 1,
@@ -690,12 +695,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: 'white',
   },
   publishButton: {
     borderRadius: 25,
@@ -722,7 +730,7 @@ const styles = StyleSheet.create({
   progressBar: {
     flex: 1,
     height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
     borderRadius: 2,
     marginRight: 12,
   },
@@ -732,7 +740,6 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   progressText: {
-    color: 'white',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -744,11 +751,18 @@ const styles = StyleSheet.create({
   },
   section: {
     marginBottom: 24,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: 'white',
     marginBottom: 16,
   },
   contentTypeContainer: {
@@ -757,15 +771,9 @@ const styles = StyleSheet.create({
   contentTypeOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
     padding: 16,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  contentTypeSelected: {
-    borderColor: '#10B981',
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderWidth: 1,
   },
   contentTypeIcon: {
     width: 48,
@@ -781,12 +789,10 @@ const styles = StyleSheet.create({
   contentTypeLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: 'white',
     marginBottom: 4,
   },
   contentTypeDescription: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
   },
   inputGroup: {
     marginBottom: 16,
@@ -794,17 +800,13 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
     fontWeight: '500',
-    color: 'white',
     marginBottom: 8,
   },
   textInput: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 8,
     padding: 12,
-    color: 'white',
     fontSize: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   textArea: {
     height: 80,
@@ -814,25 +816,15 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   genreChip: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
     marginRight: 8,
     borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  genreChipSelected: {
-    backgroundColor: '#DC2626',
-    borderColor: '#DC2626',
   },
   genreChipText: {
-    color: 'rgba(255, 255, 255, 0.7)',
     fontSize: 14,
     fontWeight: '500',
-  },
-  genreChipTextSelected: {
-    color: 'white',
   },
   privacyContainer: {
     gap: 8,
@@ -841,15 +833,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 8,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  privacyOptionSelected: {
-    borderColor: '#10B981',
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
   },
   privacyOptionContent: {
     flex: 1,
@@ -857,30 +843,24 @@ const styles = StyleSheet.create({
   privacyOptionLabel: {
     fontSize: 16,
     fontWeight: '500',
-    color: 'white',
     marginBottom: 2,
   },
   privacyOptionDescription: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
   },
   uploadButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 8,
     padding: 24,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
     borderStyle: 'dashed',
   },
   uploadButtonText: {
-    color: 'white',
     fontSize: 16,
     fontWeight: '500',
     marginTop: 8,
   },
   uploadButtonSubtext: {
-    color: 'rgba(255, 255, 255, 0.5)',
     fontSize: 12,
     marginTop: 4,
   },
@@ -888,11 +868,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
     borderRadius: 8,
     padding: 12,
     borderWidth: 1,
-    borderColor: '#10B981',
   },
   fileInfo: {
     flexDirection: 'row',
@@ -900,7 +878,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   fileName: {
-    color: 'white',
     fontSize: 14,
     fontWeight: '500',
     marginLeft: 8,

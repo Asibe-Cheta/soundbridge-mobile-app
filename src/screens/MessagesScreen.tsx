@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { db } from '../lib/supabase';
 
 const { width } = Dimensions.get('window');
@@ -61,6 +62,7 @@ interface Conversation {
 
 export default function MessagesScreen() {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const [activeTab, setActiveTab] = useState<'conversations' | 'search'>('conversations');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -196,7 +198,7 @@ export default function MessagesScreen() {
 
   const renderConversationItem = ({ item }: { item: Conversation }) => (
     <TouchableOpacity
-      style={styles.conversationItem}
+      style={[styles.conversationItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
       onPress={() => handleConversationPress(item)}
     >
       <View style={styles.conversationAvatar}>
@@ -206,8 +208,8 @@ export default function MessagesScreen() {
             style={styles.avatarImage}
           />
         ) : (
-          <View style={styles.defaultAvatar}>
-            <Ionicons name="person" size={24} color="#666" />
+          <View style={[styles.defaultAvatar, { backgroundColor: theme.colors.surface }]}>
+            <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
           </View>
         )}
         {item.unread_count > 0 && (
@@ -221,10 +223,10 @@ export default function MessagesScreen() {
 
       <View style={styles.conversationContent}>
         <View style={styles.conversationHeader}>
-          <Text style={styles.conversationName} numberOfLines={1}>
+          <Text style={[styles.conversationName, { color: theme.colors.text }]} numberOfLines={1}>
             {item.other_user.display_name}
           </Text>
-          <Text style={styles.conversationTime}>
+          <Text style={[styles.conversationTime, { color: theme.colors.textSecondary }]}>
             {item.last_message ? formatTime(item.last_message.created_at) : ''}
           </Text>
         </View>
@@ -233,7 +235,8 @@ export default function MessagesScreen() {
           <Text 
             style={[
               styles.lastMessage,
-              item.unread_count > 0 && styles.unreadMessage
+              { color: theme.colors.textSecondary },
+              item.unread_count > 0 && { color: theme.colors.text, fontWeight: '500' }
             ]} 
             numberOfLines={1}
           >
@@ -249,7 +252,7 @@ export default function MessagesScreen() {
 
   const renderSearchResult = ({ item }: { item: any }) => (
     <TouchableOpacity
-      style={styles.searchResultItem}
+      style={[styles.searchResultItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
       onPress={() => handleUserPress(item)}
     >
       <View style={styles.searchResultAvatar}>
@@ -259,61 +262,75 @@ export default function MessagesScreen() {
             style={styles.avatarImage}
           />
         ) : (
-          <View style={styles.defaultAvatar}>
-            <Ionicons name="person" size={24} color="#666" />
+          <View style={[styles.defaultAvatar, { backgroundColor: theme.colors.surface }]}>
+            <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
           </View>
         )}
         <View style={[styles.onlineIndicator, { backgroundColor: item.is_online ? '#4CAF50' : '#666' }]} />
       </View>
 
       <View style={styles.searchResultContent}>
-        <Text style={styles.searchResultName}>{item.display_name}</Text>
-        <Text style={styles.searchResultUsername}>@{item.username}</Text>
+        <Text style={[styles.searchResultName, { color: theme.colors.text }]}>{item.display_name}</Text>
+        <Text style={[styles.searchResultUsername, { color: theme.colors.textSecondary }]}>@{item.username}</Text>
       </View>
 
       <TouchableOpacity style={styles.startChatButton}>
-        <Ionicons name="chatbubble-outline" size={20} color="#DC2626" />
+        <Ionicons name="chatbubble-outline" size={20} color={theme.colors.primary} />
       </TouchableOpacity>
     </TouchableOpacity>
   );
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
-      <Ionicons name="chatbubbles-outline" size={64} color="#666" />
-      <Text style={styles.emptyStateTitle}>No Conversations Yet</Text>
-      <Text style={styles.emptyStateText}>
+      <Ionicons name="chatbubbles-outline" size={64} color={theme.colors.textSecondary} />
+      <Text style={[styles.emptyStateTitle, { color: theme.colors.text }]}>No Conversations Yet</Text>
+      <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
         Start a conversation with other creators and connect with the community.
       </Text>
     </View>
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
+      <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} />
       
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Messages</Text>
+      <View style={[styles.header, { backgroundColor: theme.colors.surface }]}>
+        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Messages</Text>
         <TouchableOpacity style={styles.headerButton}>
-          <Ionicons name="add" size={24} color="#FFFFFF" />
+          <Ionicons name="add" size={24} color={theme.colors.text} />
         </TouchableOpacity>
       </View>
 
       {/* Tabs */}
-      <View style={styles.tabsContainer}>
+      <View style={[styles.tabsContainer, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'conversations' && styles.activeTab]}
+          style={[
+            styles.tab, 
+            activeTab === 'conversations' && { backgroundColor: theme.colors.primary + '20' }
+          ]}
           onPress={() => setActiveTab('conversations')}
         >
-          <Text style={[styles.tabText, activeTab === 'conversations' && styles.activeTabText]}>
+          <Text style={[
+            styles.tabText, 
+            { color: theme.colors.textSecondary },
+            activeTab === 'conversations' && { color: theme.colors.primary, fontWeight: 'bold' }
+          ]}>
             Conversations
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'search' && styles.activeTab]}
+          style={[
+            styles.tab, 
+            activeTab === 'search' && { backgroundColor: theme.colors.primary + '20' }
+          ]}
           onPress={() => setActiveTab('search')}
         >
-          <Text style={[styles.tabText, activeTab === 'search' && styles.activeTabText]}>
+          <Text style={[
+            styles.tabText, 
+            { color: theme.colors.textSecondary },
+            activeTab === 'search' && { color: theme.colors.primary, fontWeight: 'bold' }
+          ]}>
             Find People
           </Text>
         </TouchableOpacity>
@@ -340,12 +357,12 @@ export default function MessagesScreen() {
           />
         ) : (
           <View style={styles.searchContainer}>
-            <View style={styles.searchInputContainer}>
-              <Ionicons name="search" size={20} color="rgba(255, 255, 255, 0.6)" />
+            <View style={[styles.searchInputContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <Ionicons name="search" size={20} color={theme.colors.textSecondary} />
               <TextInput
-                style={styles.searchInput}
+                style={[styles.searchInput, { color: theme.colors.text }]}
                 placeholder="Search for creators..."
-                placeholderTextColor="rgba(255, 255, 255, 0.6)"
+                placeholderTextColor={theme.colors.textSecondary}
                 value={searchQuery}
                 onChangeText={handleSearch}
                 autoCapitalize="none"
@@ -353,7 +370,7 @@ export default function MessagesScreen() {
               />
               {searchQuery.length > 0 && (
                 <TouchableOpacity onPress={() => setSearchQuery('')}>
-                  <Ionicons name="close-circle" size={20} color="rgba(255, 255, 255, 0.6)" />
+                  <Ionicons name="close-circle" size={20} color={theme.colors.textSecondary} />
                 </TouchableOpacity>
               )}
             </View>
@@ -367,17 +384,17 @@ export default function MessagesScreen() {
               ListEmptyComponent={
                 searchQuery.length > 0 ? (
                   <View style={styles.noResultsState}>
-                    <Ionicons name="search-outline" size={48} color="#666" />
-                    <Text style={styles.noResultsText}>No users found</Text>
-                    <Text style={styles.noResultsSubtext}>
+                    <Ionicons name="search-outline" size={48} color={theme.colors.textSecondary} />
+                    <Text style={[styles.noResultsText, { color: theme.colors.text }]}>No users found</Text>
+                    <Text style={[styles.noResultsSubtext, { color: theme.colors.textSecondary }]}>
                       Try searching with a different name
                     </Text>
                   </View>
                 ) : (
                   <View style={styles.searchPromptState}>
-                    <Ionicons name="people-outline" size={48} color="#666" />
-                    <Text style={styles.searchPromptText}>Search for creators</Text>
-                    <Text style={styles.searchPromptSubtext}>
+                    <Ionicons name="people-outline" size={48} color={theme.colors.textSecondary} />
+                    <Text style={[styles.searchPromptText, { color: theme.colors.text }]}>Search for creators</Text>
+                    <Text style={[styles.searchPromptSubtext, { color: theme.colors.textSecondary }]}>
                       Find and connect with other music creators
                     </Text>
                   </View>
@@ -394,7 +411,6 @@ export default function MessagesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
   },
   header: {
     flexDirection: 'row',
@@ -403,21 +419,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#FFFFFF',
   },
   headerButton: {
     padding: 8,
   },
   tabsContainer: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     paddingHorizontal: 16,
     paddingBottom: 8,
+    borderBottomWidth: 1,
   },
   tab: {
     paddingVertical: 12,
@@ -425,17 +444,9 @@ const styles = StyleSheet.create({
     marginRight: 8,
     borderRadius: 20,
   },
-  activeTab: {
-    backgroundColor: 'rgba(220, 38, 38, 0.2)',
-  },
   tabText: {
-    color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 14,
     fontWeight: '500',
-  },
-  activeTabText: {
-    color: '#DC2626',
-    fontWeight: 'bold',
   },
   content: {
     flex: 1,
@@ -447,11 +458,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     marginHorizontal: 16,
     marginVertical: 4,
     borderRadius: 12,
     alignItems: 'center',
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   conversationAvatar: {
     position: 'relative',
@@ -466,7 +482,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#1A1A1A',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -497,13 +512,11 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   conversationName: {
-    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
     flex: 1,
   },
   conversationTime: {
-    color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 12,
   },
   conversationFooter: {
@@ -512,13 +525,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   lastMessage: {
-    color: 'rgba(255, 255, 255, 0.7)',
     fontSize: 14,
     flex: 1,
-  },
-  unreadMessage: {
-    color: '#FFFFFF',
-    fontWeight: '500',
   },
   unreadIndicator: {
     width: 8,
@@ -534,16 +542,15 @@ const styles = StyleSheet.create({
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
     marginBottom: 16,
     gap: 8,
+    borderWidth: 1,
   },
   searchInput: {
     flex: 1,
-    color: '#FFFFFF',
     fontSize: 16,
   },
   searchResultsList: {
@@ -554,9 +561,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
     marginBottom: 8,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   searchResultAvatar: {
     position: 'relative',
@@ -570,19 +582,16 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 6,
     borderWidth: 2,
-    borderColor: '#000000',
   },
   searchResultContent: {
     flex: 1,
   },
   searchResultName: {
-    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 2,
   },
   searchResultUsername: {
-    color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 14,
   },
   startChatButton: {
@@ -595,14 +604,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   emptyStateTitle: {
-    color: '#FFFFFF',
     fontSize: 18,
     fontWeight: 'bold',
     marginTop: 16,
     marginBottom: 8,
   },
   emptyStateText: {
-    color: 'rgba(255, 255, 255, 0.7)',
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
@@ -614,14 +621,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   noResultsText: {
-    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
     marginTop: 12,
     marginBottom: 4,
   },
   noResultsSubtext: {
-    color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 14,
     textAlign: 'center',
   },
@@ -632,14 +637,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   searchPromptText: {
-    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
     marginTop: 12,
     marginBottom: 4,
   },
   searchPromptSubtext: {
-    color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 14,
     textAlign: 'center',
   },

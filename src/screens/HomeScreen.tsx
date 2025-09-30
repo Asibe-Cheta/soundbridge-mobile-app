@@ -359,36 +359,23 @@ export default function HomeScreen() {
       >
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity 
-          style={[styles.notificationButton, { backgroundColor: '#DC2626' }]}
-          onPress={testAudioPlayback}
-        >
-          <Ionicons name="musical-notes" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.notificationButton}>
-          <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
+        <TouchableOpacity style={[styles.notificationButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+          <Ionicons name="notifications-outline" size={24} color={theme.colors.text} />
         </TouchableOpacity>
       </View>
 
       {/* Creator Banner */}
-      <TouchableOpacity style={styles.creatorBanner} onPress={navigateToCreatorSetup}>
-        <LinearGradient
-          colors={['#1a1a1a', '#2a1a1a', '#1a1a1a']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.creatorBannerGradient}
-        >
-          <View style={styles.creatorBannerContent}>
-            <View style={styles.creatorBannerLeft}>
-              <Ionicons name="star" size={20} color="#DC2626" />
-              <Text style={[styles.creatorBannerTitle, { color: theme.colors.text }]}>Share Your Sound</Text>
-            </View>
-            <View style={styles.creatorBannerRight}>
-              <Text style={[styles.creatorBannerSubtitle, { color: theme.colors.textSecondary }]}>Get support from fans</Text>
-              <Ionicons name="chevron-forward" size={16} color="#DC2626" />
-            </View>
+      <TouchableOpacity style={[styles.creatorBanner, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={navigateToCreatorSetup}>
+        <View style={styles.creatorBannerContent}>
+          <View style={styles.creatorBannerLeft}>
+            <Ionicons name="star" size={20} color={theme.colors.primary} />
+            <Text style={[styles.creatorBannerTitle, { color: theme.colors.text }]}>Share Your Sound</Text>
           </View>
-        </LinearGradient>
+          <View style={styles.creatorBannerRight}>
+            <Text style={[styles.creatorBannerSubtitle, { color: theme.colors.textSecondary }]}>Get support from fans</Text>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.primary} />
+          </View>
+        </View>
       </TouchableOpacity>
 
       {/* Featured Creator Hero */}
@@ -450,7 +437,7 @@ export default function HomeScreen() {
                     <Image source={{ uri: track.cover_image_url || track.artwork_url }} style={styles.trackImage} />
                       ) : (
                         <View style={styles.defaultTrackImage}>
-                          <Ionicons name="musical-notes" size={32} color="#666" />
+                          <Ionicons name="musical-notes" size={32} color={theme.colors.textSecondary} />
                         </View>
                       )}
                       <View style={styles.playOverlay}>
@@ -463,7 +450,7 @@ export default function HomeScreen() {
                     <Text style={[styles.trackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                       {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
                     </Text>
-                    <Text style={styles.trackDuration}>
+                    <Text style={[styles.trackDuration, { color: theme.colors.textSecondary }]}>
                       {formatDuration(track.duration)}
                     </Text>
                   </TouchableOpacity>
@@ -489,7 +476,7 @@ export default function HomeScreen() {
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Music</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={navigateToRecentMusic}>
-            <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.primary} />
           </TouchableOpacity>
         </View>
         
@@ -514,24 +501,24 @@ export default function HomeScreen() {
                       <Image source={{ uri: imageUrl }} style={styles.trackRowImage} />
                     ) : (
                       <View style={styles.defaultTrackRowImage}>
-                        <Ionicons name="musical-notes" size={20} color="#666" />
+                        <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />
                       </View>
                     );
                   })()}
                 </View>
                 <View style={styles.trackRowInfo}>
-                  <Text style={styles.trackRowTitle} numberOfLines={1}>
+                  <Text style={[styles.trackRowTitle, { color: theme.colors.text }]} numberOfLines={1}>
                     {track.title}
                   </Text>
-                  <Text style={styles.trackRowArtist} numberOfLines={1}>
+                  <Text style={[styles.trackRowArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                     {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
                   </Text>
                 </View>
                 <View style={styles.trackRowActions}>
                   <TouchableOpacity style={styles.playButton} onPress={() => handleTrackPress(track)}>
-                    <Ionicons name="play" size={16} color="#DC2626" />
+                    <Ionicons name="play" size={16} color={theme.colors.primary} />
                   </TouchableOpacity>
-                  <Text style={styles.trackRowDuration}>
+                  <Text style={[styles.trackRowDuration, { color: theme.colors.textSecondary }]}>
                     {formatDuration(track.duration)}
                   </Text>
                 </View>
@@ -673,7 +660,6 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
   },
   scrollView: {
     flex: 1,
@@ -690,9 +676,12 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 16,
     borderRadius: 12,
-    overflow: 'hidden',
-  },
-  creatorBannerGradient: {
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
@@ -709,7 +698,6 @@ const styles = StyleSheet.create({
   creatorBannerTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#FFFFFF',
   },
   creatorBannerRight: {
     flexDirection: 'row',
@@ -718,11 +706,13 @@ const styles = StyleSheet.create({
   },
   creatorBannerSubtitle: {
     fontSize: 13,
-    color: '#CCCCCC',
     fontWeight: '500',
   },
   notificationButton: {
     padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginLeft: 8,
   },
   heroSection: {
     marginHorizontal: 16,

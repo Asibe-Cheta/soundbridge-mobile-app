@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,12 +8,15 @@ import {
   Alert,
   ActivityIndicator,
   Switch,
+  Platform,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import InAppPurchaseService, { SoundBridgeProduct } from '../services/InAppPurchaseService';
 
 interface Plan {
   id: 'free' | 'pro' | 'enterprise';
@@ -25,17 +28,26 @@ interface Plan {
   features: string[];
   popular: boolean;
   savings?: string;
+  productIds: {
+    monthly: string;
+    yearly: string;
+  };
 }
 
 export default function UpgradeScreen() {
   const navigation = useNavigation();
-  const { user } = useAuth();
+  const { user, session, refreshUser } = useAuth();
   const { theme } = useTheme();
   
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [isLoading, setIsLoading] = useState(false);
-  const [currentPlan, setCurrentPlan] = useState<'free' | 'pro' | 'enterprise'>('free'); // TODO: Get from user data
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [currentPlan, setCurrentPlan] = useState<'free' | 'pro' | 'enterprise'>('free');
+  const [appStoreProducts, setAppStoreProducts] = useState<any[]>([]);
+  const [soundBridgeProducts, setSoundBridgeProducts] = useState<SoundBridgeProduct[]>([]);
+  const [isDevelopmentMode, setIsDevelopmentMode] = useState(false); // Hide dev banner in all builds
 
+  // Product IDs based on web team's configuration
   const plans: Plan[] = [
     {
       id: 'free',
@@ -47,335 +59,440 @@ export default function UpgradeScreen() {
       features: [
         '3 uploads total',
         '10MB file size limit',
-        '100MB total storage',
-        'Standard processing (2-5 min)',
-        'Basic copyright protection',
-        'Basic analytics',
-        'Community features',
-        'Standard audio quality',
-        'SoundBridge branding'
+        'Basic audio quality',
+        'Community support',
+        'Standard streaming',
       ],
-      popular: false
+      popular: false,
+      productIds: { monthly: '', yearly: '' },
     },
     {
       id: 'pro',
       name: 'Pro',
-      description: 'For growing creators',
-      icon: 'crown',
+      description: 'For serious creators',
+      icon: 'diamond',
       price: { monthly: 9.99, yearly: 99.99 },
-      color: '#8B5CF6',
+      color: '#10B981',
       features: [
-        'Everything in Free',
-        '50MB file size limit',
-        '2GB total storage',
-        '10 uploads per month',
-        'Priority processing (1-2 min)',
-        'Advanced copyright protection',
+        'Unlimited uploads',
+        '100MB file size limit',
+        'High-quality audio',
+        'Priority support',
         'Advanced analytics',
         'Custom branding',
-        'Revenue sharing (95%)',
-        'Priority support',
-        'HD audio quality',
-        'Direct fan messaging',
-        '3 concurrent uploads'
+        'Monetization tools',
       ],
       popular: true,
-      savings: 'Save 17%'
+      savings: 'Save 17%',
+      productIds: Platform.select({
+        ios: {
+          monthly: 'com.soundbridge.pro.monthly',
+          yearly: 'com.soundbridge.pro.yearly',
+        },
+        android: {
+          monthly: 'soundbridge_pro_monthly',
+          yearly: 'soundbridge_pro_yearly',
+        },
+      }) || { monthly: '', yearly: '' },
     },
     {
       id: 'enterprise',
       name: 'Enterprise',
-      description: 'For professional creators',
-      icon: 'star',
-      price: { monthly: 49.99, yearly: 499.99 },
-      color: '#F59E0B',
+      description: 'For teams and businesses',
+      icon: 'trophy',
+      price: { monthly: 29.99, yearly: 299.99 },
+      color: '#8B5CF6',
       features: [
         'Everything in Pro',
-        '100MB file size limit',
-        '10GB total storage',
-        'Unlimited uploads',
-        'Instant processing (< 1 min)',
-        'AI-powered copyright protection',
-        'Human + AI content moderation',
-        'White-label platform',
-        'Custom integrations',
-        'Revenue sharing (98%)',
-        'Dedicated support',
+        '500MB file size limit',
+        'Team collaboration',
+        'White-label solution',
         'API access',
-        'Custom domain',
-        'Advanced collaboration tools',
-        'Priority feature requests',
-        '5 concurrent uploads'
+        'Dedicated support',
+        'Custom integrations',
+        'Advanced security',
       ],
       popular: false,
-      savings: 'Save 17%'
-    }
+      savings: 'Save 17%',
+      productIds: Platform.select({
+        ios: {
+          monthly: 'com.soundbridge.enterprise.monthly',
+          yearly: 'com.soundbridge.enterprise.yearly',
+        },
+        android: {
+          monthly: 'soundbridge_enterprise_monthly',
+          yearly: 'soundbridge_enterprise_yearly',
+        },
+      }) || { monthly: '', yearly: '' },
+    },
   ];
 
-  const handleUpgrade = async (planId: 'pro' | 'enterprise') => {
-    if (!user) {
-      Alert.alert('Authentication Required', 'Please sign in to upgrade your plan');
+  useEffect(() => {
+    initializeIAP();
+  }, []);
+
+  useEffect(() => {
+    // Update current plan from user data
+    if ((user as any)?.subscription_tier) {
+      setCurrentPlan((user as any).subscription_tier as 'free' | 'pro' | 'enterprise');
+    }
+  }, [user]);
+
+  const initializeIAP = async () => {
+    try {
+      setIsInitializing(true);
+      console.log('🚀 Initializing In-App Purchases...');
+      
+      const success = await InAppPurchaseService.initialize();
+      if (success) {
+        const { appStoreProducts, soundBridgeProducts } = await InAppPurchaseService.getAvailableProducts();
+        setAppStoreProducts(appStoreProducts);
+        setSoundBridgeProducts(soundBridgeProducts);
+        console.log('✅ IAP initialized successfully');
+        console.log('📦 App Store products:', appStoreProducts.length);
+        console.log('🌐 SoundBridge products:', soundBridgeProducts.length);
+      } else {
+        console.error('❌ Failed to initialize IAP');
+        Alert.alert('Error', 'Failed to load subscription options. Please try again.');
+      }
+    } catch (error) {
+      console.error('❌ IAP initialization error:', error);
+      Alert.alert('Error', 'Failed to initialize payment system. Please try again.');
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  const getProductPrice = (plan: Plan): string => {
+    const productId = plan.productIds[billingCycle];
+    if (!productId) return `$${plan.price[billingCycle]}`;
+
+    // Try to find the actual price from app store
+    const appStoreProduct = appStoreProducts.find(p => p.productId === productId);
+    if (appStoreProduct) {
+      return `${appStoreProduct.price} ${appStoreProduct.currencyCode}`;
+    }
+
+    // Fallback to configured price
+    return `$${plan.price[billingCycle]}`;
+  };
+
+  const handleUpgrade = async (plan: Plan) => {
+    if (!session?.access_token) {
+      Alert.alert('Error', 'Please log in to upgrade your subscription.');
       return;
     }
 
-    setIsLoading(true);
-    
+    if (plan.id === 'free') {
+      Alert.alert('Info', 'You are already on the free plan.');
+      return;
+    }
+
+    if (plan.id === currentPlan) {
+      Alert.alert('Info', `You are already subscribed to the ${plan.name} plan.`);
+      return;
+    }
+
+    const productId = plan.productIds[billingCycle];
+    if (!productId) {
+      Alert.alert('Error', 'Product not available for this platform.');
+      return;
+    }
+
     try {
-      // TODO: Implement actual upgrade logic
+      setIsLoading(true);
+      console.log('💳 Starting upgrade process...');
+      console.log('📦 Product ID:', productId);
+      console.log('💰 Plan:', plan.name);
+      console.log('🔄 Billing cycle:', billingCycle);
+
+      // Show confirmation dialog
       Alert.alert(
-        'Upgrade Plan',
-        `Upgrade to ${planId.charAt(0).toUpperCase() + planId.slice(1)} plan for $${billingCycle === 'monthly' ? plans.find(p => p.id === planId)?.price.monthly : plans.find(p => p.id === planId)?.price.yearly}/${billingCycle === 'monthly' ? 'month' : 'year'}?`,
+        'Confirm Subscription',
+        `Upgrade to ${plan.name} (${billingCycle}) for ${getProductPrice(plan)}?`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Upgrade', 
-            onPress: () => {
-              // Mock upgrade success
-              Alert.alert('Success', `Successfully upgraded to ${planId.charAt(0).toUpperCase() + planId.slice(1)} plan!`);
-              setCurrentPlan(planId);
-            }
-          }
+          {
+            text: 'Subscribe',
+            onPress: async () => {
+              await performPurchase(productId, plan);
+            },
+          },
         ]
       );
     } catch (error) {
-      console.error('Upgrade error:', error);
-      Alert.alert('Error', 'Failed to upgrade plan. Please try again.');
+      console.error('❌ Upgrade error:', error);
+      Alert.alert('Error', 'Failed to start upgrade process. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const features = [
-    {
-      category: 'Content & Uploads',
-      icon: 'musical-notes',
-      items: [
-        { name: 'Music Tracks', free: '3 total', pro: '10/month', enterprise: 'Unlimited' },
-        { name: 'Podcast Episodes', free: '3 total', pro: '10/month', enterprise: 'Unlimited' },
-        { name: 'Events', free: '3 total', pro: '10/month', enterprise: 'Unlimited' },
-        { name: 'Max File Size', free: '10MB', pro: '50MB', enterprise: '100MB' },
-        { name: 'Processing Speed', free: 'Standard (2-5 min)', pro: 'Priority (1-2 min)', enterprise: 'Instant (< 1 min)' },
-        { name: 'Concurrent Uploads', free: '1', pro: '3', enterprise: '5' },
-        { name: 'Storage Space', free: '100MB', pro: '2GB', enterprise: '10GB' },
-        { name: 'Audio Quality', free: 'Standard', pro: 'HD', enterprise: 'Lossless' }
-      ]
-    },
-    {
-      category: 'Analytics & Insights',
-      icon: 'bar-chart',
-      items: [
-        { name: 'Basic Analytics', free: '✓', pro: '✓', enterprise: '✓' },
-        { name: 'Advanced Analytics', free: '✗', pro: '✓', enterprise: '✓' },
-        { name: 'Demographic Data', free: '✗', pro: '✓', enterprise: '✓' },
-        { name: 'Geographic Insights', free: '✗', pro: '✓', enterprise: '✓' },
-        { name: 'Custom Reports', free: '✗', pro: '✗', enterprise: '✓' }
-      ]
-    },
-    {
-      category: 'Monetization',
-      icon: 'cash',
-      items: [
-        { name: 'Revenue Sharing', free: '✗', pro: '95%', enterprise: '98%' },
-        { name: 'Direct Payments', free: '✗', pro: '✓', enterprise: '✓' },
-        { name: 'Subscription Tiers', free: '✗', pro: '✓', enterprise: '✓' },
-        { name: 'Merchandise Sales', free: '✗', pro: '✗', enterprise: '✓' }
-      ]
+  const performPurchase = async (productId: string, plan: Plan) => {
+    try {
+      setIsLoading(true);
+      console.log('🛒 Performing purchase for:', productId);
+
+      const result = await InAppPurchaseService.purchaseProduct(productId, session!.access_token);
+      
+      if (result.success) {
+        console.log('✅ Purchase successful!');
+        
+        // Refresh user data to get updated subscription
+        await refreshUser();
+        
+        // Haptic feedback for success
+        try {
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch (error) {
+          console.log('Haptics not available:', error);
+        }
+        
+        // Enhanced success message with feature highlights
+        const planFeatures = plan.id === 'pro' 
+          ? '✨ Unlimited uploads\n🎵 High-quality audio\n📊 Advanced analytics\n💰 Monetization tools'
+          : '✨ Everything in Pro\n👥 Team collaboration\n🏷️ White-label solution\n🔧 API access\n🛡️ Advanced security';
+        
+        Alert.alert(
+          'Subscription Activated! 🎉',
+          `Welcome to ${plan.name}! Your subscription is now active and all premium features are unlocked.\n\n${planFeatures}\n\nEnjoy your enhanced SoundBridge experience!`,
+          [
+            {
+              text: 'Explore Features',
+              onPress: () => navigation.goBack(),
+            },
+          ]
+        );
+      } else {
+        console.error('❌ Purchase failed:', result.error);
+        Alert.alert('Purchase Failed', result.error || 'Unable to complete purchase. Please try again.');
+      }
+    } catch (error) {
+      console.error('❌ Purchase error:', error);
+      Alert.alert('Purchase Error', 'An error occurred during purchase. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
-  ];
+  };
+
+  const handleRestorePurchases = async () => {
+    try {
+      setIsLoading(true);
+      console.log('🔄 Restoring purchases...');
+      
+      const purchases = await InAppPurchaseService.restorePurchases();
+      
+      if (purchases.length > 0) {
+        console.log('✅ Found purchases to restore:', purchases.length);
+        
+        // Refresh user data to sync any restored subscriptions
+        await refreshUser();
+        
+        Alert.alert('Purchases Restored', 'Your previous purchases have been restored.');
+      } else {
+        Alert.alert('No Purchases Found', 'No previous purchases were found to restore.');
+      }
+    } catch (error) {
+      console.error('❌ Restore purchases error:', error);
+      Alert.alert('Error', 'Failed to restore purchases. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (isInitializing) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={[styles.loadingText, { color: theme.colors.text }]}>
+            Loading subscription options...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Upgrade Plan</Text>
-        <View style={{ width: 24 }} />
-      </View>
-
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 100 }}>
-        {/* Header Section */}
-        <View style={styles.headerSection}>
-          <View style={styles.upgradeIcon}>
-            <Ionicons name="rocket" size={32} color="#DC2626" />
-          </View>
-          <Text style={[styles.title, { color: theme.colors.text }]}>Choose Your Plan</Text>
-          <Text style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
-            Start free, upgrade when you're ready. No hidden fees, no surprises.
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: 100 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
+          </TouchableOpacity>
+          <Text style={[styles.title, { color: theme.colors.text }]}>
+            Choose Your Plan
           </Text>
+          <TouchableOpacity
+            style={styles.restoreButton}
+            onPress={handleRestorePurchases}
+            disabled={isLoading}
+          >
+            <Ionicons name="refresh" size={20} color={theme.colors.primary} />
+          </TouchableOpacity>
+        </View>
 
-          {/* Billing Toggle */}
-          <View style={styles.billingToggle}>
-            <Text style={[styles.billingLabel, { color: billingCycle === 'monthly' ? theme.colors.text : theme.colors.textSecondary }]}>
-              Monthly
+        {/* Development Mode Banner */}
+        {isDevelopmentMode && (
+          <View style={[styles.devBanner, { backgroundColor: '#FEF3C7', borderColor: '#F59E0B' }]}>
+            <Ionicons name="warning" size={16} color="#F59E0B" />
+            <Text style={[styles.devBannerText, { color: '#92400E' }]}>
+              Development Mode: IAP simulation enabled
             </Text>
-            <Switch
-              value={billingCycle === 'yearly'}
-              onValueChange={(value) => setBillingCycle(value ? 'yearly' : 'monthly')}
-              trackColor={{ false: theme.colors.border, true: '#DC2626' }}
-              thumbColor={billingCycle === 'yearly' ? '#FFFFFF' : '#f4f3f4'}
-            />
-            <Text style={[styles.billingLabel, { color: billingCycle === 'yearly' ? theme.colors.text : theme.colors.textSecondary }]}>
+          </View>
+        )}
+
+        {/* Subtitle */}
+        <Text style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
+          Unlock premium features and take your music to the next level
+        </Text>
+
+        {/* Billing Cycle Toggle */}
+        <View style={[styles.billingToggle, { backgroundColor: theme.colors.card }]}>
+          <Text style={[
+            styles.billingText,
+            { color: billingCycle === 'monthly' ? theme.colors.primary : theme.colors.textSecondary }
+          ]}>
+            Monthly
+          </Text>
+          <Switch
+            value={billingCycle === 'yearly'}
+            onValueChange={(value) => setBillingCycle(value ? 'yearly' : 'monthly')}
+            trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
+            thumbColor={theme.colors.background}
+          />
+          <View style={styles.yearlyContainer}>
+            <Text style={[
+              styles.billingText,
+              { color: billingCycle === 'yearly' ? theme.colors.primary : theme.colors.textSecondary }
+            ]}>
               Yearly
             </Text>
-            {billingCycle === 'yearly' && (
-              <View style={styles.savingsBadge}>
-                <Text style={styles.savingsText}>Save 17%</Text>
-              </View>
-            )}
+            <View style={[styles.savingsBadge, { backgroundColor: theme.colors.primary }]}>
+              <Text style={styles.savingsText}>Save 17%</Text>
+            </View>
           </View>
         </View>
 
-        {/* Pricing Cards */}
+        {/* Plans */}
         <View style={styles.plansContainer}>
-          {plans.map((plan) => {
-            const price = billingCycle === 'monthly' ? plan.price.monthly : plan.price.yearly;
-            const isCurrentPlan = currentPlan === plan.id;
-            
-            return (
-              <View key={plan.id} style={[
+          {plans.map((plan) => (
+            <View
+              key={plan.id}
+              style={[
                 styles.planCard,
-                { backgroundColor: theme.colors.surface },
-                plan.popular && styles.popularCard,
-                isCurrentPlan && styles.currentPlanCard
-              ]}>
-                {plan.popular && (
-                  <View style={styles.popularBadge}>
-                    <Text style={styles.popularText}>Most Popular</Text>
+                { 
+                  backgroundColor: theme.colors.card,
+                  borderColor: plan.popular ? plan.color : theme.colors.border,
+                  borderWidth: plan.popular ? 2 : 1,
+                },
+                currentPlan === plan.id && styles.currentPlanCard,
+              ]}
+            >
+              {plan.popular && (
+                <View style={[styles.popularBadge, { backgroundColor: plan.color }]}>
+                  <Text style={styles.popularText}>Most Popular</Text>
+                </View>
+              )}
+
+              <View style={styles.planHeader}>
+                <View style={[styles.planIcon, { backgroundColor: plan.color }]}>
+                  <Ionicons name={plan.icon as any} size={24} color="#FFFFFF" />
+                </View>
+                <View style={styles.planInfo}>
+                  <Text style={[styles.planName, { color: theme.colors.text }]}>
+                    {plan.name}
+                  </Text>
+                  <Text style={[styles.planDescription, { color: theme.colors.textSecondary }]}>
+                    {plan.description}
+                  </Text>
+                </View>
+                {currentPlan === plan.id && (
+                  <View style={[styles.currentBadge, { backgroundColor: theme.colors.primary }]}>
+                    <Text style={styles.currentText}>Current</Text>
                   </View>
                 )}
+              </View>
 
-                <View style={styles.planHeader}>
-                  <View style={[styles.planIcon, { backgroundColor: `${plan.color}20` }]}>
-                    <Ionicons name={plan.icon as any} size={24} color={plan.color} />
-                  </View>
-                  <Text style={[styles.planName, { color: theme.colors.text }]}>{plan.name}</Text>
-                  <Text style={[styles.planDescription, { color: theme.colors.textSecondary }]}>{plan.description}</Text>
-                  
-                  <View style={styles.priceContainer}>
-                    <Text style={[styles.price, { color: theme.colors.text }]}>${price}</Text>
-                    <Text style={[styles.pricePeriod, { color: theme.colors.textSecondary }]}>
-                      /{billingCycle === 'monthly' ? 'month' : 'year'}
+              <View style={styles.priceContainer}>
+                <Text style={[styles.price, { color: theme.colors.text }]}>
+                  {plan.id === 'free' ? 'Free' : getProductPrice(plan)}
+                </Text>
+                {plan.id !== 'free' && (
+                  <Text style={[styles.priceSubtext, { color: theme.colors.textSecondary }]}>
+                    per {billingCycle === 'monthly' ? 'month' : 'year'}
+                  </Text>
+                )}
+                {billingCycle === 'yearly' && plan.savings && (
+                  <Text style={[styles.savings, { color: plan.color }]}>
+                    {plan.savings}
+                  </Text>
+                )}
+              </View>
+
+              <View style={styles.featuresContainer}>
+                {plan.features.map((feature, index) => (
+                  <View key={index} style={styles.featureItem}>
+                    <Ionicons name="checkmark" size={16} color={plan.color} />
+                    <Text style={[styles.featureText, { color: theme.colors.text }]}>
+                      {feature}
                     </Text>
                   </View>
+                ))}
+              </View>
 
-                  {plan.savings && billingCycle === 'yearly' && (
-                    <Text style={styles.planSavings}>{plan.savings}</Text>
-                  )}
-                </View>
-
-                {/* Features */}
-                <View style={styles.featuresContainer}>
-                  {plan.features.slice(0, 6).map((feature, index) => (
-                    <View key={index} style={styles.featureItem}>
-                      <Ionicons name="checkmark" size={16} color="#10B981" />
-                      <Text style={[styles.featureText, { color: theme.colors.textSecondary }]}>{feature}</Text>
-                    </View>
-                  ))}
-                  {plan.features.length > 6 && (
-                    <Text style={[styles.moreFeatures, { color: theme.colors.textSecondary }]}>
-                      +{plan.features.length - 6} more features
+              <TouchableOpacity
+                style={[
+                  styles.upgradeButton,
+                  {
+                    backgroundColor: currentPlan === plan.id 
+                      ? theme.colors.border 
+                      : plan.color,
+                  },
+                ]}
+                onPress={() => handleUpgrade(plan)}
+                disabled={isLoading || currentPlan === plan.id}
+              >
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Text style={styles.upgradeButtonText}>
+                      {currentPlan === plan.id 
+                        ? 'Current Plan' 
+                        : plan.id === 'free' 
+                        ? 'Downgrade' 
+                        : 'Subscribe'}
                     </Text>
-                  )}
-                </View>
-
-                {/* CTA Button */}
-                <View style={styles.ctaContainer}>
-                  {isCurrentPlan ? (
-                    <View style={[styles.currentPlanButton, { backgroundColor: theme.colors.card }]}>
-                      <Ionicons name="checkmark-circle" size={20} color="#10B981" />
-                      <Text style={[styles.currentPlanText, { color: theme.colors.text }]}>Current Plan</Text>
-                    </View>
-                  ) : plan.id === 'free' ? (
-                    <TouchableOpacity 
-                      style={[styles.freeButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-                      onPress={() => {
-                        if (currentPlan !== 'free') {
-                          Alert.alert('Downgrade', 'Are you sure you want to downgrade to the free plan?', [
-                            { text: 'Cancel', style: 'cancel' },
-                            { text: 'Downgrade', onPress: () => setCurrentPlan('free') }
-                          ]);
-                        }
-                      }}
-                    >
-                      <Text style={[styles.freeButtonText, { color: theme.colors.text }]}>
-                        {currentPlan === 'free' ? 'Current Plan' : 'Downgrade'}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity 
-                      style={[styles.upgradeButton, { backgroundColor: plan.color }]}
-                      onPress={() => handleUpgrade(plan.id as 'pro' | 'enterprise')}
-                      disabled={isLoading}
-                    >
-                      {isLoading ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <>
-                          <Text style={styles.upgradeButtonText}>Upgrade to {plan.name}</Text>
-                          <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
-                        </>
-                      )}
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            );
-          })}
-        </View>
-
-        {/* Features Comparison */}
-        <View style={[styles.comparisonSection, { backgroundColor: theme.colors.surface }]}>
-          <Text style={[styles.comparisonTitle, { color: theme.colors.text }]}>Compare Features</Text>
-          
-          {features.map((category, categoryIndex) => (
-            <View key={categoryIndex} style={styles.categorySection}>
-              <View style={styles.categoryHeader}>
-                <Ionicons name={category.icon as any} size={20} color="#DC2626" />
-                <Text style={[styles.categoryTitle, { color: theme.colors.text }]}>{category.category}</Text>
-              </View>
-              
-              {category.items.map((item, itemIndex) => (
-                <View key={itemIndex} style={[styles.comparisonRow, { borderBottomColor: theme.colors.border }]}>
-                  <Text style={[styles.featureName, { color: theme.colors.text }]}>{item.name}</Text>
-                  <View style={styles.planValues}>
-                    <Text style={[styles.planValue, { color: theme.colors.textSecondary }]}>{item.free}</Text>
-                    <Text style={[styles.planValue, { color: theme.colors.textSecondary }]}>{item.pro}</Text>
-                    <Text style={[styles.planValue, { color: theme.colors.textSecondary }]}>{item.enterprise}</Text>
-                  </View>
-                </View>
-              ))}
+                    {currentPlan !== plan.id && (
+                      <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+                    )}
+                  </>
+                )}
+              </TouchableOpacity>
             </View>
           ))}
         </View>
 
-        {/* FAQ Section */}
-        <View style={[styles.faqSection, { backgroundColor: theme.colors.surface }]}>
-          <Text style={[styles.faqTitle, { color: theme.colors.text }]}>Frequently Asked Questions</Text>
-          
-          {[
-            {
-              q: "Can I change my plan anytime?",
-              a: "Yes! You can upgrade or downgrade your plan at any time. Changes take effect immediately."
-            },
-            {
-              q: "What happens to my content if I downgrade?",
-              a: "Your content is always safe. You keep all your uploads and can still access them."
-            },
-            {
-              q: "How does revenue sharing work?",
-              a: "Pro users keep 95% of earnings, Enterprise users keep 98%. Payouts available at $25 minimum."
-            },
-            {
-              q: "Do you offer refunds?",
-              a: "We offer a 30-day money-back guarantee for all paid plans."
-            }
-          ].map((faq, index) => (
-            <View key={index} style={[styles.faqItem, { borderBottomColor: theme.colors.border }]}>
-              <Text style={[styles.faqQuestion, { color: theme.colors.text }]}>{faq.q}</Text>
-              <Text style={[styles.faqAnswer, { color: theme.colors.textSecondary }]}>{faq.a}</Text>
-            </View>
-          ))}
+        {/* Footer */}
+        <View style={styles.footer}>
+          <Text style={[styles.footerText, { color: theme.colors.textSecondary }]}>
+            • Subscriptions auto-renew unless cancelled
+          </Text>
+          <Text style={[styles.footerText, { color: theme.colors.textSecondary }]}>
+            • Cancel anytime in your device settings
+          </Text>
+          <Text style={[styles.footerText, { color: theme.colors.textSecondary }]}>
+            • Prices may vary by region
+          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -386,139 +503,152 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  scrollView: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    textAlign: 'center',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingVertical: 16,
-    borderBottomWidth: 1,
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  content: {
-    flex: 1,
-  },
-  headerSection: {
-    alignItems: 'center',
-    paddingVertical: 32,
-    paddingHorizontal: 16,
-  },
-  upgradeIcon: {
-    width: 64,
-    height: 64,
-    backgroundColor: '#DC262620',
-    borderRadius: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
+  backButton: {
+    padding: 8,
   },
   title: {
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 8,
+    flex: 1,
     textAlign: 'center',
+    marginHorizontal: 16,
+  },
+  restoreButton: {
+    padding: 8,
   },
   subtitle: {
     fontSize: 16,
     textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 32,
+    paddingHorizontal: 20,
+    marginBottom: 24,
+    lineHeight: 22,
   },
   billingToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    justifyContent: 'center',
+    marginHorizontal: 20,
+    marginBottom: 24,
+    padding: 16,
+    borderRadius: 12,
   },
-  billingLabel: {
+  billingText: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
+  },
+  yearlyContainer: {
+    alignItems: 'center',
+    marginLeft: 12,
   },
   savingsBadge: {
-    backgroundColor: '#10B981',
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginTop: 2,
   },
   savingsText: {
     color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   plansContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 32,
+    paddingHorizontal: 20,
   },
   planCard: {
     borderRadius: 16,
-    padding: 24,
+    padding: 20,
     marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  popularCard: {
-    borderColor: '#8B5CF6',
-    transform: [{ scale: 1.02 }],
+    position: 'relative',
   },
   currentPlanCard: {
-    borderColor: '#10B981',
+    opacity: 0.8,
   },
   popularBadge: {
     position: 'absolute',
     top: -8,
-    left: '50%',
-    transform: [{ translateX: -50 }],
-    backgroundColor: '#8B5CF6',
-    paddingHorizontal: 16,
-    paddingVertical: 4,
-    borderRadius: 12,
-    zIndex: 1,
+    left: 20,
+    right: 20,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignItems: 'center',
   },
   popularText: {
     color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
   planHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 16,
+    marginTop: 8,
   },
   planIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  planInfo: {
+    flex: 1,
   },
   planName: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   planDescription: {
     fontSize: 14,
-    marginBottom: 16,
+  },
+  currentBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  currentText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   priceContainer: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: 8,
+    alignItems: 'center',
+    marginBottom: 20,
   },
   price: {
     fontSize: 32,
     fontWeight: 'bold',
+    marginBottom: 4,
   },
-  pricePeriod: {
-    fontSize: 16,
-    marginLeft: 4,
+  priceSubtext: {
+    fontSize: 14,
   },
-  planSavings: {
-    color: '#10B981',
+  savings: {
     fontSize: 14,
     fontWeight: '600',
+    marginTop: 2,
   },
   featuresContainer: {
     marginBottom: 24,
@@ -533,120 +663,42 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     flex: 1,
   },
-  moreFeatures: {
-    fontSize: 12,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  ctaContainer: {
-    marginTop: 'auto',
-  },
   upgradeButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 16,
     borderRadius: 12,
-    gap: 8,
   },
   upgradeButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '600',
-  },
-  freeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  freeButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  currentPlanButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    gap: 8,
-  },
-  currentPlanText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  comparisonSection: {
-    margin: 16,
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 32,
-  },
-  comparisonTitle: {
-    fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 24,
-    textAlign: 'center',
+    marginRight: 8,
   },
-  categorySection: {
-    marginBottom: 24,
-  },
-  categoryHeader: {
-    flexDirection: 'row',
+  footer: {
+    paddingHorizontal: 20,
+    paddingVertical: 24,
     alignItems: 'center',
-    marginBottom: 16,
   },
-  categoryTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  comparisonRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-  },
-  featureName: {
-    fontSize: 14,
-    flex: 1,
-  },
-  planValues: {
-    flexDirection: 'row',
-    flex: 1,
-    justifyContent: 'space-around',
-  },
-  planValue: {
+  footerText: {
     fontSize: 12,
     textAlign: 'center',
-    flex: 1,
+    marginBottom: 4,
   },
-  faqSection: {
-    margin: 16,
-    borderRadius: 16,
-    padding: 24,
+  devBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 20,
+    marginBottom: 16,
+    borderRadius: 8,
+    borderWidth: 1,
   },
-  faqTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 24,
-    textAlign: 'center',
-  },
-  faqItem: {
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-  },
-  faqQuestion: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  faqAnswer: {
+  devBannerText: {
     fontSize: 14,
-    lineHeight: 20,
+    fontWeight: '500',
+    marginLeft: 8,
   },
 });

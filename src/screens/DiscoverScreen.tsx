@@ -306,6 +306,7 @@ export default function DiscoverScreen() {
     <ScrollView 
       showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      contentContainerStyle={{ paddingBottom: 100 }}
     >
       {/* Trending Now */}
       <Section title="Trending Now">
@@ -321,16 +322,16 @@ export default function DiscoverScreen() {
                       <Image source={{ uri: track.cover_image_url }} style={styles.trendingImage} />
                     ) : (
                       <View style={styles.defaultTrackImage}>
-                        <Ionicons name="musical-notes" size={32} color="#666" />
+                        <Ionicons name="musical-notes" size={32} color={theme.colors.textSecondary} />
                       </View>
                     )}
                     <View style={styles.playOverlay}>
                       <Ionicons name="play" size={16} color="#FFFFFF" />
                     </View>
                   </View>
-                  <Text style={styles.trendingTitle} numberOfLines={1}>{track.title}</Text>
-                  <Text style={styles.trendingArtist} numberOfLines={1}>by {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}</Text>
-                  <Text style={styles.trackDuration}>{formatDuration(track.duration)}</Text>
+                  <Text style={[styles.trendingTitle, { color: theme.colors.text }]} numberOfLines={1}>{track.title}</Text>
+                  <Text style={[styles.trendingArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>by {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}</Text>
+                  <Text style={[styles.trackDuration, { color: theme.colors.textSecondary }]}>{formatDuration(track.duration)}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -375,27 +376,27 @@ export default function DiscoverScreen() {
         {loadingTracks ? (
           <LoadingState text="Loading recent tracks..." />
         ) : recentTracks.length > 0 ? (
-          <View style={styles.tracksList}>
-            {recentTracks.slice(0, 5).map((track) => (
+          <View style={[styles.tracksList, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderWidth: 1 }]}>
+            {recentTracks.map((track) => (
               <TouchableOpacity key={track.id} style={styles.trackRow} onPress={() => handleTrackPress(track)}>
                 <View style={styles.trackRowCover}>
                   {(track.cover_image_url || track.artwork_url) ? (
                     <Image source={{ uri: track.cover_image_url || track.artwork_url }} style={styles.trackRowImage} />
                   ) : (
                     <View style={styles.defaultTrackRowImage}>
-                      <Ionicons name="musical-notes" size={20} color="#666" />
+                      <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />
                     </View>
                   )}
                 </View>
                 <View style={styles.trackRowInfo}>
-                  <Text style={styles.trackRowTitle} numberOfLines={1}>{track.title}</Text>
-                  <Text style={styles.trackRowArtist} numberOfLines={1}>by {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}</Text>
+                  <Text style={[styles.trackRowTitle, { color: theme.colors.text }]} numberOfLines={1}>{track.title}</Text>
+                  <Text style={[styles.trackRowArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>by {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}</Text>
                 </View>
                 <View style={styles.trackRowActions}>
                   <TouchableOpacity style={styles.playButton} onPress={() => handleTrackPress(track)}>
-                    <Ionicons name="play" size={16} color="#DC2626" />
+                    <Ionicons name="play" size={16} color={theme.colors.primary} />
                   </TouchableOpacity>
-                  <Text style={styles.trackRowDuration}>{formatDuration(track.duration)}</Text>
+                  <Text style={[styles.trackRowDuration, { color: theme.colors.textSecondary }]}>{formatDuration(track.duration)}</Text>
                 </View>
               </TouchableOpacity>
             ))}
@@ -418,20 +419,20 @@ export default function DiscoverScreen() {
         ) : featuredArtists.length > 0 ? (
           <View style={styles.artistsGrid}>
             {featuredArtists.map((artist) => (
-              <TouchableOpacity key={artist.id} style={styles.artistGridCard} onPress={() => handleArtistPress(artist)}>
+              <TouchableOpacity key={artist.id} style={[styles.artistGridCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => handleArtistPress(artist)}>
                 <View style={styles.artistAvatarContainer}>
                   {artist.avatar_url ? (
                     <Image source={{ uri: artist.avatar_url }} style={styles.artistAvatar} />
                   ) : (
                     <View style={styles.defaultArtistAvatar}>
-                      <Ionicons name="person" size={24} color="#666" />
+                      <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
                     </View>
                   )}
                 </View>
-                <Text style={styles.artistName} numberOfLines={1}>{artist?.display_name || artist?.username || 'Unknown Artist'}</Text>
-                <Text style={styles.artistHandle} numberOfLines={1}>@{artist.username}</Text>
-                <Text style={styles.artistBio} numberOfLines={2}>{artist.bio}</Text>
-                <Text style={styles.artistStats}>{artist.followers_count?.toLocaleString()} followers • {artist.tracks_count} tracks</Text>
+                <Text style={[styles.artistName, { color: theme.colors.text }]} numberOfLines={1}>{artist?.display_name || artist?.username || 'Unknown Artist'}</Text>
+                <Text style={[styles.artistHandle, { color: theme.colors.textSecondary }]} numberOfLines={1}>@{artist.username}</Text>
+                <Text style={[styles.artistBio, { color: theme.colors.textSecondary }]} numberOfLines={2}>{artist.bio}</Text>
+                <Text style={[styles.artistStats, { color: theme.colors.textSecondary }]}>{artist.followers_count?.toLocaleString()} followers • {artist.tracks_count} tracks</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -544,20 +545,20 @@ export default function DiscoverScreen() {
       <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} />
       
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
         <TouchableOpacity style={styles.headerButton}>
-          <Ionicons name="menu" size={24} color="#FFFFFF" />
+          <Ionicons name="menu" size={24} color={theme.colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Discover</Text>
+        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Discover</Text>
         <TouchableOpacity style={styles.headerButton}>
-          <Ionicons name="filter-outline" size={24} color="#FFFFFF" />
+          <Ionicons name="filter-outline" size={24} color={theme.colors.text} />
         </TouchableOpacity>
       </View>
 
       {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color="rgba(255, 255, 255, 0.6)" />
+      <View style={[styles.searchContainer, { backgroundColor: theme.colors.surface }]}>
+        <View style={[styles.searchBar, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+          <Ionicons name="search" size={20} color={theme.colors.textSecondary} />
           <TextInput
             style={[styles.searchInput, { backgroundColor: theme.colors.surface, color: theme.colors.text }]}
             placeholder="Search for creators, music, events..."
@@ -569,16 +570,23 @@ export default function DiscoverScreen() {
       </View>
 
       {/* Tabs */}
-      <View style={styles.tabsContainer}>
+      <View style={[styles.tabsContainer, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={styles.tabs}>
             {tabs.map((tab) => (
               <TouchableOpacity
                 key={tab}
-                style={[styles.tab, activeTab === tab && styles.activeTab]}
+                style={[
+                  styles.tab, 
+                  activeTab === tab && { backgroundColor: theme.colors.primary + '20' }
+                ]}
                 onPress={() => setActiveTab(tab)}
               >
-                <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
+                <Text style={[
+                  styles.tabText, 
+                  { color: theme.colors.textSecondary },
+                  activeTab === tab && { color: theme.colors.primary, fontWeight: 'bold' }
+                ]}>
                   {tab}
                 </Text>
               </TouchableOpacity>
@@ -597,14 +605,16 @@ export default function DiscoverScreen() {
 
 // Section Component
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const { theme } = useTheme();
+  
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
         <TouchableOpacity style={styles.sectionTitleContainer}>
-          <Text style={styles.sectionTitle}>{title}</Text>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>{title}</Text>
         </TouchableOpacity>
         <TouchableOpacity>
-          <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.primary} />
         </TouchableOpacity>
       </View>
       {children}
@@ -614,19 +624,23 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 // Loading State Component
 function LoadingState({ text }: { text: string }) {
+  const { theme } = useTheme();
+  
   return (
     <View style={styles.loadingContainer}>
-      <Text style={styles.loadingText}>{text}</Text>
+      <Text style={[styles.loadingText, { color: theme.colors.text }]}>{text}</Text>
     </View>
   );
 }
 
 // Empty State Component
 function EmptyState({ icon, text }: { icon: string; text: string }) {
+  const { theme } = useTheme();
+  
   return (
     <View style={styles.emptyState}>
-      <Ionicons name={icon as any} size={48} color="#666" />
-      <Text style={styles.emptyStateText}>{text}</Text>
+      <Ionicons name={icon as any} size={48} color={theme.colors.textSecondary} />
+      <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>{text}</Text>
     </View>
   );
 }
@@ -634,7 +648,6 @@ function EmptyState({ icon, text }: { icon: string; text: string }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
   },
   header: {
     flexDirection: 'row',
@@ -643,7 +656,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    borderBottomWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   headerButton: {
     padding: 8,
@@ -651,30 +669,27 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#FFFFFF',
   },
   searchContainer: {
     paddingHorizontal: 16,
     paddingBottom: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 8,
     paddingHorizontal: 12,
     height: 40,
     gap: 8,
+    borderWidth: 1,
   },
   searchInput: {
     flex: 1,
-    color: '#FFFFFF',
     fontSize: 16,
   },
   tabsContainer: {
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     paddingBottom: 8,
+    borderBottomWidth: 1,
   },
   tabs: {
     flexDirection: 'row',
@@ -684,20 +699,11 @@ const styles = StyleSheet.create({
   tab: {
     paddingVertical: 12,
     paddingHorizontal: 4,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  activeTab: {
-    borderBottomColor: '#DC2626',
+    borderRadius: 8,
   },
   tabText: {
-    color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 16,
     fontWeight: '500',
-  },
-  activeTabText: {
-    color: '#DC2626',
-    fontWeight: 'bold',
   },
   content: {
     flex: 1,
@@ -720,11 +726,9 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#FFFFFF',
   },
   viewAllText: {
     fontSize: 12,
-    color: '#DC2626',
     fontWeight: '500',
   },
   horizontalScroll: {
@@ -769,15 +773,12 @@ const styles = StyleSheet.create({
   trendingTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#FFFFFF',
   },
   trendingArtist: {
     fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.7)',
   },
   trackDuration: {
     fontSize: 11,
-    color: '#999999',
   },
   artistCard: {
     width: 120,
@@ -808,17 +809,14 @@ const styles = StyleSheet.create({
   artistName: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#FFFFFF',
     textAlign: 'center',
   },
   artistHandle: {
     fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.7)',
     textAlign: 'center',
   },
   artistStats: {
     fontSize: 11,
-    color: '#999999',
     textAlign: 'center',
   },
   artistsGrid: {
@@ -837,14 +835,13 @@ const styles = StyleSheet.create({
   },
   artistBio: {
     fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.7)',
     textAlign: 'center',
   },
   tracksList: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
     padding: 16,
     gap: 16,
+    paddingBottom: 32,
   },
   trackRow: {
     flexDirection: 'row',
@@ -878,12 +875,10 @@ const styles = StyleSheet.create({
   trackRowTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#FFFFFF',
     marginBottom: 2,
   },
   trackRowArtist: {
     fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.7)',
   },
   trackRowActions: {
     flexDirection: 'row',
@@ -900,7 +895,6 @@ const styles = StyleSheet.create({
   },
   trackRowDuration: {
     fontSize: 11,
-    color: '#999999',
   },
   eventsList: {
     gap: 12,
@@ -1030,7 +1024,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    color: '#CCCCCC',
     fontSize: 14,
   },
   emptyState: {
@@ -1038,7 +1031,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyStateText: {
-    color: '#666666',
     fontSize: 14,
     marginTop: 8,
   },
