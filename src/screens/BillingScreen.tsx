@@ -14,6 +14,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService, WalletBalance } from '../services/WalletService';
+import { currencyService } from '../services/CurrencyService';
 
 interface SubscriptionData {
   tier: 'free' | 'pro' | 'enterprise';
@@ -77,11 +78,12 @@ export default function BillingScreen() {
       // Load wallet data if user is logged in
       if (session) {
         try {
-          const walletBalance = await walletService.getWalletBalance(session);
+          const walletBalance = await walletService.getWalletBalanceSafe(session);
           setWalletData(walletBalance);
         } catch (error) {
           console.error('Error loading wallet data:', error);
           // Don't fail the whole screen if wallet fails
+          setWalletData(null);
         }
       }
       
@@ -488,7 +490,7 @@ export default function BillingScreen() {
               <View style={styles.walletBalance}>
                 <Text style={[styles.walletLabel, { color: theme.colors.textSecondary }]}>Available Balance</Text>
                 <Text style={[styles.walletAmount, { color: theme.colors.text }]}>
-                  {walletService.formatAmount(walletData.balance, walletData.currency)}
+                  {currencyService.formatAmount(walletData.balance, walletData.currency)}
                 </Text>
               </View>
               

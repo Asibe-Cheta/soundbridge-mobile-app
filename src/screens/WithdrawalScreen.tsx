@@ -16,6 +16,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService, WalletBalance, WithdrawalMethod, WithdrawalRequest } from '../services/WalletService';
+import { currencyService } from '../services/CurrencyService';
 
 interface WithdrawalMethodOption {
   type: 'bank_transfer' | 'paypal' | 'crypto' | 'prepaid_card';
@@ -86,7 +87,7 @@ export default function WithdrawalScreen() {
 
       // Load wallet balance and withdrawal methods in parallel
       const [balanceResult, methodsResult] = await Promise.all([
-        walletService.getWalletBalance(session),
+        walletService.getWalletBalanceSafe(session),
         walletService.getWithdrawalMethods(session).catch(() => ({ methods: [], count: 0 })) // Graceful fallback
       ]);
 
@@ -111,13 +112,13 @@ export default function WithdrawalScreen() {
     }
     
     if (!walletData || numValue > walletData.balance) {
-      Alert.alert('Insufficient Balance', `You can withdraw up to ${walletService.formatAmount(walletData?.balance || 0)}`);
+      Alert.alert('Insufficient Balance', `You can withdraw up to ${currencyService.formatAmount(walletData?.balance || 0, walletData?.currency || 'USD')}`);
       return false;
     }
 
     const minWithdrawal = 5.00; // $5 minimum
     if (numValue < minWithdrawal) {
-      Alert.alert('Minimum Amount', `Minimum withdrawal amount is ${walletService.formatAmount(minWithdrawal)}`);
+      Alert.alert('Minimum Amount', `Minimum withdrawal amount is ${currencyService.formatAmount(minWithdrawal, walletData?.currency || 'USD')}`);
       return false;
     }
 
@@ -162,7 +163,7 @@ export default function WithdrawalScreen() {
       // Show confirmation dialog
       Alert.alert(
         'Confirm Withdrawal',
-        `Withdraw ${walletService.formatAmount(withdrawalAmount)} via ${selectedMethod.name}?\n\nFee: ${walletService.formatAmount(fee)}\nYou'll receive: ${walletService.formatAmount(net)}`,
+        `Withdraw ${currencyService.formatAmount(withdrawalAmount, walletData?.currency || 'USD')} via ${selectedMethod.name}?\n\nFee: ${currencyService.formatAmount(fee, walletData?.currency || 'USD')}\nYou'll receive: ${currencyService.formatAmount(net, walletData?.currency || 'USD')}`,
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Confirm', onPress: processWithdrawal }
@@ -332,7 +333,7 @@ export default function WithdrawalScreen() {
             <Text style={[styles.balanceTitle, { color: theme.colors.text }]}>Available Balance</Text>
           </View>
           <Text style={[styles.balanceAmount, { color: theme.colors.text }]}>
-            {walletData ? walletService.formatAmount(walletData.balance, walletData.currency) : '$0.00'}
+            {walletData ? currencyService.formatAmount(walletData.balance, walletData.currency) : '$0.00'}
           </Text>
         </View>
 
@@ -430,19 +431,19 @@ export default function WithdrawalScreen() {
               <View style={styles.feeRow}>
                 <Text style={[styles.feeLabel, { color: theme.colors.textSecondary }]}>Withdrawal Amount</Text>
                 <Text style={[styles.feeValue, { color: theme.colors.text }]}>
-                  {walletService.formatAmount(withdrawalAmount)}
+                  {currencyService.formatAmount(withdrawalAmount, walletData?.currency || 'USD')}
                 </Text>
               </View>
               <View style={styles.feeRow}>
                 <Text style={[styles.feeLabel, { color: theme.colors.textSecondary }]}>Processing Fee (2.5%)</Text>
                 <Text style={[styles.feeValue, { color: theme.colors.error }]}>
-                  -{walletService.formatAmount(fee)}
+                  -{currencyService.formatAmount(fee, walletData?.currency || 'USD')}
                 </Text>
               </View>
               <View style={[styles.feeRow, styles.totalRow, { borderTopColor: theme.colors.border }]}>
                 <Text style={[styles.feeLabel, styles.totalLabel, { color: theme.colors.text }]}>You'll Receive</Text>
                 <Text style={[styles.feeValue, styles.totalValue, { color: theme.colors.success }]}>
-                  {walletService.formatAmount(net)}
+                  {currencyService.formatAmount(net, walletData?.currency || 'USD')}
                 </Text>
               </View>
             </View>

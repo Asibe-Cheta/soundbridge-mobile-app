@@ -16,6 +16,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService } from '../services/WalletService';
+import CountryAwareBankForm from '../components/CountryAwareBankForm';
 
 type MethodType = 'bank_transfer' | 'paypal' | 'crypto' | 'prepaid_card';
 
@@ -66,16 +67,6 @@ export default function AddWithdrawalMethodScreen() {
   const [selectedMethod, setSelectedMethod] = useState<MethodType | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Bank Transfer Form State
-  const [bankForm, setBankForm] = useState({
-    method_name: '',
-    account_holder_name: '',
-    bank_name: '',
-    account_number: '',
-    routing_number: '',
-    account_type: 'checking' as 'checking' | 'savings',
-    currency: 'USD',
-  });
 
   // PayPal Form State
   const [paypalForm, setPaypalForm] = useState({
@@ -103,29 +94,27 @@ export default function AddWithdrawalMethodScreen() {
 
   const [makeDefault, setMakeDefault] = useState(false);
 
-  const validateBankForm = (): boolean => {
-    if (!bankForm.method_name.trim()) {
-      Alert.alert('Error', 'Please enter a name for this method');
-      return false;
+  // Handler for CountryAwareBankForm
+  const handleAddMethod = async (methodData: any) => {
+    try {
+      setSubmitting(true);
+      
+      const result = await walletService.addWithdrawalMethod(session!, methodData);
+      
+      if (result.success) {
+        Alert.alert('Success', 'Withdrawal method added successfully!');
+        navigation.goBack();
+      } else {
+        Alert.alert('Error', result.error || 'Failed to add withdrawal method');
+      }
+    } catch (error) {
+      console.error('Error adding withdrawal method:', error);
+      Alert.alert('Error', 'Failed to add withdrawal method');
+    } finally {
+      setSubmitting(false);
     }
-    if (!bankForm.account_holder_name.trim()) {
-      Alert.alert('Error', 'Please enter the account holder name');
-      return false;
-    }
-    if (!bankForm.bank_name.trim()) {
-      Alert.alert('Error', 'Please enter the bank name');
-      return false;
-    }
-    if (!bankForm.account_number.trim()) {
-      Alert.alert('Error', 'Please enter the account number');
-      return false;
-    }
-    if (!bankForm.routing_number.trim() || bankForm.routing_number.length !== 9) {
-      Alert.alert('Error', 'Please enter a valid 9-digit routing number');
-      return false;
-    }
-    return true;
   };
+
 
   const validatePayPalForm = (): boolean => {
     if (!paypalForm.method_name.trim()) {
@@ -191,22 +180,8 @@ export default function AddWithdrawalMethodScreen() {
 
       switch (selectedMethod) {
         case 'bank_transfer':
-          isValid = validateBankForm();
-          if (isValid) {
-            methodData = {
-              method_type: 'bank_transfer',
-              method_name: bankForm.method_name,
-              bank_details: {
-                account_holder_name: bankForm.account_holder_name,
-                bank_name: bankForm.bank_name,
-                account_number: bankForm.account_number,
-                routing_number: bankForm.routing_number,
-                account_type: bankForm.account_type,
-                currency: bankForm.currency,
-              }
-            };
-          }
-          break;
+          // Bank transfer is handled by CountryAwareBankForm
+          return;
 
         case 'paypal':
           isValid = validatePayPalForm();
@@ -334,111 +309,6 @@ export default function AddWithdrawalMethodScreen() {
     </View>
   );
 
-  const renderBankTransferForm = () => (
-    <View style={styles.formSection}>
-      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Bank Account Details</Text>
-      
-      <View style={styles.inputGroup}>
-        <Text style={[styles.label, { color: theme.colors.text }]}>Method Name *</Text>
-        <TextInput
-          style={[styles.input, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
-          placeholder="e.g., My Bank Account"
-          placeholderTextColor={theme.colors.textSecondary}
-          value={bankForm.method_name}
-          onChangeText={(text) => setBankForm({...bankForm, method_name: text})}
-        />
-      </View>
-
-      <View style={styles.inputGroup}>
-        <Text style={[styles.label, { color: theme.colors.text }]}>Account Holder Name *</Text>
-        <TextInput
-          style={[styles.input, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
-          placeholder="Full name as it appears on account"
-          placeholderTextColor={theme.colors.textSecondary}
-          value={bankForm.account_holder_name}
-          onChangeText={(text) => setBankForm({...bankForm, account_holder_name: text})}
-          autoCapitalize="words"
-        />
-      </View>
-
-      <View style={styles.inputGroup}>
-        <Text style={[styles.label, { color: theme.colors.text }]}>Bank Name *</Text>
-        <TextInput
-          style={[styles.input, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
-          placeholder="e.g., Bank of America"
-          placeholderTextColor={theme.colors.textSecondary}
-          value={bankForm.bank_name}
-          onChangeText={(text) => setBankForm({...bankForm, bank_name: text})}
-        />
-      </View>
-
-      <View style={styles.inputGroup}>
-        <Text style={[styles.label, { color: theme.colors.text }]}>Account Number *</Text>
-        <TextInput
-          style={[styles.input, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
-          placeholder="Account number"
-          placeholderTextColor={theme.colors.textSecondary}
-          value={bankForm.account_number}
-          onChangeText={(text) => setBankForm({...bankForm, account_number: text})}
-          keyboardType="numeric"
-          secureTextEntry
-        />
-      </View>
-
-      <View style={styles.inputGroup}>
-        <Text style={[styles.label, { color: theme.colors.text }]}>Routing Number *</Text>
-        <TextInput
-          style={[styles.input, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
-          placeholder="9-digit routing number"
-          placeholderTextColor={theme.colors.textSecondary}
-          value={bankForm.routing_number}
-          onChangeText={(text) => setBankForm({...bankForm, routing_number: text})}
-          keyboardType="numeric"
-          maxLength={9}
-        />
-      </View>
-
-      <View style={styles.inputGroup}>
-        <Text style={[styles.label, { color: theme.colors.text }]}>Account Type</Text>
-        <View style={styles.accountTypeContainer}>
-          <TouchableOpacity
-            style={[
-              styles.accountTypeButton,
-              {
-                backgroundColor: bankForm.account_type === 'checking' ? theme.colors.primary : theme.colors.surface,
-                borderColor: theme.colors.border,
-              }
-            ]}
-            onPress={() => setBankForm({...bankForm, account_type: 'checking'})}
-          >
-            <Text style={[
-              styles.accountTypeText,
-              { color: bankForm.account_type === 'checking' ? '#FFFFFF' : theme.colors.text }
-            ]}>
-              Checking
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.accountTypeButton,
-              {
-                backgroundColor: bankForm.account_type === 'savings' ? theme.colors.primary : theme.colors.surface,
-                borderColor: theme.colors.border,
-              }
-            ]}
-            onPress={() => setBankForm({...bankForm, account_type: 'savings'})}
-          >
-            <Text style={[
-              styles.accountTypeText,
-              { color: bankForm.account_type === 'savings' ? '#FFFFFF' : theme.colors.text }
-            ]}>
-              Savings
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </View>
-  );
 
   const renderPayPalForm = () => (
     <View style={styles.formSection}>
@@ -570,11 +440,17 @@ export default function AddWithdrawalMethodScreen() {
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {renderMethodSelection()}
 
-        {selectedMethod === 'bank_transfer' && renderBankTransferForm()}
+        {selectedMethod === 'bank_transfer' && (
+          <CountryAwareBankForm
+            session={session!}
+            onSubmit={handleAddMethod}
+            setAsDefault={setAsDefault}
+          />
+        )}
         {selectedMethod === 'paypal' && renderPayPalForm()}
         {selectedMethod === 'crypto' && renderCryptoForm()}
 
-        {selectedMethod && (
+        {selectedMethod && selectedMethod !== 'bank_transfer' && (
           <>
             {/* Make Default Option */}
             <View style={[styles.defaultSection, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>

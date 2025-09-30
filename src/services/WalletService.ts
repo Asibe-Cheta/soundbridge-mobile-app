@@ -1,6 +1,7 @@
 import { Session } from '@supabase/supabase-js';
+import { currencyService } from './CurrencyService';
 
-const API_BASE_URL = __DEV__ ? 'http://192.168.1.122:3000' : 'https://soundbridge.live';
+const API_BASE_URL = 'https://soundbridge.live';
 
 export interface WalletBalance {
   balance: number;
@@ -29,11 +30,44 @@ export interface WithdrawalMethod {
   id: string;
   method_type: 'bank_transfer' | 'paypal' | 'crypto' | 'prepaid_card';
   method_name: string;
+  country?: string;
+  currency?: string;
+  banking_system?: string;
   is_verified: boolean;
   is_default: boolean;
   encrypted_details?: any;
   created_at: string;
   updated_at?: string;
+}
+
+export interface Country {
+  country_code: string;
+  country_name: string;
+  currency: string;
+  banking_system: string;
+}
+
+export interface CountryBankingInfo {
+  country_code: string;
+  country_name: string;
+  currency: string;
+  banking_system: string;
+  required_fields: Record<string, {
+    required: boolean;
+    label: string;
+    placeholder?: string;
+  }>;
+  field_validation: Record<string, string>;
+}
+
+export interface CountriesResponse {
+  countries: Country[];
+  count: number;
+}
+
+export interface CountryInfoResponse {
+  country: CountryBankingInfo;
+  success: boolean;
 }
 
 export interface WithdrawalRequest {
@@ -54,6 +88,23 @@ export interface ApiResponse<T = any> {
   message?: string;
   error?: string;
   data?: T;
+}
+
+export interface StripeConnectResponse {
+  success: boolean;
+  accountId: string;
+  onboardingUrl: string;
+  country: string;
+  currency: string;
+  message?: string;
+  error?: string;
+}
+
+export interface CountryDetectionResponse {
+  country_code: string;
+  country_name: string;
+  currency: string;
+  supported_by_stripe: boolean;
 }
 
 class WalletService {
@@ -87,7 +138,10 @@ class WalletService {
     
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      const timeoutId = setTimeout(() => {
+        console.log(`⏰ WalletService: Request timeout after 10s for ${url}`);
+        controller.abort();
+      }, 10000); // 10 second timeout (reduced from 30s)
       
       const response = await fetch(url, {
         ...config,
@@ -105,7 +159,27 @@ class WalletService {
       
       return JSON.parse(responseText);
     } catch (error) {
-      console.error(`❌ WalletService Error:`, error);
+      console.error(`❌ WalletService Error for ${url}:`, error);
+      
+      // Handle specific error types
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error('Request timed out. Please check your internet connection and try again.');
+        }
+        if (error.message.includes('Network request failed')) {
+          throw new Error('Network error. Please check your internet connection.');
+        }
+        if (error.message.includes('HTTP 401')) {
+          throw new Error('Authentication failed. Please log in again.');
+        }
+        if (error.message.includes('HTTP 404')) {
+          throw new Error('Service not found. Please try again later.');
+        }
+        if (error.message.includes('HTTP 500')) {
+          throw new Error('Server error. Please try again later.');
+        }
+      }
+      
       throw error;
     }
   }
@@ -127,6 +201,18 @@ class WalletService {
   }
 
   /**
+   * Get wallet balance with graceful error handling (doesn't throw)
+   */
+  async getWalletBalanceSafe(session: Session, currency: string = 'USD'): Promise<WalletBalance | null> {
+    try {
+      return await this.getWalletBalance(session, currency);
+    } catch (error) {
+      console.log('🔇 WalletService: Suppressing wallet balance error (safe mode)');
+      return null;
+    }
+  }
+
+  /**
    * Get wallet transactions with pagination
    */
   async getWalletTransactions(
@@ -135,6 +221,22 @@ class WalletService {
     offset: number = 0
   ): Promise<TransactionsResponse> {
     return this.makeRequest(`/wallet/transactions?limit=${limit}&offset=${offset}`, session);
+  }
+
+  /**
+   * Get wallet transactions with graceful error handling (doesn't throw)
+   */
+  async getWalletTransactionsSafe(
+    session: Session, 
+    limit: number = 50, 
+    offset: number = 0
+  ): Promise<TransactionsResponse> {
+    try {
+      return await this.getWalletTransactions(session, limit, offset);
+    } catch (error) {
+      console.log('🔇 WalletService: Suppressing wallet transactions error (safe mode)');
+      return { transactions: [], limit, offset, count: 0 };
+    }
   }
 
   /**
@@ -218,6 +320,67 @@ class WalletService {
   }
 
   /**
+   * Get supported countries for banking
+   */
+  async getSupportedCountries(session: Session): Promise<CountriesResponse> {
+    return this.makeRequest('/banking/countries', session);
+  }
+
+  /**
+   * Get country-specific banking information
+   */
+  async getCountryBankingInfo(session: Session, countryCode: string): Promise<CountryInfoResponse> {
+    return this.makeRequest(`/banking/country/${countryCode}`, session);
+  }
+
+  /**
+   * Get supported countries with graceful error handling (doesn't throw)
+   */
+  async getSupportedCountriesSafe(session: Session): Promise<CountriesResponse> {
+    try {
+      return await this.getSupportedCountries(session);
+    } catch (error) {
+      console.log('🔇 WalletService: Suppressing countries error (safe mode)');
+      return { countries: [], count: 0 };
+    }
+  }
+
+  /**
+   * Get country banking info with graceful error handling (doesn't throw)
+   */
+  async getCountryBankingInfoSafe(session: Session, countryCode: string): Promise<CountryBankingInfo | null> {
+    try {
+      const result = await this.getCountryBankingInfo(session, countryCode);
+      return result.success ? result.country : null;
+    } catch (error) {
+      console.log('🔇 WalletService: Suppressing country info error (safe mode)');
+      return null;
+    }
+  }
+
+  /**
+   * Create country-aware Stripe Connect account
+   */
+  async createStripeConnectAccount(session: Session, country?: string): Promise<StripeConnectResponse> {
+    const requestBody: any = {};
+    if (country) {
+      requestBody.country = country;
+    }
+
+    return this.makeRequest('/stripe/connect/create-account', session, {
+      method: 'POST',
+      body: JSON.stringify(requestBody),
+    });
+  }
+
+  /**
+   * Detect user's country for Stripe Connect
+   */
+  async detectCountryForStripe(session: Session): Promise<CountryDetectionResponse> {
+    return this.makeRequest('/stripe/detect-country', session);
+  }
+
+  /**
    * Process withdrawal with enhanced status tracking
    */
   async processWithdrawal(
@@ -278,13 +441,10 @@ class WalletService {
   }
 
   /**
-   * Format currency amount
+   * Format currency amount using CurrencyService
    */
   formatAmount(amount: number, currency: string = 'USD'): string {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currency,
-    }).format(amount);
+    return currencyService.formatAmount(amount, currency);
   }
 
   /**

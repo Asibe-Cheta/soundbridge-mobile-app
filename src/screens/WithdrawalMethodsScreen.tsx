@@ -15,6 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService, WithdrawalMethod } from '../services/WalletService';
+import { currencyService } from '../services/CurrencyService';
 
 export default function WithdrawalMethodsScreen() {
   const navigation = useNavigation();
@@ -182,6 +183,12 @@ export default function WithdrawalMethodsScreen() {
           
           <Text style={[styles.methodType, { color: theme.colors.textSecondary }]}>
             {method.method_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+            {method.country && method.currency && (
+              <Text> • {method.country} ({method.currency} {currencyService.getCurrencySymbol(method.currency)})</Text>
+            )}
+            {method.banking_system && (
+              <Text> • {method.banking_system}</Text>
+            )}
           </Text>
           
           <View style={styles.methodStatus}>

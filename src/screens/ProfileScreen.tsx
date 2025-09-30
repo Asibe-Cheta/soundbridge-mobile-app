@@ -514,100 +514,100 @@ export default function ProfileScreen() {
     >
       {/* Stats Cards */}
       <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
-          <Text style={styles.statNumber}>{formatNumber(stats?.total_plays || 0)}</Text>
-          <Text style={styles.statLabel}>Total Plays</Text>
+        <View style={[styles.statCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(stats?.total_plays || 0)}</Text>
+          <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Total Plays</Text>
         </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statNumber}>{formatNumber(stats?.total_likes || 0)}</Text>
-          <Text style={styles.statLabel}>Likes</Text>
+        <View style={[styles.statCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(stats?.total_likes || 0)}</Text>
+          <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Likes</Text>
         </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statNumber}>{formatNumber(stats?.total_tips_received || 0)}</Text>
-          <Text style={styles.statLabel}>Tips</Text>
+        <View style={[styles.statCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(stats?.total_tips_received || 0)}</Text>
+          <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Tips</Text>
         </View>
       </View>
 
       {/* Recent Activity */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Recent Activity</Text>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Activity</Text>
         {recentActivity.length > 0 ? (
           recentActivity.map((activity) => (
-            <View key={activity.id} style={styles.activityItem}>
+            <View key={activity.id} style={[styles.activityItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
               <Ionicons name={activity.icon as any} size={20} color={activity.color} />
-              <Text style={styles.activityText}>{activity.message}</Text>
-              <Text style={styles.activityTime}>{activity.time}</Text>
+              <Text style={[styles.activityText, { color: theme.colors.text }]}>{activity.message}</Text>
+              <Text style={[styles.activityTime, { color: theme.colors.textSecondary }]}>{activity.time}</Text>
             </View>
           ))
         ) : (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>No recent activity</Text>
-            <Text style={styles.emptyStateSubtext}>Start uploading tracks to see your activity here!</Text>
+            <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No recent activity</Text>
+            <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>Start uploading tracks to see your activity here!</Text>
           </View>
         )}
       </View>
 
       {/* Quick Actions */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <TouchableOpacity style={styles.actionButton} onPress={handleUploadTrack}>
-          <Ionicons name="add-circle" size={24} color="#DC2626" />
-          <Text style={styles.actionText}>Upload New Track</Text>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Quick Actions</Text>
+        <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleUploadTrack}>
+          <Ionicons name="add-circle" size={24} color={theme.colors.primary} />
+          <Text style={[styles.actionText, { color: theme.colors.text }]}>Upload New Track</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton} onPress={handleCreateEvent}>
-          <Ionicons name="calendar" size={24} color="#DC2626" />
-          <Text style={styles.actionText}>Create Event</Text>
+        <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleCreateEvent}>
+          <Ionicons name="calendar" size={24} color={theme.colors.primary} />
+          <Text style={[styles.actionText, { color: theme.colors.text }]}>Create Event</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton} onPress={handleCreatePlaylist}>
-          <Ionicons name="musical-notes" size={24} color="#DC2626" />
-          <Text style={styles.actionText}>Create Playlist</Text>
+        <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleCreatePlaylist}>
+          <Ionicons name="musical-notes" size={24} color={theme.colors.primary} />
+          <Text style={[styles.actionText, { color: theme.colors.text }]}>Create Playlist</Text>
         </TouchableOpacity>
       </View>
 
       {/* My Tracks (matching web app) */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>My Tracks</Text>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>My Tracks</Text>
         {userTracks.length > 0 ? (
           userTracks.slice(0, 5).map((track) => (
-            <View key={track.id} style={styles.trackItem}>
+            <View key={track.id} style={[styles.trackItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
               <View style={styles.trackImageContainer}>
                 {track.artwork_url ? (
                   <Image source={{ uri: track.artwork_url }} style={styles.trackImage} />
                 ) : (
-                  <View style={[styles.trackImage, styles.trackImagePlaceholder]}>
-                    <Ionicons name="musical-notes" size={20} color="#666" />
+                  <View style={[styles.trackImage, styles.trackImagePlaceholder, { backgroundColor: theme.colors.surface }]}>
+                    <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />
                   </View>
                 )}
               </View>
               
               <View style={styles.trackInfo}>
-                <Text style={styles.trackTitle} numberOfLines={1}>
+                <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
                   {track.title}
                 </Text>
                 <View style={styles.trackStats}>
-                  <Ionicons name="play" size={12} color="#666" />
-                  <Text style={styles.trackStatText}>{formatNumber(track.play_count || 0)}</Text>
-                  <Ionicons name="heart" size={12} color="#666" style={{ marginLeft: 8 }} />
-                  <Text style={styles.trackStatText}>{formatNumber(track.likes_count || 0)}</Text>
+                  <Ionicons name="play" size={12} color={theme.colors.textSecondary} />
+                  <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>{formatNumber(track.play_count || 0)}</Text>
+                  <Ionicons name="heart" size={12} color={theme.colors.textSecondary} style={{ marginLeft: 8 }} />
+                  <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>{formatNumber(track.likes_count || 0)}</Text>
                 </View>
               </View>
               
               <TouchableOpacity style={styles.trackMenu}>
-                <Ionicons name="ellipsis-horizontal" size={20} color="#666" />
+                <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.textSecondary} />
               </TouchableOpacity>
             </View>
           ))
         ) : (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>No tracks yet</Text>
-            <Text style={styles.emptyStateSubtext}>Upload your first track to get started!</Text>
+            <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No tracks yet</Text>
+            <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>Upload your first track to get started!</Text>
           </View>
         )}
         
         {userTracks.length > 5 && (
-          <TouchableOpacity style={styles.viewAllButton}>
-            <Text style={styles.viewAllText}>View All Tracks</Text>
-            <Ionicons name="arrow-forward" size={16} color="#DC2626" />
+          <TouchableOpacity style={[styles.viewAllButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <Text style={[styles.viewAllText, { color: theme.colors.primary }]}>View All Tracks</Text>
+            <Ionicons name="arrow-forward" size={16} color={theme.colors.primary} />
           </TouchableOpacity>
         )}
       </View>
@@ -621,10 +621,10 @@ export default function ProfileScreen() {
       showsVerticalScrollIndicator={false}
     >
       {/* Earnings Overview */}
-      <View style={styles.earningsOverview}>
-        <Text style={styles.earningsTotal}>${stats?.total_earnings?.toFixed(2) || '0.00'}</Text>
-        <Text style={styles.earningsLabel}>Total Earnings</Text>
-        <Text style={styles.earningsMonthly}>
+      <View style={[styles.earningsOverview, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <Text style={[styles.earningsTotal, { color: theme.colors.text }]}>${stats?.total_earnings?.toFixed(2) || '0.00'}</Text>
+        <Text style={[styles.earningsLabel, { color: theme.colors.textSecondary }]}>Total Earnings</Text>
+        <Text style={[styles.earningsMonthly, { color: theme.colors.textSecondary }]}>
           ${stats?.monthly_earnings?.toFixed(2) || '0.00'} this month
         </Text>
       </View>
@@ -632,60 +632,60 @@ export default function ProfileScreen() {
       {/* Earnings Breakdown */}
       <View style={styles.section}>
         <View style={styles.earningsHeader}>
-          <Text style={styles.sectionTitle}>Earnings Breakdown</Text>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Earnings Breakdown</Text>
           <TouchableOpacity 
-            style={styles.upgradeButton}
+            style={[styles.upgradeButton, { backgroundColor: theme.colors.primary }]}
             onPress={() => navigation.navigate('Upgrade' as never)}
           >
             <Ionicons name="rocket" size={16} color="#FFFFFF" />
             <Text style={styles.upgradeButtonText}>Upgrade</Text>
           </TouchableOpacity>
         </View>
-        <View style={styles.earningsItem}>
-          <Ionicons name="heart" size={20} color="#DC2626" />
+        <View style={[styles.earningsItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <Ionicons name="heart" size={20} color={theme.colors.primary} />
           <View style={styles.earningsItemContent}>
-            <Text style={styles.earningsItemTitle}>Tips Received</Text>
-            <Text style={styles.earningsItemAmount}>${stats?.total_tips_received || 0}</Text>
+            <Text style={[styles.earningsItemTitle, { color: theme.colors.text }]}>Tips Received</Text>
+            <Text style={[styles.earningsItemAmount, { color: theme.colors.text }]}>${stats?.total_tips_received || 0}</Text>
           </View>
         </View>
-        <View style={styles.earningsItem}>
-          <Ionicons name="play" size={20} color="#4CAF50" />
+        <View style={[styles.earningsItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <Ionicons name="play" size={20} color={theme.colors.success} />
           <View style={styles.earningsItemContent}>
-            <Text style={styles.earningsItemTitle}>Play Rewards</Text>
-            <Text style={styles.earningsItemAmount}>${((stats?.total_plays || 0) * 0.001).toFixed(2)}</Text>
+            <Text style={[styles.earningsItemTitle, { color: theme.colors.text }]}>Play Rewards</Text>
+            <Text style={[styles.earningsItemAmount, { color: theme.colors.text }]}>${((stats?.total_plays || 0) * 0.001).toFixed(2)}</Text>
           </View>
         </View>
-        <View style={styles.earningsItem}>
-          <Ionicons name="people" size={20} color="#FF9800" />
+        <View style={[styles.earningsItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <Ionicons name="people" size={20} color={theme.colors.warning} />
           <View style={styles.earningsItemContent}>
-            <Text style={styles.earningsItemTitle}>Collaborations</Text>
-            <Text style={styles.earningsItemAmount}>$0.00</Text>
+            <Text style={[styles.earningsItemTitle, { color: theme.colors.text }]}>Collaborations</Text>
+            <Text style={[styles.earningsItemAmount, { color: theme.colors.text }]}>$0.00</Text>
           </View>
         </View>
       </View>
 
       {/* Payout Settings */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Payout Settings</Text>
-        <TouchableOpacity style={styles.settingButton} onPress={handleWallet}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Payout Settings</Text>
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleWallet}>
           <Ionicons name="wallet" size={20} color="#8B5CF6" />
-          <Text style={styles.settingText}>Digital Wallet</Text>
-          <Ionicons name="chevron-forward" size={16} color="#666" />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Digital Wallet</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.settingButton} onPress={handlePaymentMethods}>
-          <Ionicons name="card" size={20} color="#666" />
-          <Text style={styles.settingText}>Payment Methods</Text>
-          <Ionicons name="chevron-forward" size={16} color="#666" />
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handlePaymentMethods}>
+          <Ionicons name="card" size={20} color={theme.colors.textSecondary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Payment Methods</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.settingButton} onPress={handlePayoutSchedule}>
-          <Ionicons name="calendar" size={20} color="#666" />
-          <Text style={styles.settingText}>Payout Schedule</Text>
-          <Ionicons name="chevron-forward" size={16} color="#666" />
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handlePayoutSchedule}>
+          <Ionicons name="calendar" size={20} color={theme.colors.textSecondary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Payout Schedule</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.settingButton} onPress={handleTaxInfo}>
-          <Ionicons name="document-text" size={20} color="#666" />
-          <Text style={styles.settingText}>Tax Information</Text>
-          <Ionicons name="chevron-forward" size={16} color="#666" />
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleTaxInfo}>
+          <Ionicons name="document-text" size={20} color={theme.colors.textSecondary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Tax Information</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -699,94 +699,94 @@ export default function ProfileScreen() {
     >
       {/* Account Settings */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Account</Text>
-        <TouchableOpacity style={styles.settingButton} onPress={handleEditProfile}>
-          <Ionicons name="person" size={20} color="#666" />
-          <Text style={styles.settingText}>Edit Profile</Text>
-          <Ionicons name="chevron-forward" size={16} color="#666" />
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Account</Text>
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleEditProfile}>
+          <Ionicons name="person" size={20} color={theme.colors.textSecondary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Edit Profile</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.settingButton} onPress={handlePrivacySecurity}>
-          <Ionicons name="shield-checkmark" size={20} color="#666" />
-          <Text style={styles.settingText}>Privacy & Security</Text>
-          <Ionicons name="chevron-forward" size={16} color="#666" />
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handlePrivacySecurity}>
+          <Ionicons name="shield-checkmark" size={20} color={theme.colors.textSecondary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Privacy & Security</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.settingButton} onPress={handleChangePassword}>
-          <Ionicons name="key" size={20} color="#666" />
-          <Text style={styles.settingText}>Change Password</Text>
-          <Ionicons name="chevron-forward" size={16} color="#666" />
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleChangePassword}>
+          <Ionicons name="key" size={20} color={theme.colors.textSecondary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Change Password</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
       </View>
 
       {/* App Settings */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>App Settings</Text>
-        <View style={styles.settingRow}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>App Settings</Text>
+        <View style={[styles.settingRow, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
           <View style={styles.settingInfo}>
-            <Ionicons name="notifications" size={20} color="#666" />
-            <Text style={styles.settingText}>Push Notifications</Text>
+            <Ionicons name="notifications" size={20} color={theme.colors.textSecondary} />
+            <Text style={[styles.settingText, { color: theme.colors.text }]}>Push Notifications</Text>
           </View>
           <Switch
             value={notificationsEnabled}
             onValueChange={setNotificationsEnabled}
-            trackColor={{ false: '#767577', true: '#DC2626' }}
-            thumbColor={notificationsEnabled ? '#FFFFFF' : '#f4f3f4'}
+            trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+            thumbColor={notificationsEnabled ? theme.colors.primary : theme.colors.textSecondary}
           />
         </View>
-        <TouchableOpacity style={styles.settingButton} onPress={() => navigation.navigate('ThemeSettings' as never)}>
-          <Ionicons name="moon" size={20} color="#666" />
-          <Text style={styles.settingText}>Theme Settings</Text>
-          <Ionicons name="chevron-forward" size={16} color="#666" />
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => navigation.navigate('ThemeSettings' as never)}>
+          <Ionicons name="moon" size={20} color={theme.colors.textSecondary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Theme Settings</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
-        <View style={styles.settingRow}>
+        <View style={[styles.settingRow, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
           <View style={styles.settingInfo}>
-            <Ionicons name="play-circle" size={20} color="#666" />
-            <Text style={styles.settingText}>Auto-play</Text>
+            <Ionicons name="play-circle" size={20} color={theme.colors.textSecondary} />
+            <Text style={[styles.settingText, { color: theme.colors.text }]}>Auto-play</Text>
           </View>
           <Switch
             value={autoPlay}
             onValueChange={toggleAutoPlay}
-            trackColor={{ false: '#767577', true: '#DC2626' }}
-            thumbColor={autoPlay ? '#FFFFFF' : '#f4f3f4'}
+            trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+            thumbColor={autoPlay ? theme.colors.primary : theme.colors.textSecondary}
           />
         </View>
       </View>
 
       {/* Support & About */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Support & About</Text>
-        <TouchableOpacity style={styles.settingButton} onPress={handleHelpSupport}>
-          <Ionicons name="help-circle" size={20} color="#666" />
-          <Text style={styles.settingText}>Help & Support</Text>
-          <Ionicons name="chevron-forward" size={16} color="#666" />
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Support & About</Text>
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleHelpSupport}>
+          <Ionicons name="help-circle" size={20} color={theme.colors.textSecondary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Help & Support</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.settingButton} onPress={handleTermsOfService}>
-          <Ionicons name="document-text" size={20} color="#666" />
-          <Text style={styles.settingText}>Terms of Service</Text>
-          <Ionicons name="chevron-forward" size={16} color="#666" />
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleTermsOfService}>
+          <Ionicons name="document-text" size={20} color={theme.colors.textSecondary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Terms of Service</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.settingButton} onPress={handlePrivacyPolicy}>
-          <Ionicons name="shield" size={20} color="#666" />
-          <Text style={styles.settingText}>Privacy Policy</Text>
-          <Ionicons name="chevron-forward" size={16} color="#666" />
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handlePrivacyPolicy}>
+          <Ionicons name="shield" size={20} color={theme.colors.textSecondary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Privacy Policy</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.settingButton} onPress={handleAbout}>
-          <Ionicons name="information-circle" size={20} color="#666" />
-          <Text style={styles.settingText}>About SoundBridge</Text>
-          <Ionicons name="chevron-forward" size={16} color="#666" />
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleAbout}>
+          <Ionicons name="information-circle" size={20} color={theme.colors.textSecondary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>About SoundBridge</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
       </View>
 
       {/* Sign Out */}
-      <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
-        <Text style={styles.signOutText}>Sign Out</Text>
+      <TouchableOpacity style={[styles.signOutButton, { backgroundColor: theme.colors.error + '20', borderColor: theme.colors.error }]} onPress={handleSignOut}>
+        <Text style={[styles.signOutText, { color: theme.colors.error }]}>Sign Out</Text>
       </TouchableOpacity>
     </ScrollView>
   );
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading profile...</Text>
+      <View style={[styles.loadingContainer, { backgroundColor: theme.colors.background }]}>
+        <Text style={[styles.loadingText, { color: theme.colors.text }]}>Loading profile...</Text>
       </View>
     );
   }
@@ -796,25 +796,25 @@ export default function ProfileScreen() {
       <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} />
       
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Profile</Text>
+      <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Profile</Text>
         <View style={styles.headerButtons}>
           {isEditing ? (
             <>
               <TouchableOpacity style={styles.headerButton} onPress={handleCancelEdit}>
-                <Ionicons name="close" size={24} color="#FFFFFF" />
+                <Ionicons name="close" size={24} color={theme.colors.text} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.headerButton} onPress={handleSaveProfile}>
-                <Ionicons name="checkmark" size={24} color="#FFFFFF" />
+                <Ionicons name="checkmark" size={24} color={theme.colors.text} />
               </TouchableOpacity>
             </>
           ) : (
             <>
               <TouchableOpacity style={styles.headerButton} onPress={handleEditProfile}>
-                <Ionicons name="create" size={24} color="#FFFFFF" />
+                <Ionicons name="create" size={24} color={theme.colors.text} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.headerButton} onPress={handleShareProfile}>
-                <Ionicons name="share" size={24} color="#FFFFFF" />
+                <Ionicons name="share" size={24} color={theme.colors.text} />
               </TouchableOpacity>
             </>
           )}
@@ -837,8 +837,8 @@ export default function ProfileScreen() {
                   style={styles.avatar}
                 />
               ) : (
-                <View style={styles.defaultAvatar}>
-                  <Ionicons name="person" size={40} color="#666" />
+                <View style={[styles.defaultAvatar, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                  <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
                 </View>
               )}
               
@@ -881,30 +881,30 @@ export default function ProfileScreen() {
                 </>
               ) : (
                 <>
-                  <Text style={styles.displayName}>{profile?.display_name}</Text>
-                  <Text style={styles.username}>@{profile?.username}</Text>
+                  <Text style={[styles.displayName, { color: '#FFFFFF' }]}>{profile?.display_name}</Text>
+                  <Text style={[styles.username, { color: 'rgba(255, 255, 255, 0.8)' }]}>@{profile?.username}</Text>
                   {profile?.bio && (
-                    <Text style={styles.bio}>{profile.bio}</Text>
+                    <Text style={[styles.bio, { color: 'rgba(255, 255, 255, 0.9)' }]}>{profile.bio}</Text>
                   )}
                 </>
               )}
-              <Text style={styles.joinDate}>
+              <Text style={[styles.joinDate, { color: 'rgba(255, 255, 255, 0.7)' }]}>
                 Joined {formatDate(profile?.created_at || new Date().toISOString())}
               </Text>
             </View>
 
             <View style={styles.profileStats}>
               <View style={styles.statItem}>
-                <Text style={styles.statNumber}>{profile?.followers_count}</Text>
-                <Text style={styles.statLabel}>Followers</Text>
+                <Text style={[styles.statNumber, { color: '#FFFFFF' }]}>{profile?.followers_count}</Text>
+                <Text style={[styles.statLabel, { color: 'rgba(255, 255, 255, 0.8)' }]}>Followers</Text>
               </View>
               <View style={styles.statItem}>
-                <Text style={styles.statNumber}>{profile?.following_count}</Text>
-                <Text style={styles.statLabel}>Following</Text>
+                <Text style={[styles.statNumber, { color: '#FFFFFF' }]}>{profile?.following_count}</Text>
+                <Text style={[styles.statLabel, { color: 'rgba(255, 255, 255, 0.8)' }]}>Following</Text>
               </View>
               <View style={styles.statItem}>
-                <Text style={styles.statNumber}>{profile?.tracks_count}</Text>
-                <Text style={styles.statLabel}>Tracks</Text>
+                <Text style={[styles.statNumber, { color: '#FFFFFF' }]}>{profile?.tracks_count}</Text>
+                <Text style={[styles.statLabel, { color: 'rgba(255, 255, 255, 0.8)' }]}>Tracks</Text>
               </View>
             </View>
           </View>
@@ -912,35 +912,35 @@ export default function ProfileScreen() {
       </View>
 
       {/* Tabs */}
-      <View style={styles.tabsContainer}>
+      <View style={[styles.tabsContainer, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'overview' && styles.activeTab]}
+          style={[styles.tab, activeTab === 'overview' && { backgroundColor: theme.colors.primary + '20' }]}
           onPress={() => setActiveTab('overview')}
         >
-          <Text style={[styles.tabText, activeTab === 'overview' && styles.activeTabText]}>
+          <Text style={[styles.tabText, { color: activeTab === 'overview' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'overview' && styles.activeTabText]}>
             Overview
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'earnings' && styles.activeTab]}
+          style={[styles.tab, activeTab === 'earnings' && { backgroundColor: theme.colors.primary + '20' }]}
           onPress={() => setActiveTab('earnings')}
         >
-          <Text style={[styles.tabText, activeTab === 'earnings' && styles.activeTabText]}>
+          <Text style={[styles.tabText, { color: activeTab === 'earnings' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'earnings' && styles.activeTabText]}>
             Earnings
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'settings' && styles.activeTab]}
+          style={[styles.tab, activeTab === 'settings' && { backgroundColor: theme.colors.primary + '20' }]}
           onPress={() => setActiveTab('settings')}
         >
-          <Text style={[styles.tabText, activeTab === 'settings' && styles.activeTabText]}>
+          <Text style={[styles.tabText, { color: activeTab === 'settings' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'settings' && styles.activeTabText]}>
             Settings
           </Text>
         </TouchableOpacity>
       </View>
 
       {/* Tab Content */}
-      <View style={styles.content}>
+      <View style={[styles.content, { backgroundColor: theme.colors.background }]}>
         {activeTab === 'overview' && renderOverviewTab()}
         {activeTab === 'earnings' && renderEarningsTab()}
         {activeTab === 'settings' && renderSettingsTab()}
@@ -961,7 +961,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
   },
   loadingText: {
-    color: '#FFFFFF',
+    // color applied dynamically in JSX
     fontSize: 16,
   },
   header: {
@@ -971,12 +971,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    borderBottomWidth: 1,
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#FFFFFF',
   },
   headerButton: {
     padding: 8,
@@ -1006,11 +1005,9 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: '#1A1A1A',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 4,
-    borderColor: '#FFFFFF',
   },
   verifiedBadge: {
     position: 'absolute',
@@ -1032,24 +1029,20 @@ const styles = StyleSheet.create({
   displayName: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#FFFFFF',
     marginBottom: 4,
   },
   username: {
     fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.8)',
     marginBottom: 8,
   },
   bio: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.9)',
     textAlign: 'center',
     marginBottom: 8,
     lineHeight: 20,
   },
   joinDate: {
     fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.7)',
   },
   profileStats: {
     flexDirection: 'row',
@@ -1062,18 +1055,16 @@ const styles = StyleSheet.create({
   statNumber: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#FFFFFF',
     marginBottom: 4,
   },
   statLabel: {
     fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.8)',
   },
   tabsContainer: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     paddingHorizontal: 16,
     paddingBottom: 8,
+    borderBottomWidth: 1,
   },
   tab: {
     paddingVertical: 12,
@@ -1082,15 +1073,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   activeTab: {
-    backgroundColor: 'rgba(220, 38, 38, 0.2)',
+    // backgroundColor applied dynamically in JSX
   },
   tabText: {
-    color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 14,
     fontWeight: '500',
   },
   activeTabText: {
-    color: '#DC2626',
     fontWeight: 'bold',
   },
   content: {
@@ -1107,11 +1096,17 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    // backgroundColor applied dynamically in JSX
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
     marginHorizontal: 4,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   section: {
     marginBottom: 24,
@@ -1119,7 +1114,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    // color applied dynamically in JSX
     marginBottom: 16,
   },
   activityItem: {
@@ -1127,18 +1122,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    // backgroundColor applied dynamically in JSX
     borderRadius: 8,
     marginBottom: 8,
+    borderWidth: 1,
   },
   activityText: {
     flex: 1,
-    color: '#FFFFFF',
+    // color applied dynamically in JSX
     fontSize: 14,
     marginLeft: 12,
   },
   activityTime: {
-    color: 'rgba(255, 255, 255, 0.6)',
+    // color applied dynamically in JSX
     fontSize: 12,
   },
   actionButton: {
@@ -1146,17 +1142,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 16,
     paddingHorizontal: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    // backgroundColor applied dynamically in JSX
     borderRadius: 8,
     marginBottom: 8,
+    borderWidth: 1,
   },
   actionText: {
-    color: '#FFFFFF',
+    // color applied dynamically in JSX
     fontSize: 16,
     marginLeft: 12,
   },
   earningsOverview: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    // backgroundColor applied dynamically in JSX
     borderRadius: 12,
     padding: 24,
     alignItems: 'center',
@@ -1182,7 +1179,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    // backgroundColor applied dynamically in JSX
     borderRadius: 8,
     marginBottom: 8,
   },
@@ -1191,12 +1188,12 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   earningsItemTitle: {
-    color: '#FFFFFF',
+    // color applied dynamically in JSX
     fontSize: 14,
     marginBottom: 2,
   },
   earningsItemAmount: {
-    color: '#4CAF50',
+    // color applied dynamically in JSX
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -1205,9 +1202,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 16,
     paddingHorizontal: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    // backgroundColor applied dynamically in JSX
     borderRadius: 8,
     marginBottom: 8,
+    borderWidth: 1,
   },
   settingRow: {
     flexDirection: 'row',
@@ -1215,28 +1213,30 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 16,
     paddingHorizontal: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    // backgroundColor applied dynamically in JSX
     borderRadius: 8,
     marginBottom: 8,
+    borderWidth: 1,
   },
   settingInfo: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   settingText: {
-    color: '#FFFFFF',
+    // color applied dynamically in JSX
     fontSize: 16,
     marginLeft: 12,
   },
   signOutButton: {
-    backgroundColor: 'rgba(220, 38, 38, 0.2)',
+    // backgroundColor applied dynamically in JSX
     borderRadius: 8,
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 24,
+    borderWidth: 1,
   },
   signOutText: {
-    color: '#DC2626',
+    // color applied dynamically in JSX
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -1244,12 +1244,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   editInput: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    // backgroundColor applied dynamically in JSX
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
     marginBottom: 8,
-    color: '#FFFFFF',
+    // color applied dynamically in JSX
     fontSize: 16,
   },
   bioInput: {
@@ -1261,7 +1261,7 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
   },
   emptyStateText: {
-    color: '#FFFFFF',
+    // color applied dynamically in JSX
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 4,
@@ -1277,7 +1277,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    // backgroundColor applied dynamically in JSX
     borderRadius: 8,
     marginBottom: 8,
   },
@@ -1288,7 +1288,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    // backgroundColor applied dynamically in JSX
   },
   trackImagePlaceholder: {
     justifyContent: 'center',
@@ -1299,7 +1299,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   trackTitle: {
-    color: '#FFFFFF',
+    // color applied dynamically in JSX
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
@@ -1345,7 +1345,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   upgradeButtonText: {
-    color: '#FFFFFF',
+    // color applied dynamically in JSX
     fontSize: 12,
     fontWeight: '600',
   },
@@ -1356,7 +1356,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    // backgroundColor applied dynamically in JSX
     borderRadius: 40,
     justifyContent: 'center',
     alignItems: 'center',

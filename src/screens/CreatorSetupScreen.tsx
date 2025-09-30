@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 
 interface CreatorPreferences {
@@ -29,6 +30,7 @@ interface CreatorPreferences {
 
 export default function CreatorSetupScreen() {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const navigation = useNavigation();
   const [loading, setLoading] = useState(false);
   const [preferences, setPreferences] = useState<CreatorPreferences>({
@@ -85,56 +87,52 @@ export default function CreatorSetupScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
+      <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} />
       
-      <LinearGradient
-        colors={['#000000', '#0D0D0D', '#1A0A0A']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.gradient}
-      >
+      <View style={[styles.gradient, { backgroundColor: theme.colors.background }]}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+            <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Creator Setup</Text>
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Creator Setup</Text>
           <View style={styles.headerSpacer} />
         </View>
 
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           {/* Welcome Section */}
           <View style={styles.welcomeSection}>
-            <Text style={styles.welcomeTitle}>Welcome to SoundBridge!</Text>
-            <Text style={styles.welcomeSubtitle}>
+            <Text style={[styles.welcomeTitle, { color: theme.colors.text }]}>Welcome to SoundBridge!</Text>
+            <Text style={[styles.welcomeSubtitle, { color: theme.colors.textSecondary }]}>
               Let's set up your profile to help you connect with fans and other creators.
             </Text>
           </View>
 
           {/* Role Selection */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Your Role</Text>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Your Role</Text>
             <View style={styles.roleContainer}>
               <TouchableOpacity
                 style={[
                   styles.roleOption,
-                  preferences.role === 'listener' && styles.roleOptionActive
+                  { backgroundColor: theme.colors.card, borderColor: preferences.role === 'listener' ? theme.colors.primary : theme.colors.border },
+                  preferences.role === 'listener' && { backgroundColor: theme.colors.primary + '20' }
                 ]}
                 onPress={() => updatePreference('role', 'listener')}
               >
                 <Ionicons 
                   name="headset" 
                   size={24} 
-                  color={preferences.role === 'listener' ? '#DC2626' : '#666'} 
+                  color={preferences.role === 'listener' ? theme.colors.primary : theme.colors.textSecondary} 
                 />
                 <Text style={[
                   styles.roleText,
-                  preferences.role === 'listener' && styles.roleTextActive
+                  { color: preferences.role === 'listener' ? theme.colors.primary : theme.colors.text }
                 ]}>
                   Listener
                 </Text>
-                <Text style={styles.roleDescription}>
+                <Text style={[styles.roleDescription, { color: theme.colors.textSecondary }]}>
                   Discover music and support creators
                 </Text>
               </TouchableOpacity>
@@ -142,22 +140,23 @@ export default function CreatorSetupScreen() {
               <TouchableOpacity
                 style={[
                   styles.roleOption,
-                  preferences.role === 'creator' && styles.roleOptionActive
+                  { backgroundColor: theme.colors.card, borderColor: preferences.role === 'creator' ? theme.colors.primary : theme.colors.border },
+                  preferences.role === 'creator' && { backgroundColor: theme.colors.primary + '20' }
                 ]}
                 onPress={() => updatePreference('role', 'creator')}
               >
                 <Ionicons 
                   name="musical-notes" 
                   size={24} 
-                  color={preferences.role === 'creator' ? '#DC2626' : '#666'} 
+                  color={preferences.role === 'creator' ? theme.colors.primary : theme.colors.textSecondary} 
                 />
                 <Text style={[
                   styles.roleText,
-                  preferences.role === 'creator' && styles.roleTextActive
+                  { color: preferences.role === 'creator' ? theme.colors.primary : theme.colors.text }
                 ]}>
                   Creator
                 </Text>
-                <Text style={styles.roleDescription}>
+                <Text style={[styles.roleDescription, { color: theme.colors.textSecondary }]}>
                   Share music and build your fanbase
                 </Text>
               </TouchableOpacity>
@@ -169,14 +168,14 @@ export default function CreatorSetupScreen() {
             <>
               {/* Creator Features */}
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Creator Features</Text>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Creator Features</Text>
                 
-                <View style={styles.optionRow}>
+                <View style={[styles.optionRow, { borderBottomColor: theme.colors.border }]}>
                   <View style={styles.optionInfo}>
-                    <Ionicons name="heart" size={20} color="#DC2626" />
+                    <Ionicons name="heart" size={20} color={theme.colors.primary} />
                     <View style={styles.optionTextContainer}>
-                      <Text style={styles.optionTitle}>Accept Tips</Text>
-                      <Text style={styles.optionDescription}>
+                      <Text style={[styles.optionTitle, { color: theme.colors.text }]}>Accept Tips</Text>
+                      <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
                         Let fans support you with tips
                       </Text>
                     </View>
@@ -184,17 +183,17 @@ export default function CreatorSetupScreen() {
                   <Switch
                     value={preferences.acceptsTips}
                     onValueChange={() => togglePreference('acceptsTips')}
-                    trackColor={{ false: '#333', true: '#DC2626' }}
-                    thumbColor="#FFFFFF"
+                    trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+                    thumbColor={preferences.acceptsTips ? theme.colors.primary : theme.colors.textSecondary}
                   />
                 </View>
 
-                <View style={styles.optionRow}>
+                <View style={[styles.optionRow, { borderBottomColor: theme.colors.border }]}>
                   <View style={styles.optionInfo}>
-                    <Ionicons name="people" size={20} color="#DC2626" />
+                    <Ionicons name="people" size={20} color={theme.colors.primary} />
                     <View style={styles.optionTextContainer}>
-                      <Text style={styles.optionTitle}>Collaborations</Text>
-                      <Text style={styles.optionDescription}>
+                      <Text style={[styles.optionTitle, { color: theme.colors.text }]}>Collaborations</Text>
+                      <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
                         Open to working with other artists
                       </Text>
                     </View>
@@ -202,17 +201,17 @@ export default function CreatorSetupScreen() {
                   <Switch
                     value={preferences.acceptsCollaborations}
                     onValueChange={() => togglePreference('acceptsCollaborations')}
-                    trackColor={{ false: '#333', true: '#DC2626' }}
-                    thumbColor="#FFFFFF"
+                    trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+                    thumbColor={preferences.acceptsCollaborations ? theme.colors.primary : theme.colors.textSecondary}
                   />
                 </View>
 
-                <View style={styles.optionRow}>
+                <View style={[styles.optionRow, { borderBottomColor: theme.colors.border }]}>
                   <View style={styles.optionInfo}>
-                    <Ionicons name="radio" size={20} color="#DC2626" />
+                    <Ionicons name="radio" size={20} color={theme.colors.primary} />
                     <View style={styles.optionTextContainer}>
-                      <Text style={styles.optionTitle}>Live Performances</Text>
-                      <Text style={styles.optionDescription}>
+                      <Text style={[styles.optionTitle, { color: theme.colors.text }]}>Live Performances</Text>
+                      <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
                         Available for live events
                       </Text>
                     </View>
@@ -220,16 +219,16 @@ export default function CreatorSetupScreen() {
                   <Switch
                     value={preferences.availableForLive}
                     onValueChange={() => togglePreference('availableForLive')}
-                    trackColor={{ false: '#333', true: '#DC2626' }}
-                    thumbColor="#FFFFFF"
+                    trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+                    thumbColor={preferences.availableForLive ? theme.colors.primary : theme.colors.textSecondary}
                   />
                 </View>
               </View>
 
               {/* Event Categories */}
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Music Genres</Text>
-                <Text style={styles.sectionDescription}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Music Genres</Text>
+                <Text style={[styles.sectionDescription, { color: theme.colors.textSecondary }]}>
                   Select genres you're interested in
                 </Text>
                 
@@ -239,13 +238,16 @@ export default function CreatorSetupScreen() {
                       key={category}
                       style={[
                         styles.categoryChip,
-                        preferences.eventCategories.includes(category) && styles.categoryChipActive
+                        { 
+                          backgroundColor: preferences.eventCategories.includes(category) ? theme.colors.primary : theme.colors.card,
+                          borderColor: preferences.eventCategories.includes(category) ? theme.colors.primary : theme.colors.border
+                        }
                       ]}
                       onPress={() => toggleEventCategory(category)}
                     >
                       <Text style={[
                         styles.categoryText,
-                        preferences.eventCategories.includes(category) && styles.categoryTextActive
+                        { color: preferences.eventCategories.includes(category) ? '#FFFFFF' : theme.colors.text }
                       ]}>
                         {category.charAt(0).toUpperCase() + category.slice(1)}
                       </Text>
@@ -258,14 +260,14 @@ export default function CreatorSetupScreen() {
 
           {/* Notification Settings */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Notifications</Text>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Notifications</Text>
             
-            <View style={styles.optionRow}>
+            <View style={[styles.optionRow, { borderBottomColor: theme.colors.border }]}>
               <View style={styles.optionInfo}>
-                <Ionicons name="mail" size={20} color="#DC2626" />
+                <Ionicons name="mail" size={20} color={theme.colors.primary} />
                 <View style={styles.optionTextContainer}>
-                  <Text style={styles.optionTitle}>Email Notifications</Text>
-                  <Text style={styles.optionDescription}>
+                  <Text style={[styles.optionTitle, { color: theme.colors.text }]}>Email Notifications</Text>
+                  <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
                     Get updates via email
                   </Text>
                 </View>
@@ -273,17 +275,17 @@ export default function CreatorSetupScreen() {
               <Switch
                 value={preferences.emailNotifications}
                 onValueChange={() => togglePreference('emailNotifications')}
-                trackColor={{ false: '#333', true: '#DC2626' }}
-                thumbColor="#FFFFFF"
+                trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+                thumbColor={preferences.emailNotifications ? theme.colors.primary : theme.colors.textSecondary}
               />
             </View>
 
-            <View style={styles.optionRow}>
+            <View style={[styles.optionRow, { borderBottomColor: theme.colors.border }]}>
               <View style={styles.optionInfo}>
-                <Ionicons name="notifications" size={20} color="#DC2626" />
+                <Ionicons name="notifications" size={20} color={theme.colors.primary} />
                 <View style={styles.optionTextContainer}>
-                  <Text style={styles.optionTitle}>Push Notifications</Text>
-                  <Text style={styles.optionDescription}>
+                  <Text style={[styles.optionTitle, { color: theme.colors.text }]}>Push Notifications</Text>
+                  <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
                     Get notifications on your device
                   </Text>
                 </View>
@@ -291,8 +293,8 @@ export default function CreatorSetupScreen() {
               <Switch
                 value={preferences.pushNotifications}
                 onValueChange={() => togglePreference('pushNotifications')}
-                trackColor={{ false: '#333', true: '#DC2626' }}
-                thumbColor="#FFFFFF"
+                trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+                thumbColor={preferences.pushNotifications ? theme.colors.primary : theme.colors.textSecondary}
               />
             </View>
           </View>
@@ -318,7 +320,7 @@ export default function CreatorSetupScreen() {
           {/* Bottom padding */}
           <View style={styles.bottomPadding} />
         </ScrollView>
-      </LinearGradient>
+      </View>
     </SafeAreaView>
   );
 }
@@ -326,7 +328,6 @@ export default function CreatorSetupScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
   },
   gradient: {
     flex: 1,
@@ -337,6 +338,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 8,
+    borderBottomWidth: 1,
   },
   backButton: {
     padding: 8,
@@ -345,7 +347,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     fontWeight: '600',
-    color: '#FFFFFF',
     textAlign: 'center',
   },
   headerSpacer: {
@@ -362,13 +363,11 @@ const styles = StyleSheet.create({
   welcomeTitle: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: 8,
   },
   welcomeSubtitle: {
     fontSize: 16,
-    color: '#CCCCCC',
     textAlign: 'center',
     lineHeight: 24,
   },
@@ -379,42 +378,40 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#FFFFFF',
     marginBottom: 8,
   },
   sectionDescription: {
     fontSize: 14,
-    color: '#CCCCCC',
     marginBottom: 16,
   },
   roleContainer: {
     gap: 12,
   },
   roleOption: {
-    backgroundColor: '#1A1A1A',
     padding: 20,
     borderRadius: 12,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: 'transparent',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   roleOptionActive: {
-    borderColor: '#DC2626',
-    backgroundColor: '#2A1A1A',
+    // Applied dynamically in JSX
   },
   roleText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#666',
     marginTop: 8,
     marginBottom: 4,
   },
   roleTextActive: {
-    color: '#DC2626',
+    // Applied dynamically in JSX
   },
   roleDescription: {
     fontSize: 12,
-    color: '#999',
     textAlign: 'center',
   },
   optionRow: {
@@ -423,7 +420,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
   },
   optionInfo: {
     flexDirection: 'row',
@@ -437,12 +433,10 @@ const styles = StyleSheet.create({
   optionTitle: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#FFFFFF',
     marginBottom: 2,
   },
   optionDescription: {
     fontSize: 12,
-    color: '#CCCCCC',
   },
   categoriesGrid: {
     flexDirection: 'row',
@@ -450,24 +444,20 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   categoryChip: {
-    backgroundColor: '#1A1A1A',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#333',
   },
   categoryChipActive: {
-    backgroundColor: '#DC2626',
-    borderColor: '#DC2626',
+    // Applied dynamically in JSX
   },
   categoryText: {
     fontSize: 14,
-    color: '#CCCCCC',
     fontWeight: '500',
   },
   categoryTextActive: {
-    color: '#FFFFFF',
+    // Applied dynamically in JSX
   },
   saveButton: {
     marginHorizontal: 16,

@@ -17,6 +17,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService } from '../services/WalletService';
+import { currencyService } from '../services/CurrencyService';
 
 interface BankAccount {
   id: string;
@@ -122,191 +123,9 @@ export default function PaymentMethodsScreen() {
     }
   };
 
-  const testBasicConnectivity = async () => {
-    try {
-      console.log('=== TESTING BASIC CONNECTIVITY ===');
-      
-      // Test 1: Can we reach the domain at all?
-      console.log('🌐 Test 1: Testing basic domain connectivity...');
-      const response1 = await fetch('https://soundbridge.live/', {
-        method: 'GET',
-      });
-      console.log('✅ Domain reachable! Status:', response1.status);
-      
-      // Test 2: Can we reach a simple API endpoint?
-      console.log('🔗 Test 2: Testing simple API endpoint...');
-      const response2 = await fetch('https://soundbridge.live/api/test-deployment', {
-        method: 'GET',
-      });
-      console.log('✅ API endpoint reachable! Status:', response2.status);
-      
-      // Test 3: Can we make a POST request?
-      console.log('📤 Test 3: Testing POST request...');
-      const response3 = await fetch('https://soundbridge.live/api/debug/bearer-auth', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ test: 'basic connectivity' })
-      });
-      console.log('✅ POST request works! Status:', response3.status);
-      
-      Alert.alert('Connectivity Test Results', 
-        `Domain: ${response1.status}\n` +
-        `API GET: ${response2.status}\n` +
-        `API POST: ${response3.status}\n\n` +
-        `All tests passed! Issue is route-specific.`
-      );
-    } catch (error) {
-      console.error('❌ Connectivity test failed:', error);
-      Alert.alert('Connectivity Failed', 
-        `Error: ${error instanceof Error ? error.message : 'Unknown'}\n\n` +
-        `This indicates a fundamental network issue.`
-      );
-    }
-  };
 
-  const testSimpleCheckout = async () => {
-    try {
-      if (!session?.access_token) {
-        Alert.alert('Error', 'No access token available');
-        return;
-      }
 
-      console.log('=== TESTING SIMPLE CHECKOUT ROUTE ===');
-      console.log('🚀 Testing if ANY Stripe API route works...');
-      
-      const startTime = Date.now();
-      const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-        'X-Auth-Token': `Bearer ${session.access_token}`,
-        'X-Authorization': `Bearer ${session.access_token}`,
-        'X-Supabase-Token': session.access_token,
-      };
-      
-      console.log('📡 Calling test route:', 'https://soundbridge.live/api/stripe/test-checkout');
-      console.log('📡 Request headers:', headers);
-      
-      const response = await fetch('https://soundbridge.live/api/stripe/test-checkout', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ test: 'mobile app routing test' })
-      });
-      
-      const endTime = Date.now();
-      const duration = endTime - startTime;
-      
-      console.log('⏱️ Test route response time:', duration + 'ms');
-      console.log('📊 Response status:', response.status);
-      console.log('📊 Response headers:', Object.fromEntries(response.headers.entries()));
-      
-      const result = await response.text();
-      console.log('📊 Raw response:', result);
-      
-      Alert.alert('Simple Route Test', 
-        `Status: ${response.status}\n` +
-        `Time: ${duration}ms\n` +
-        `Response: ${result.substring(0, 200)}...`
-      );
-    } catch (error) {
-      console.error('❌ Simple route test error:', error);
-      Alert.alert('Test Error', error instanceof Error ? error.message : 'Unknown error');
-    }
-  };
 
-  const testDeployment = async () => {
-    try {
-      console.log('=== TESTING DEPLOYMENT STATUS ===');
-      const response = await fetch('https://soundbridge.live/api/test-deployment', {
-        method: 'GET',
-      });
-      
-      const result = await response.text();
-      console.log('Deployment test status:', response.status);
-      console.log('Deployment test response:', result);
-      
-      Alert.alert('Deployment Test', `Status: ${response.status}\n\nResponse: ${result.substring(0, 300)}...`);
-    } catch (error) {
-      console.error('Deployment test error:', error);
-      Alert.alert('Deployment Test Error', error instanceof Error ? error.message : 'Unknown error');
-    }
-  };
-
-  const testBearerTokenAuth = async () => {
-    try {
-      if (!session?.access_token) {
-        Alert.alert('Error', 'No access token available');
-        return;
-      }
-
-      console.log('=== TESTING BEARER TOKEN AUTH - ENHANCED ===');
-      console.log('Access token preview:', session.access_token.substring(0, 50) + '...');
-      
-      // Test 1: Multiple header approach
-      console.log('Test 1: Multiple header approach...');
-      const headers1 = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-        'X-Auth-Token': `Bearer ${session.access_token}`,
-        'X-Authorization': `Bearer ${session.access_token}`,
-        'X-Supabase-Token': session.access_token,
-      };
-      console.log('Headers being sent:', headers1);
-      
-      const response1 = await fetch('https://soundbridge.live/api/debug/bearer-auth', {
-        method: 'POST',
-        headers: headers1,
-      });
-
-      const result1 = await response1.text();
-      console.log('Test 1 - Status:', response1.status);
-      console.log('Test 1 - Response:', result1);
-      
-      // Test 2: Try lowercase 'authorization'
-      console.log('Test 2: Lowercase authorization header...');
-      const headers2 = {
-        'Content-Type': 'application/json',
-        'authorization': `Bearer ${session.access_token}`,
-      };
-      
-      const response2 = await fetch('https://soundbridge.live/api/debug/bearer-auth', {
-        method: 'POST',
-        headers: headers2,
-      });
-
-      const result2 = await response2.text();
-      console.log('Test 2 - Status:', response2.status);
-      console.log('Test 2 - Response:', result2);
-      
-      // Test 3: Send token in body instead of header
-      console.log('Test 3: Token in request body...');
-      const response3 = await fetch('https://soundbridge.live/api/debug/bearer-auth', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          token: session.access_token,
-          authHeader: `Bearer ${session.access_token}`
-        }),
-      });
-
-      const result3 = await response3.text();
-      console.log('Test 3 - Status:', response3.status);
-      console.log('Test 3 - Response:', result3);
-      
-      Alert.alert('Enhanced Debug Results', 
-        `Test 1 (Authorization): ${response1.status}\n` +
-        `Test 2 (authorization): ${response2.status}\n` +
-        `Test 3 (body): ${response3.status}\n\n` +
-        `Check console for full details`
-      );
-    } catch (error) {
-      console.error('Debug test error:', error);
-      Alert.alert('Debug Error', error instanceof Error ? error.message : 'Unknown error');
-    }
-  };
 
   const handleSetupStripeConnect = async () => {
     try {
@@ -324,56 +143,37 @@ export default function PaymentMethodsScreen() {
         return;
       }
 
-      // Call the web app's API directly with Bearer token authentication
-      console.log('=== STRIPE CONNECT DEBUG INFO ===');
+      console.log('=== COUNTRY-AWARE STRIPE CONNECT ===');
       console.log('User ID:', user?.id);
       console.log('User email:', session?.user?.email);
-      console.log('Session exists:', !!session);
+      
+      // Step 1: Detect user's country for Stripe Connect
+      console.log('🌍 Detecting user country...');
+      let userCountry = 'US'; // Default fallback
+      
+      try {
+        const countryResult = await walletService.detectCountryForStripe(session);
+        if (countryResult.supported_by_stripe) {
+          userCountry = countryResult.country_code;
+          console.log(`✅ Country detected: ${countryResult.country_name} (${userCountry}) - Currency: ${countryResult.currency}`);
+        } else {
+          console.log(`⚠️ Country ${countryResult.country_name} not supported by Stripe, using fallback: ${userCountry}`);
+        }
+      } catch (error) {
+        console.log('❌ Country detection failed, using fallback:', userCountry);
+      }
+
+      // Step 2: Create country-aware Stripe Connect account
+      console.log(`🏦 Creating Stripe Connect account for ${userCountry}...`);
       console.log('Access token exists:', !!session?.access_token);
       console.log('Access token length:', session?.access_token?.length);
       console.log('Access token preview:', session?.access_token?.substring(0, 50) + '...');
       console.log('Token type:', typeof session?.access_token);
       
-      // Use production URL - the live web app
-      const baseUrl = 'https://soundbridge.live';
-      console.log('Calling API:', `${baseUrl}/api/stripe/connect/create-account`);
-      
-      const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-        'X-Auth-Token': `Bearer ${session.access_token}`,
-        'X-Authorization': `Bearer ${session.access_token}`,
-        'X-Supabase-Token': session.access_token,
-      };
-      console.log('Request headers:', headers);
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-      
-      const response = await fetch(`${baseUrl}/api/stripe/connect/create-account`, {
-        method: 'POST',
-        headers,
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
-      
-      console.log('Response status:', response.status);
-      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+      const result = await walletService.createStripeConnectAccount(session, userCountry);
+      console.log('Stripe Connect API response:', result);
 
-      const responseText = await response.text();
-      console.log('Raw response text:', responseText);
-      
-      let result;
-      try {
-        result = JSON.parse(responseText);
-        console.log('Parsed response:', result);
-      } catch (e) {
-        console.error('Failed to parse response as JSON:', e);
-        result = { error: 'Invalid JSON response', rawResponse: responseText };
-      }
-
-      if (response.ok && result.success && result.onboardingUrl) {
+      if (result.success && result.onboardingUrl) {
         // Open the Stripe onboarding URL directly
         const supported = await Linking.canOpenURL(result.onboardingUrl);
         
@@ -382,7 +182,7 @@ export default function PaymentMethodsScreen() {
           
           Alert.alert(
             'Complete Stripe Setup',
-            'You\'ve been redirected to Stripe to set up your payout account. Once completed, return to the app to see your connected account.',
+            `You've been redirected to Stripe to set up your ${result.country} payout account (${result.currency} ${currencyService.getCurrencySymbol(result.currency)}). Once completed, return to the app to see your connected account.`,
             [
               { text: 'OK' },
               { 
@@ -824,41 +624,6 @@ export default function PaymentMethodsScreen() {
                 )}
               </TouchableOpacity>
               
-              <TouchableOpacity 
-                style={[styles.stripeButton, { backgroundColor: '#FF6B35' }]}
-                onPress={testBearerTokenAuth}
-                disabled={saving}
-              >
-                <Ionicons name="bug" size={20} color="#FFFFFF" />
-                <Text style={styles.stripeButtonText}>Test Bearer Token (Debug)</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={[styles.stripeButton, { backgroundColor: '#E91E63' }]}
-                onPress={testBasicConnectivity}
-                disabled={saving}
-              >
-                <Ionicons name="wifi" size={20} color="#FFFFFF" />
-                <Text style={styles.stripeButtonText}>🌐 Test Connectivity</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.stripeButton, { backgroundColor: '#FF9800' }]}
-                onPress={testSimpleCheckout}
-                disabled={saving}
-              >
-                <Ionicons name="flask" size={20} color="#FFFFFF" />
-                <Text style={styles.stripeButtonText}>🧪 Test Simple Route</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.stripeButton, { backgroundColor: '#10B981' }]}
-                onPress={testDeployment}
-                disabled={saving}
-              >
-                <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
-                <Text style={styles.stripeButtonText}>Test Deployment Status</Text>
-              </TouchableOpacity>
               
               <TouchableOpacity 
                 style={[styles.manualButton, { backgroundColor: theme.colors.card }]}

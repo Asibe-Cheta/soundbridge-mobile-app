@@ -15,6 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService, WalletBalance, WalletTransaction } from '../services/WalletService';
+import { currencyService } from '../services/CurrencyService';
 
 export default function WalletScreen() {
   const navigation = useNavigation();
@@ -42,8 +43,8 @@ export default function WalletScreen() {
 
       // Load wallet balance and recent transactions in parallel
       const [balanceResult, transactionsResult] = await Promise.all([
-        walletService.getWalletBalance(session),
-        walletService.getWalletTransactions(session, 5, 0) // Get last 5 transactions
+        walletService.getWalletBalanceSafe(session),
+        walletService.getWalletTransactionsSafe(session, 5, 0)
       ]);
 
       setWalletData(balanceResult);
@@ -146,7 +147,7 @@ export default function WalletScreen() {
           <View style={styles.balanceContainer}>
             <Text style={[styles.balanceLabel, { color: theme.colors.textSecondary }]}>Available Balance</Text>
             <Text style={[styles.balanceAmount, { color: theme.colors.text }]}>
-              {walletData ? walletService.formatAmount(walletData.balance, walletData.currency) : '$0.00'}
+              {walletData ? currencyService.formatAmount(walletData.balance, walletData.currency) : '$0.00'}
             </Text>
           </View>
           
@@ -219,7 +220,7 @@ export default function WalletScreen() {
                       styles.amountText,
                       { color: transaction.amount > 0 ? theme.colors.success : theme.colors.error }
                     ]}>
-                      {transaction.amount > 0 ? '+' : ''}{walletService.formatAmount(transaction.amount, transaction.currency)}
+                      {transaction.amount > 0 ? '+' : ''}{currencyService.formatAmount(transaction.amount, transaction.currency)}
                     </Text>
                     <View style={[styles.statusBadgeSmall, { backgroundColor: walletService.getStatusColor(transaction.status) + '20' }]}>
                       <Text style={[styles.statusTextSmall, { color: walletService.getStatusColor(transaction.status) }]}>

@@ -15,6 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService, WalletTransaction } from '../services/WalletService';
+import { currencyService } from '../services/CurrencyService';
 
 type FilterType = 'all' | 'deposit' | 'withdrawal' | 'tip_received' | 'tip_sent' | 'payout' | 'refund';
 
@@ -68,7 +69,7 @@ export default function TransactionHistoryScreen() {
       const currentOffset = reset ? 0 : offset;
       console.log(`📊 Loading transactions: offset=${currentOffset}, limit=${LIMIT}`);
 
-      const result = await walletService.getWalletTransactions(session, LIMIT, currentOffset);
+      const result = await walletService.getWalletTransactionsSafe(session, LIMIT, currentOffset);
       
       if (reset) {
         setTransactions(result.transactions);
@@ -128,7 +129,7 @@ export default function TransactionHistoryScreen() {
             styles.amountText,
             { color: item.amount > 0 ? theme.colors.success : theme.colors.error }
           ]}>
-            {item.amount > 0 ? '+' : ''}{walletService.formatAmount(item.amount, item.currency)}
+            {item.amount > 0 ? '+' : ''}{currencyService.formatAmount(item.amount, item.currency)}
           </Text>
         </View>
         
