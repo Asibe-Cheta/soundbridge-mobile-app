@@ -612,6 +612,10 @@ export default function DiscoverScreen() {
   }, [searchQuery]);
 
   const handleTrackPress = async (track: AudioTrack) => {
+    navigation.navigate('TrackDetails' as never, { trackId: track.id, track: track } as never);
+  };
+
+  const handleTrackPlay = async (track: AudioTrack) => {
     try {
       console.log('🎵 Playing track from Discover:', track.title);
       await play(track);
@@ -631,11 +635,11 @@ export default function DiscoverScreen() {
   };
 
   const handleArtistPress = (artist: Creator) => {
-    console.log('Viewing artist:', artist.username);
+    navigation.navigate('CreatorProfile' as never, { creatorId: artist.id, creator: artist } as never);
   };
 
   const handleEventPress = (event: Event) => {
-    console.log('Viewing event:', event.title);
+    navigation.navigate('EventDetails' as never, { eventId: event.id, event: event } as never);
   };
 
   const handlePlaylistPress = (playlist: Playlist) => {
@@ -758,7 +762,7 @@ export default function DiscoverScreen() {
                   <Text style={[styles.trackRowArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>by {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}</Text>
                 </View>
                 <View style={styles.trackRowActions}>
-                  <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]} onPress={() => handleTrackPress(track)}>
+                  <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]} onPress={() => handleTrackPlay(track)}>
                     <Ionicons name="play" size={16} color={theme.colors.primary} />
                   </TouchableOpacity>
                   <Text style={[styles.trackRowDuration, { color: theme.colors.textSecondary }]}>{formatDuration(track.duration)}</Text>

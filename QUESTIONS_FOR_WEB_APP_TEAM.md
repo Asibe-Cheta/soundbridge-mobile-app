@@ -147,3 +147,56 @@ When resolved, the mobile app should:
 ---
 
 **Critical Note:** The mobile app was working with data before, but something in the recent Supabase integration changes broke the data fetching. We need the exact, working configuration and query examples to restore functionality.
+
+---
+
+## **NEW: Database Schema Questions for Detail Screens**
+
+### **Creator Profile Database Fields**
+**Issue:** `CreatorProfileScreen` is getting undefined values for stats, causing crashes.
+
+**Questions:**
+1. **Profiles Table Structure:** What are the exact column names in the `profiles` table?
+   - Are `followers_count`, `following_count`, `tracks_count` actual columns or computed?
+   - If computed, what are the correct queries to calculate them?
+   - What's the exact field name for verification status? (`is_verified`, `verified`, etc.)
+
+2. **Creator Stats Calculation:** 
+   - Should we query the `followers` table to count followers dynamically?
+   - Should we query the `audio_tracks` table to count tracks dynamically?
+   - Or are these stored as denormalized fields in `profiles`?
+
+3. **Creator Tracks Query:**
+   - What's the correct query to get all tracks by a creator?
+   - What are the exact column names in `audio_tracks` table?
+   - Are `plays_count`, `likes_count` actual columns or computed from other tables?
+
+### **Event Details Database Fields**
+**Questions:**
+1. **Events Table Structure:** What are the exact column names in the `events` table?
+   - Price fields: `price_gbp`, `price_ngn`, or different names?
+   - Attendee fields: `max_attendees`, `current_attendees`, or computed?
+   - Image field: `image_url`, `cover_image_url`, or different name?
+
+2. **Event Attendance:**
+   - What's the table name for event attendance? (`event_attendees`, `attendees`, etc.)
+   - What are the exact column names for user-event relationships?
+
+### **Track Details Database Fields**
+**Questions:**
+1. **Audio Tracks Table:** What are the exact column names in `audio_tracks` table?
+   - Audio file: `audio_url`, `file_url`, or different name?
+   - Artwork: `cover_image_url`, `artwork_url`, or different name?
+   - Stats: `plays_count`, `likes_count` - actual columns or computed?
+
+2. **Track Interactions:**
+   - What's the table name for track likes? (`track_likes`, `likes`, etc.)
+   - What are the exact column names for user-track like relationships?
+
+### **Follow System Database**
+**Questions:**
+1. **Followers Table:** What are the exact column names in the `followers` table?
+   - `follower_id` and `following_id`? Or different names?
+   - Any additional fields we should be aware of?
+
+**Priority:** HIGH - These are blocking the detail screens from working properly.

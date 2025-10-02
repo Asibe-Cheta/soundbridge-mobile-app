@@ -6,213 +6,293 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  StatusBar,
-  Dimensions,
+  ActivityIndicator,
   Alert,
   RefreshControl,
-  ActivityIndicator,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
-import type { AudioTrack, PublicProfile, Event } from '@soundbridge/types';
 
-const { width } = Dimensions.get('window');
-
-interface CreatorProfileScreenProps {
-  navigation: any;
-  route: any;
+interface Creator {
+  id: string;
+  username: string;
+  display_name: string;
+  bio?: string;
+  avatar_url?: string;
+  banner_url?: string;
+  location?: string;
+  genre?: string;
+  followers_count?: number;  // COMPUTED from follows table
+  tracks_count?: number;     // COMPUTED from audio_tracks table
+  events_count?: number;     // COMPUTED from events table
+  created_at: string;
+  isFollowing?: boolean;
 }
 
-interface CreatorStats {
-  totalTracks: number;
-  totalPlays: number;
-  totalLikes: number;
-  totalFollowers: number;
-  totalFollowing: number;
-  totalTips: number;
-  totalEarnings: number;
+interface Track {
+  id: string;
+  title: string;
+  description?: string;
+  duration?: number;
+  play_count?: number;        // Correct field name from schema
+  likes_count?: number;       // Correct field name from schema
+  file_url?: string;          // Correct field name from schema
+  cover_art_url?: string;     // Correct field name from schema
+  genre?: string;
+  created_at: string;
 }
 
-export default function CreatorProfileScreen({ navigation, route }: CreatorProfileScreenProps) {
-  const { username } = route.params || {};
+export default function CreatorProfileScreen() {
+  const navigation = useNavigation();
+  const route = useRoute();
+  const { theme } = useTheme();
+  const { user } = useAuth();
   const { play, addToQueue } = useAudioPlayer();
-  
-  const [creator, setCreator] = useState<PublicProfile | null>(null);
-  const [tracks, setTracks] = useState<AudioTrack[]>([]);
-  const [events, setEvents] = useState<Event[]>([]);
-  const [stats, setStats] = useState<CreatorStats | null>(null);
-  const [activeTab, setActiveTab] = useState<'tracks' | 'events' | 'about'>('tracks');
-  const [loading, setLoading] = useState(true);
+
+  const { creatorId, creator: initialCreator } = route.params as { creatorId: string; creator?: Creator };
+
+  const [creator, setCreator] = useState<Creator | null>(initialCreator || null);
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [loading, setLoading] = useState(!initialCreator);
   const [refreshing, setRefreshing] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
-  const [isLiked, setIsLiked] = useState<{ [key: string]: boolean }>({});
 
   useEffect(() => {
-    loadCreatorData();
-  }, [username]);
+    loadCreatorProfile();
+    loadCreatorTracks();
+    checkFollowStatus();
+  }, [creatorId]);
 
-  const loadCreatorData = async () => {
-    setLoading(true);
+  const loadCreatorProfile = async () => {
+    if (initialCreator) return; // Skip if we already have creator data
+
     try {
-      // Mock data for now - in real app, this would come from API
-      const mockCreator: PublicProfile = {
-        id: '1',
-        username: username || 'creator123',
-        display_name: 'SoundBridge Creator',
-        avatar_url: 'https://picsum.photos/200/200?random=creator',
-        bio: 'Music producer and composer. Creating beats that move your soul. 🎵✨',
-        location: 'Los Angeles, CA',
-        city: 'Los Angeles',
-        country: 'US',
-        genre: 'Hip Hop',
-        role: 'creator',
-        verified: false,
-        followers_count: 0,
-        following_count: 0,
-        total_plays: 0,
-        // total_tracks: 0, // TODO: Add total_tracks to database schema
-        total_likes: 0,
-        total_events: 0,
-        last_active: '2022-03-15T10:30:00Z',
-        // TODO: Add onboarding fields to database schema
-        created_at: '2022-03-15T10:30:00Z',
-        // updated_at: '2022-03-15T10:30:00Z', // TODO: Add updated_at to database schema
+      console.log('🔧 Loading creator profile:', creatorId);
+      
+      // Get basic profile data
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select(`
+          id,
+          username,
+          display_name,
+          bio,
+          avatar_url,
+          banner_url,
+          location,
+          created_at
+        `)
+        .eq('id', creatorId)
+        .single();
+
+      if (profileError) throw profileError;
+
+      // Get computed stats
+      const [followersResult, tracksResult, eventsResult] = await Promise.all([
+        // Count followers
+        supabase
+          .from('follows')
+          .select('*', { count: 'exact', head: true })
+          .eq('following_id', creatorId),
+        
+        // Count tracks
+        supabase
+          .from('audio_tracks')
+          .select('*', { count: 'exact', head: true })
+          .eq('creator_id', creatorId)
+          .eq('is_public', true),
+        
+        // Count events
+        supabase
+          .from('events')
+          .select('*', { count: 'exact', head: true })
+          .eq('creator_id', creatorId)
+      ]);
+
+      const creatorWithStats = {
+        ...profileData,
+        followers_count: followersResult.count || 0,
+        tracks_count: tracksResult.count || 0,
+        events_count: eventsResult.count || 0,
       };
 
-      const mockTracks: AudioTrack[] = [
-        {
-          id: '1',
-          title: 'Summer Vibes',
-          creator_id: '1',
-          description: 'A chill summer track',
-          genre: 'Hip Hop',
-          sub_genre: null,
-          duration: 180,
-          file_url: 'https://example.com/audio1.mp3',
-          artwork_url: 'https://picsum.photos/300/300?random=1',
-          waveform_url: null,
-          share_count: 0,
-          comment_count: 0,
-          is_public: true,
-          play_count: 15420,
-          like_count: 892,
-          // comments_count: 0, // TODO: Add comments_count to database schema
-          // shares_count: 0, // TODO: Add shares_count to database schema
-          download_count: 0,
-          is_explicit: false,
-          is_featured: false,
-          tags: ['summer', 'vibes', 'chill'],
-          metadata: {},
-          created_at: '2024-01-15T10:30:00Z',
-          updated_at: '2024-01-15T10:30:00Z',
-          deleted_at: null,
-        },
-        {
-          id: '2',
-          title: 'Midnight Dreams',
-          creator_id: '1',
-          description: 'A soulful midnight track',
-          genre: 'R&B',
-          sub_genre: null,
-          duration: 240,
-          file_url: 'https://example.com/audio2.mp3',
-          artwork_url: 'https://picsum.photos/300/300?random=2',
-          waveform_url: null,
-          share_count: 0,
-          comment_count: 0,
-          is_public: true,
-          play_count: 12350,
-          like_count: 756,
-          // comments_count: 0, // TODO: Add comments_count to database schema
-          // shares_count: 0, // TODO: Add shares_count to database schema
-          download_count: 0,
-          is_explicit: false,
-          is_featured: false,
-          tags: ['midnight', 'dreams', 'soulful'],
-          metadata: {},
-          created_at: '2024-01-10T10:30:00Z',
-          updated_at: '2024-01-10T10:30:00Z',
-          deleted_at: null,
-        },
-      ];
-
-      const mockStats: CreatorStats = {
-        totalTracks: mockTracks.length,
-        totalPlays: mockTracks.reduce((sum, track) => sum + track.play_count, 0),
-        totalLikes: mockTracks.reduce((sum, track) => sum + track.like_count, 0),
-        totalFollowers: mockCreator.followers_count,
-        totalFollowing: mockCreator.following_count,
-        totalTips: 156,
-        totalEarnings: 1247.50,
-      };
-
-      setCreator(mockCreator);
-      setTracks(mockTracks);
-      setEvents([]);
-      setStats(mockStats);
+      setCreator(creatorWithStats);
+      console.log('✅ Creator profile loaded:', creatorWithStats.display_name);
     } catch (error) {
-      console.error('Error loading creator data:', error);
+      console.error('❌ Error loading creator profile:', error);
       Alert.alert('Error', 'Failed to load creator profile');
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   };
 
-  const onRefresh = () => {
+  const loadCreatorTracks = async () => {
+    try {
+      console.log('🔧 Loading creator tracks:', creatorId);
+      
+      const { data, error } = await supabase
+        .from('audio_tracks')
+        .select(`
+          id,
+          title,
+          description,
+          duration,
+          play_count,
+          likes_count,
+          file_url,
+          cover_art_url,
+          genre,
+          created_at
+        `)
+        .eq('creator_id', creatorId)
+        .eq('is_public', true)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (error) throw error;
+
+      setTracks(data || []);
+      console.log('✅ Creator tracks loaded:', data?.length || 0);
+    } catch (error) {
+      console.error('❌ Error loading creator tracks:', error);
+    }
+  };
+
+  const checkFollowStatus = async () => {
+    if (!user?.id) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('follows')
+        .select('follower_id')
+        .eq('follower_id', user.id)
+        .eq('following_id', creatorId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') throw error;
+
+      setIsFollowing(!!data);
+    } catch (error) {
+      console.error('❌ Error checking follow status:', error);
+    }
+  };
+
+  const handleFollow = async () => {
+    if (!user?.id) {
+      Alert.alert('Login Required', 'Please log in to follow creators');
+      return;
+    }
+
+    try {
+      if (isFollowing) {
+        // Unfollow
+        const { error } = await supabase
+          .from('follows')
+          .delete()
+          .eq('follower_id', user.id)
+          .eq('following_id', creatorId);
+
+        if (error) throw error;
+
+        setIsFollowing(false);
+        setCreator(prev => prev ? { ...prev, followers_count: Math.max(0, (prev.followers_count || 0) - 1) } : null);
+      } else {
+        // Follow
+        const { error } = await supabase
+          .from('follows')
+          .insert({
+            follower_id: user.id,
+            following_id: creatorId,
+            created_at: new Date().toISOString()
+          });
+
+        if (error) throw error;
+
+        setIsFollowing(true);
+        setCreator(prev => prev ? { ...prev, followers_count: (prev.followers_count || 0) + 1 } : null);
+      }
+    } catch (error) {
+      console.error('❌ Error following/unfollowing:', error);
+      Alert.alert('Error', 'Failed to update follow status');
+    }
+  };
+
+  const handleTrackPress = async (track: Track) => {
+    try {
+      console.log('🎵 Playing track:', track.title);
+      await play({
+        id: track.id,
+        title: track.title,
+        creator: { id: creatorId, username: creator?.username || '', display_name: creator?.display_name || '' },
+        duration: track.duration,
+        file_url: track.file_url,
+        cover_image_url: track.cover_art_url,
+        artwork_url: track.cover_art_url,
+        plays_count: track.play_count,
+        likes_count: track.likes_count,
+        created_at: track.created_at,
+      });
+
+      // Add other tracks to queue
+      const otherTracks = tracks.filter(t => t.id !== track.id);
+      otherTracks.forEach(t => addToQueue({
+        id: t.id,
+        title: t.title,
+        creator: { id: creatorId, username: creator?.username || '', display_name: creator?.display_name || '' },
+        duration: t.duration,
+        file_url: t.file_url,
+        cover_image_url: t.cover_art_url,
+        artwork_url: t.cover_art_url,
+        plays_count: t.play_count,
+        likes_count: t.likes_count,
+        created_at: t.created_at,
+      }));
+    } catch (error) {
+      console.error('❌ Error playing track:', error);
+      Alert.alert('Error', 'Failed to play track');
+    }
+  };
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    loadCreatorData();
+    await Promise.all([loadCreatorProfile(), loadCreatorTracks(), checkFollowStatus()]);
+    setRefreshing(false);
   };
 
-  const handleFollow = () => {
-    setIsFollowing(!isFollowing);
-  };
-
-  const handleTipCreator = () => {
-    Alert.alert('Tip Creator', 'Tip functionality will be implemented soon.');
-  };
-
-  const handlePlayTrack = (track: AudioTrack) => {
-    play(track);
-  };
-
-  const handleAddToQueue = (track: AudioTrack) => {
-    addToQueue(track);
-    Alert.alert('Added to Queue', `${track.title} has been added to your queue.`);
-  };
-
-  const handleLikeTrack = (trackId: string) => {
-    setIsLiked(prev => ({
-      ...prev,
-      [trackId]: !prev[trackId]
-    }));
-  };
-
-  const formatNumber = (num: number) => {
-    if (num >= 1000000) {
-      return (num / 1000000).toFixed(1) + 'M';
-    } else if (num >= 1000) {
-      return (num / 1000).toFixed(1) + 'K';
-    }
+  const formatNumber = (num?: number | null) => {
+    if (!num || num === 0) return '0';
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
     return num.toString();
+  };
+
+  const formatDuration = (seconds?: number) => {
+    if (!seconds) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#DC2626" />
-        <Text style={styles.loadingText}>Loading creator profile...</Text>
+      <View style={[styles.loadingContainer, { backgroundColor: theme.colors.background }]}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+        <Text style={[styles.loadingText, { color: theme.colors.text }]}>Loading profile...</Text>
       </View>
     );
   }
 
   if (!creator) {
     return (
-      <View style={styles.errorContainer}>
-        <Ionicons name="person-outline" size={64} color="rgba(255,255,255,0.3)" />
-        <Text style={styles.errorText}>Creator not found</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+      <View style={[styles.errorContainer, { backgroundColor: theme.colors.background }]}>
+        <Ionicons name="person-outline" size={64} color={theme.colors.textSecondary} />
+        <Text style={[styles.errorText, { color: theme.colors.text }]}>Creator not found</Text>
+        <TouchableOpacity style={[styles.backButton, { backgroundColor: theme.colors.primary }]} onPress={() => navigation.goBack()}>
           <Text style={styles.backButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -220,468 +300,376 @@ export default function CreatorProfileScreen({ navigation, route }: CreatorProfi
   }
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
-      
-      <ScrollView 
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+        <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>{creator.display_name}</Text>
+        <TouchableOpacity style={styles.headerButton}>
+          <Ionicons name="share-outline" size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
         style={styles.scrollView}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#DC2626"
-            colors={['#DC2626']}
-          />
-        }
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Creator Profile</Text>
-          <TouchableOpacity>
-            <Ionicons name="share-outline" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Banner */}
-        <View style={styles.bannerContainer}>
-          <Image 
-            source={{ uri: 'https://via.placeholder.com/800x300' }}
-            style={styles.banner}
-          />
-          <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.8)']}
-            style={styles.bannerGradient}
-          />
-        </View>
-
-        {/* Profile Info */}
-        <View style={styles.profileInfo}>
-          <View style={styles.avatarContainer}>
-            <Image 
-              source={{ uri: creator.avatar_url || 'https://via.placeholder.com/120' }}
-              style={styles.avatar}
-            />
-            {creator.verified && (
-              <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark" size={16} color="#FFFFFF" />
-              </View>
-            )}
-          </View>
-          
-          <View style={styles.creatorInfo}>
-            <Text style={styles.creatorName}>{creator.display_name}</Text>
-            <Text style={styles.creatorUsername}>@{creator.username}</Text>
-          </View>
-        </View>
-
-        {/* Stats */}
-        <View style={styles.statsContainer}>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{formatNumber(stats?.totalFollowers || 0)}</Text>
-            <Text style={styles.statLabel}>Followers</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{formatNumber(stats?.totalTracks || 0)}</Text>
-            <Text style={styles.statLabel}>Tracks</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{formatNumber(stats?.totalPlays || 0)}</Text>
-            <Text style={styles.statLabel}>Plays</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{formatNumber(stats?.totalLikes || 0)}</Text>
-            <Text style={styles.statLabel}>Likes</Text>
-          </View>
-        </View>
-
-        {/* Action Buttons */}
-        <View style={styles.actionButtons}>
-          <TouchableOpacity 
-            style={[styles.actionButton, styles.followButton, isFollowing && styles.followingButton]}
-            onPress={handleFollow}
-          >
-            <Ionicons 
-              name={isFollowing ? 'person-remove' : 'person-add'} 
-              size={20} 
-              color="#FFFFFF" 
-            />
-            <Text style={styles.actionButtonText}>
-              {isFollowing ? 'Following' : 'Follow'}
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.actionButton, styles.tipButton]}
-            onPress={handleTipCreator}
-          >
-            <Ionicons name="cash-outline" size={20} color="#FFFFFF" />
-            <Text style={styles.actionButtonText}>Tip Creator</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Tracks */}
-        <View style={styles.tracksContainer}>
-          <Text style={styles.sectionTitle}>Tracks</Text>
-          {tracks.map((track) => (
-            <TouchableOpacity key={track.id} style={styles.trackItem}>
-              <Image 
-                source={{ uri: track.artwork_url || 'https://via.placeholder.com/80' }}
-                style={styles.trackImage}
-              />
-              <View style={styles.trackInfo}>
-                <Text style={styles.trackTitle} numberOfLines={1}>{track.title}</Text>
-                <Text style={styles.trackGenre}>{track.genre}</Text>
-                <View style={styles.trackStats}>
-                  <Text style={styles.trackStat}>
-                    <Ionicons name="play" size={12} color="rgba(255,255,255,0.6)" /> {formatNumber(track.play_count)}
-                  </Text>
-                  <Text style={styles.trackStat}>
-                    <Ionicons name="heart" size={12} color="rgba(255,255,255,0.6)" /> {formatNumber(track.like_count)}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.trackActions}>
-                <TouchableOpacity 
-                  style={styles.trackActionButton}
-                  onPress={() => handleLikeTrack(track.id)}
-                >
-                  <Ionicons 
-                    name={isLiked[track.id] ? 'heart' : 'heart-outline'} 
-                    size={20} 
-                    color={isLiked[track.id] ? '#DC2626' : 'rgba(255,255,255,0.6)'} 
-                  />
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.trackActionButton}
-                  onPress={() => handlePlayTrack(track)}
-                >
-                  <Ionicons name="play" size={20} color="#DC2626" />
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.trackActionButton}
-                  onPress={() => handleAddToQueue(track)}
-                >
-                  <Ionicons name="add-circle-outline" size={20} color="rgba(255,255,255,0.6)" />
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* About Section */}
-        <View style={styles.aboutContainer}>
-          <Text style={styles.sectionTitle}>About</Text>
-          <View style={styles.aboutSection}>
-            <Text style={styles.aboutTitle}>Bio</Text>
-            <Text style={styles.aboutText}>{creator.bio}</Text>
-          </View>
-          
-          {creator.location && (
-            <View style={styles.aboutSection}>
-              <Text style={styles.aboutTitle}>Location</Text>
-              <Text style={styles.aboutText}>
-                <Ionicons name="location-outline" size={16} color="rgba(255,255,255,0.6)" /> {creator.location}
-              </Text>
-            </View>
+        {/* Profile Header */}
+        <View style={styles.profileSection}>
+          {creator.banner_url && (
+            <Image source={{ uri: creator.banner_url }} style={styles.bannerImage} />
           )}
           
-          {/* TODO: Add website field to database schema */}
-          
-          {creator.genre && (
-            <View style={styles.aboutSection}>
-              <Text style={styles.aboutTitle}>Genre</Text>
-              <View style={styles.genresContainer}>
-                <View style={styles.genreTag}>
-                  <Text style={styles.genreText}>{creator.genre}</Text>
-                </View>
+          <View style={styles.profileInfo}>
+            {creator.avatar_url ? (
+              <Image source={{ uri: creator.avatar_url }} style={styles.avatar} />
+            ) : (
+              <View style={[styles.defaultAvatar, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
               </View>
+            )}
+
+            <View style={styles.nameSection}>
+              <View style={styles.nameRow}>
+                <Text style={[styles.displayName, { color: theme.colors.text }]}>{creator.display_name}</Text>
+              </View>
+              <Text style={[styles.username, { color: theme.colors.textSecondary }]}>@{creator.username}</Text>
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.followButton,
+                {
+                  backgroundColor: isFollowing ? theme.colors.surface : theme.colors.primary,
+                  borderColor: theme.colors.primary,
+                }
+              ]}
+              onPress={handleFollow}
+            >
+              <Text
+                style={[
+                  styles.followButtonText,
+                  { color: isFollowing ? theme.colors.primary : '#FFFFFF' }
+                ]}
+              >
+                {isFollowing ? 'Following' : 'Follow'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {creator.bio && (
+            <Text style={[styles.bio, { color: theme.colors.text }]}>{creator.bio}</Text>
+          )}
+
+          {creator.location && (
+            <View style={styles.locationRow}>
+              <Ionicons name="location-outline" size={16} color={theme.colors.textSecondary} />
+              <Text style={[styles.location, { color: theme.colors.textSecondary }]}>{creator.location}</Text>
+            </View>
+          )}
+
+          {creator.genre && (
+            <View style={[styles.genreTag, { backgroundColor: theme.colors.primary + '20' }]}>
+              <Text style={[styles.genreText, { color: theme.colors.primary }]}>{creator.genre}</Text>
+            </View>
+          )}
+
+          {/* Stats */}
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(creator.followers_count || 0)}</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Followers</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(creator.tracks_count || 0)}</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Tracks</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(creator.events_count || 0)}</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Events</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Tracks Section */}
+        <View style={styles.tracksSection}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Tracks</Text>
+          
+          {tracks.length > 0 ? (
+            tracks.map((track) => (
+              <TouchableOpacity
+                key={track.id}
+                style={[styles.trackItem, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}
+                onPress={() => handleTrackPress(track)}
+              >
+                <View style={[styles.trackCover, { backgroundColor: theme.colors.card }]}>
+                  {track.cover_art_url ? (
+                    <Image source={{ uri: track.cover_art_url }} style={styles.trackImage} />
+                  ) : (
+                    <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />
+                  )}
+                </View>
+
+                <View style={styles.trackInfo}>
+                  <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                    {track.title}
+                  </Text>
+                  <View style={styles.trackStats}>
+                    <Ionicons name="play" size={12} color={theme.colors.textSecondary} />
+                    <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>
+                      {formatNumber(track.play_count || 0)}
+                    </Text>
+                    <Ionicons name="heart" size={12} color={theme.colors.textSecondary} style={{ marginLeft: 8 }} />
+                    <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>
+                      {formatNumber(track.likes_count || 0)}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.trackActions}>
+                  <Text style={[styles.trackDuration, { color: theme.colors.textSecondary }]}>
+                    {formatDuration(track.duration)}
+                  </Text>
+                  <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]}>
+                    <Ionicons name="play" size={16} color={theme.colors.primary} />
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            ))
+          ) : (
+            <View style={styles.emptyTracks}>
+              <Ionicons name="musical-notes-outline" size={48} color={theme.colors.textSecondary} />
+              <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>No tracks yet</Text>
             </View>
           )}
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000000',
   },
   loadingText: {
-    color: '#FFFFFF',
-    fontSize: 16,
     marginTop: 16,
+    fontSize: 16,
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000000',
-    paddingHorizontal: 40,
+    padding: 32,
   },
   errorText: {
-    color: '#FFFFFF',
     fontSize: 18,
+    fontWeight: '600',
     marginTop: 16,
-    marginBottom: 32,
-    textAlign: 'center',
+    marginBottom: 24,
   },
   backButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 20,
+    borderRadius: 8,
   },
   backButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  headerButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
   },
   scrollView: {
     flex: 1,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1,
+  profileSection: {
+    padding: 16,
   },
-  headerTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  bannerContainer: {
-    height: 200,
-    position: 'relative',
-  },
-  banner: {
+  bannerImage: {
     width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  bannerGradient: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 100,
+    height: 120,
+    borderRadius: 12,
+    marginBottom: 16,
   },
   profileInfo: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    marginTop: -50,
-  },
-  avatarContainer: {
-    position: 'relative',
-    marginRight: 16,
+    alignItems: 'center',
+    marginBottom: 16,
   },
   avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 4,
-    borderColor: '#FFFFFF',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginRight: 16,
   },
-  verifiedBadge: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    backgroundColor: '#4CAF50',
-    borderRadius: 12,
-    width: 24,
-    height: 24,
+  defaultAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginRight: 16,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#FFFFFF',
   },
-  creatorInfo: {
+  nameSection: {
     flex: 1,
-    paddingBottom: 10,
   },
-  creatorName: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: 'bold',
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 4,
   },
-  creatorUsername: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 16,
+  displayName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginRight: 8,
   },
-  statsContainer: {
+  username: {
+    fontSize: 14,
+  },
+  followButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  followButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  bio: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  location: {
+    fontSize: 14,
+    marginLeft: 4,
+  },
+  genreTag: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  genreText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    marginHorizontal: 16,
-    borderRadius: 12,
-    marginBottom: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
   statItem: {
     alignItems: 'center',
   },
   statNumber: {
-    color: '#FFFFFF',
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 4,
   },
   statLabel: {
-    color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 12,
   },
-  actionButtons: {
-    flexDirection: 'row',
+  tracksSection: {
     paddingHorizontal: 16,
-    marginBottom: 20,
-    gap: 12,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 8,
-    gap: 8,
-  },
-  followButton: {
-    backgroundColor: '#DC2626',
-  },
-  followingButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  tipButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  actionButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '500',
+    paddingBottom: 100,
   },
   sectionTitle: {
-    color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 16,
-    paddingHorizontal: 16,
-  },
-  tracksContainer: {
-    paddingBottom: 20,
   },
   trackItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 12,
-    padding: 12,
-    marginHorizontal: 16,
-    marginBottom: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderBottomWidth: 0.5,
+    marginBottom: 8,
+    borderRadius: 8,
+  },
+  trackCover: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   trackImage: {
-    width: 60,
-    height: 60,
+    width: '100%',
+    height: '100%',
     borderRadius: 8,
-    marginRight: 12,
   },
   trackInfo: {
     flex: 1,
   },
   trackTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: 14,
+    fontWeight: '600',
     marginBottom: 4,
-  },
-  trackGenre: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 12,
-    marginBottom: 8,
   },
   trackStats: {
     flexDirection: 'row',
-    gap: 16,
-  },
-  trackStat: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 12,
-    flexDirection: 'row',
     alignItems: 'center',
+  },
+  trackStatText: {
+    fontSize: 12,
+    marginLeft: 4,
   },
   trackActions: {
     flexDirection: 'row',
-    gap: 8,
-  },
-  trackActionButton: {
-    padding: 8,
-  },
-  aboutContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 100,
-  },
-  aboutSection: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-  },
-  aboutTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  aboutText: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 14,
-    lineHeight: 20,
-    flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
   },
-  websiteLink: {
-    color: '#DC2626',
-    fontSize: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  genresContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  genreTag: {
-    backgroundColor: 'rgba(220, 38, 38, 0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  genreText: {
-    color: '#DC2626',
+  trackDuration: {
     fontSize: 12,
-    fontWeight: '500',
+  },
+  playButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyTracks: {
+    alignItems: 'center',
+    paddingVertical: 48,
+  },
+  emptyText: {
+    fontSize: 16,
+    marginTop: 16,
   },
 });

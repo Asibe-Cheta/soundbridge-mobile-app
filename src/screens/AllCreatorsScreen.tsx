@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { dbHelpers } from '../lib/supabase';
+import { supabase, dbHelpers } from '../lib/supabase';
 
 interface Creator {
   id: string;
@@ -28,6 +28,7 @@ interface Creator {
   genre?: string;
   role: string;
   created_at: string;
+  isFollowing?: boolean;
 }
 
 type SortOption = 'recent' | 'alphabetical';
@@ -138,7 +139,73 @@ export default function AllCreatorsScreen() {
 
   const handleCreatorPress = (creator: Creator) => {
     console.log('Navigate to creator profile:', creator.username);
-    // navigation.navigate('CreatorProfileScreen', { creatorId: creator.id });
+    navigation.navigate('CreatorProfile' as never, { creatorId: creator.id, creator: creator } as never);
+  };
+
+  const handleFollowCreator = async (creator: Creator) => {
+    if (!user?.id) {
+      Alert.alert('Login Required', 'Please log in to follow creators');
+      return;
+    }
+
+    try {
+      console.log('🔄 Following creator:', creator.display_name);
+      
+      // Check if already following
+      const { data: existingFollow, error: checkError } = await supabase
+        .from('follows')
+        .select('follower_id')
+        .eq('follower_id', user.id)
+        .eq('following_id', creator.id)
+        .single();
+
+      if (checkError && checkError.code !== 'PGRST116') {
+        throw checkError;
+      }
+
+      if (existingFollow) {
+        // Unfollow
+        const { error: unfollowError } = await supabase
+          .from('follows')
+          .delete()
+          .eq('follower_id', user.id)
+          .eq('following_id', creator.id);
+
+        if (unfollowError) throw unfollowError;
+
+        // Update local state
+        setCreators(prev => prev.map(c => 
+          c.id === creator.id 
+            ? { ...c, isFollowing: false }
+            : c
+        ));
+
+        console.log('✅ Unfollowed creator:', creator.display_name);
+      } else {
+        // Follow
+        const { error: followError } = await supabase
+          .from('follows')
+          .insert({
+            follower_id: user.id,
+            following_id: creator.id,
+            created_at: new Date().toISOString()
+          });
+
+        if (followError) throw followError;
+
+        // Update local state
+        setCreators(prev => prev.map(c => 
+          c.id === creator.id 
+            ? { ...c, isFollowing: true }
+            : c
+        ));
+
+        console.log('✅ Followed creator:', creator.display_name);
+      }
+    } catch (error) {
+      console.error('❌ Error following/unfollowing creator:', error);
+      Alert.alert('Error', 'Failed to update follow status. Please try again.');
+    }
   };
 
   const onRefresh = () => {
@@ -173,6 +240,31 @@ export default function AllCreatorsScreen() {
             </Text>
           )}
         </View>
+        
+        <TouchableOpacity
+          style={[
+            styles.followButton,
+            {
+              backgroundColor: creator.isFollowing ? theme.colors.surface : theme.colors.primary,
+              borderColor: theme.colors.primary,
+            }
+          ]}
+          onPress={(e) => {
+            e.stopPropagation();
+            handleFollowCreator(creator);
+          }}
+        >
+          <Text
+            style={[
+              styles.followButtonText,
+              {
+                color: creator.isFollowing ? theme.colors.primary : '#FFFFFF',
+              }
+            ]}
+          >
+            {creator.isFollowing ? 'Following' : 'Follow'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {creator.bio && (
@@ -393,6 +485,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
+  },
+  followButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginLeft: 8,
+  },
+  followButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   creatorAvatar: {
     width: 50,

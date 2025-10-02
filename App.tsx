@@ -36,6 +36,8 @@ import WithdrawalMethodsScreen from './src/screens/WithdrawalMethodsScreen';
 import AddWithdrawalMethodScreen from './src/screens/AddWithdrawalMethodScreen';
 import AllCreatorsScreen from './src/screens/AllCreatorsScreen';
 import AllEventsScreen from './src/screens/AllEventsScreen';
+import EventDetailsScreen from './src/screens/EventDetailsScreen';
+import TrackDetailsScreen from './src/screens/TrackDetailsScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -133,7 +135,6 @@ function AppNavigator() {
                  <>
                    <Stack.Screen name="MainTabs" component={MainTabs} />
                    <Stack.Screen name="AudioPlayer" component={AudioPlayerScreen} />
-                   <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} />
                    <Stack.Screen name="CreatorSetup" component={CreatorSetupScreen} />
                    <Stack.Screen name="PrivacySecurity" component={PrivacySecurityScreen} />
                    <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
@@ -153,6 +154,9 @@ function AppNavigator() {
                             <Stack.Screen name="AddWithdrawalMethod" component={AddWithdrawalMethodScreen} />
                             <Stack.Screen name="AllCreators" component={AllCreatorsScreen} />
                             <Stack.Screen name="AllEvents" component={AllEventsScreen} />
+                            <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} />
+                            <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
+                            <Stack.Screen name="TrackDetails" component={TrackDetailsScreen} />
                  </>
                )}
       </Stack.Navigator>

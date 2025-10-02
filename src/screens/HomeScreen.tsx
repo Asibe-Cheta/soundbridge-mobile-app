@@ -25,12 +25,10 @@ interface AudioTrack {
   id: string;
   title: string;
   description?: string;
-  audio_url?: string;
-  file_url?: string;
-  cover_image_url?: string;
-  artwork_url?: string;
+  file_url?: string;          // Correct field name from schema
+  cover_art_url?: string;     // Correct field name from schema
   duration?: number;
-  plays_count?: number;
+  play_count?: number;        // Correct field name from schema
   likes_count?: number;
   created_at: string;
   creator?: {
@@ -57,7 +55,7 @@ interface Event {
   description?: string;
   event_date: string;
   location?: string;
-  cover_image_url?: string;
+  image_url?: string;         // Correct field name from schema
   organizer: {
     id: string;
     username: string;
@@ -291,26 +289,11 @@ export default function HomeScreen() {
         ];
         
         const transformedTracks: AudioTrack[] = data.map((track, index) => {
-          // Try multiple possible column names for artwork
-          const imageUrl = track.cover_image_url || 
-                           track.cover_url || 
-                           track.artwork_url || 
-                           track.image_url ||
-                           track.thumbnail_url ||
-                           track.cover ||
-                           track.artwork ||
-                           track.image ||
-                           fallbackImages[index % fallbackImages.length];
+          // Use the correct field name from schema
+          const imageUrl = track.cover_art_url || fallbackImages[index % fallbackImages.length];
           
           console.log(`🖼️ Track "${track.title}" artwork check:`, {
-            cover_image_url: track.cover_image_url,
-            cover_url: track.cover_url,
-            artwork_url: track.artwork_url,
-            image_url: track.image_url,
-            thumbnail_url: track.thumbnail_url,
-            cover: track.cover,
-            artwork: track.artwork,
-            image: track.image,
+            cover_art_url: track.cover_art_url,
             final: imageUrl
           });
           
@@ -318,13 +301,11 @@ export default function HomeScreen() {
             id: track.id,
             title: track.title || 'Untitled Track',
             description: track.description,
-            audio_url: track.audio_url || track.file_url,
             file_url: track.file_url,
-            cover_image_url: imageUrl,
-            artwork_url: imageUrl,
+            cover_art_url: imageUrl,
             duration: track.duration || 180,
-            plays_count: track.plays_count || track.play_count || 0,
-            likes_count: track.likes_count || track.like_count || 0,
+            play_count: track.play_count || 0,
+            likes_count: track.likes_count || 0,
             created_at: track.created_at,
             creator: {
               id: track.creator_id || 'unknown',
@@ -338,7 +319,7 @@ export default function HomeScreen() {
         setRecentTracks(transformedTracks);
         console.log('✅ Recent tracks loaded from Supabase:', transformedTracks.length);
         transformedTracks.forEach(track => {
-          console.log(`🎵 Track: "${track.title}" - Cover: ${track.cover_image_url || 'none'}`);
+          console.log(`🎵 Track: "${track.title}" - Cover: ${track.cover_art_url || 'none'}`);
         });
       } else {
         console.log('ℹ️ No recent tracks found, using mock data');
@@ -347,8 +328,7 @@ export default function HomeScreen() {
           {
             id: 'mock-1',
             title: 'Untitled Audio File',
-            cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
-            artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
+            cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
             creator: {
               id: 'mock-creator-1',
               username: 'asibe_cheta',
@@ -477,7 +457,7 @@ export default function HomeScreen() {
           description: event.description,
           event_date: event.event_date,
           location: event.location,
-          cover_image_url: event.image_url,
+          image_url: event.image_url,
           organizer: {
             id: 'organizer-1',
             username: 'event_organizer',
@@ -498,7 +478,7 @@ export default function HomeScreen() {
             description: 'Join us for an evening of new music from talented creators',
             event_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
             location: 'Online Event',
-            cover_image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+            image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
             organizer: {
               id: 'organizer-1',
               username: 'event_organizer',
@@ -555,6 +535,10 @@ export default function HomeScreen() {
   };
 
   const handleTrackPress = async (track: AudioTrack) => {
+    navigation.navigate('TrackDetails' as never, { trackId: track.id, track: track } as never);
+  };
+
+  const handleTrackPlay = async (track: AudioTrack) => {
     try {
       console.log('🎵 Playing track from Home:', track.title);
       await play(track);
@@ -575,18 +559,16 @@ export default function HomeScreen() {
       // Navigation to full player is handled by mini player expand button
     } catch (error) {
       console.error('Error playing track:', error);
-      Alert.alert('Playback Error', 'Failed to play the track. Please try again.');
+      Alert.alert('Playbook Error', 'Failed to play the track. Please try again.');
     }
   };
 
   const handleCreatorPress = (creator: Creator) => {
-    // TODO: Navigate to creator profile
-    console.log('Viewing creator:', creator.username);
+    navigation.navigate('CreatorProfile' as never, { creatorId: creator.id, creator: creator } as never);
   };
 
   const handleEventPress = (event: Event) => {
-    // TODO: Navigate to event details
-    console.log('Viewing event:', event.title);
+    navigation.navigate('EventDetails' as never, { eventId: event.id, event: event } as never);
   };
 
   const formatDuration = (seconds?: number) => {
@@ -691,7 +673,7 @@ export default function HomeScreen() {
                   >
                     <View style={[styles.trackCover, { backgroundColor: theme.colors.surface }]}>
                   {(() => {
-                    const imageUrl = track.cover_image_url || track.artwork_url;
+                    const imageUrl = track.cover_art_url;
                     console.log(`🖼️ Trending track "${track.title}" - imageUrl: ${imageUrl}`);
                     
                     return imageUrl ? (
@@ -790,7 +772,7 @@ export default function HomeScreen() {
                 >
                   <View style={[styles.trackRowCover, { backgroundColor: theme.colors.surface }]}>
                     {(() => {
-                      const imageUrl = track.cover_image_url || track.artwork_url;
+                      const imageUrl = track.cover_art_url;
                       return imageUrl ? (
                         <Image 
                           source={{ uri: imageUrl }} 
@@ -818,9 +800,9 @@ export default function HomeScreen() {
                     </Text>
                   </View>
                   <View style={styles.trackRowActions}>
-                    <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]} onPress={() => handleTrackPress(track)}>
-                      <Ionicons name="play" size={16} color={theme.colors.primary} />
-                    </TouchableOpacity>
+                      <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]} onPress={() => handleTrackPlay(track)}>
+                        <Ionicons name="play" size={16} color={theme.colors.primary} />
+                      </TouchableOpacity>
                     <Text style={[styles.trackRowDuration, { color: theme.colors.textSecondary }]}>
                       {formatDuration(track.duration)}
                     </Text>
@@ -840,7 +822,7 @@ export default function HomeScreen() {
                   plays_count: 1100,
                   likes_count: 78,
                   created_at: new Date().toISOString(),
-                  cover_image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+                  image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
                   artwork_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
                 },
                 {
@@ -862,13 +844,13 @@ export default function HomeScreen() {
                 >
                   <View style={[styles.trackRowCover, { backgroundColor: theme.colors.surface }]}>
                     <Image 
-                      source={{ uri: track.cover_image_url }} 
+                      source={{ uri: track.cover_art_url }} 
                       style={styles.trackRowImage}
                       onError={(error) => {
-                        console.log(`❌ Image failed to load for "${track.title}": ${track.cover_image_url}`, error);
+                        console.log(`❌ Image failed to load for "${track.title}": ${track.cover_art_url}`, error);
                       }}
                       onLoad={() => {
-                        console.log(`✅ Image loaded successfully for "${track.title}": ${track.cover_image_url}`);
+                        console.log(`✅ Image loaded successfully for "${track.title}": ${track.cover_art_url}`);
                       }}
                     />
                   </View>
@@ -881,9 +863,9 @@ export default function HomeScreen() {
                     </Text>
                   </View>
                   <View style={styles.trackRowActions}>
-                    <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]} onPress={() => handleTrackPress(track)}>
-                      <Ionicons name="play" size={16} color={theme.colors.primary} />
-                    </TouchableOpacity>
+                      <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]} onPress={() => handleTrackPlay(track)}>
+                        <Ionicons name="play" size={16} color={theme.colors.primary} />
+                      </TouchableOpacity>
                     <Text style={[styles.trackRowDuration, { color: theme.colors.textSecondary }]}>
                       {formatDuration(track.duration)}
                     </Text>
@@ -925,13 +907,13 @@ export default function HomeScreen() {
                 >
                   <View style={[styles.trackRowCover, { backgroundColor: theme.colors.surface }]}>
                     <Image 
-                      source={{ uri: track.cover_image_url }} 
+                      source={{ uri: track.cover_art_url }} 
                       style={styles.trackRowImage}
                       onError={(error) => {
-                        console.log(`❌ Image failed to load for "${track.title}": ${track.cover_image_url}`, error);
+                        console.log(`❌ Image failed to load for "${track.title}": ${track.cover_art_url}`, error);
                       }}
                       onLoad={() => {
-                        console.log(`✅ Image loaded successfully for "${track.title}": ${track.cover_image_url}`);
+                        console.log(`✅ Image loaded successfully for "${track.title}": ${track.cover_art_url}`);
                       }}
                     />
                   </View>
@@ -944,9 +926,9 @@ export default function HomeScreen() {
                     </Text>
                   </View>
                   <View style={styles.trackRowActions}>
-                    <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]} onPress={() => handleTrackPress(track)}>
-                      <Ionicons name="play" size={16} color={theme.colors.primary} />
-                    </TouchableOpacity>
+                      <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]} onPress={() => handleTrackPlay(track)}>
+                        <Ionicons name="play" size={16} color={theme.colors.primary} />
+                      </TouchableOpacity>
                     <Text style={[styles.trackRowDuration, { color: theme.colors.textSecondary }]}>
                       {formatDuration(track.duration)}
                     </Text>
@@ -1042,7 +1024,7 @@ export default function HomeScreen() {
                     description: 'Join us for an evening of new music from talented creators',
                     event_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
                     location: 'Online Event',
-                    cover_image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+                    image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-1', username: 'event_organizer', display_name: 'Music Events', avatar_url: undefined },
                   },
                   {
@@ -1061,9 +1043,9 @@ export default function HomeScreen() {
                     onPress={() => handleEventPress(event)}
                   >
                     <View style={[styles.eventImageContainer, { backgroundColor: theme.colors.card }]}>
-                      {event.cover_image_url ? (
-                        <Image source={{ uri: event.cover_image_url }} style={styles.eventImage} />
-                      ) : (
+                  {event.image_url ? (
+                    <Image source={{ uri: event.image_url }} style={styles.eventImage} />
+                  ) : (
                         <View style={[styles.defaultEventImage, { backgroundColor: theme.colors.card }]}>
                           <Ionicons name="calendar" size={24} color={theme.colors.textSecondary} />
                         </View>

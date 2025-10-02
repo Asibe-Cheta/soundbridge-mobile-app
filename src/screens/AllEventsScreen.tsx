@@ -119,8 +119,7 @@ export default function AllEventsScreen() {
   };
 
   const handleEventPress = (event: Event) => {
-    console.log('Navigate to event details:', event.title);
-    // navigation.navigate('EventDetailsScreen', { eventId: event.id });
+    navigation.navigate('EventDetails' as never, { eventId: event.id, event: event } as never);
   };
 
   const onRefresh = () => {
