@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -66,6 +66,7 @@ interface UserTrack {
   play_count: number;
   likes_count: number;
   created_at: string;
+  cover_url?: string;
 }
 
 export default function ProfileScreen() {
@@ -100,9 +101,38 @@ export default function ProfileScreen() {
       console.log('🔧 Loading profile data for user:', user.id);
       
       // Load real profile data
-      const { success, data, error } = await db.getProfile(user.id);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
       
-      if (success && data) {
+      console.log('🔍 Raw profile data:', data);
+      console.log('🔍 Profile error:', error);
+      
+      // Get real counts from database
+      const [followersResult, followingResult, tracksCountResult] = await Promise.all([
+        supabase
+          .from('followers')
+          .select('id', { count: 'exact' })
+          .eq('following_id', user.id),
+        supabase
+          .from('followers')
+          .select('id', { count: 'exact' })
+          .eq('follower_id', user.id),
+        supabase
+          .from('audio_tracks')
+          .select('id', { count: 'exact' })
+          .eq('creator_id', user.id)
+      ]);
+      
+      const followersCount = followersResult.count || 0;
+      const followingCount = followingResult.count || 0;
+      const tracksCount = tracksCountResult.count || 0;
+      
+      console.log('📊 Real counts - Followers:', followersCount, 'Following:', followingCount, 'Tracks:', tracksCount);
+      
+      if (data && !error) {
         console.log('✅ Profile loaded:', data.username);
         setProfile({
           id: data.id,
@@ -111,9 +141,9 @@ export default function ProfileScreen() {
           bio: data.bio,
           avatar_url: data.avatar_url,
           banner_url: data.banner_url,
-          followers_count: data.followers_count || 0,
-          following_count: data.following_count || 0,
-          tracks_count: data.tracks_count || 0,
+          followers_count: followersCount,
+          following_count: followingCount,
+          tracks_count: tracksCount,
           is_creator: data.is_creator || false,
           is_verified: data.is_verified || false,
           created_at: data.created_at,
@@ -138,15 +168,34 @@ export default function ProfileScreen() {
       }
 
       // Load user tracks
-      const { success: tracksSuccess, data: tracksData } = await db.getUserTracks(user.id, 10);
-      if (tracksSuccess && tracksData) {
+      const { data: tracksData, error: tracksError } = await supabase
+        .from('audio_tracks')
+        .select('*')
+        .eq('creator_id', user.id)
+        .limit(10);
+      
+      console.log('🔍 Raw tracks data:', tracksData);
+      console.log('🔍 Tracks error:', tracksError);
+      
+      if (tracksData && !tracksError) {
         console.log('✅ User tracks loaded:', tracksData.length);
-        setUserTracks(tracksData);
+        
+        // Transform tracks data to match interface
+        const transformedTracks: UserTrack[] = tracksData.map(track => ({
+          id: track.id,
+          title: track.title || 'Untitled Track',
+          play_count: track.play_count || track.plays_count || 0,
+          likes_count: track.likes_count || track.like_count || 0,
+          created_at: track.created_at,
+          cover_url: track.cover_image_url || track.cover_url || track.artwork_url || track.image_url,
+        }));
+        
+        setUserTracks(transformedTracks);
         
         // Generate recent activity based on user tracks
         const activities: RecentActivity[] = [];
         
-        tracksData.forEach((track, index) => {
+        transformedTracks.forEach((track, index) => {
           if (track.play_count > 100) {
             activities.push({
               id: `play-${track.id}`,
@@ -171,11 +220,11 @@ export default function ProfileScreen() {
         });
         
         // Add upload activity for recent tracks
-        if (tracksData.length > 0) {
+        if (transformedTracks.length > 0) {
           activities.push({
-            id: `upload-${tracksData[0].id}`,
+            id: `upload-${transformedTracks[0].id}`,
             type: 'upload',
-            message: `Uploaded "${tracksData[0].title}"`,
+            message: `Uploaded "${transformedTracks[0].title}"`,
             time: '3d ago',
             icon: 'cloud-upload',
             color: '#2196F3'
@@ -185,8 +234,10 @@ export default function ProfileScreen() {
         setRecentActivity(activities.slice(0, 5)); // Show max 5 activities
         
         // Calculate real stats from user tracks
-        const totalPlays = tracksData.reduce((sum, track) => sum + (track.play_count || 0), 0);
-        const totalLikes = tracksData.reduce((sum, track) => sum + (track.likes_count || 0), 0);
+        const totalPlays = transformedTracks.reduce((sum, track) => sum + (track.play_count || 0), 0);
+        const totalLikes = transformedTracks.reduce((sum, track) => sum + (track.likes_count || 0), 0);
+        
+        console.log('📊 Calculated stats - Total plays:', totalPlays, 'Total likes:', totalLikes);
         
         const estimatedEarnings = totalPlays * 0.001; // $0.001 per play
         const realStats: UserStats = {
@@ -245,9 +296,12 @@ export default function ProfileScreen() {
     
     try {
       console.log('🔧 Saving profile changes...');
-      const { success, error } = await db.updateProfile(user.id, editingProfile);
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(editingProfile)
+        .eq('id', user.id);
       
-      if (success) {
+      if (!error) {
         console.log('✅ Profile updated successfully');
         // Update local state
         setProfile(prev => prev ? { ...prev, ...editingProfile } : null);
@@ -342,24 +396,10 @@ export default function ProfileScreen() {
         };
 
         // Upload to Supabase
-        const uploadResult = await db.uploadImage(user.id, file, 'avatars');
-        
-        if (!uploadResult.success) {
-          Alert.alert('Upload Failed', 'Failed to upload profile picture');
-          return;
-        }
-
-        // Update profile with new avatar URL
-        const updateResult = await db.updateProfileAvatar(user.id, uploadResult.data!.url);
-        
-        if (updateResult.success && updateResult.data) {
-          setProfile(updateResult.data);
-          // Refresh user data across the app
-          await refreshUser();
-          Alert.alert('Success', 'Profile picture updated successfully');
-        } else {
-          Alert.alert('Error', 'Failed to update profile picture');
-        }
+        // TODO: Implement image upload with Supabase Storage
+        console.log('Image upload not implemented yet');
+        Alert.alert('Info', 'Image upload feature coming soon!');
+        return;
       }
     } catch (error) {
       console.error('Error updating avatar:', error);
@@ -571,8 +611,13 @@ export default function ProfileScreen() {
           userTracks.slice(0, 5).map((track) => (
             <View key={track.id} style={[styles.trackItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
               <View style={styles.trackImageContainer}>
-                {track.artwork_url ? (
-                  <Image source={{ uri: track.artwork_url }} style={styles.trackImage} />
+                {track.cover_url ? (
+                  <Image 
+                    source={{ uri: track.cover_url }} 
+                    style={styles.trackImage}
+                    onError={() => console.log(`❌ Failed to load track image: ${track.cover_url}`)}
+                    onLoad={() => console.log(`✅ Track image loaded: ${track.cover_url}`)}
+                  />
                 ) : (
                   <View style={[styles.trackImage, styles.trackImagePlaceholder, { backgroundColor: theme.colors.surface }]}>
                     <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />

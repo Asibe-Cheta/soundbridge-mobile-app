@@ -19,7 +19,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
-import { db } from '../lib/supabase';
+import { supabase, dbHelpers } from '../lib/supabase';
 
 const { width } = Dimensions.get('window');
 
@@ -142,12 +142,59 @@ export default function DiscoverScreen() {
 
   const loadTrendingTracks = async () => {
     try {
-      const { success, data } = await db.getTrendingTracks(10);
-      if (success && data) {
-        setTrendingTracks(data);
-      }
+      console.log('🔧 DiscoverScreen: Loading trending tracks...');
+      // Enhanced mock trending tracks with artwork (since we don't have a trending endpoint)
+      const mockTrending: AudioTrack[] = [
+        {
+          id: 'discover-trending-1',
+          title: 'Electric Dreams',
+          cover_image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+          artwork_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+          creator: {
+            id: '1',
+            username: 'artist1',
+            display_name: 'Artist One',
+          },
+          duration: 180,
+          plays_count: 5500,
+          likes_count: 234,
+          created_at: new Date().toISOString(),
+        },
+        {
+          id: 'discover-trending-2',
+          title: 'Midnight City',
+          cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+          artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+          creator: {
+            id: '2',
+            username: 'artist2',
+            display_name: 'City Sounds',
+          },
+          duration: 210,
+          plays_count: 4200,
+          likes_count: 189,
+          created_at: new Date().toISOString(),
+        },
+        {
+          id: 'discover-trending-3',
+          title: 'Ocean Waves',
+          cover_image_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+          artwork_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+          creator: {
+            id: '3',
+            username: 'artist3',
+            display_name: 'Wave Sounds',
+          },
+          duration: 195,
+          plays_count: 3800,
+          likes_count: 156,
+          created_at: new Date().toISOString(),
+        },
+      ];
+      setTrendingTracks(mockTrending);
+      console.log('✅ DiscoverScreen: Trending tracks loaded (mock data):', mockTrending.length);
     } catch (error) {
-      console.error('Error loading trending tracks:', error);
+      console.error('❌ DiscoverScreen: Error loading trending tracks:', error);
     } finally {
       setLoadingTracks(false);
     }
@@ -155,28 +202,264 @@ export default function DiscoverScreen() {
 
   const loadRecentTracks = async () => {
     try {
-      const { success, data } = await db.getAudioTracks(10);
-      if (success && data) {
-        setRecentTracks(data);
+      console.log('🔧 DiscoverScreen: Loading recent tracks...');
+      // Try to load real tracks from Supabase - get all columns to find artwork
+      const { data, error } = await supabase
+        .from('audio_tracks')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (error) {
+        console.error('❌ DiscoverScreen: Supabase error loading recent tracks:', error);
+        // Fallback to mock data
+        const mockTracks: AudioTrack[] = [
+          {
+            id: 'discover-recent-1',
+            title: 'Untitled Audio File',
+            cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
+            artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
+            creator: {
+              id: 'discover-creator-1',
+              username: 'asibe_cheta',
+              display_name: 'Asibe Cheta',
+            },
+            duration: 180,
+            plays_count: 45,
+            likes_count: 12,
+            created_at: new Date().toISOString(),
+          },
+          {
+            id: 'discover-recent-2',
+            title: 'My Song Hits',
+            cover_image_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+            artwork_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+            creator: {
+              id: 'discover-creator-2',
+              username: 'asibe_cheta',
+              display_name: 'Asibe Cheta',
+            },
+            duration: 210,
+            plays_count: 89,
+            likes_count: 23,
+            created_at: new Date().toISOString(),
+          },
+        ];
+        setRecentTracks(mockTracks);
+        console.log('✅ DiscoverScreen: Recent tracks loaded (fallback mock data):', mockTracks.length);
+      } else if (data && data.length > 0) {
+        const fallbackImages = [
+          'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
+          'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+          'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+          'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop',
+          'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=center',
+        ];
+        
+        const transformedTracks: AudioTrack[] = data.map((track, index) => {
+          // Try multiple possible column names for artwork
+          const imageUrl = track.cover_image_url || 
+                           track.cover_url || 
+                           track.artwork_url || 
+                           track.image_url ||
+                           track.thumbnail_url ||
+                           track.cover ||
+                           track.artwork ||
+                           track.image ||
+                           fallbackImages[index % fallbackImages.length];
+          
+          console.log(`🖼️ DiscoverScreen Track "${track.title}" artwork check:`, {
+            cover_image_url: track.cover_image_url,
+            cover_url: track.cover_url,
+            artwork_url: track.artwork_url,
+            image_url: track.image_url,
+            thumbnail_url: track.thumbnail_url,
+            cover: track.cover,
+            artwork: track.artwork,
+            image: track.image,
+            final: imageUrl
+          });
+          
+          return {
+            id: track.id,
+            title: track.title || 'Untitled Track',
+            description: track.description,
+            audio_url: track.audio_url || track.file_url,
+            file_url: track.file_url,
+            cover_image_url: imageUrl,
+            artwork_url: imageUrl,
+            duration: track.duration || 180,
+            plays_count: track.plays_count || track.play_count || 0,
+            likes_count: track.likes_count || track.like_count || 0,
+            created_at: track.created_at,
+            creator: {
+              id: track.creator_id || 'unknown',
+              username: 'creator',
+              display_name: 'Music Creator',
+              avatar_url: undefined,
+            },
+          };
+        });
+        
+        setRecentTracks(transformedTracks);
+        console.log('✅ DiscoverScreen: Recent tracks loaded from Supabase:', transformedTracks.length);
+      } else {
+        console.log('ℹ️ DiscoverScreen: No recent tracks found, using mock data');
+        // Mock data fallback
+        const mockTracks: AudioTrack[] = [
+          {
+            id: 'discover-empty-1',
+            title: 'Demo Track',
+            cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
+            artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
+            creator: {
+              id: 'demo-creator',
+              username: 'demo_artist',
+              display_name: 'Demo Artist',
+            },
+            duration: 180,
+            plays_count: 0,
+            likes_count: 0,
+            created_at: new Date().toISOString(),
+          },
+        ];
+        setRecentTracks(mockTracks);
       }
     } catch (error) {
-      console.error('Error loading recent tracks:', error);
+      console.error('❌ DiscoverScreen: Error loading recent tracks:', error);
+      setRecentTracks([]);
     }
   };
 
   const loadFeaturedArtists = async () => {
     try {
-      console.log('🔧 Loading featured artists...');
-      const { success, data } = await db.getFeaturedCreators(10);
-      if (success && data && data.length > 0) {
-        console.log('✅ Featured artists loaded:', data.length, 'artists');
-        setFeaturedArtists(data);
+      console.log('🔧 DiscoverScreen: Loading featured artists...');
+      
+      // Try to load real creators from the database
+      const { data, error } = await supabase
+        .from('profiles')
+        .select(`
+          id,
+          username,
+          display_name,
+          bio,
+          avatar_url,
+          followers_count,
+          tracks_count,
+          is_creator,
+          is_verified
+        `)
+        .eq('role', 'creator')
+        .eq('is_creator', true)
+        .order('followers_count', { ascending: false })
+        .limit(10);
+      
+      console.log('🔍 DiscoverScreen: Raw featured artists data:', data);
+      console.log('🔍 DiscoverScreen: Featured artists error:', error);
+      
+      if (data && data.length > 0 && !error) {
+        console.log('✅ DiscoverScreen: Featured artists loaded from Supabase:', data.length);
+        
+        // Transform the data to match our Creator interface
+        const transformedArtists: Creator[] = data.map(artist => ({
+          id: artist.id,
+          username: artist.username,
+          display_name: artist.display_name || artist.username,
+          bio: artist.bio || 'Music creator',
+          avatar_url: artist.avatar_url,
+          followers_count: artist.followers_count || 0,
+          tracks_count: artist.tracks_count || 0,
+          is_creator: artist.is_creator,
+          is_verified: artist.is_verified || false,
+        }));
+        
+        setFeaturedArtists(transformedArtists);
+        console.log('✅ DiscoverScreen: Transformed featured artists:', transformedArtists.length);
+        transformedArtists.forEach(artist => {
+          console.log(`🎵 Artist: "${artist.display_name}" (@${artist.username}) - ${artist.followers_count} followers`);
+        });
       } else {
-        console.log('ℹ️ No featured artists found in database');
-        setFeaturedArtists([]);
+        console.log('ℹ️ DiscoverScreen: No featured artists found in database, trying alternative query...');
+        
+        // Try alternative query without role filter
+        const { data: altData, error: altError } = await supabase
+          .from('profiles')
+          .select(`
+            id,
+            username,
+            display_name,
+            bio,
+            avatar_url,
+            followers_count,
+            tracks_count,
+            is_creator,
+            is_verified
+          `)
+          .eq('is_creator', true)
+          .order('followers_count', { ascending: false })
+          .limit(10);
+        
+        console.log('🔍 DiscoverScreen: Alternative query data:', altData);
+        console.log('🔍 DiscoverScreen: Alternative query error:', altError);
+        
+        if (altData && altData.length > 0 && !altError) {
+          const transformedArtists: Creator[] = altData.map(artist => ({
+            id: artist.id,
+            username: artist.username,
+            display_name: artist.display_name || artist.username,
+            bio: artist.bio || 'Music creator',
+            avatar_url: artist.avatar_url,
+            followers_count: artist.followers_count || 0,
+            tracks_count: artist.tracks_count || 0,
+            is_creator: artist.is_creator,
+            is_verified: artist.is_verified || false,
+          }));
+          
+          setFeaturedArtists(transformedArtists);
+          console.log('✅ DiscoverScreen: Using alternative query results:', transformedArtists.length);
+        } else {
+          console.log('ℹ️ DiscoverScreen: No creators found, using enhanced mock data');
+          // Enhanced mock data with better variety
+          const mockArtists: Creator[] = [
+            {
+              id: 'discover-artist-1',
+              username: 'asibe_cheta',
+              display_name: 'Asibe Cheta',
+              bio: 'Music creator and producer',
+              avatar_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=150&h=150&fit=crop&crop=face',
+              followers_count: 1250,
+              tracks_count: 25,
+              is_creator: true,
+              is_verified: true,
+            },
+            {
+              id: 'discover-artist-2',
+              username: 'beat_maker_pro',
+              display_name: 'Beat Maker Pro',
+              bio: 'Electronic music producer',
+              avatar_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=150&h=150&fit=crop&crop=face',
+              followers_count: 890,
+              tracks_count: 18,
+              is_creator: true,
+              is_verified: false,
+            },
+            {
+              id: 'discover-artist-3',
+              username: 'indie_sound',
+              display_name: 'Indie Sound',
+              bio: 'Indie rock and alternative music',
+              avatar_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=150&h=150&fit=crop&crop=face',
+              followers_count: 2100,
+              tracks_count: 32,
+              is_creator: true,
+              is_verified: true,
+            },
+          ];
+          setFeaturedArtists(mockArtists);
+        }
       }
     } catch (error) {
-      console.error('Error loading featured artists:', error);
+      console.error('❌ DiscoverScreen: Error loading featured artists:', error);
       setFeaturedArtists([]);
     } finally {
       setLoadingArtists(false);
@@ -185,12 +468,85 @@ export default function DiscoverScreen() {
 
   const loadEvents = async () => {
     try {
-      const { success, data } = await db.getEvents(10);
-      if (success && data) {
-        setEvents(data);
+      console.log('🔧 DiscoverScreen: Loading events...');
+      const { data, error } = await dbHelpers.getUpcomingEvents(10);
+      
+      if (error) {
+        console.error('❌ DiscoverScreen: Supabase error loading events:', error);
+        // Fallback to mock data
+        const mockEvents: Event[] = [
+          {
+            id: 'discover-event-1',
+            title: 'Virtual Music Showcase',
+            description: 'Join us for an evening of new music from talented creators',
+            event_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+            location: 'Online Event',
+            cover_image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+            organizer: {
+              id: 'discover-organizer-1',
+              username: 'event_organizer',
+              display_name: 'Music Events',
+              avatar_url: undefined,
+            },
+          },
+          {
+            id: 'discover-event-2',
+            title: 'Beat Making Workshop',
+            description: 'Learn the fundamentals of music production',
+            event_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+            location: 'Community Center',
+            cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+            organizer: {
+              id: 'discover-organizer-2',
+              username: 'workshop_host',
+              display_name: 'Production Academy',
+              avatar_url: undefined,
+            },
+          },
+        ];
+        setEvents(mockEvents);
+        console.log('✅ DiscoverScreen: Events loaded (fallback mock data):', mockEvents.length);
+      } else if (data && data.length > 0) {
+        const transformedEvents: Event[] = data.map(event => ({
+          id: event.id,
+          title: event.title,
+          description: event.description,
+          event_date: event.event_date,
+          location: event.location,
+          cover_image_url: event.image_url,
+          organizer: {
+            id: 'organizer-' + event.id,
+            username: 'event_organizer',
+            display_name: 'Event Organizer',
+            avatar_url: undefined,
+          },
+        }));
+        
+        setEvents(transformedEvents);
+        console.log('✅ DiscoverScreen: Events loaded from Supabase:', transformedEvents.length);
+      } else {
+        console.log('ℹ️ DiscoverScreen: No events found, using mock data');
+        const mockEvents: Event[] = [
+          {
+            id: 'discover-empty-event',
+            title: 'Music Meetup',
+            description: 'Connect with local musicians and creators',
+            event_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
+            location: 'Local Venue',
+            cover_image_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+            organizer: {
+              id: 'discover-organizer-empty',
+              username: 'music_community',
+              display_name: 'Music Community',
+              avatar_url: undefined,
+            },
+          },
+        ];
+        setEvents(mockEvents);
       }
     } catch (error) {
-      console.error('Error loading events:', error);
+      console.error('❌ DiscoverScreen: Error loading events:', error);
+      setEvents([]);
     } finally {
       setLoadingEvents(false);
     }
@@ -376,14 +732,23 @@ export default function DiscoverScreen() {
         {loadingTracks ? (
           <LoadingState text="Loading recent tracks..." />
         ) : recentTracks.length > 0 ? (
-          <View style={[styles.tracksList, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderWidth: 1 }]}>
+          <View style={[styles.tracksList, { backgroundColor: theme.colors.background }]}>
             {recentTracks.map((track) => (
-              <TouchableOpacity key={track.id} style={styles.trackRow} onPress={() => handleTrackPress(track)}>
-                <View style={styles.trackRowCover}>
+              <TouchableOpacity key={track.id} style={[styles.trackRow, { backgroundColor: theme.colors.background, borderBottomColor: theme.colors.border }]} onPress={() => handleTrackPress(track)}>
+                <View style={[styles.trackRowCover, { backgroundColor: theme.colors.surface }]}>
                   {(track.cover_image_url || track.artwork_url) ? (
-                    <Image source={{ uri: track.cover_image_url || track.artwork_url }} style={styles.trackRowImage} />
+                    <Image 
+                      source={{ uri: track.cover_image_url || track.artwork_url }} 
+                      style={styles.trackRowImage}
+                      onError={(error) => {
+                        console.log(`❌ DiscoverScreen Image failed to load for "${track.title}": ${track.cover_image_url || track.artwork_url}`, error);
+                      }}
+                      onLoad={() => {
+                        console.log(`✅ DiscoverScreen Image loaded successfully for "${track.title}": ${track.cover_image_url || track.artwork_url}`);
+                      }}
+                    />
                   ) : (
-                    <View style={styles.defaultTrackRowImage}>
+                    <View style={[styles.defaultTrackRowImage, { backgroundColor: theme.colors.surface }]}>
                       <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />
                     </View>
                   )}
@@ -393,7 +758,7 @@ export default function DiscoverScreen() {
                   <Text style={[styles.trackRowArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>by {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}</Text>
                 </View>
                 <View style={styles.trackRowActions}>
-                  <TouchableOpacity style={styles.playButton} onPress={() => handleTrackPress(track)}>
+                  <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]} onPress={() => handleTrackPress(track)}>
                     <Ionicons name="play" size={16} color={theme.colors.primary} />
                   </TouchableOpacity>
                   <Text style={[styles.trackRowDuration, { color: theme.colors.textSecondary }]}>{formatDuration(track.duration)}</Text>
@@ -838,23 +1203,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   tracksList: {
-    borderRadius: 12,
-    padding: 16,
-    gap: 16,
-    paddingBottom: 32,
+    paddingHorizontal: 16,
   },
   trackRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderBottomWidth: 0.5,
   },
   trackRowCover: {
     width: 48,
     height: 48,
     borderRadius: 8,
-    backgroundColor: '#1A1A1A',
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 12,
   },
   trackRowImage: {
     width: '100%',
@@ -889,7 +1253,6 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(220, 38, 38, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
   },

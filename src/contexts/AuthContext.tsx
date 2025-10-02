@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { Linking } from 'react-native';
 import type { User, Session } from '@supabase/supabase-js';
-import { authService } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 
 interface AuthContextType {
   user: User | null;
@@ -37,10 +37,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const getInitialSession = async () => {
       try {
         console.log('Getting initial session...');
-        const { success, session } = await authService.getSession();
-        console.log('Initial session result:', { success, session: !!session });
+        const { data: { session }, error } = await supabase.auth.getSession();
+        console.log('Initial session result:', { session: !!session, error });
         
-        if (success && session) {
+        if (session && !error) {
           setSession(session);
           setUser(session.user);
         }
@@ -63,7 +63,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     getInitialSession();
 
     // Listen for auth state changes
-    const { data: { subscription } } = authService.onAuthStateChange(
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('Auth state changed:', event, session?.user?.email);
         setSession(session);
@@ -138,10 +138,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
     
     try {
-      const { success, error } = await authService.signIn(email, password);
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
       
-      if (!success) {
-        setError(error?.message || 'Sign in failed');
+      if (error) {
+        setError(error.message || 'Sign in failed');
         setLoading(false);
         return { success: false, error };
       }
@@ -160,10 +163,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
     
     try {
-      const { success, error } = await authService.signUp(email, password, metadata);
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: metadata,
+        },
+      });
       
-      if (!success) {
-        setError(error?.message || 'Sign up failed');
+      if (error) {
+        setError(error.message || 'Sign up failed');
         setLoading(false);
         return { success: false, error };
       }
@@ -183,10 +192,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setLoading(true);
     
     try {
-      const { success, error } = await authService.signOut();
+      const { error } = await supabase.auth.signOut();
       
-      if (!success) {
-        setError(error?.message || 'Sign out failed');
+      if (error) {
+        setError(error.message || 'Sign out failed');
         setLoading(false);
         return { success: false, error };
       }
@@ -209,10 +218,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
     
     try {
-      const { success, error } = await authService.signInWithProvider('google');
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+      });
       
-      if (!success) {
-        setError(error?.message || 'Google sign in failed');
+      if (error) {
+        setError(error.message || 'Google sign in failed');
         setLoading(false);
         return { success: false, error };
       }
@@ -231,10 +242,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
     
     try {
-      const { success, error } = await authService.resetPassword(email);
+      const { data, error } = await supabase.auth.resetPasswordForEmail(email);
       
-      if (!success) {
-        setError(error?.message || 'Password reset failed');
+      if (error) {
+        setError(error.message || 'Password reset failed');
         setLoading(false);
         return { success: false, error };
       }
@@ -254,10 +265,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
     
     try {
-      const { success, error } = await authService.updatePassword(newPassword);
+      const { data, error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
       
-      if (!success) {
-        setError(error?.message || 'Password update failed');
+      if (error) {
+        setError(error.message || 'Password update failed');
         setLoading(false);
         return { success: false, error };
       }
@@ -277,10 +290,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
     
     try {
-      const { success, error } = await authService.resendConfirmation(email);
+      const { data, error } = await supabase.auth.resend({
+        type: 'signup',
+        email: email,
+      });
       
-      if (!success) {
-        setError(error?.message || 'Failed to resend confirmation');
+      if (error) {
+        setError(error.message || 'Failed to resend confirmation');
         setLoading(false);
         return { success: false, error };
       }
@@ -297,8 +313,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const refreshUser = async () => {
     try {
-      const { success, session } = await authService.getSession();
-      if (success && session) {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (session && !error) {
         setSession(session);
         setUser(session.user);
       }

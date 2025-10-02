@@ -34,6 +34,8 @@ import TransactionHistoryScreen from './src/screens/TransactionHistoryScreen';
 import WithdrawalScreen from './src/screens/WithdrawalScreen';
 import WithdrawalMethodsScreen from './src/screens/WithdrawalMethodsScreen';
 import AddWithdrawalMethodScreen from './src/screens/AddWithdrawalMethodScreen';
+import AllCreatorsScreen from './src/screens/AllCreatorsScreen';
+import AllEventsScreen from './src/screens/AllEventsScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -149,6 +151,8 @@ function AppNavigator() {
                             <Stack.Screen name="Withdrawal" component={WithdrawalScreen} />
                             <Stack.Screen name="WithdrawalMethods" component={WithdrawalMethodsScreen} />
                             <Stack.Screen name="AddWithdrawalMethod" component={AddWithdrawalMethodScreen} />
+                            <Stack.Screen name="AllCreators" component={AllCreatorsScreen} />
+                            <Stack.Screen name="AllEvents" component={AllEventsScreen} />
                  </>
                )}
       </Stack.Navigator>

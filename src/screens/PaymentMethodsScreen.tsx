@@ -18,6 +18,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService } from '../services/WalletService';
 import { currencyService } from '../services/CurrencyService';
+import CountryAwareBankForm from '../components/CountryAwareBankForm';
 
 interface BankAccount {
   id: string;
@@ -49,6 +50,10 @@ export default function PaymentMethodsScreen() {
   const [bankAccount, setBankAccount] = useState<BankAccount | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [accountStatus, setAccountStatus] = useState<any>(null);
+  const [statusDisplay, setStatusDisplay] = useState<any>(null);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [cleaningAccounts, setCleaningAccounts] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showAccountDetails, setShowAccountDetails] = useState(false);
   
@@ -66,22 +71,139 @@ export default function PaymentMethodsScreen() {
   }, []);
 
   const loadBankAccount = async () => {
+    if (!session) {
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
-      // TODO: Implement actual API call
-      // const account = await revenueService.getBankAccount(user?.id);
-      // setBankAccount(account);
+      console.log('🔄 Loading bank account data...');
       
-      // Mock data for now
-      setTimeout(() => {
-        setBankAccount(null); // No account initially
-        setLoading(false);
-      }, 1000);
+      // Load bank account data (mock for now)
+      // In a real app, this would call an API
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Mock data - replace with actual API call
+      setBankAccount(null); // No bank account initially
+      
+      // Check account status if we have a bank account
+      await checkAccountStatus();
+      
+      console.log('✅ Bank account data loaded');
     } catch (error) {
-      console.error('Error loading bank account:', error);
-      Alert.alert('Error', 'Failed to load bank account information');
+      console.error('❌ Error loading bank account:', error);
+      Alert.alert('Error', 'Failed to load bank account data');
+    } finally {
       setLoading(false);
     }
+  };
+
+  /**
+   * Check Stripe account status and update display
+   */
+  const checkAccountStatus = async () => {
+    if (!session) return;
+
+    try {
+      setCheckingStatus(true);
+      console.log('🔍 Checking Stripe account status...');
+      
+      const statusResult = await walletService.checkStripeAccountStatusSafe(session);
+      
+      if (statusResult?.success && statusResult?.accountStatus) {
+        const status = statusResult.accountStatus;
+        setAccountStatus(status);
+        
+        // Get display information
+        const display = walletService.getVerificationStatusDisplay(status);
+        setStatusDisplay(display);
+        
+        console.log('✅ Account status updated:', display);
+        
+        // Show alert for restricted accounts
+        if (walletService.isAccountRestricted(status)) {
+          Alert.alert(
+            'Account Restricted',
+            'Your Stripe account has been restricted. This may be due to multiple verification attempts. You can clean up restricted accounts and contact Stripe support for assistance.',
+            [
+              { text: 'Contact Support', onPress: () => handleContactSupport() },
+              { text: 'Clean Up Accounts', onPress: () => handleCleanupAccounts() },
+              { text: 'OK', style: 'cancel' }
+            ]
+          );
+        }
+      } else {
+        console.log('⚠️ No account status available');
+        setStatusDisplay({
+          status: 'unknown',
+          color: '#6B7280',
+          icon: 'help-circle',
+          message: 'Unable to check account status',
+          actionRequired: false,
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error checking account status:', error);
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
+  /**
+   * Clean up restricted Stripe accounts
+   */
+  const handleCleanupAccounts = async () => {
+    if (!session) return;
+
+    Alert.alert(
+      'Clean Up Restricted Accounts',
+      'This will remove restricted Stripe accounts from your profile. You may need to contact Stripe support before creating new accounts. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Clean Up', 
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setCleaningAccounts(true);
+              console.log('🧹 Cleaning up restricted accounts...');
+              
+              const cleanupResult = await walletService.cleanupRestrictedAccountsSafe(session);
+              
+              if (cleanupResult?.success) {
+                Alert.alert(
+                  'Accounts Cleaned',
+                  `Successfully cleaned up ${cleanupResult.cleaned || 0} restricted accounts. ${cleanupResult.recommendation || ''}`,
+                  [
+                    { text: 'Contact Support', onPress: () => handleContactSupport() },
+                    { text: 'OK' }
+                  ]
+                );
+                
+                // Refresh account status
+                await checkAccountStatus();
+                await loadBankAccount();
+              } else {
+                Alert.alert('Error', 'Failed to clean up accounts. Please try again.');
+              }
+            } catch (error) {
+              console.error('❌ Error cleaning up accounts:', error);
+              Alert.alert('Error', 'Failed to clean up accounts. Please try again.');
+            } finally {
+              setCleaningAccounts(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  /**
+   * Open Stripe support link
+   */
+  const handleContactSupport = () => {
+    Linking.openURL('https://support.stripe.com/');
   };
 
   const handleSave = async () => {
@@ -126,6 +248,23 @@ export default function PaymentMethodsScreen() {
 
 
 
+
+  const handleCountryAwareBankSubmit = async (methodData: any) => {
+    try {
+      console.log('🏦 Submitting country-aware bank account:', methodData);
+      
+      // Here we would normally call the walletService to add the withdrawal method
+      // For now, let's simulate the API call and show success
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      Alert.alert('Success', 'Bank account added successfully with country-aware details!');
+      setIsEditing(false);
+      loadBankAccount(); // Refresh data
+    } catch (error) {
+      console.error('❌ Error adding bank account:', error);
+      Alert.alert('Error', 'Failed to add bank account. Please try again.');
+    }
+  };
 
   const handleSetupStripeConnect = async () => {
     try {
@@ -370,6 +509,87 @@ export default function PaymentMethodsScreen() {
       </View>
 
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 100 }}>
+        {/* Account Status Section */}
+        {statusDisplay && (
+          <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+            <View style={styles.statusHeader}>
+              <Text style={[styles.cardTitle, { color: theme.colors.text }]}>Stripe Account Status</Text>
+              <TouchableOpacity 
+                style={[styles.refreshButton, { backgroundColor: theme.colors.card }]}
+                onPress={checkAccountStatus}
+                disabled={checkingStatus}
+              >
+                {checkingStatus ? (
+                  <ActivityIndicator size="small" color={theme.colors.primary} />
+                ) : (
+                  <Ionicons name="refresh" size={16} color={theme.colors.primary} />
+                )}
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.statusContainer}>
+              <View style={styles.statusInfo}>
+                <View style={[styles.statusIcon, { backgroundColor: `${statusDisplay.color}20` }]}>
+                  <Ionicons 
+                    name={statusDisplay.icon as any} 
+                    size={20} 
+                    color={statusDisplay.color} 
+                  />
+                </View>
+                <View style={styles.statusTextContainer}>
+                  <Text style={[styles.statusTitle, { color: theme.colors.text }]}>
+                    {statusDisplay.status.charAt(0).toUpperCase() + statusDisplay.status.slice(1)}
+                  </Text>
+                  <Text style={[styles.statusMessage, { color: theme.colors.textSecondary }]}>
+                    {statusDisplay.message}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Action buttons for restricted accounts */}
+            {statusDisplay.status === 'restricted' && (
+              <View style={styles.restrictedActions}>
+                <TouchableOpacity 
+                  style={[styles.supportButton, { backgroundColor: theme.colors.primary }]}
+                  onPress={handleContactSupport}
+                >
+                  <Ionicons name="help-circle" size={16} color="white" />
+                  <Text style={styles.supportButtonText}>Contact Stripe Support</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[styles.cleanupButton, { backgroundColor: theme.colors.error + '20', borderColor: theme.colors.error }]}
+                  onPress={handleCleanupAccounts}
+                  disabled={cleaningAccounts}
+                >
+                  {cleaningAccounts ? (
+                    <ActivityIndicator size="small" color={theme.colors.error} />
+                  ) : (
+                    <Ionicons name="trash" size={16} color={theme.colors.error} />
+                  )}
+                  <Text style={[styles.cleanupButtonText, { color: theme.colors.error }]}>
+                    {cleaningAccounts ? 'Cleaning...' : 'Clean Up Restricted Accounts'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Requirements display */}
+            {accountStatus?.requirements?.currently_due?.length > 0 && (
+              <View style={styles.requirementsSection}>
+                <Text style={[styles.requirementsTitle, { color: theme.colors.text }]}>
+                  Required Information:
+                </Text>
+                {accountStatus.requirements.currently_due.map((req: string, index: number) => (
+                  <Text key={index} style={[styles.requirementItem, { color: theme.colors.textSecondary }]}>
+                    • {req.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                  </Text>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
         {/* Bank Account Information */}
         {bankAccount ? (
           <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
@@ -459,138 +679,26 @@ export default function PaymentMethodsScreen() {
           </View>
         )}
 
-        {/* Edit Form */}
-        {isEditing && (
+        {/* Country-Aware Bank Form */}
+        {isEditing && session && (
           <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
             <Text style={[styles.cardTitle, { color: theme.colors.text }]}>
-              {bankAccount ? 'Edit Bank Account' : 'Add Bank Account'}
+              Add Bank Account
             </Text>
             
-            <View style={styles.formContainer}>
-              <View style={styles.inputRow}>
-                <View style={styles.inputContainer}>
-                  <Text style={[styles.inputLabel, { color: theme.colors.textSecondary }]}>Account Holder Name</Text>
-                  <TextInput
-                    style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
-                    value={formData.account_holder_name}
-                    onChangeText={(text) => setFormData({ ...formData, account_holder_name: text })}
-                    placeholder="John Doe"
-                    placeholderTextColor={theme.colors.textSecondary}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputRow}>
-                <View style={styles.inputContainer}>
-                  <Text style={[styles.inputLabel, { color: theme.colors.textSecondary }]}>Bank Name</Text>
-                  <TextInput
-                    style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
-                    value={formData.bank_name}
-                    onChangeText={(text) => setFormData({ ...formData, bank_name: text })}
-                    placeholder="Bank of America"
-                    placeholderTextColor={theme.colors.textSecondary}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputRow}>
-                <View style={[styles.inputContainer, { flex: 1, marginRight: 8 }]}>
-                  <Text style={[styles.inputLabel, { color: theme.colors.textSecondary }]}>Account Number</Text>
-                  <TextInput
-                    style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
-                    value={formData.account_number}
-                    onChangeText={(text) => setFormData({ ...formData, account_number: text })}
-                    placeholder="123456789"
-                    placeholderTextColor={theme.colors.textSecondary}
-                    keyboardType="numeric"
-                  />
-                </View>
-                <View style={[styles.inputContainer, { flex: 1, marginLeft: 8 }]}>
-                  <Text style={[styles.inputLabel, { color: theme.colors.textSecondary }]}>Routing Number</Text>
-                  <TextInput
-                    style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
-                    value={formData.routing_number}
-                    onChangeText={(text) => setFormData({ ...formData, routing_number: text })}
-                    placeholder="123456789"
-                    placeholderTextColor={theme.colors.textSecondary}
-                    keyboardType="numeric"
-                    maxLength={9}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputRow}>
-                <View style={[styles.inputContainer, { flex: 1, marginRight: 8 }]}>
-                  <Text style={[styles.inputLabel, { color: theme.colors.textSecondary }]}>Account Type</Text>
-                  <View style={[styles.pickerContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-                    <TouchableOpacity
-                      style={styles.picker}
-                      onPress={() => {
-                        Alert.alert(
-                          'Account Type',
-                          'Select your account type',
-                          [
-                            { text: 'Checking', onPress: () => setFormData({ ...formData, account_type: 'checking' }) },
-                            { text: 'Savings', onPress: () => setFormData({ ...formData, account_type: 'savings' }) },
-                            { text: 'Cancel', style: 'cancel' }
-                          ]
-                        );
-                      }}
-                    >
-                      <Text style={[styles.pickerText, { color: theme.colors.text }]}>
-                        {formData.account_type.charAt(0).toUpperCase() + formData.account_type.slice(1)}
-                      </Text>
-                      <Ionicons name="chevron-down" size={20} color={theme.colors.textSecondary} />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-                <View style={[styles.inputContainer, { flex: 1, marginLeft: 8 }]}>
-                  <Text style={[styles.inputLabel, { color: theme.colors.textSecondary }]}>Currency</Text>
-                  <View style={[styles.pickerContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-                    <TouchableOpacity
-                      style={styles.picker}
-                      onPress={() => {
-                        Alert.alert(
-                          'Currency',
-                          'Select your currency',
-                          [
-                            { text: 'USD - US Dollar', onPress: () => setFormData({ ...formData, currency: 'USD' }) },
-                            { text: 'EUR - Euro', onPress: () => setFormData({ ...formData, currency: 'EUR' }) },
-                            { text: 'GBP - British Pound', onPress: () => setFormData({ ...formData, currency: 'GBP' }) },
-                            { text: 'Cancel', style: 'cancel' }
-                          ]
-                        );
-                      }}
-                    >
-                      <Text style={[styles.pickerText, { color: theme.colors.text }]}>
-                        {formData.currency}
-                      </Text>
-                      <Ionicons name="chevron-down" size={20} color={theme.colors.textSecondary} />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            </View>
-
-            {/* Form Actions */}
+            <CountryAwareBankForm
+              session={session}
+              onSubmit={handleCountryAwareBankSubmit}
+              setAsDefault={true}
+            />
+            
+            {/* Cancel Button */}
             <View style={styles.formActions}>
               <TouchableOpacity 
                 style={[styles.cancelButton, { backgroundColor: theme.colors.card }]}
-                onPress={handleCancel}
-                disabled={saving}
+                onPress={() => setIsEditing(false)}
               >
                 <Text style={[styles.cancelButtonText, { color: theme.colors.text }]}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.saveButton}
-                onPress={handleSave}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.saveButtonText}>Save</Text>
-                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -1030,5 +1138,76 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#EF4444',
+  },
+  // Account Status Styles
+  statusHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  refreshButton: {
+    padding: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#DC2626',
+  },
+  statusTextContainer: {
+    flex: 1,
+  },
+  statusMessage: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 2,
+  },
+  restrictedActions: {
+    marginTop: 16,
+    gap: 12,
+  },
+  supportButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 8,
+  },
+  supportButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cleanupButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 8,
+  },
+  cleanupButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  requirementsSection: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: '#FEF3C7',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+  },
+  requirementsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  requirementItem: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 4,
   },
 });

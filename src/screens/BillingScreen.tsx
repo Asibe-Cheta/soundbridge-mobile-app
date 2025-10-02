@@ -15,45 +15,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService, WalletBalance } from '../services/WalletService';
 import { currencyService } from '../services/CurrencyService';
+import { subscriptionService, SubscriptionStatus, UsageStatistics, BillingHistoryItem, RevenueData } from '../services/SubscriptionService';
 
-interface SubscriptionData {
-  tier: 'free' | 'pro' | 'enterprise';
-  status: 'active' | 'cancelled' | 'past_due' | 'trialing';
-  current_period_start: string;
-  current_period_end: string;
-  cancel_at_period_end: boolean;
-  amount: number;
-  currency: string;
-  billing_cycle: 'monthly' | 'yearly';
-}
-
-interface UsageStats {
-  uploads_used: number;
-  uploads_limit: number;
-  storage_used: number; // in MB
-  storage_limit: number; // in MB
-  bandwidth_used: number; // in MB
-  bandwidth_limit: number; // in MB
-}
-
-interface RevenueData {
-  total_earnings: number;
-  pending_earnings: number;
-  last_payout: number;
-  last_payout_date: string;
-  next_payout_date: string;
-  currency: string;
-}
-
-interface BillingHistory {
-  id: string;
-  date: string;
-  amount: number;
-  currency: string;
-  status: 'paid' | 'pending' | 'failed';
-  description: string;
-  invoice_url?: string;
-}
+// Interfaces moved to SubscriptionService
 
 export default function BillingScreen() {
   const navigation = useNavigation();
@@ -61,95 +25,187 @@ export default function BillingScreen() {
   const { theme } = useTheme();
   
   const [loading, setLoading] = useState(true);
-  const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
-  const [usage, setUsage] = useState<UsageStats | null>(null);
+  const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
+  const [usage, setUsage] = useState<UsageStatistics | null>(null);
   const [revenue, setRevenue] = useState<RevenueData | null>(null);
-  const [billingHistory, setBillingHistory] = useState<BillingHistory[]>([]);
+  const [billingHistory, setBillingHistory] = useState<BillingHistoryItem[]>([]);
   const [walletData, setWalletData] = useState<WalletBalance | null>(null);
+  const [accountStatus, setAccountStatus] = useState<any>(null);
+  const [statusDisplay, setStatusDisplay] = useState<any>(null);
 
   useEffect(() => {
     loadBillingData();
   }, []);
 
   const loadBillingData = async () => {
+    if (!session) {
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
-      
-      // Load wallet data if user is logged in
-      if (session) {
-        try {
-          const walletBalance = await walletService.getWalletBalanceSafe(session);
-          setWalletData(walletBalance);
-        } catch (error) {
-          console.error('Error loading wallet data:', error);
-          // Don't fail the whole screen if wallet fails
-          setWalletData(null);
-        }
-      }
-      
-      // TODO: Implement actual API calls for billing data
-      // Mock data for now
-      setTimeout(() => {
+      console.log('🔄 Loading real billing data from APIs...');
+
+      // Load all data in parallel for better performance
+      const [
+        subscriptionData,
+        usageData,
+        revenueData,
+        billingHistoryData,
+        walletBalance,
+        accountStatusData
+      ] = await Promise.allSettled([
+        subscriptionService.getSubscriptionStatusSafe(session),
+        subscriptionService.getUsageStatisticsSafe(session),
+        subscriptionService.getRevenueDataSafe(session),
+        subscriptionService.getBillingHistorySafe(session, 10),
+        walletService.getWalletBalanceSafe(session),
+        walletService.checkStripeAccountStatusSafe(session)
+      ]);
+
+      // Handle subscription data
+      if (subscriptionData.status === 'fulfilled' && subscriptionData.value) {
+        setSubscription(subscriptionData.value);
+        console.log('✅ Real subscription data loaded');
+      } else {
+        console.warn('⚠️ Failed to load subscription data, using fallback');
+        // Fallback to free plan with correct limits
         setSubscription({
-          tier: 'pro',
+          tier: 'free',
           status: 'active',
-          current_period_start: '2025-01-01T00:00:00Z',
-          current_period_end: '2025-02-01T00:00:00Z',
+          current_period_start: new Date().toISOString(),
+          current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
           cancel_at_period_end: false,
-          amount: 9.99,
+          amount: 0,
           currency: 'USD',
-          billing_cycle: 'monthly'
+          billing_cycle: 'monthly',
         });
+      }
 
+      // Handle usage data
+      if (usageData.status === 'fulfilled' && usageData.value) {
+        setUsage(usageData.value);
+        console.log('✅ Real usage data loaded');
+      } else {
+        console.warn('⚠️ Failed to load usage data, using fallback');
+        // Fallback usage stats for free plan (correct limits)
         setUsage({
-          uploads_used: 7,
-          uploads_limit: 10,
-          storage_used: 1200, // 1.2GB
-          storage_limit: 2048, // 2GB
-          bandwidth_used: 850,
-          bandwidth_limit: 10240 // 10GB
+          uploads_used: 0,
+          uploads_limit: 3, // Free plan: 3 uploads
+          storage_used: 0,
+          storage_limit: 512, // Free plan: 0.5 GB = 512 MB
+          bandwidth_used: 0,
+          bandwidth_limit: 1000, // Free plan: 1 GB = 1000 MB
+          period_start: new Date().toISOString(),
+          period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
         });
+      }
 
+      // Handle revenue data
+      if (revenueData.status === 'fulfilled' && revenueData.value) {
+        setRevenue(revenueData.value);
+        console.log('✅ Real revenue data loaded');
+      } else {
+        console.warn('⚠️ Failed to load revenue data, using fallback');
+        // Fallback revenue data
         setRevenue({
-          total_earnings: 245.67,
-          pending_earnings: 32.45,
-          last_payout: 180.22,
-          last_payout_date: '2025-01-15T00:00:00Z',
-          next_payout_date: '2025-02-15T00:00:00Z',
-          currency: 'USD'
+          total_earnings: 0,
+          pending_earnings: 0,
+          last_payout: 0,
+          last_payout_date: '',
+          next_payout_date: '',
+          currency: 'USD',
+          total_tips: 0,
+          total_subscriptions: 0,
+          total_purchases: 0,
         });
+      }
 
-        setBillingHistory([
-          {
-            id: '1',
-            date: '2025-01-01T00:00:00Z',
-            amount: 9.99,
-            currency: 'USD',
-            status: 'paid',
-            description: 'Pro Plan - Monthly',
-            invoice_url: 'https://example.com/invoice/1'
-          },
-          {
-            id: '2',
-            date: '2024-12-01T00:00:00Z',
-            amount: 9.99,
-            currency: 'USD',
-            status: 'paid',
-            description: 'Pro Plan - Monthly',
-            invoice_url: 'https://example.com/invoice/2'
-          }
-        ]);
+      // Handle billing history
+      if (billingHistoryData.status === 'fulfilled') {
+        setBillingHistory(billingHistoryData.value);
+        console.log('✅ Real billing history loaded');
+      } else {
+        console.warn('⚠️ Failed to load billing history, using fallback');
+        setBillingHistory([]);
+      }
 
-        setLoading(false);
-      }, 1000);
+      // Handle wallet data
+      if (walletBalance.status === 'fulfilled' && walletBalance.value) {
+        setWalletData(walletBalance.value);
+        console.log('✅ Real wallet data loaded');
+      } else {
+        console.warn('⚠️ Failed to load wallet data');
+        setWalletData(null);
+      }
+
+      // Handle account status data
+      if (accountStatusData.status === 'fulfilled' && accountStatusData.value?.success && accountStatusData.value?.accountStatus) {
+        const status = accountStatusData.value.accountStatus;
+        setAccountStatus(status);
+        
+        // Get display information
+        const display = walletService.getVerificationStatusDisplay(status);
+        setStatusDisplay(display);
+        
+        console.log('✅ Account status loaded:', display);
+      } else {
+        console.warn('⚠️ Failed to load account status');
+        setStatusDisplay({
+          status: 'unknown',
+          color: '#6B7280',
+          icon: 'help-circle',
+          message: 'Unable to check account status',
+          actionRequired: false,
+        });
+      }
+
+      console.log('✅ All real billing data loaded successfully');
     } catch (error) {
-      console.error('Error loading billing data:', error);
-      Alert.alert('Error', 'Failed to load billing information');
+      console.error('❌ Error loading billing data:', error);
+      // Set fallback data on error
+      setSubscription({
+        tier: 'free',
+        status: 'active',
+        current_period_start: new Date().toISOString(),
+        current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        cancel_at_period_end: false,
+        amount: 0,
+        currency: 'USD',
+        billing_cycle: 'monthly',
+      });
+      setUsage({
+        uploads_used: 0,
+        uploads_limit: 3, // Free plan: 3 uploads
+        storage_used: 0,
+        storage_limit: 512, // Free plan: 0.5 GB = 512 MB
+        bandwidth_used: 0,
+        bandwidth_limit: 1000, // Free plan: 1 GB = 1000 MB
+        period_start: new Date().toISOString(),
+        period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+      setRevenue({
+        total_earnings: 0,
+        pending_earnings: 0,
+        last_payout: 0,
+        last_payout_date: '',
+        next_payout_date: '',
+        currency: 'USD',
+        total_tips: 0,
+        total_subscriptions: 0,
+        total_purchases: 0,
+      });
+      setBillingHistory([]);
+      setWalletData(null);
+    } finally {
       setLoading(false);
     }
   };
 
-  const handleCancelSubscription = () => {
+  const handleCancelSubscription = async () => {
+    if (!session) return;
+
     Alert.alert(
       'Cancel Subscription',
       'Are you sure you want to cancel your subscription? You\'ll lose access to Pro features at the end of your billing period.',
@@ -158,36 +214,54 @@ export default function BillingScreen() {
         { 
           text: 'Cancel Subscription', 
           style: 'destructive',
-          onPress: () => {
-            // TODO: Implement cancellation
-            Alert.alert('Success', 'Your subscription will be cancelled at the end of the current billing period.');
+          onPress: async () => {
+            try {
+              const result = await subscriptionService.cancelSubscription(session);
+              if (result.success) {
+                Alert.alert('Success', result.message || 'Your subscription has been cancelled.');
+                loadBillingData(); // Refresh data
+              } else {
+                Alert.alert('Error', result.message || 'Failed to cancel subscription.');
+              }
+            } catch (error) {
+              console.error('Error cancelling subscription:', error);
+              Alert.alert('Error', 'Failed to cancel subscription. Please try again.');
+            }
           }
         }
       ]
     );
   };
 
-  const handleRequestPayout = () => {
-    if (!revenue || revenue.pending_earnings < 25) {
-      Alert.alert('Minimum Not Met', 'You need at least $25 in pending earnings to request a payout.');
-      return;
-    }
+  const handleRequestPayout = async () => {
+    if (!session || !revenue) return;
 
     Alert.alert(
       'Request Payout',
-      `Request payout of $${revenue.pending_earnings.toFixed(2)}?`,
+      `Request payout of ${currencyService.formatAmount(revenue.pending_earnings, revenue.currency)}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         { 
-          text: 'Request Payout',
-          onPress: () => {
-            // TODO: Implement payout request
-            Alert.alert('Success', 'Payout request submitted. You\'ll receive payment within 2-3 business days.');
+          text: 'Request', 
+          onPress: async () => {
+            try {
+              const result = await subscriptionService.requestPayout(session);
+              if (result.success) {
+                Alert.alert('Success', result.message || 'Payout requested successfully.');
+                loadBillingData(); // Refresh data
+              } else {
+                Alert.alert('Error', result.message || 'Failed to request payout.');
+              }
+            } catch (error) {
+              console.error('Error requesting payout:', error);
+              Alert.alert('Error', 'Failed to request payout. Please try again.');
+            }
           }
         }
       ]
     );
   };
+
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -197,17 +271,7 @@ export default function BillingScreen() {
     });
   };
 
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 MB';
-    const k = 1024;
-    const sizes = ['MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  };
-
-  const getUsagePercentage = (used: number, limit: number) => {
-    return Math.min((used / limit) * 100, 100);
-  };
+  // Using SubscriptionService methods for formatting
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -285,8 +349,8 @@ export default function BillingScreen() {
                   size={16} 
                   color={getStatusColor(subscription.status)} 
                 />
-                <Text style={[styles.statusText, { color: getStatusColor(subscription.status) }]}>
-                  {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1)}
+                <Text style={[styles.statusText, { color: subscriptionService.getStatusColor(subscription.status) }]}>
+                  {subscriptionService.formatStatus(subscription.status)}
                 </Text>
               </View>
             </View>
@@ -294,7 +358,7 @@ export default function BillingScreen() {
             <View style={styles.planInfo}>
               <View style={styles.planDetails}>
                 <Text style={[styles.planName, { color: theme.colors.text }]}>
-                  {subscription.tier.charAt(0).toUpperCase() + subscription.tier.slice(1)} Plan
+                  {subscriptionService.formatTier(subscription.tier)}
                 </Text>
                 <Text style={[styles.planPrice, { color: theme.colors.text }]}>
                   ${subscription.amount}/{subscription.billing_cycle === 'monthly' ? 'month' : 'year'}
@@ -348,7 +412,7 @@ export default function BillingScreen() {
               <View style={styles.usageHeader}>
                 <Text style={[styles.usageLabel, { color: theme.colors.text }]}>Uploads</Text>
                 <Text style={[styles.usageValue, { color: theme.colors.textSecondary }]}>
-                  {usage.uploads_used} / {usage.uploads_limit}
+                  {usage.uploads_used} / {subscriptionService.formatUsageLimit(usage.uploads_limit)}
                 </Text>
               </View>
               <View style={[styles.progressBar, { backgroundColor: theme.colors.card }]}>
@@ -356,8 +420,8 @@ export default function BillingScreen() {
                   style={[
                     styles.progressFill, 
                     { 
-                      width: `${getUsagePercentage(usage.uploads_used, usage.uploads_limit)}%`,
-                      backgroundColor: getUsagePercentage(usage.uploads_used, usage.uploads_limit) > 80 ? '#EF4444' : '#DC2626'
+                      width: `${subscriptionService.calculateUsagePercentage(usage.uploads_used, usage.uploads_limit)}%`,
+                      backgroundColor: subscriptionService.calculateUsagePercentage(usage.uploads_used, usage.uploads_limit) > 80 ? '#EF4444' : '#DC2626'
                     }
                   ]} 
                 />
@@ -368,7 +432,7 @@ export default function BillingScreen() {
               <View style={styles.usageHeader}>
                 <Text style={[styles.usageLabel, { color: theme.colors.text }]}>Storage</Text>
                 <Text style={[styles.usageValue, { color: theme.colors.textSecondary }]}>
-                  {formatBytes(usage.storage_used)} / {formatBytes(usage.storage_limit)}
+                  {subscriptionService.formatStorage(usage.storage_used)} / {subscriptionService.formatStorage(usage.storage_limit)}
                 </Text>
               </View>
               <View style={[styles.progressBar, { backgroundColor: theme.colors.card }]}>
@@ -376,8 +440,8 @@ export default function BillingScreen() {
                   style={[
                     styles.progressFill, 
                     { 
-                      width: `${getUsagePercentage(usage.storage_used, usage.storage_limit)}%`,
-                      backgroundColor: getUsagePercentage(usage.storage_used, usage.storage_limit) > 80 ? '#EF4444' : '#10B981'
+                      width: `${subscriptionService.calculateUsagePercentage(usage.storage_used, usage.storage_limit)}%`,
+                      backgroundColor: subscriptionService.calculateUsagePercentage(usage.storage_used, usage.storage_limit) > 80 ? '#EF4444' : '#10B981'
                     }
                   ]} 
                 />
@@ -388,7 +452,7 @@ export default function BillingScreen() {
               <View style={styles.usageHeader}>
                 <Text style={[styles.usageLabel, { color: theme.colors.text }]}>Bandwidth</Text>
                 <Text style={[styles.usageValue, { color: theme.colors.textSecondary }]}>
-                  {formatBytes(usage.bandwidth_used)} / {formatBytes(usage.bandwidth_limit)}
+                  {subscriptionService.formatStorage(usage.bandwidth_used)} / {subscriptionService.formatStorage(usage.bandwidth_limit)}
                 </Text>
               </View>
               <View style={[styles.progressBar, { backgroundColor: theme.colors.card }]}>
@@ -396,8 +460,8 @@ export default function BillingScreen() {
                   style={[
                     styles.progressFill, 
                     { 
-                      width: `${getUsagePercentage(usage.bandwidth_used, usage.bandwidth_limit)}%`,
-                      backgroundColor: getUsagePercentage(usage.bandwidth_used, usage.bandwidth_limit) > 80 ? '#EF4444' : '#3B82F6'
+                      width: `${subscriptionService.calculateUsagePercentage(usage.bandwidth_used, usage.bandwidth_limit)}%`,
+                      backgroundColor: subscriptionService.calculateUsagePercentage(usage.bandwidth_used, usage.bandwidth_limit) > 80 ? '#EF4444' : '#3B82F6'
                     }
                   ]} 
                 />

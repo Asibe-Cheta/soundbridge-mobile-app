@@ -460,6 +460,126 @@ class WalletService {
       minute: '2-digit',
     });
   }
+
+  /**
+   * Check and force update Stripe account status
+   */
+  async checkStripeAccountStatus(session: Session): Promise<any> {
+    try {
+      console.log('🔍 Checking Stripe account status...');
+      const data = await this.makeRequest('/api/stripe/check-account-status', session, {
+        method: 'POST',
+      });
+      console.log('✅ Account status checked:', data);
+      return data;
+    } catch (error) {
+      console.error('❌ Error checking account status:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up restricted Stripe accounts
+   */
+  async cleanupRestrictedAccounts(session: Session): Promise<any> {
+    try {
+      console.log('🧹 Cleaning up restricted accounts...');
+      const data = await this.makeRequest('/api/stripe/cleanup-restricted-accounts', session, {
+        method: 'POST',
+      });
+      console.log('✅ Restricted accounts cleaned:', data);
+      return data;
+    } catch (error) {
+      console.error('❌ Error cleaning up accounts:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get verification status display information
+   */
+  getVerificationStatusDisplay(accountStatus: any): {
+    status: string;
+    color: string;
+    icon: string;
+    message: string;
+    actionRequired: boolean;
+  } {
+    if (accountStatus?.chargesEnabled) {
+      return {
+        status: 'verified',
+        color: '#10B981', // Green
+        icon: 'checkmark-circle',
+        message: 'Account verified and ready for payouts',
+        actionRequired: false,
+      };
+    } else if (accountStatus?.requirements?.currently_due?.length > 0) {
+      return {
+        status: 'requirements',
+        color: '#F59E0B', // Orange
+        icon: 'alert-circle',
+        message: `Additional information required: ${accountStatus.requirements.currently_due.join(', ')}`,
+        actionRequired: true,
+      };
+    } else if (accountStatus?.requirements?.past_due?.length > 0) {
+      return {
+        status: 'restricted',
+        color: '#EF4444', // Red
+        icon: 'close-circle',
+        message: 'Account restricted. Contact Stripe support for assistance.',
+        actionRequired: true,
+      };
+    } else if (accountStatus?.detailsSubmitted) {
+      return {
+        status: 'processing',
+        color: '#3B82F6', // Blue
+        icon: 'time',
+        message: 'Verification in progress...',
+        actionRequired: false,
+      };
+    } else {
+      return {
+        status: 'pending',
+        color: '#6B7280', // Gray
+        icon: 'time',
+        message: 'Account setup required',
+        actionRequired: true,
+      };
+    }
+  }
+
+  /**
+   * Check if account is restricted
+   */
+  isAccountRestricted(accountStatus: any): boolean {
+    return !accountStatus?.chargesEnabled && 
+           (accountStatus?.requirements?.past_due?.length > 0 || 
+            accountStatus?.requirements?.currently_due?.length > 0);
+  }
+
+  /**
+   * Safe wrapper for checking account status
+   */
+  async checkStripeAccountStatusSafe(session: Session): Promise<any | null> {
+    try {
+      return await this.checkStripeAccountStatus(session);
+    } catch (error) {
+      console.warn('⚠️ Account status check failed:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Safe wrapper for cleaning up restricted accounts
+   */
+  async cleanupRestrictedAccountsSafe(session: Session): Promise<any | null> {
+    try {
+      return await this.cleanupRestrictedAccounts(session);
+    } catch (error) {
+      console.warn('⚠️ Account cleanup failed:', error);
+      return null;
+    }
+  }
 }
 
 export const walletService = new WalletService();
