@@ -90,16 +90,15 @@ export default function HomeScreen() {
   };
 
   const navigateToRecentMusic = () => {
-    // Navigate to recent music page
-    console.log('Navigate to recent music');
+    navigation.navigate('Discover' as never);
   };
 
   const navigateToHotCreators = () => {
-    navigation.navigate('AllCreatorsScreen' as never);
+    navigation.navigate('AllCreators' as never);
   };
 
   const navigateToEvents = () => {
-    navigation.navigate('AllEventsScreen' as never);
+    navigation.navigate('AllEvents' as never);
   };
 
   const navigateToCreatorSetup = () => {
