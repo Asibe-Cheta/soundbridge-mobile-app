@@ -17,6 +17,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
+import TipModal from '../components/TipModal';
 
 interface Creator {
   id: string;
@@ -27,9 +28,11 @@ interface Creator {
   banner_url?: string;
   location?: string;
   genre?: string;
-  followers_count?: number;  // COMPUTED from follows table
-  tracks_count?: number;     // COMPUTED from audio_tracks table
-  events_count?: number;     // COMPUTED from events table
+  followers_count?: number;     // COMPUTED from follows table
+  tracks_count?: number;        // COMPUTED from audio_tracks table
+  events_count?: number;        // COMPUTED from events table
+  total_tips_received?: number; // COMPUTED from creator_tips table
+  total_tip_count?: number;     // COMPUTED from creator_tips table
   created_at: string;
   isFollowing?: boolean;
 }
@@ -54,13 +57,37 @@ export default function CreatorProfileScreen() {
   const { user } = useAuth();
   const { play, addToQueue } = useAudioPlayer();
 
-  const { creatorId, creator: initialCreator } = route.params as { creatorId: string; creator?: Creator };
+  // Debug route params
+  console.log('🔍 Route params:', route.params);
+  
+  const params = route.params as { creatorId?: string; creator?: Creator } || {};
+  const { creatorId, creator: initialCreator } = params;
+  
+  console.log('🔍 Extracted creatorId:', creatorId);
+  console.log('🔍 Extracted initialCreator:', initialCreator);
+  
+  // Handle missing creatorId
+  if (!creatorId) {
+    console.error('❌ No creatorId provided in route params');
+    return (
+      <View style={[styles.container, { backgroundColor: theme.colors.background, justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: theme.colors.text }}>Error: Creator ID not provided</Text>
+        <TouchableOpacity 
+          style={{ marginTop: 16, padding: 12, backgroundColor: theme.colors.primary, borderRadius: 8 }}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={{ color: '#FFFFFF' }}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const [creator, setCreator] = useState<Creator | null>(initialCreator || null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(!initialCreator);
   const [refreshing, setRefreshing] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
+  const [showTipModal, setShowTipModal] = useState(false);
 
   useEffect(() => {
     loadCreatorProfile();
@@ -92,33 +119,94 @@ export default function CreatorProfileScreen() {
 
       if (profileError) throw profileError;
 
-      // Get computed stats
-      const [followersResult, tracksResult, eventsResult] = await Promise.all([
-        // Count followers
+      // Get computed stats with better error handling
+      console.log('🔧 Loading stats for creator:', creatorId);
+      console.log('🔧 Creator ID type:', typeof creatorId, 'Value:', creatorId);
+      console.log('👤 Profile data loaded:', profileData);
+      
+      // Test query to verify creator ID is working
+      const testQuery = await supabase
+        .from('audio_tracks')
+        .select('id, title, creator_id')
+        .eq('creator_id', creatorId);
+      
+      console.log('🧪 Test query for tracks with creator_id:', creatorId);
+      console.log('🧪 Test query result:', testQuery.data?.length || 0, 'tracks found');
+      console.log('🧪 Test tracks:', testQuery.data?.map(t => ({ id: t.id, title: t.title })) || []);
+      
+      // Use a different approach - get actual data and count it
+      const [followersData, tracksData, eventsData, tipsResult] = await Promise.all([
+        // Get followers
         supabase
           .from('follows')
-          .select('*', { count: 'exact', head: true })
+          .select('follower_id')
           .eq('following_id', creatorId),
         
-        // Count tracks
+        // Get tracks
         supabase
           .from('audio_tracks')
-          .select('*', { count: 'exact', head: true })
+          .select('id')
           .eq('creator_id', creatorId)
           .eq('is_public', true),
         
-        // Count events
+        // Get events
         supabase
           .from('events')
-          .select('*', { count: 'exact', head: true })
+          .select('id')
+          .eq('creator_id', creatorId),
+        
+        // Get tip statistics (may not exist yet)
+        supabase
+          .from('creator_tips')
+          .select('amount')
           .eq('creator_id', creatorId)
+          .eq('status', 'completed')
+          .then(result => result)
+          .catch(error => {
+            console.log('ℹ️ Tips table may not exist yet:', error.message);
+            return { data: [], error: null };
+          })
       ]);
+
+      // Count the actual results
+      const followersResult = { count: followersData.data?.length || 0 };
+      const tracksResult = { count: tracksData.data?.length || 0 };
+      const eventsResult = { count: eventsData.data?.length || 0 };
+
+      console.log('📊 Stats results:', {
+        followers: followersResult.count,
+        tracks: tracksResult.count,
+        events: eventsResult.count,
+        tips: tipsResult.data?.length || 0
+      });
+
+      // Debug: Log raw results to understand the discrepancy
+      console.log('🔍 Raw stats data:', {
+        followersCount: followersData.data?.length,
+        tracksCount: tracksData.data?.length,
+        eventsCount: eventsData.data?.length,
+        creatorId,
+        followersData: followersData.data,
+        tracksData: tracksData.data?.map(t => ({ id: t.id, creator_id: `should be ${creatorId}` }))
+      });
+      
+      // Check if we're getting data for the wrong creator
+      console.log('🔍 Followers query result:', followersData);
+      console.log('🔍 Tracks query result:', tracksData);
+      console.log('🔍 Events query result:', eventsData);
+
+      // Calculate tip statistics
+      const tipAmounts = tipsResult.data || [];
+      const totalTipsReceived = tipAmounts.reduce((sum, tip) => sum + (tip.amount || 0), 0);
+      const totalTipCount = tipAmounts.length;
 
       const creatorWithStats = {
         ...profileData,
         followers_count: followersResult.count || 0,
         tracks_count: tracksResult.count || 0,
         events_count: eventsResult.count || 0,
+        total_tips_received: totalTipsReceived,
+        total_tip_count: totalTipCount,
       };
 
       setCreator(creatorWithStats);
@@ -158,6 +246,7 @@ export default function CreatorProfileScreen() {
 
       setTracks(data || []);
       console.log('✅ Creator tracks loaded:', data?.length || 0);
+      console.log('🎵 Track details:', data?.map(t => ({ id: t.id, title: t.title, creator_id: creatorId })) || []);
     } catch (error) {
       console.error('❌ Error loading creator tracks:', error);
     }
@@ -258,6 +347,20 @@ export default function CreatorProfileScreen() {
     }
   };
 
+  const handleTipSuccess = async (amount: number, message?: string) => {
+    console.log('🎉 Tip sent successfully:', { amount, message });
+    
+    // Update creator stats locally
+    setCreator(prev => prev ? {
+      ...prev,
+      total_tips_received: (prev.total_tips_received || 0) + amount,
+      total_tip_count: (prev.total_tip_count || 0) + 1,
+    } : null);
+    
+    // Optionally refresh the profile to get updated data
+    // await loadCreatorProfile();
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([loadCreatorProfile(), loadCreatorTracks(), checkFollowStatus()]);
@@ -338,26 +441,6 @@ export default function CreatorProfileScreen() {
               </View>
               <Text style={[styles.username, { color: theme.colors.textSecondary }]}>@{creator.username}</Text>
             </View>
-
-            <TouchableOpacity
-              style={[
-                styles.followButton,
-                {
-                  backgroundColor: isFollowing ? theme.colors.surface : theme.colors.primary,
-                  borderColor: theme.colors.primary,
-                }
-              ]}
-              onPress={handleFollow}
-            >
-              <Text
-                style={[
-                  styles.followButtonText,
-                  { color: isFollowing ? theme.colors.primary : '#FFFFFF' }
-                ]}
-              >
-                {isFollowing ? 'Following' : 'Follow'}
-              </Text>
-            </TouchableOpacity>
           </View>
 
           {creator.bio && (
@@ -377,6 +460,50 @@ export default function CreatorProfileScreen() {
             </View>
           )}
 
+          {/* Action Buttons */}
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              style={[
+                styles.followButton,
+                {
+                  backgroundColor: isFollowing ? theme.colors.surface : theme.colors.primary,
+                  borderColor: theme.colors.primary,
+                }
+              ]}
+              onPress={handleFollow}
+            >
+              <Text
+                style={[
+                  styles.followButtonText,
+                  { color: isFollowing ? theme.colors.primary : '#FFFFFF' }
+                ]}
+              >
+                {isFollowing ? 'Following' : 'Follow'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.tipButton,
+                {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.primary,
+                }
+              ]}
+              onPress={() => setShowTipModal(true)}
+            >
+              <Ionicons name="heart" size={16} color={theme.colors.primary} />
+              <Text
+                style={[
+                  styles.tipButtonText,
+                  { color: theme.colors.primary }
+                ]}
+              >
+                Tip
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           {/* Stats */}
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
@@ -390,6 +517,14 @@ export default function CreatorProfileScreen() {
             <View style={styles.statItem}>
               <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(creator.events_count || 0)}</Text>
               <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Events</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={[styles.statNumber, { color: theme.colors.primary }]}>
+                ${formatNumber(creator.total_tips_received || 0)}
+              </Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>
+                Tips ({creator.total_tip_count || 0})
+              </Text>
             </View>
           </View>
         </View>
@@ -433,7 +568,10 @@ export default function CreatorProfileScreen() {
                   <Text style={[styles.trackDuration, { color: theme.colors.textSecondary }]}>
                     {formatDuration(track.duration)}
                   </Text>
-                  <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]}>
+                  <TouchableOpacity 
+                    style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]}
+                    onPress={() => handleTrackPress(track)}
+                  >
                     <Ionicons name="play" size={16} color={theme.colors.primary} />
                   </TouchableOpacity>
                 </View>
@@ -447,6 +585,15 @@ export default function CreatorProfileScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Tip Modal */}
+      <TipModal
+        visible={showTipModal}
+        creatorId={creatorId}
+        creatorName={creator?.display_name || 'Creator'}
+        onClose={() => setShowTipModal(false)}
+        onTipSuccess={handleTipSuccess}
+      />
     </SafeAreaView>
   );
 }
@@ -549,13 +696,35 @@ const styles = StyleSheet.create({
   username: {
     fontSize: 14,
   },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginVertical: 16,
+  },
   followButton: {
+    flex: 1,
     paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingVertical: 12,
+    borderRadius: 24,
     borderWidth: 1,
+    alignItems: 'center',
   },
   followButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  tipButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 24,
+    borderWidth: 1,
+    gap: 6,
+    minWidth: 80,
+  },
+  tipButtonText: {
     fontSize: 14,
     fontWeight: '600',
   },

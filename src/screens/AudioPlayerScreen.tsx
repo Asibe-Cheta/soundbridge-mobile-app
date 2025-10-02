@@ -10,10 +10,14 @@ import {
   ScrollView,
   Animated,
   PanResponder,
+  Share,
+  Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
+import { useTheme } from '../contexts/ThemeContext';
 import type { AudioTrack } from '@soundbridge/types';
 
 const { width, height } = Dimensions.get('window');
@@ -165,9 +169,26 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  const handleLike = () => {
-    setIsLiked(!isLiked);
-    // TODO: Implement like functionality
+  const handleLike = async () => {
+    if (!currentTrack) return;
+    
+    try {
+      // TODO: Replace with actual API call when user auth is available
+      setIsLiked(!isLiked);
+      
+      // Simulate API call for now
+      console.log(`${isLiked ? 'Unliked' : 'Liked'} track:`, currentTrack.title);
+      
+      // Show feedback
+      Alert.alert(
+        isLiked ? 'Removed from Liked Songs' : 'Added to Liked Songs',
+        `"${currentTrack.title}" ${isLiked ? 'removed from' : 'added to'} your liked songs.`,
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      console.error('Error liking track:', error);
+      Alert.alert('Error', 'Unable to like this track. Please try again.');
+    }
   };
 
   const handleFollow = () => {
@@ -175,13 +196,34 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     // TODO: Implement follow functionality
   };
 
-  const handleShare = () => {
-    // TODO: Implement share functionality
+  const handleShare = async () => {
+    if (!currentTrack) return;
+    
+    try {
+      const shareUrl = `https://soundbridge.live/track/${currentTrack.id}`;
+      const message = `🎵 Check out "${currentTrack.title}" by ${currentTrack.creator?.display_name || 'Unknown Artist'} on SoundBridge!\n\n${shareUrl}`;
+      
+      await Share.share({
+        message: message,
+        url: shareUrl,
+        title: `${currentTrack.title} - SoundBridge`,
+      });
+    } catch (error) {
+      console.error('Error sharing track:', error);
+      Alert.alert('Share Failed', 'Unable to share this track. Please try again.');
+    }
   };
 
   const handleTipCreator = () => {
-    // TODO: Navigate to tip creator screen
-    navigation.navigate('CreatorProfile', { username: 'unknown' });
+    if (!currentTrack?.creator?.id) {
+      Alert.alert('Error', 'Creator information not available');
+      return;
+    }
+    
+    navigation.navigate('CreatorProfile', { 
+      creatorId: currentTrack.creator.id,
+      creator: currentTrack.creator 
+    });
   };
 
   const rotateInterpolate = rotateAnim.interpolate({
@@ -344,20 +386,21 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   }
 
   return (
-    <Animated.View 
-      style={[
-        styles.container,
-        {
-          opacity: fadeAnim,
-          transform: [
-            { translateY: slideAnim },
-            { scale: scaleAnim }
-          ]
-        }
-      ]}
-      {...panResponder.panHandlers}
-    >
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <Animated.View 
+        style={[
+          styles.container,
+          {
+            opacity: fadeAnim,
+            transform: [
+              { translateY: slideAnim },
+              { scale: scaleAnim }
+            ]
+          }
+        ]}
+        {...panResponder.panHandlers}
+      >
+        <StatusBar barStyle="light-content" backgroundColor="#000000" />
       
       <LinearGradient
         colors={['#000000', '#1A0A0A', '#2D1B1B']}
@@ -444,11 +487,16 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
 
       {/* Queue Modal */}
       {showQueue && renderQueue()}
-    </Animated.View>
+      </Animated.View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
   container: {
     flex: 1,
     backgroundColor: '#000000',
