@@ -18,7 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { db } from '../lib/supabase';
+import { dbHelpers } from '../lib/supabase';
 
 const { width } = Dimensions.get('window');
 
@@ -84,7 +84,7 @@ export default function MessagesScreen() {
       }
       
       console.log('🔧 Loading conversations for user:', user.id);
-      const { success, data } = await db.getConversations(user.id);
+      const { success, data } = await dbHelpers.getConversations(user.id);
       
       if (success && data && data.length > 0) {
         console.log('✅ Conversations loaded:', data.length, 'conversations');
@@ -135,7 +135,7 @@ export default function MessagesScreen() {
 
     try {
       console.log('🔍 Searching for users:', query);
-      const { success, data } = await db.searchProfiles(query, 10);
+      const { success, data } = await dbHelpers.searchProfiles(query, 10);
       
       if (success && data) {
         // Transform to match our search interface
