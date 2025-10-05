@@ -61,8 +61,17 @@ interface Event {
   description?: string;
   event_date: string;
   location?: string;
+  venue?: string;
+  category?: string;
+  price_gbp?: number;
+  price_ngn?: number;
+  max_attendees?: number;
+  current_attendees?: number;
+  likes_count?: number;
   image_url?: string;
   cover_art_url?: string;
+  creator_id?: string;
+  created_at?: string;
   organizer: {
     id: string;
     username: string;
@@ -75,9 +84,13 @@ interface Playlist {
   id: string;
   name: string;
   description?: string;
-  cover_art_url?: string;
+  cover_image_url?: string;
   tracks_count?: number;
-  creator: {
+  total_duration?: number;
+  followers_count?: number;
+  created_at?: string;
+  updated_at?: string;
+  creator?: {
     id: string;
     username: string;
     display_name: string;
@@ -135,8 +148,10 @@ function DiscoverScreen() {
       ]);
       console.log('✅ DiscoverScreen: Initial content loading completed');
     };
-    
+
     loadInitialContent();
+    // Also test search data availability
+    testSearchData();
   }, []); // Only run once on mount
 
   const loadDiscoverContent = async () => {
@@ -617,16 +632,28 @@ function DiscoverScreen() {
 
   const loadPlaylists = async () => {
     try {
+      setLoadingPlaylists(true);
       console.log('🔧 DiscoverScreen: Loading playlists...');
-      // Note: Playlists functionality would need to be implemented in the database
-      // For now, we'll just set empty playlists since this table doesn't exist yet
-      console.log('ℹ️ Playlists feature not implemented yet');
-      setPlaylists([]);
+      
+      const { data, error } = await dbHelpers.getPublicPlaylists(20);
+      
+      if (error) throw error;
+      
+      console.log('✅ DiscoverScreen: Playlists loaded:', data?.length || 0);
+      
+      // Transform data to handle creator relationship (might come as array)
+      const transformedPlaylists = data?.map(playlist => ({
+        ...playlist,
+        creator: Array.isArray(playlist.creator) ? playlist.creator[0] : playlist.creator
+      })) || [];
+      
+      setPlaylists(transformedPlaylists);
     } catch (error) {
       console.error('❌ DiscoverScreen: Error loading playlists:', error);
       setPlaylists([]);
     } finally {
       setLoadingPlaylists(false);
+      console.log('🏁 DiscoverScreen: Playlists loading completed');
     }
   };
 
@@ -701,10 +728,64 @@ function DiscoverScreen() {
   };
 
   const formatDuration = (seconds?: number) => {
-    if (!seconds) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    if (!seconds) return '0m';
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m`;
+  };
+
+  // ✅ NEW: Test search data availability
+  const testSearchData = async () => {
+    try {
+      console.log('🔍 Testing search data availability...');
+      
+      // Test 1: Check if public tracks exist
+      const { data: tracks, error: tracksError } = await supabase
+        .from('audio_tracks')
+        .select('id, title, is_public, creator_id')
+        .eq('is_public', true)
+        .limit(5);
+      
+      console.log('✅ Public tracks found:', tracks?.length || 0);
+      if (tracks && tracks.length > 0) {
+        console.log('Sample tracks:', tracks.map(t => t.title));
+      }
+      
+      // Test 2: Check if creators exist
+      const { data: creators, error: creatorsError } = await supabase
+        .from('profiles')
+        .select('id, username, display_name, role')
+        .eq('role', 'creator')
+        .limit(5);
+      
+      console.log('✅ Creators found:', creators?.length || 0);
+      if (creators && creators.length > 0) {
+        console.log('Sample creators:', creators.map(c => c.display_name));
+      }
+      
+      // Test 3: Check if events exist
+      const { data: events, error: eventsError } = await supabase
+        .from('events')
+        .select('id, title, event_date')
+        .limit(5);
+      
+      console.log('✅ Events found:', events?.length || 0);
+      if (events && events.length > 0) {
+        console.log('Sample events:', events.map(e => e.title));
+      }
+      
+      return {
+        tracks: tracks?.length || 0,
+        creators: creators?.length || 0,
+        events: events?.length || 0
+      };
+    } catch (error) {
+      console.error('❌ Error testing search data:', error);
+      return null;
+    }
   };
 
   return (
@@ -1199,15 +1280,153 @@ function DiscoverScreen() {
         )}
 
         {activeTab === 'Events' && (
-          <View style={[styles.tabContent, styles.firstSection]}>
-            <Text style={[styles.tabContentText, { color: theme.colors.text }]}>Events content coming soon...</Text>
-          </View>
+          <>
+            {/* Upcoming Events */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Upcoming Events</Text>
+                <TouchableOpacity>
+                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </TouchableOpacity>
+              </View>
+              
+              {loadingEvents ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading events...</Text>
+                </View>
+              ) : events.length > 0 ? (
+                <View style={styles.eventsContainer}>
+                  {events.map((event) => (
+                    <TouchableOpacity
+                      key={event.id}
+                      style={styles.eventCard}
+                      onPress={() => handleEventPress(event)}
+                    >
+                      <View style={styles.eventImageContainer}>
+                        {event.image_url ? (
+                          <Image source={{ uri: event.image_url }} style={styles.eventImage} />
+                        ) : (
+                          <View style={styles.defaultEventImage}>
+                            <Ionicons name="calendar" size={32} color={theme.colors.textSecondary} />
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.eventInfo}>
+                        <Text style={[styles.eventTitle, { color: theme.colors.text }]} numberOfLines={2}>
+                          {event.title}
+                        </Text>
+                        <Text style={[styles.eventDate, { color: theme.colors.primary }]}>
+                          {new Date(event.event_date).toLocaleDateString('en-US', {
+                            weekday: 'short',
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric'
+                          })}
+                        </Text>
+                        {event.location && (
+                          <Text style={[styles.eventLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            📍 {event.location}
+                          </Text>
+                        )}
+                        {event.venue && (
+                          <Text style={[styles.eventVenue, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            🏢 {event.venue}
+                          </Text>
+                        )}
+                        <Text style={[styles.eventOrganizer, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                          by {event.organizer?.display_name || event.organizer?.username || 'Unknown Organizer'}
+                        </Text>
+                        {(event.price_gbp || event.price_ngn) && (
+                          <Text style={[styles.eventPrice, { color: theme.colors.primary }]}>
+                            {event.price_gbp ? `£${event.price_gbp}` : event.price_ngn ? `₦${event.price_ngn}` : 'Free'}
+                          </Text>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="calendar" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>No events found</Text>
+                </View>
+              )}
+            </View>
+          </>
         )}
 
         {activeTab === 'Playlists' && (
-          <View style={[styles.tabContent, styles.firstSection]}>
-            <Text style={[styles.tabContentText, { color: theme.colors.text }]}>Playlists content coming soon...</Text>
-          </View>
+          <>
+            {/* Public Playlists */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Public Playlists</Text>
+                <TouchableOpacity>
+                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </TouchableOpacity>
+              </View>
+              
+              {loadingPlaylists ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading playlists...</Text>
+                </View>
+              ) : playlists.length > 0 ? (
+                <View style={styles.playlistsContainer}>
+                  {playlists.map((playlist) => (
+                    <TouchableOpacity
+                      key={playlist.id}
+                      style={styles.playlistCard}
+                      onPress={() => (navigation as any).navigate('PlaylistDetails', { playlistId: playlist.id })}
+                    >
+                      <View style={styles.playlistCover}>
+                        {playlist.cover_image_url ? (
+                          <Image source={{ uri: playlist.cover_image_url }} style={styles.playlistImage} />
+                        ) : (
+                          <View style={styles.defaultPlaylistImage}>
+                            <Ionicons name="musical-notes" size={32} color={theme.colors.textSecondary} />
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.playlistInfo}>
+                        <Text style={[styles.playlistName, { color: theme.colors.text }]} numberOfLines={1}>
+                          {playlist.name}
+                        </Text>
+                        <Text style={[styles.playlistCreator, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                          by {playlist.creator?.display_name || playlist.creator?.username || 'Unknown Creator'}
+                        </Text>
+                        <View style={styles.playlistStats}>
+                          <Text style={[styles.playlistStat, { color: theme.colors.textSecondary }]}>
+                            {playlist.tracks_count || 0} tracks
+                          </Text>
+                          <Text style={[styles.playlistStat, { color: theme.colors.textSecondary }]}>•</Text>
+                          <Text style={[styles.playlistStat, { color: theme.colors.textSecondary }]}>
+                            {formatDuration(playlist.total_duration || 0)}
+                          </Text>
+                          <Text style={[styles.playlistStat, { color: theme.colors.textSecondary }]}>•</Text>
+                          <Text style={[styles.playlistStat, { color: theme.colors.textSecondary }]}>
+                            {playlist.followers_count || 0} followers
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="musical-notes" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No playlists available yet</Text>
+                  <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
+                    Playlists will appear here once users start creating them!
+                  </Text>
+                  <Text style={[styles.emptyStateNote, { color: theme.colors.textSecondary }]}>
+                    💡 Users can create playlists by adding tracks to custom collections
+                  </Text>
+                </View>
+              )}
+            </View>
+          </>
         )}
           </>
         )}
@@ -1783,6 +2002,176 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 12,
+  },
+  // Events Tab Styles
+  eventsContainer: {
+    paddingHorizontal: 16,
+  },
+  eventCard: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  eventImageContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  eventImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  defaultEventImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  eventInfo: {
+    flex: 1,
+  },
+  eventTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  eventDate: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  eventLocation: {
+    fontSize: 12,
+    marginBottom: 2,
+  },
+  eventVenue: {
+    fontSize: 12,
+    marginBottom: 2,
+  },
+  eventOrganizer: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  eventPrice: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // Playlists Not Implemented Styles
+  playlistsNotImplemented: {
+    flex: 1,
+    paddingTop: 32,
+  },
+  notImplementedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 64,
+  },
+  notImplementedTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    marginTop: 24,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  notImplementedText: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 32,
+    lineHeight: 24,
+  },
+  notImplementedFeatures: {
+    alignSelf: 'stretch',
+    marginBottom: 32,
+  },
+  featureTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  featureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 16,
+  },
+  featureText: {
+    fontSize: 16,
+    marginLeft: 12,
+  },
+  notImplementedNote: {
+    fontSize: 14,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  // Playlists Styles
+  playlistsContainer: {
+    paddingHorizontal: 16,
+  },
+  playlistCard: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  playlistCover: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  playlistImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  defaultPlaylistImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playlistInfo: {
+    flex: 1,
+  },
+  playlistName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  playlistCreator: {
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  playlistStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  playlistStat: {
+    fontSize: 12,
+    marginRight: 6,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  emptyStateNote: {
+    fontSize: 12,
+    marginTop: 8,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });
 

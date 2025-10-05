@@ -38,6 +38,7 @@ import AllCreatorsScreen from './src/screens/AllCreatorsScreen';
 import AllEventsScreen from './src/screens/AllEventsScreen';
 import EventDetailsScreen from './src/screens/EventDetailsScreen';
 import TrackDetailsScreen from './src/screens/TrackDetailsScreen';
+import PlaylistDetailsScreen from './src/screens/PlaylistDetailsScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -157,6 +158,7 @@ function AppNavigator() {
                             <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} />
                             <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
                             <Stack.Screen name="TrackDetails" component={TrackDetailsScreen} />
+                            <Stack.Screen name="PlaylistDetails" component={PlaylistDetailsScreen} />
                  </>
                )}
       </Stack.Navigator>

@@ -207,7 +207,14 @@ When resolved, the mobile app should:
 
 ## **Playlists Database Schema Needed**
 
-We've introduced a **Playlists tab** in the mobile app's DiscoverScreen that needs database support. Please implement the following schema:
+**⚠️ IMPORTANT**: The mobile app now has a Playlists tab in the DiscoverScreen, but we understand this feature is **not yet implemented** on the web app side. 
+
+**Current Status**: 
+- ✅ Mobile UI ready with professional "Coming Soon" screen
+- ❌ Database schema not implemented yet
+- ❌ Backend API endpoints not available
+
+**When you're ready to implement playlists**, please use this schema:
 
 ### **`playlists` Table**
 ```sql
@@ -241,7 +248,7 @@ CREATE TABLE playlist_tracks (
 
 ### **Required Helper Functions**
 
-Please implement these in the mobile app's `src/lib/supabase.ts`:
+Please implement these in the mobile app's `src/lib/supabase.ts` when ready:
 
 ```typescript
 // Get public playlists (for discovery)
@@ -261,10 +268,12 @@ async getPublicPlaylists(limit = 20) {
 }
 ```
 
-### **Questions:**
+### **Questions for Future Implementation:**
 1. Should playlists have a maximum track limit?
 2. Do you want playlist categories/genres?
 3. Should there be playlist likes/favorites?
 
-**Status:** ⏳ Awaiting implementation  
-**Priority:** MEDIUM - New feature for enhanced user experience
+**Status:** ⏳ **NOT URGENT** - Implement when web app team has capacity  
+**Priority:** LOW - New feature for enhanced user experience
+
+**Note**: Mobile app gracefully handles this with a "Coming Soon" screen that explains the feature is being developed.
