@@ -746,34 +746,174 @@ function DiscoverScreen() {
         style={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* Navigation Tabs - Now inside main ScrollView */}
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          style={styles.inlineTabsScrollView}
-          contentContainerStyle={styles.inlineTabsContainer}
-        >
-          {tabs.map((tab) => (
-            <TouchableOpacity
-              key={tab}
-              style={[
-                styles.inlineTabButton,
-                activeTab === tab && styles.activeInlineTabButton
-              ]}
-              onPress={() => setActiveTab(tab)}
-            >
-              <Text
-                style={[
-                  styles.inlineTabText,
-                  { color: activeTab === tab ? '#DC2626' : theme.colors.textSecondary },
-                  activeTab === tab && styles.activeInlineTabText
-                ]}
-              >
-                {tab}
+        {/* Show search results when searching */}
+        {searchQuery.length > 0 ? (
+          <View style={styles.searchResultsContainer}>
+            {/* Search Results Header */}
+            <View style={styles.searchResultsHeader}>
+              <Text style={[styles.searchResultsTitle, { color: theme.colors.text }]}>
+                {isSearching ? 'Searching...' : `Results for "${searchQuery}"`}
               </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+              {!isSearching && (
+                <Text style={[styles.searchResultsCount, { color: theme.colors.textSecondary }]}>
+                  {searchResults.tracks.length + searchResults.artists.length} results
+                </Text>
+              )}
+            </View>
+
+            {isSearching ? (
+              <View style={styles.searchLoadingContainer}>
+                <ActivityIndicator size="large" color={theme.colors.primary} />
+                <Text style={[styles.searchLoadingText, { color: theme.colors.textSecondary }]}>Searching...</Text>
+              </View>
+            ) : (
+              <>
+                {/* Search Results Tabs */}
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.searchTabsScrollView}
+                  contentContainerStyle={styles.searchTabsContainer}
+                >
+                  <TouchableOpacity
+                    style={[styles.searchTabButton, styles.activeSearchTabButton]}
+                    onPress={() => {/* Could add search tab switching */}}
+                  >
+                    <Text style={[styles.searchTabText, { color: '#DC2626' }, styles.activeSearchTabText]}>
+                      All ({searchResults.tracks.length + searchResults.artists.length})
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.searchTabButton}>
+                    <Text style={[styles.searchTabText, { color: theme.colors.textSecondary }]}>
+                      Tracks ({searchResults.tracks.length})
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.searchTabButton}>
+                    <Text style={[styles.searchTabText, { color: theme.colors.textSecondary }]}>
+                      Artists ({searchResults.artists.length})
+                    </Text>
+                  </TouchableOpacity>
+                </ScrollView>
+
+                {/* Search Results Content */}
+                {searchResults.tracks.length === 0 && searchResults.artists.length === 0 ? (
+                  <View style={styles.noResultsContainer}>
+                    <Ionicons name="search" size={48} color={theme.colors.textSecondary} />
+                    <Text style={[styles.noResultsTitle, { color: theme.colors.text }]}>No results found</Text>
+                    <Text style={[styles.noResultsText, { color: theme.colors.textSecondary }]}>
+                      Try searching for different keywords
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    {/* Artists Results */}
+                    {searchResults.artists.length > 0 && (
+                      <View style={styles.searchSection}>
+                        <Text style={[styles.searchSectionTitle, { color: theme.colors.text }]}>Artists</Text>
+                        {searchResults.artists.map((artist) => (
+                          <TouchableOpacity
+                            key={artist.id}
+                            style={styles.searchArtistItem}
+                            onPress={() => handleCreatorPress(artist)}
+                          >
+                            <View style={styles.searchArtistAvatar}>
+                              {artist.avatar_url ? (
+                                <Image source={{ uri: artist.avatar_url }} style={styles.searchArtistImage} />
+                              ) : (
+                                <View style={styles.defaultSearchArtistImage}>
+                                  <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
+                                </View>
+                              )}
+                            </View>
+                            <View style={styles.searchArtistInfo}>
+                              <Text style={[styles.searchArtistName, { color: theme.colors.text }]} numberOfLines={1}>
+                                {artist.display_name || artist.username}
+                              </Text>
+                              <Text style={[styles.searchArtistUsername, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                                @{artist.username}
+                              </Text>
+                              <Text style={[styles.searchArtistStats, { color: theme.colors.textSecondary }]}>
+                                {formatNumber(artist.followers_count)} followers • {formatNumber(artist.tracks_count)} tracks
+                              </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* Tracks Results */}
+                    {searchResults.tracks.length > 0 && (
+                      <View style={styles.searchSection}>
+                        <Text style={[styles.searchSectionTitle, { color: theme.colors.text }]}>Tracks</Text>
+                        {searchResults.tracks.map((track) => (
+                          <TouchableOpacity
+                            key={track.id}
+                            style={styles.searchTrackItem}
+                            onPress={() => handleTrackPress(track)}
+                          >
+                            <View style={styles.searchTrackCover}>
+                              {track.cover_art_url ? (
+                                <Image source={{ uri: track.cover_art_url }} style={styles.searchTrackImage} />
+                              ) : (
+                                <View style={styles.defaultSearchTrackImage}>
+                                  <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />
+                                </View>
+                              )}
+                            </View>
+                            <View style={styles.searchTrackInfo}>
+                              <Text style={[styles.searchTrackTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                                {track.title}
+                              </Text>
+                              <Text style={[styles.searchTrackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                                {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
+                              </Text>
+                              <Text style={[styles.searchTrackStats, { color: theme.colors.textSecondary }]}>
+                                {formatDuration(track.duration)} • {formatNumber(track.play_count)} plays
+                              </Text>
+                            </View>
+                            <TouchableOpacity style={styles.searchTrackPlayButton} onPress={() => handleTrackPress(track)}>
+                              <Ionicons name="play" size={16} color={theme.colors.primary} />
+                            </TouchableOpacity>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </View>
+        ) : (
+          <>
+            {/* Navigation Tabs - Now inside main ScrollView */}
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              style={styles.inlineTabsScrollView}
+              contentContainerStyle={styles.inlineTabsContainer}
+            >
+              {tabs.map((tab) => (
+                <TouchableOpacity
+                  key={tab}
+                  style={[
+                    styles.inlineTabButton,
+                    activeTab === tab && styles.activeInlineTabButton
+                  ]}
+                  onPress={() => setActiveTab(tab)}
+                >
+                  <Text
+                    style={[
+                      styles.inlineTabText,
+                      { color: activeTab === tab ? '#DC2626' : theme.colors.textSecondary },
+                      activeTab === tab && styles.activeInlineTabText
+                    ]}
+                  >
+                    {tab}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
         {activeTab === 'Music' && (
           <>
             {/* Trending Now */}
@@ -1069,7 +1209,9 @@ function DiscoverScreen() {
             <Text style={[styles.tabContentText, { color: theme.colors.text }]}>Playlists content coming soon...</Text>
           </View>
         )}
-        </ScrollView>
+          </>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -1468,6 +1610,179 @@ const styles = StyleSheet.create({
   },
   topArtistFollowersLabel: {
     fontSize: 12,
+  },
+  // Search Results Styles
+  searchResultsContainer: {
+    flex: 1,
+    paddingTop: 16,
+  },
+  searchResultsHeader: {
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  searchResultsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  searchResultsCount: {
+    fontSize: 14,
+  },
+  searchLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 100,
+  },
+  searchLoadingText: {
+    fontSize: 16,
+    marginTop: 12,
+  },
+  searchTabsScrollView: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    marginBottom: 16,
+  },
+  searchTabsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  searchTabButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginRight: 24,
+  },
+  activeSearchTabButton: {
+    borderBottomWidth: 2,
+    borderBottomColor: '#DC2626',
+  },
+  searchTabText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  activeSearchTabText: {
+    fontWeight: '700',
+  },
+  noResultsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 100,
+  },
+  noResultsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  noResultsText: {
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  searchSection: {
+    marginBottom: 24,
+  },
+  searchSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  // Search Artist Item Styles
+  searchArtistItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  searchArtistAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 12,
+  },
+  searchArtistImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
+  },
+  defaultSearchArtistImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchArtistInfo: {
+    flex: 1,
+  },
+  searchArtistName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  searchArtistUsername: {
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  searchArtistStats: {
+    fontSize: 12,
+  },
+  // Search Track Item Styles
+  searchTrackItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  searchTrackCover: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  searchTrackImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  defaultSearchTrackImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchTrackInfo: {
+    flex: 1,
+  },
+  searchTrackTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  searchTrackArtist: {
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  searchTrackStats: {
+    fontSize: 12,
+  },
+  searchTrackPlayButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(220, 38, 38, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 12,
   },
 });
 
