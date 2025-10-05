@@ -152,6 +152,8 @@ function DiscoverScreen() {
     loadInitialContent();
     // Also test search data availability
     testSearchData();
+    // Test playlists tables
+    dbHelpers.testPlaylistsTables();
   }, []); // Only run once on mount
 
   const loadDiscoverContent = async () => {
