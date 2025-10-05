@@ -120,19 +120,6 @@ export default function CreatorProfileScreen() {
       if (profileError) throw profileError;
 
       // Get computed stats with better error handling
-      console.log('🔧 Loading stats for creator:', creatorId);
-      console.log('🔧 Creator ID type:', typeof creatorId, 'Value:', creatorId);
-      console.log('👤 Profile data loaded:', profileData);
-      
-      // Test query to verify creator ID is working
-      const testQuery = await supabase
-        .from('audio_tracks')
-        .select('id, title, creator_id')
-        .eq('creator_id', creatorId);
-      
-      console.log('🧪 Test query for tracks with creator_id:', creatorId);
-      console.log('🧪 Test query result:', testQuery.data?.length || 0, 'tracks found');
-      console.log('🧪 Test tracks:', testQuery.data?.map(t => ({ id: t.id, title: t.title })) || []);
       
       // Use a different approach - get actual data and count it
       const [followersData, tracksData, eventsData, tipsResult] = await Promise.all([
@@ -173,27 +160,7 @@ export default function CreatorProfileScreen() {
       const tracksResult = { count: tracksData.data?.length || 0 };
       const eventsResult = { count: eventsData.data?.length || 0 };
 
-      console.log('📊 Stats results:', {
-        followers: followersResult.count,
-        tracks: tracksResult.count,
-        events: eventsResult.count,
-        tips: tipsResult.data?.length || 0
-      });
-
-      // Debug: Log raw results to understand the discrepancy
-      console.log('🔍 Raw stats data:', {
-        followersCount: followersData.data?.length,
-        tracksCount: tracksData.data?.length,
-        eventsCount: eventsData.data?.length,
-        creatorId,
-        followersData: followersData.data,
-        tracksData: tracksData.data?.map(t => ({ id: t.id, creator_id: `should be ${creatorId}` }))
-      });
-      
-      // Check if we're getting data for the wrong creator
-      console.log('🔍 Followers query result:', followersData);
-      console.log('🔍 Tracks query result:', tracksData);
-      console.log('🔍 Events query result:', eventsData);
+      // Stats computation completed
 
       // Calculate tip statistics
       const tipAmounts = tipsResult.data || [];
