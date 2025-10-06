@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { Audio, AVPlaybackStatus } from 'expo-av';
 import { supabase } from '../lib/supabase';
+import { realAudioProcessor } from '../services/RealAudioProcessor';
 
 interface AudioTrack {
   id: string;
@@ -184,6 +185,27 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       
       console.log('🎵 Loading track:', track.title, 'URL:', audioUrl);
       
+      // Try to use real audio processor first (for enhanced audio)
+      const audioProcessorSuccess = await realAudioProcessor.playTrackWithEnhancement({
+        id: track.id,
+        title: track.title,
+        url: audioUrl,
+        artist: track.creator?.display_name || track.creator?.username || 'Unknown Artist',
+        artwork: track.cover_image_url,
+        duration: track.duration,
+      });
+
+      if (audioProcessorSuccess) {
+        console.log('✅ Using real audio processor for enhanced playback');
+        setCurrentTrack(track);
+        setIsPlaying(true);
+        setIsPaused(false);
+        setIsLoading(false);
+        return;
+      }
+
+      console.log('⚠️ Real audio processor failed, falling back to Expo AV');
+      
       // Test URL accessibility and try different URL approaches
       let finalAudioUrl = audioUrl;
       let urlTestFailed = false;
@@ -286,13 +308,18 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
 
   const pause = async () => {
     try {
+      // Try real audio processor first
+      await realAudioProcessor.pausePlayback();
+      
+      // Also pause Expo AV if it's being used
       if (soundRef.current) {
         await soundRef.current.pauseAsync();
-        setIsPlaying(false);
-        setIsPaused(true);
-        stopPositionTracking();
-        console.log('🎵 Paused playback');
       }
+      
+      setIsPlaying(false);
+      setIsPaused(true);
+      stopPositionTracking();
+      console.log('🎵 Paused playback');
     } catch (err) {
       console.error('Failed to pause:', err);
       setError('Failed to pause playback');
@@ -301,13 +328,18 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
 
   const resume = async () => {
     try {
+      // Try real audio processor first
+      await realAudioProcessor.resumePlayback();
+      
+      // Also resume Expo AV if it's being used
       if (soundRef.current) {
         await soundRef.current.playAsync();
-        setIsPlaying(true);
-        setIsPaused(false);
-        startPositionTracking();
-        console.log('🎵 Resumed playback');
       }
+      
+      setIsPlaying(true);
+      setIsPaused(false);
+      startPositionTracking();
+      console.log('🎵 Resumed playback');
     } catch (err) {
       console.error('Failed to resume:', err);
       setError('Failed to resume playback');

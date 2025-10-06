@@ -42,6 +42,7 @@ import PlaylistDetailsScreen from './src/screens/PlaylistDetailsScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import AvailabilityCalendarScreen from './src/screens/AvailabilityCalendarScreen';
 import CollaborationRequestsScreen from './src/screens/CollaborationRequestsScreen';
+import AudioEnhancementScreen from './src/screens/AudioEnhancementScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -201,6 +202,7 @@ function AppNavigator() {
             <Stack.Screen name="PlaylistDetails" component={PlaylistDetailsScreen} />
             <Stack.Screen name="AvailabilityCalendar" component={AvailabilityCalendarScreen} />
             <Stack.Screen name="CollaborationRequests" component={CollaborationRequestsScreen} />
+            <Stack.Screen name="AudioEnhancement" component={AudioEnhancementScreen} />
             {/* Allow access to onboarding even after completion for testing */}
             <Stack.Screen name="OnboardingTest" component={OnboardingScreen} />
           </>
