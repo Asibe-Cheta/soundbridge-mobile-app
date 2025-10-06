@@ -21,6 +21,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { audioEnhancementService } from '../services/AudioEnhancementService';
 import { realAudioProcessor } from '../services/RealAudioProcessor';
+import { showTestResults } from '../utils/audioEnhancementTest';
 import type { AudioEnhancementProfile } from '../services/AudioEnhancementService';
 
 export default function AudioEnhancementScreen() {
@@ -397,9 +398,14 @@ export default function AudioEnhancementScreen() {
           <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Audio Enhancement</Text>
-        <TouchableOpacity onPress={saveCurrentSettings}>
-          <Ionicons name="save" size={24} color={theme.colors.primary} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity onPress={showTestResults} style={styles.testButton}>
+            <Ionicons name="flask" size={20} color={theme.colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={saveCurrentSettings}>
+            <Ionicons name="save" size={24} color={theme.colors.primary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Status Indicator */}
@@ -454,6 +460,14 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  testButton: {
+    padding: 4,
   },
   statusBar: {
     flexDirection: 'row',

@@ -663,7 +663,6 @@ class AudioEnhancementService {
             eq: { bands: [0, 0, 1, 1, 0, 0, 1, 2, 1, 0], frequencies, gains: [0, 0, 1, 1, 0, 0, 1, 2, 1, 0], preset: 'mastered' },
             enhancement: { enabled: true, strength: 0.7, type: 'ai' as const },
             noise_reduction: { enabled: true, level: 0.5 },
-            reverb: { type: 'hall', wetness: 0.3 },
           },
         }
       );
