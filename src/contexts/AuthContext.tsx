@@ -3,11 +3,26 @@ import { Linking } from 'react-native';
 import type { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 
+interface UserProfile {
+  id: string;
+  email: string;
+  username?: string;
+  display_name?: string;
+  avatar_url?: string;
+  role?: 'creator' | 'listener';
+  onboarding_completed?: boolean;
+  country?: string;
+  location?: string;
+  created_at: string;
+}
+
 interface AuthContextType {
   user: User | null;
+  userProfile: UserProfile | null;
   session: Session | null;
   loading: boolean;
   error: string | null;
+  needsOnboarding: boolean;
   signIn: (email: string, password: string) => Promise<{ success: boolean; error?: any }>;
   signUp: (email: string, password: string, metadata?: any) => Promise<{ success: boolean; error?: any }>;
   signOut: () => Promise<{ success: boolean; error?: any }>;
@@ -16,6 +31,8 @@ interface AuthContextType {
   updatePassword: (newPassword: string) => Promise<{ success: boolean; error?: any }>;
   resendConfirmation: (email: string) => Promise<{ success: boolean; error?: any }>;
   refreshUser: () => Promise<void>;
+  updateUserProfile: (updates: Partial<UserProfile>) => Promise<{ success: boolean; error?: any }>;
+  completeOnboarding: () => Promise<{ success: boolean; error?: any }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -26,9 +43,11 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
@@ -43,6 +62,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (session && !error) {
           setSession(session);
           setUser(session.user);
+          await loadUserProfile(session.user.id);
         }
       } catch (err) {
         console.error('Error getting initial session:', err);
@@ -68,6 +88,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
         console.log('Auth state changed:', event, session?.user?.email);
         setSession(session);
         setUser(session?.user ?? null);
+        
+        if (session?.user) {
+          await loadUserProfile(session.user.id);
+        } else {
+          setUserProfile(null);
+          setNeedsOnboarding(false);
+        }
         
         // Clear timeout when auth state changes
         if (timeoutId) {
@@ -311,23 +338,109 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
+  // Load user profile from database
+  const loadUserProfile = async (userId: string) => {
+    try {
+      console.log('🔍 Loading user profile for:', userId);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      
+      if (error) {
+        console.error('❌ Error loading user profile:', error);
+        // If profile doesn't exist, user needs onboarding
+        setNeedsOnboarding(true);
+        return;
+      }
+      
+      if (data) {
+        console.log('✅ User profile loaded:', data);
+        setUserProfile(data);
+        // Check if user needs onboarding
+        const needsOnboarding = !data.onboarding_completed;
+        setNeedsOnboarding(needsOnboarding);
+        console.log('🎯 User needs onboarding:', needsOnboarding);
+      }
+    } catch (err) {
+      console.error('❌ Error loading user profile:', err);
+      setNeedsOnboarding(true);
+    }
+  };
+
   const refreshUser = async () => {
     try {
       const { data: { session }, error } = await supabase.auth.getSession();
       if (session && !error) {
         setSession(session);
         setUser(session.user);
+        await loadUserProfile(session.user.id);
       }
     } catch (err) {
       console.error('Error refreshing user:', err);
     }
   };
 
+  const updateUserProfile = async (updates: Partial<UserProfile>) => {
+    try {
+      if (!user?.id) {
+        return { success: false, error: 'No user logged in' };
+      }
+      
+      console.log('💾 Updating user profile:', updates);
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', user.id)
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('❌ Error updating user profile:', error);
+        return { success: false, error };
+      }
+      
+      if (data) {
+        console.log('✅ User profile updated:', data);
+        setUserProfile(data);
+        // Update onboarding status if needed
+        if (updates.onboarding_completed !== undefined) {
+          setNeedsOnboarding(!updates.onboarding_completed);
+        }
+      }
+      
+      return { success: true };
+    } catch (err) {
+      console.error('❌ Error updating user profile:', err);
+      return { success: false, error: err };
+    }
+  };
+
+  const completeOnboarding = async () => {
+    try {
+      console.log('🎉 Completing onboarding for user:', user?.id);
+      const result = await updateUserProfile({ onboarding_completed: true });
+      
+      if (result.success) {
+        console.log('✅ Onboarding completed successfully');
+        setNeedsOnboarding(false);
+      }
+      
+      return result;
+    } catch (err) {
+      console.error('❌ Error completing onboarding:', err);
+      return { success: false, error: err };
+    }
+  };
+
   const value: AuthContextType = {
     user,
+    userProfile,
     session,
     loading,
     error,
+    needsOnboarding,
     signIn,
     signUp,
     signOut,
@@ -336,6 +449,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     updatePassword,
     resendConfirmation,
     refreshUser,
+    updateUserProfile,
+    completeOnboarding,
   };
 
   return (

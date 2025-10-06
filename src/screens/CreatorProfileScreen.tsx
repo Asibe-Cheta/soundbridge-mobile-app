@@ -17,7 +17,11 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
+import { useCollaboration } from '../contexts/CollaborationContext';
 import TipModal from '../components/TipModal';
+import CollaborationRequestForm from '../components/CollaborationRequestForm';
+import { collaborationUtils } from '../utils/collaborationUtils';
+import type { BookingStatus, CreatorAvailability } from '../types/collaboration';
 
 interface Creator {
   id: string;
@@ -56,6 +60,7 @@ export default function CreatorProfileScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
   const { play, addToQueue } = useAudioPlayer();
+  const { getBookingStatus } = useCollaboration();
 
   // Debug route params
   console.log('🔍 Route params:', route.params);
@@ -88,11 +93,17 @@ export default function CreatorProfileScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const [showTipModal, setShowTipModal] = useState(false);
+  const [bookingStatus, setBookingStatus] = useState<BookingStatus | null>(null);
+  const [availability, setAvailability] = useState<CreatorAvailability[]>([]);
+  const [showCollabModal, setShowCollabModal] = useState(false);
+  const [selectedAvailabilitySlot, setSelectedAvailabilitySlot] = useState<CreatorAvailability | null>(null);
 
   useEffect(() => {
     loadCreatorProfile();
     loadCreatorTracks();
     checkFollowStatus();
+    loadBookingStatus();
+    loadCreatorAvailability();
   }, [creatorId]);
 
   const loadCreatorProfile = async () => {
@@ -330,8 +341,66 @@ export default function CreatorProfileScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([loadCreatorProfile(), loadCreatorTracks(), checkFollowStatus()]);
+    await Promise.all([
+      loadCreatorProfile(), 
+      loadCreatorTracks(), 
+      checkFollowStatus(),
+      loadBookingStatus(),
+      loadCreatorAvailability()
+    ]);
     setRefreshing(false);
+  };
+
+  const loadBookingStatus = async () => {
+    try {
+      console.log('📊 Loading booking status for creator:', creatorId);
+      const status = await getBookingStatus(creatorId);
+      setBookingStatus(status);
+      console.log('✅ Booking status loaded:', status);
+    } catch (error) {
+      console.error('❌ Error loading booking status:', error);
+    }
+  };
+
+  const loadCreatorAvailability = async () => {
+    try {
+      console.log('📅 Loading creator availability:', creatorId);
+      const { data, error } = await supabase
+        .from('creator_availability')
+        .select('*')
+        .eq('creator_id', creatorId)
+        .eq('is_available', true)
+        .gte('end_date', new Date().toISOString())
+        .order('start_date', { ascending: true })
+        .limit(5);
+
+      if (error) {
+        console.log('⚠️ Error loading availability (table may not exist):', error.message);
+        setAvailability([]);
+        return;
+      }
+
+      setAvailability(data || []);
+      console.log('✅ Creator availability loaded:', data?.length || 0);
+    } catch (error) {
+      console.error('❌ Error loading creator availability:', error);
+      setAvailability([]);
+    }
+  };
+
+  const handleCollaborationRequest = (availabilitySlot?: CreatorAvailability) => {
+    if (!user?.id) {
+      Alert.alert('Login Required', 'Please log in to send collaboration requests');
+      return;
+    }
+
+    if (user.id === creatorId) {
+      Alert.alert('Invalid Action', 'You cannot send a collaboration request to yourself');
+      return;
+    }
+
+    setSelectedAvailabilitySlot(availabilitySlot || null);
+    setShowCollabModal(true);
   };
 
   const formatNumber = (num?: number | null) => {
@@ -427,6 +496,51 @@ export default function CreatorProfileScreen() {
             </View>
           )}
 
+          {/* Collaboration Status */}
+          {bookingStatus && (
+            <View style={[styles.collaborationStatus, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <View style={styles.statusHeader}>
+                <Ionicons name="calendar" size={16} color={collaborationUtils.getBookingStatusColor(bookingStatus)} />
+                <Text style={[styles.statusText, { color: collaborationUtils.getBookingStatusColor(bookingStatus) }]}>
+                  {collaborationUtils.getBookingStatusText(bookingStatus)}
+                </Text>
+              </View>
+              {bookingStatus.next_available_slot && (
+                <Text style={[styles.nextSlotText, { color: theme.colors.textSecondary }]}>
+                  Next available: {collaborationUtils.formatDate(bookingStatus.next_available_slot)}
+                </Text>
+              )}
+            </View>
+          )}
+
+          {/* Available Time Slots */}
+          {availability.length > 0 && (
+            <View style={styles.availabilitySection}>
+              <Text style={[styles.availabilityTitle, { color: theme.colors.text }]}>Available Time Slots</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.availabilityScroll}>
+                {availability.map((slot) => (
+                  <TouchableOpacity
+                    key={slot.id}
+                    style={[styles.availabilitySlot, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                    onPress={() => handleCollaborationRequest(slot)}
+                  >
+                    <Text style={[styles.slotDate, { color: theme.colors.text }]}>
+                      {collaborationUtils.formatDate(slot.start_date)}
+                    </Text>
+                    <Text style={[styles.slotTime, { color: theme.colors.textSecondary }]}>
+                      {collaborationUtils.formatTime(slot.start_date)} - {collaborationUtils.formatTime(slot.end_date)}
+                    </Text>
+                    {slot.notes && (
+                      <Text style={[styles.slotNotes, { color: theme.colors.textSecondary }]} numberOfLines={2}>
+                        {slot.notes}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
             <TouchableOpacity
@@ -448,6 +562,76 @@ export default function CreatorProfileScreen() {
                 {isFollowing ? 'Following' : 'Follow'}
               </Text>
             </TouchableOpacity>
+
+            {/* Collaboration Button */}
+            {user?.id !== creatorId && (
+              <TouchableOpacity
+                style={[
+                  styles.collabButton,
+                  {
+                    backgroundColor: collaborationUtils.isCreatorAvailable(bookingStatus || { 
+                      creator_id: creatorId, 
+                      collaboration_enabled: true, 
+                      is_accepting_requests: true, 
+                      available_slots: availability.length,
+                      pending_requests: 0,
+                      total_availability_slots: availability.length,
+                      min_notice_days: 1
+                    }) ? theme.colors.primary : theme.colors.surface,
+                    borderColor: theme.colors.primary,
+                    opacity: collaborationUtils.isCreatorAvailable(bookingStatus || { 
+                      creator_id: creatorId, 
+                      collaboration_enabled: true, 
+                      is_accepting_requests: true, 
+                      available_slots: availability.length,
+                      pending_requests: 0,
+                      total_availability_slots: availability.length,
+                      min_notice_days: 1
+                    }) ? 1 : 0.6
+                  }
+                ]}
+                onPress={() => handleCollaborationRequest()}
+                disabled={!collaborationUtils.isCreatorAvailable(bookingStatus || { 
+                  creator_id: creatorId, 
+                  collaboration_enabled: true, 
+                  is_accepting_requests: true, 
+                  available_slots: availability.length,
+                  pending_requests: 0,
+                  total_availability_slots: availability.length,
+                  min_notice_days: 1
+                })}
+              >
+                <Ionicons 
+                  name="people" 
+                  size={16} 
+                  color={collaborationUtils.isCreatorAvailable(bookingStatus || { 
+                    creator_id: creatorId, 
+                    collaboration_enabled: true, 
+                    is_accepting_requests: true, 
+                    available_slots: availability.length,
+                    pending_requests: 0,
+                    total_availability_slots: availability.length,
+                    min_notice_days: 1
+                  }) ? '#FFFFFF' : theme.colors.primary} 
+                />
+                <Text
+                  style={[
+                    styles.collabButtonText,
+                    { color: collaborationUtils.isCreatorAvailable(bookingStatus || { 
+                      creator_id: creatorId, 
+                      collaboration_enabled: true, 
+                      is_accepting_requests: true, 
+                      available_slots: availability.length,
+                      pending_requests: 0,
+                      total_availability_slots: availability.length,
+                      min_notice_days: 1
+                    }) ? '#FFFFFF' : theme.colors.primary }
+                  ]}
+                >
+                  Collaborate
+                </Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               style={[
@@ -560,6 +744,15 @@ export default function CreatorProfileScreen() {
         creatorName={creator?.display_name || 'Creator'}
         onClose={() => setShowTipModal(false)}
         onTipSuccess={handleTipSuccess}
+      />
+
+      {/* Collaboration Request Modal */}
+      <CollaborationRequestForm
+        visible={showCollabModal}
+        onClose={() => setShowCollabModal(false)}
+        creatorId={creatorId}
+        creatorName={creator?.display_name || 'Creator'}
+        availabilitySlot={selectedAvailabilitySlot || undefined}
       />
     </SafeAreaView>
   );
@@ -675,6 +868,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1,
     alignItems: 'center',
+    minWidth: 100,
   },
   followButtonText: {
     fontSize: 14,
@@ -692,6 +886,73 @@ const styles = StyleSheet.create({
     minWidth: 80,
   },
   tipButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  collaborationStatus: {
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  statusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  statusText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  nextSlotText: {
+    fontSize: 12,
+    marginLeft: 24,
+  },
+  availabilitySection: {
+    marginBottom: 16,
+  },
+  availabilityTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  availabilityScroll: {
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
+  },
+  availabilitySlot: {
+    width: 160,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginRight: 12,
+  },
+  slotDate: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  slotTime: {
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  slotNotes: {
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  collabButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 24,
+    borderWidth: 1,
+    gap: 6,
+    minWidth: 120,
+  },
+  collabButtonText: {
     fontSize: 14,
     fontWeight: '600',
   },

@@ -188,58 +188,71 @@ function DiscoverScreen() {
   };
 
   const loadTrendingTracks = async () => {
+    setLoadingTracks(true);
     try {
-      console.log('🔧 DiscoverScreen: Loading trending tracks...');
-      // Enhanced mock trending tracks with artwork (since we don't have a trending endpoint)
-      const mockTrending: AudioTrack[] = [
-        {
-          id: 'discover-trending-1',
-          title: 'Electric Dreams',
-          cover_art_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-          artwork_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-          creator: {
-            id: '1',
-            username: 'artist1',
-            display_name: 'Artist One',
+      console.log('🔥 DiscoverScreen: Loading tracks...');
+      
+      // Use personalized tracks if user is logged in, otherwise use general trending
+      const { data, error } = user?.id 
+        ? await dbHelpers.getPersonalizedTracks(user.id, 20)
+        : await dbHelpers.getTrendingTracks(20);
+      
+      if (error || !data || data.length === 0) {
+        console.log('⚠️ Using fallback mock data. Error:', error?.message);
+        // Enhanced mock trending tracks with artwork (fallback)
+        const mockTrending: AudioTrack[] = [
+          {
+            id: 'discover-trending-1',
+            title: 'Electric Dreams',
+            cover_art_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+            artwork_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+            creator: {
+              id: '1',
+              username: 'artist1',
+              display_name: 'Artist One',
+            },
+            duration: 180,
+            plays_count: 5500,
+            likes_count: 234,
+            created_at: new Date().toISOString(),
           },
-          duration: 180,
-          plays_count: 5500,
-          likes_count: 234,
-          created_at: new Date().toISOString(),
-        },
-        {
-          id: 'discover-trending-2',
-          title: 'Midnight City',
-          cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-          artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-          creator: {
-            id: '2',
-            username: 'artist2',
-            display_name: 'City Sounds',
+          {
+            id: 'discover-trending-2',
+            title: 'Midnight City',
+            cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+            artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+            creator: {
+              id: '2',
+              username: 'artist2',
+              display_name: 'City Sounds',
+            },
+            duration: 210,
+            plays_count: 4200,
+            likes_count: 189,
+            created_at: new Date().toISOString(),
           },
-          duration: 210,
-          plays_count: 4200,
-          likes_count: 189,
-          created_at: new Date().toISOString(),
-        },
-        {
-          id: 'discover-trending-3',
-          title: 'Ocean Waves',
-          cover_art_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-          artwork_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-          creator: {
-            id: '3',
-            username: 'artist3',
-            display_name: 'Wave Sounds',
+          {
+            id: 'discover-trending-3',
+            title: 'Ocean Waves',
+            cover_art_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+            artwork_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+            creator: {
+              id: '3',
+              username: 'artist3',
+              display_name: 'Wave Sounds',
+            },
+            duration: 195,
+            plays_count: 3800,
+            likes_count: 156,
+            created_at: new Date().toISOString(),
           },
-          duration: 195,
-          plays_count: 3800,
-          likes_count: 156,
-          created_at: new Date().toISOString(),
-        },
-      ];
-      setTrendingTracks(mockTrending);
-      console.log('✅ DiscoverScreen: Trending tracks loaded (mock data):', mockTrending.length);
+        ];
+        setTrendingTracks(mockTrending);
+        console.log('✅ DiscoverScreen: Trending tracks loaded (mock data):', mockTrending.length);
+      } else {
+        console.log('✅ DiscoverScreen: Loaded tracks:', data.length, user?.id ? '(personalized)' : '(general)');
+        setTrendingTracks(data);
+      }
     } catch (error) {
       console.error('❌ DiscoverScreen: Error loading trending tracks:', error);
     } finally {
@@ -492,23 +505,14 @@ function DiscoverScreen() {
   };
 
   const loadEvents = async () => {
+    setLoadingEvents(true);
     try {
-      console.log('🔧 DiscoverScreen: Loading events...');
+      console.log('🎪 DiscoverScreen: Loading events...');
       
-      // Try a simpler events query first
-      const { data, error } = await supabase
-        .from('events')
-        .select(`
-          id,
-          title,
-          description,
-          event_date,
-          location,
-          image_url
-        `)
-        .gte('event_date', new Date().toISOString())
-        .order('event_date', { ascending: true })
-        .limit(5);
+      // Use personalized events if user is logged in, otherwise use general events
+      const { data, error } = user?.id 
+        ? await dbHelpers.getPersonalizedEvents(user.id, 10)
+        : await dbHelpers.getEvents(10);
 
       console.log('🔍 DiscoverScreen: Events data:', data?.length || 0, 'events');
       console.log('🔍 DiscoverScreen: Events error:', error);
@@ -798,8 +802,12 @@ function DiscoverScreen() {
           <Ionicons name="menu" size={24} color={theme.colors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Discover</Text>
-        <TouchableOpacity style={styles.menuButton}>
-          <Ionicons name="menu" size={24} color={theme.colors.text} />
+        {/* Temporary Test Button - Remove after testing */}
+        <TouchableOpacity 
+          style={styles.testButton}
+          onPress={() => (navigation as any).navigate('OnboardingTest')}
+        >
+          <Text style={styles.testButtonText}>Test Onboarding</Text>
         </TouchableOpacity>
       </View>
 
@@ -1454,6 +1462,18 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontWeight: '700',
+  },
+  // Temporary test button styles - Remove after testing
+  testButton: {
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  testButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
   },
   searchHeader: {
     paddingHorizontal: 16,

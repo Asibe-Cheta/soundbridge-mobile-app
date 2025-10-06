@@ -27,8 +27,10 @@ interface AudioTrack {
   description?: string;
   file_url?: string;          // Correct field name from schema
   cover_art_url?: string;     // Correct field name from schema
+  artwork_url?: string;       // Alternative field name
   duration?: number;
   play_count?: number;        // Correct field name from schema
+  play_count?: number;       // Alternative field name
   likes_count?: number;
   created_at: string;
   creator?: {
@@ -155,59 +157,71 @@ export default function HomeScreen() {
 
   const loadTrendingTracks = async () => {
     try {
-      console.log('🔧 Loading trending tracks...');
-      // Enhanced mock trending tracks with artwork
-      const mockTrending: AudioTrack[] = [
-        {
-          id: 'trending-1',
-          title: 'Electric Dreams',
-          cover_image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-          artwork_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-          creator: {
-            id: '1',
-            username: 'artist1',
-            display_name: 'Artist One',
+      console.log('🔧 HomeScreen: Loading trending tracks...');
+      
+      // Use personalized tracks if user is logged in, otherwise use general trending
+      const { data, error } = user?.id 
+        ? await dbHelpers.getPersonalizedTracks(user.id, 10)
+        : await dbHelpers.getTrendingTracks(10);
+      
+      if (error || !data || data.length === 0) {
+        console.log('⚠️ HomeScreen: Using fallback mock data. Error:', error?.message);
+        // Enhanced mock trending tracks with artwork (fallback)
+        const mockTrending: AudioTrack[] = [
+          {
+            id: 'trending-1',
+            title: 'Electric Dreams',
+            cover_art_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+            artwork_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+            creator: {
+              id: '1',
+              username: 'artist1',
+              display_name: 'Artist One',
+            },
+            duration: 180,
+            play_count: 5500,
+            likes_count: 234,
+            created_at: new Date().toISOString(),
           },
-          duration: 180,
-          plays_count: 5500,
-          likes_count: 234,
-          created_at: new Date().toISOString(),
-        },
-        {
-          id: 'trending-2',
-          title: 'Midnight City',
-          cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-          artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-          creator: {
-            id: '2',
-            username: 'artist2',
-            display_name: 'City Sounds',
+          {
+            id: 'trending-2',
+            title: 'Midnight City',
+            cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+            artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+            creator: {
+              id: '2',
+              username: 'artist2',
+              display_name: 'City Sounds',
+            },
+            duration: 210,
+            play_count: 4200,
+            likes_count: 189,
+            created_at: new Date().toISOString(),
           },
-          duration: 210,
-          plays_count: 4200,
-          likes_count: 189,
-          created_at: new Date().toISOString(),
-        },
-        {
-          id: 'trending-3',
-          title: 'Ocean Waves',
-          cover_image_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-          artwork_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-          creator: {
-            id: '3',
-            username: 'artist3',
-            display_name: 'Wave Sounds',
+          {
+            id: 'trending-3',
+            title: 'Ocean Waves',
+            cover_art_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+            artwork_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+            creator: {
+              id: '3',
+              username: 'artist3',
+              display_name: 'Wave Sounds',
+            },
+            duration: 195,
+            play_count: 3800,
+            likes_count: 156,
+            created_at: new Date().toISOString(),
           },
-          duration: 195,
-          plays_count: 3800,
-          likes_count: 156,
-          created_at: new Date().toISOString(),
-        },
-      ];
-      setTrendingTracks(mockTrending);
-      console.log('✅ Trending tracks loaded (mock data):', mockTrending.length);
+        ];
+        setTrendingTracks(mockTrending);
+        console.log('✅ HomeScreen: Trending tracks loaded (mock data):', mockTrending.length);
+      } else {
+        console.log('✅ HomeScreen: Loaded trending tracks:', data.length, user?.id ? '(personalized)' : '(general)');
+        setTrendingTracks(data);
+      }
     } catch (error) {
-      console.error('Error loading trending tracks:', error);
+      console.error('❌ HomeScreen: Error loading trending tracks:', error);
       setTrendingTracks([]);
     } finally {
       setLoadingTrending(false);
@@ -256,10 +270,10 @@ export default function HomeScreen() {
               description: undefined,
               audio_url: undefined,
               file_url: undefined,
-              cover_image_url: imageUrl,
+              cover_art_url: imageUrl,
               artwork_url: imageUrl,
               duration: 180, // Default duration
-              plays_count: 0,
+              play_count: 0,
               likes_count: 0,
               created_at: track.created_at,
               creator: {
@@ -335,14 +349,14 @@ export default function HomeScreen() {
               display_name: 'Asibe Cheta',
             },
             duration: 180,
-            plays_count: 45,
+            play_count: 45,
             likes_count: 12,
             created_at: new Date().toISOString(),
           },
           {
             id: 'mock-2',
             title: 'My Song Hits',
-            cover_image_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+            cover_art_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
             artwork_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
             creator: {
               id: 'mock-creator-2',
@@ -350,7 +364,7 @@ export default function HomeScreen() {
               display_name: 'Asibe Cheta',
             },
             duration: 210,
-            plays_count: 89,
+            play_count: 89,
             likes_count: 23,
             created_at: new Date().toISOString(),
           },
@@ -364,7 +378,7 @@ export default function HomeScreen() {
         {
           id: 'fallback-1',
           title: 'Untitled Audio File',
-          cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
+          cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
           artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
           creator: {
             id: 'fallback-creator-1',
@@ -372,7 +386,7 @@ export default function HomeScreen() {
             display_name: 'Asibe Cheta',
           },
           duration: 180,
-          plays_count: 0,
+          play_count: 0,
           likes_count: 0,
           created_at: new Date().toISOString(),
         },
@@ -442,34 +456,15 @@ export default function HomeScreen() {
 
   const loadEvents = async () => {
     try {
-      console.log('🔧 Loading events...');
-      const { data, error } = await dbHelpers.getUpcomingEvents(3);
+      console.log('🔧 HomeScreen: Loading events...');
       
-      if (error) {
-        console.error('❌ Supabase error:', error);
-        throw error;
-      }
+      // Use personalized events if user is logged in, otherwise use general events
+      const { data, error } = user?.id 
+        ? await dbHelpers.getPersonalizedEvents(user.id, 3)
+        : await dbHelpers.getEvents(3);
       
-      if (data && data.length > 0) {
-        const transformedEvents: Event[] = data.map(event => ({
-          id: event.id,
-          title: event.title,
-          description: event.description,
-          event_date: event.event_date,
-          location: event.location,
-          image_url: event.image_url,
-          organizer: {
-            id: 'organizer-1',
-            username: 'event_organizer',
-            display_name: 'Event Organizer',
-            avatar_url: undefined,
-          },
-        }));
-        
-        setEvents(transformedEvents);
-        console.log('✅ Events loaded:', transformedEvents.length);
-      } else {
-        console.log('ℹ️ No events found, using mock data');
+      if (error || !data || data.length === 0) {
+        console.log('⚠️ HomeScreen: Using fallback mock data. Error:', error?.message);
         // Enhanced mock events data
         const mockEvents: Event[] = [
           {
@@ -492,7 +487,7 @@ export default function HomeScreen() {
             description: 'Learn the fundamentals of music production',
             event_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
             location: 'Community Center',
-            cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+            image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
             organizer: {
               id: 'organizer-2',
               username: 'workshop_host',
@@ -502,9 +497,28 @@ export default function HomeScreen() {
           },
         ];
         setEvents(mockEvents);
+        console.log('✅ HomeScreen: Events loaded (mock data):', mockEvents.length);
+      } else {
+        const transformedEvents: Event[] = data.map(event => ({
+          id: event.id,
+          title: event.title,
+          description: event.description,
+          event_date: event.event_date,
+          location: event.location,
+          image_url: event.image_url,
+          organizer: {
+            id: event.organizer?.id || 'organizer-1',
+            username: event.organizer?.username || 'event_organizer',
+            display_name: event.organizer?.display_name || 'Event Organizer',
+            avatar_url: event.organizer?.avatar_url,
+          },
+        }));
+        
+        setEvents(transformedEvents);
+        console.log('✅ HomeScreen: Events loaded:', transformedEvents.length, user?.id ? '(personalized)' : '(general)');
       }
     } catch (error) {
-      console.error('❌ Error loading events:', error);
+      console.error('❌ HomeScreen: Error loading events:', error);
       // Enhanced mock events fallback
       const mockEvents: Event[] = [
         {
@@ -513,7 +527,7 @@ export default function HomeScreen() {
           description: 'Connect with local musicians and creators',
           event_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
           location: 'Local Venue',
-          cover_image_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+          image_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
           organizer: {
             id: 'fallback-organizer',
             username: 'music_community',
@@ -747,10 +761,10 @@ export default function HomeScreen() {
                   title: 'Summer Vibes',
                   creator: { id: '1', username: 'artist1', display_name: 'Artist One' },
                   duration: 180,
-                  plays_count: 1250,
+                  play_count: 1250,
                   likes_count: 89,
                   created_at: new Date().toISOString(),
-                  cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+                  cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
                   artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
                 },
                 {
@@ -758,10 +772,10 @@ export default function HomeScreen() {
                   title: 'Night Drive',
                   creator: { id: '2', username: 'artist2', display_name: 'Artist Two' },
                   duration: 210,
-                  plays_count: 890,
+                  play_count: 890,
                   likes_count: 67,
                   created_at: new Date().toISOString(),
-                  cover_image_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+                  cover_art_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
                   artwork_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
                 }
               ]).map((track, index) => (
@@ -819,7 +833,7 @@ export default function HomeScreen() {
                   title: 'Ocean Waves',
                   creator: { id: '3', username: 'artist3', display_name: 'Wave Sounds' },
                   duration: 195,
-                  plays_count: 1100,
+                  play_count: 1100,
                   likes_count: 78,
                   created_at: new Date().toISOString(),
                   image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
@@ -830,10 +844,10 @@ export default function HomeScreen() {
                   title: 'City Lights',
                   creator: { id: '4', username: 'artist4', display_name: 'Urban Beats' },
                   duration: 225,
-                  plays_count: 950,
+                  play_count: 950,
                   likes_count: 92,
                   created_at: new Date().toISOString(),
-                  cover_image_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop',
+                  cover_art_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop',
                   artwork_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop',
                 }
               ].map((track, index) => (
@@ -882,10 +896,10 @@ export default function HomeScreen() {
                   title: 'Midnight Jazz',
                   creator: { id: '5', username: 'artist5', display_name: 'Jazz Collective' },
                   duration: 240,
-                  plays_count: 1350,
+                  play_count: 1350,
                   likes_count: 105,
                   created_at: new Date().toISOString(),
-                  cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+                  cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
                   artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
                 },
                 {
@@ -893,10 +907,10 @@ export default function HomeScreen() {
                   title: 'Electric Dreams',
                   creator: { id: '6', username: 'artist6', display_name: 'Synth Wave' },
                   duration: 200,
-                  plays_count: 875,
+                  play_count: 875,
                   likes_count: 64,
                   created_at: new Date().toISOString(),
-                  cover_image_url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=300&h=300&fit=crop',
+                  cover_art_url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=300&h=300&fit=crop',
                   artwork_url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=300&h=300&fit=crop',
                 }
               ].map((track, index) => (
@@ -1033,7 +1047,7 @@ export default function HomeScreen() {
                     description: 'An intimate jazz performance featuring local artists',
                     event_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
                     location: 'Blue Note Cafe',
-                    cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+                    cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-2', username: 'jazz_events', display_name: 'Jazz Collective', avatar_url: undefined },
                   }
                 ]).map((event) => (
@@ -1080,7 +1094,7 @@ export default function HomeScreen() {
                     description: 'A day-long celebration of electronic music and digital art',
                     event_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
                     location: 'City Park Amphitheater',
-                    cover_image_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop',
+                    cover_art_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-3', username: 'electronic_events', display_name: 'EDM Collective', avatar_url: undefined },
                   },
                   {
@@ -1089,7 +1103,7 @@ export default function HomeScreen() {
                     description: 'Intimate acoustic performances in a cozy setting',
                     event_date: new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString(),
                     location: 'The Coffee House',
-                    cover_image_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+                    cover_art_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-4', username: 'acoustic_nights', display_name: 'Acoustic Vibes', avatar_url: undefined },
                   }
                 ].map((event) => (
@@ -1099,7 +1113,7 @@ export default function HomeScreen() {
                     onPress={() => handleEventPress(event)}
                   >
                     <View style={[styles.eventImageContainer, { backgroundColor: theme.colors.card }]}>
-                      <Image source={{ uri: event.cover_image_url }} style={styles.eventImage} />
+                      <Image source={{ uri: event.cover_art_url }} style={styles.eventImage} />
                     </View>
                     <View style={styles.eventInfo}>
                       <Text style={[styles.eventTitle, { color: theme.colors.text }]} numberOfLines={2}>
@@ -1130,7 +1144,7 @@ export default function HomeScreen() {
                     description: 'Open mic night for hip-hop artists and freestyle battles',
                     event_date: new Date(Date.now() + 35 * 24 * 60 * 60 * 1000).toISOString(),
                     location: 'Underground Club',
-                    cover_image_url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=300&h=300&fit=crop',
+                    cover_art_url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-5', username: 'hiphop_events', display_name: 'Hip-Hop Community', avatar_url: undefined },
                   },
                   {
@@ -1139,7 +1153,7 @@ export default function HomeScreen() {
                     description: 'Monthly classical music performances by local orchestra',
                     event_date: new Date(Date.now() + 42 * 24 * 60 * 60 * 1000).toISOString(),
                     location: 'Symphony Hall',
-                    cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+                    cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-6', username: 'classical_music', display_name: 'City Orchestra', avatar_url: undefined },
                   }
                 ].map((event) => (
@@ -1149,7 +1163,7 @@ export default function HomeScreen() {
                     onPress={() => handleEventPress(event)}
                   >
                     <View style={[styles.eventImageContainer, { backgroundColor: theme.colors.card }]}>
-                      <Image source={{ uri: event.cover_image_url }} style={styles.eventImage} />
+                      <Image source={{ uri: event.cover_art_url }} style={styles.eventImage} />
                     </View>
                     <View style={styles.eventInfo}>
                       <Text style={[styles.eventTitle, { color: theme.colors.text }]} numberOfLines={2}>
@@ -1173,7 +1187,6 @@ export default function HomeScreen() {
             </ScrollView>
           )}
         </View>
-      )}
 
         {/* Bottom padding for tab bar */}
         <View style={styles.bottomPadding} />

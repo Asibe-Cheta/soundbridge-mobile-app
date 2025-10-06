@@ -39,14 +39,22 @@ import AllEventsScreen from './src/screens/AllEventsScreen';
 import EventDetailsScreen from './src/screens/EventDetailsScreen';
 import TrackDetailsScreen from './src/screens/TrackDetailsScreen';
 import PlaylistDetailsScreen from './src/screens/PlaylistDetailsScreen';
+import OnboardingScreen from './src/screens/OnboardingScreen';
+import AvailabilityCalendarScreen from './src/screens/AvailabilityCalendarScreen';
+import CollaborationRequestsScreen from './src/screens/CollaborationRequestsScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { AudioPlayerProvider } from './src/contexts/AudioPlayerContext';
 import { ThemeProvider } from './src/contexts/ThemeContext';
+import { CollaborationProvider } from './src/contexts/CollaborationContext';
 
 // Import components
 import MiniPlayer from './src/components/MiniPlayer';
+
+// Import services
+import { notificationService } from './src/services/NotificationService';
+import { deepLinkingService } from './src/services/DeepLinkingService';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -121,7 +129,32 @@ function MainTabs() {
 
 // Main App Navigator
 function AppNavigator() {
-  const { user, loading } = useAuth();
+  const { user, loading, needsOnboarding } = useAuth();
+  const navigationRef = React.useRef<any>(null);
+
+  // Initialize services
+  React.useEffect(() => {
+    if (user) {
+      // Initialize notification service
+      notificationService.initialize().then(success => {
+        if (success) {
+          console.log('✅ Notification service ready');
+        }
+      });
+    }
+
+    // Initialize deep linking service
+    if (navigationRef.current) {
+      const cleanup = deepLinkingService.initialize(navigationRef.current);
+      return cleanup;
+    }
+  }, [user]);
+
+  // Handle navigation ready
+  const onNavigationReady = React.useCallback(() => {
+    deepLinkingService.setNavigationReady();
+    deepLinkingService.processPendingNavigation();
+  }, []);
 
   if (loading) {
     return <SplashScreen />;
@@ -129,40 +162,52 @@ function AppNavigator() {
 
   return (
     <View style={{ flex: 1 }}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <NavigationContainer 
+        ref={navigationRef} 
+        onReady={onNavigationReady}
+      >
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!user ? (
           <Stack.Screen name="Auth" component={AuthScreen} />
-               ) : (
-                 <>
-                   <Stack.Screen name="MainTabs" component={MainTabs} />
-                   <Stack.Screen name="AudioPlayer" component={AudioPlayerScreen} />
-                   <Stack.Screen name="CreatorSetup" component={CreatorSetupScreen} />
-                   <Stack.Screen name="PrivacySecurity" component={PrivacySecurityScreen} />
-                   <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
-                   <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
-                   <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
-                   <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
-                            <Stack.Screen name="About" component={AboutScreen} />
-                            <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
-                            <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
-                            <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
-                            <Stack.Screen name="Upgrade" component={UpgradeScreen} />
-                            <Stack.Screen name="Billing" component={BillingScreen} />
-                            <Stack.Screen name="Wallet" component={WalletScreen} />
-                            <Stack.Screen name="TransactionHistory" component={TransactionHistoryScreen} />
-                            <Stack.Screen name="Withdrawal" component={WithdrawalScreen} />
-                            <Stack.Screen name="WithdrawalMethods" component={WithdrawalMethodsScreen} />
-                            <Stack.Screen name="AddWithdrawalMethod" component={AddWithdrawalMethodScreen} />
-                            <Stack.Screen name="AllCreators" component={AllCreatorsScreen} />
-                            <Stack.Screen name="AllEvents" component={AllEventsScreen} />
-                            <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} />
-                            <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
-                            <Stack.Screen name="TrackDetails" component={TrackDetailsScreen} />
-                            <Stack.Screen name="PlaylistDetails" component={PlaylistDetailsScreen} />
-                 </>
-               )}
-      </Stack.Navigator>
-      {user && <MiniPlayer />}
+        ) : needsOnboarding ? (
+          // Show onboarding for users who haven't completed it
+          <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+        ) : (
+          <>
+            <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen name="AudioPlayer" component={AudioPlayerScreen} />
+            <Stack.Screen name="CreatorSetup" component={CreatorSetupScreen} />
+            <Stack.Screen name="PrivacySecurity" component={PrivacySecurityScreen} />
+            <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
+            <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
+            <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
+            <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
+            <Stack.Screen name="About" component={AboutScreen} />
+            <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
+            <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+            <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
+            <Stack.Screen name="Upgrade" component={UpgradeScreen} />
+            <Stack.Screen name="Billing" component={BillingScreen} />
+            <Stack.Screen name="Wallet" component={WalletScreen} />
+            <Stack.Screen name="TransactionHistory" component={TransactionHistoryScreen} />
+            <Stack.Screen name="Withdrawal" component={WithdrawalScreen} />
+            <Stack.Screen name="WithdrawalMethods" component={WithdrawalMethodsScreen} />
+            <Stack.Screen name="AddWithdrawalMethod" component={AddWithdrawalMethodScreen} />
+            <Stack.Screen name="AllCreators" component={AllCreatorsScreen} />
+            <Stack.Screen name="AllEvents" component={AllEventsScreen} />
+            <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} />
+            <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
+            <Stack.Screen name="TrackDetails" component={TrackDetailsScreen} />
+            <Stack.Screen name="PlaylistDetails" component={PlaylistDetailsScreen} />
+            <Stack.Screen name="AvailabilityCalendar" component={AvailabilityCalendarScreen} />
+            <Stack.Screen name="CollaborationRequests" component={CollaborationRequestsScreen} />
+            {/* Allow access to onboarding even after completion for testing */}
+            <Stack.Screen name="OnboardingTest" component={OnboardingScreen} />
+          </>
+        )}
+        </Stack.Navigator>
+        {user && !needsOnboarding && <MiniPlayer />}
+      </NavigationContainer>
     </View>
   );
 }
@@ -172,12 +217,12 @@ export default function App() {
     <SafeAreaProvider>
       <ThemeProvider>
         <AuthProvider>
-          <AudioPlayerProvider>
-            <NavigationContainer>
+          <CollaborationProvider>
+            <AudioPlayerProvider>
               <StatusBar style="light" backgroundColor="#1A1A1A" />
               <AppNavigator />
-            </NavigationContainer>
-          </AudioPlayerProvider>
+            </AudioPlayerProvider>
+          </CollaborationProvider>
         </AuthProvider>
       </ThemeProvider>
     </SafeAreaProvider>
