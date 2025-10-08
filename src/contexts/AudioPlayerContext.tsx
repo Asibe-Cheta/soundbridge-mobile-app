@@ -294,6 +294,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       const { sound } = await Promise.race([soundPromise, timeoutPromise]) as any;
       
       soundRef.current = sound;
+      console.log('🔍 Music player track creator data:', track.creator);
       setCurrentTrack(track);
       setIsPlaying(true);
       setIsPaused(false);

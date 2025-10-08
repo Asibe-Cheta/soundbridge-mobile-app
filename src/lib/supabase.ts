@@ -762,21 +762,9 @@ export const dbHelpers = {
     try {
       console.log('🎯 Getting personalized tracks for user:', userId);
       
-      // First try the new PostgreSQL function
-      const { data, error } = await supabase
-        .rpc('get_personalized_tracks', {
-          p_user_id: userId,
-          p_limit: limit,
-          p_offset: 0
-        });
-
-      if (!error && data && data.length > 0) {
-        console.log('✅ Found personalized tracks via RPC:', data.length);
-        return { data, error: null };
-      }
-
-      // Fallback to manual query if RPC function doesn't exist yet
-      console.log('⚠️ RPC function not available, using manual query. Error:', error?.message);
+      // Skip RPC function since it doesn't return creator data
+      // Use manual query directly to get proper creator information
+      console.log('🔧 Using manual query to get personalized tracks with creator data');
       
       // Get user's genre preferences
       const { data: userGenres } = await this.getUserGenres(userId);
@@ -804,7 +792,7 @@ export const dbHelpers = {
           play_count,
           likes_count,
           created_at,
-          creator:profiles!audio_tracks_creator_id_fkey(
+          creator:profiles!creator_id(
             id,
             username,
             display_name,
@@ -825,6 +813,7 @@ export const dbHelpers = {
       }
 
       console.log('✅ Found personalized tracks via manual query:', manualData?.length || 0);
+      console.log('🔍 Sample personalized track creator data:', manualData?.[0]?.creator);
       return { data: manualData, error: null };
     } catch (error) {
       console.error('❌ Error getting personalized tracks:', error);
@@ -922,7 +911,7 @@ export const dbHelpers = {
           play_count,
           likes_count,
           created_at,
-          creator:profiles!audio_tracks_creator_id_fkey(
+          creator:profiles!creator_id(
             id,
             username,
             display_name,
@@ -934,6 +923,7 @@ export const dbHelpers = {
 
       if (error) throw error;
       console.log('✅ Found trending tracks:', data?.length || 0);
+      console.log('🔍 Sample trending track creator data:', data?.[0]?.creator);
       return { data, error: null };
     } catch (error) {
       console.error('❌ Error getting trending tracks:', error);

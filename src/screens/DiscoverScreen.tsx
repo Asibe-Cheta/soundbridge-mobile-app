@@ -250,8 +250,10 @@ function DiscoverScreen() {
         ];
         setTrendingTracks(mockTrending);
         console.log('✅ DiscoverScreen: Trending tracks loaded (mock data):', mockTrending.length);
+        console.log('🔍 Mock trending track creator data:', mockTrending[0]?.creator);
       } else {
         console.log('✅ DiscoverScreen: Loaded tracks:', data.length, user?.id ? '(personalized)' : '(general)');
+        console.log('🔍 DiscoverScreen trending track creator data:', data[0]?.creator);
         setTrendingTracks(data);
       }
     } catch (error) {
@@ -269,7 +271,7 @@ function DiscoverScreen() {
         .from('audio_tracks')
         .select(`
           *,
-          creator:profiles!audio_tracks_creator_id_fkey (
+          creator:profiles!creator_id (
             id,
             username,
             display_name,
@@ -365,6 +367,7 @@ function DiscoverScreen() {
         
         setRecentTracks(transformedTracks);
         console.log('✅ DiscoverScreen: Recent tracks loaded from Supabase:', transformedTracks.length);
+        console.log('🔍 DiscoverScreen sample track creator data:', transformedTracks[0]?.creator);
       } else {
         console.log('ℹ️ DiscoverScreen: No recent tracks found, using mock data');
         // Mock data fallback

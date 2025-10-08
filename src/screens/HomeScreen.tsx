@@ -236,7 +236,7 @@ export default function HomeScreen() {
         .from('audio_tracks')
         .select(`
           *,
-          creator:profiles!audio_tracks_creator_id_fkey (
+          creator:profiles!creator_id (
             id,
             username,
             display_name,
@@ -253,7 +253,18 @@ export default function HomeScreen() {
         // Try even simpler query with just basic fields
         const { data: simpleData, error: simpleError } = await supabase
           .from('audio_tracks')
-          .select('id, title, created_at, creator_id')
+          .select(`
+            id, 
+            title, 
+            created_at, 
+            creator_id,
+            creator:profiles!creator_id (
+              id,
+              username,
+              display_name,
+              avatar_url
+            )
+          `)
           .order('created_at', { ascending: false })
           .limit(10);
 
@@ -285,16 +296,17 @@ export default function HomeScreen() {
               likes_count: 0,
               created_at: track.created_at,
               creator: {
-                id: track.creator_id || 'unknown',
-                username: 'creator',
-                display_name: 'Music Creator',
-                avatar_url: undefined,
+                id: track.creator?.id || track.creator_id || 'unknown',
+                username: track.creator?.username || 'unknown',
+                display_name: track.creator?.display_name || 'Unknown Artist',
+                avatar_url: track.creator?.avatar_url,
               },
             };
           });
           
           setRecentTracks(transformedTracks);
           console.log('✅ Recent tracks loaded (simple query):', transformedTracks.length);
+          console.log('🔍 Fallback track creator data:', transformedTracks[0]?.creator);
           return;
         }
       }
@@ -340,6 +352,7 @@ export default function HomeScreen() {
         
         setRecentTracks(transformedTracks);
         console.log('✅ Recent tracks loaded from Supabase:', transformedTracks.length);
+        console.log('🔍 Sample track creator data:', transformedTracks[0]?.creator);
         transformedTracks.forEach(track => {
           console.log(`🎵 Track: "${track.title}" - Cover: ${track.cover_art_url || 'none'}`);
         });
