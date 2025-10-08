@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { Audio, AVPlaybackStatus } from 'expo-av';
 import { supabase } from '../lib/supabase';
-import { realAudioProcessor } from '../services/RealAudioProcessor';
+// import { realAudioProcessor } from '../services/RealAudioProcessor';
 
 interface AudioTrack {
   id: string;
@@ -186,15 +186,16 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       console.log('🎵 Loading track:', track.title, 'URL:', audioUrl);
       
       // Try to use real audio processor first (for enhanced audio)
-      const audioProcessorSuccess = await realAudioProcessor.playTrackWithEnhancement({
-        id: track.id,
-        title: track.title,
-        url: audioUrl,
-        artist: track.creator?.display_name || track.creator?.username || 'Unknown Artist',
-        artwork: track.cover_image_url,
-        duration: track.duration,
-      });
+      // const audioProcessorSuccess = await realAudioProcessor.playTrackWithEnhancement({
+      //   id: track.id,
+      //   title: track.title,
+      //   url: audioUrl,
+      //   artist: track.creator?.display_name || track.creator?.username || 'Unknown Artist',
+      //   artwork: track.cover_image_url,
+      //   duration: track.duration,
+      // });
 
+      const audioProcessorSuccess = false; // Disabled for Expo compatibility
       if (audioProcessorSuccess) {
         console.log('✅ Using real audio processor for enhanced playback');
         setCurrentTrack(track);
@@ -309,7 +310,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   const pause = async () => {
     try {
       // Try real audio processor first
-      await realAudioProcessor.pausePlayback();
+      // await realAudioProcessor.pausePlayback(); // Disabled for Expo compatibility
       
       // Also pause Expo AV if it's being used
       if (soundRef.current) {
@@ -329,7 +330,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   const resume = async () => {
     try {
       // Try real audio processor first
-      await realAudioProcessor.resumePlayback();
+      // await realAudioProcessor.resumePlayback(); // Disabled for Expo compatibility
       
       // Also resume Expo AV if it's being used
       if (soundRef.current) {

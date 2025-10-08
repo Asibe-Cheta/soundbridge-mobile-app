@@ -53,6 +53,7 @@ interface Creator {
   avatar_url?: string;
   followers_count?: number;
   tracks_count?: number;
+  events_count?: number;
 }
 
 interface Event {
@@ -386,28 +387,16 @@ function DiscoverScreen() {
 
   const loadFeaturedArtists = async () => {
     try {
-      console.log('🔧 DiscoverScreen: Loading featured artists...');
+      console.log('🔧 DiscoverScreen: Loading featured artists with real stats...');
       
-      // Use a simpler query that's more likely to work
-      const { data, error } = await supabase
-        .from('profiles')
-        .select(`
-          id,
-          username,
-          display_name,
-          bio,
-          avatar_url,
-          role
-        `)
-        .eq('role', 'creator')
-        .order('created_at', { ascending: false })
-        .limit(10);
+      // Use the new function that gets real stats
+      const { data, error } = await dbHelpers.getCreatorsWithStats(10);
       
       console.log('🔍 DiscoverScreen: Featured artists data:', data?.length || 0, 'artists');
       console.log('🔍 DiscoverScreen: Featured artists error:', error);
       
       if (data && data.length > 0 && !error) {
-        console.log('✅ DiscoverScreen: Featured artists loaded from Supabase:', data.length);
+        console.log('✅ DiscoverScreen: Featured artists loaded with real stats:', data.length);
         
         // Transform the data to match our Creator interface
         const transformedArtists: Creator[] = data.map(artist => ({
@@ -416,12 +405,13 @@ function DiscoverScreen() {
           display_name: artist.display_name || artist.username,
           bio: artist.bio || 'Music creator',
           avatar_url: artist.avatar_url,
-          followers_count: Math.floor(Math.random() * 1000) + 100, // Mock data for now
-          tracks_count: Math.floor(Math.random() * 50) + 5, // Mock data for now
+          followers_count: artist.followers_count || 0, // Real data from database
+          tracks_count: artist.tracks_count || 0, // Real data from database
+          events_count: artist.events_count || 0, // Real data from database
         }));
         
         setFeaturedArtists(transformedArtists);
-        console.log('✅ DiscoverScreen: Successfully set featured artists:', transformedArtists.length);
+        console.log('✅ DiscoverScreen: Successfully set featured artists with real stats:', transformedArtists.length);
       } else if (error) {
         console.log('❌ DiscoverScreen: Database error, using mock data:', error.message);
         // Use mock data on error

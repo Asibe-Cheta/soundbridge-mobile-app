@@ -17,9 +17,9 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
-import { useCollaboration } from '../contexts/CollaborationContext';
+// import { useCollaboration } from '../contexts/CollaborationContext';
 import TipModal from '../components/TipModal';
-import CollaborationRequestForm from '../components/CollaborationRequestForm';
+// import CollaborationRequestForm from '../components/CollaborationRequestForm';
 import { collaborationUtils } from '../utils/collaborationUtils';
 import type { BookingStatus, CreatorAvailability } from '../types/collaboration';
 
@@ -60,7 +60,7 @@ export default function CreatorProfileScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
   const { play, addToQueue } = useAudioPlayer();
-  const { getBookingStatus } = useCollaboration();
+  // const { getBookingStatus } = useCollaboration(); // Disabled for Expo compatibility
 
   // Debug route params
   console.log('🔍 Route params:', route.params);
@@ -354,7 +354,8 @@ export default function CreatorProfileScreen() {
   const loadBookingStatus = async () => {
     try {
       console.log('📊 Loading booking status for creator:', creatorId);
-      const status = await getBookingStatus(creatorId);
+      // const status = await getBookingStatus(creatorId); // Disabled for Expo compatibility
+      const status = null; // Mock for Expo compatibility
       setBookingStatus(status);
       console.log('✅ Booking status loaded:', status);
     } catch (error) {
@@ -746,14 +747,14 @@ export default function CreatorProfileScreen() {
         onTipSuccess={handleTipSuccess}
       />
 
-      {/* Collaboration Request Modal */}
-      <CollaborationRequestForm
+      {/* Collaboration Request Modal - Disabled for Expo compatibility */}
+      {/* <CollaborationRequestForm
         visible={showCollabModal}
         onClose={() => setShowCollabModal(false)}
         creatorId={creatorId}
         creatorName={creator?.display_name || 'Creator'}
         availabilitySlot={selectedAvailabilitySlot || undefined}
-      />
+      /> */}
     </SafeAreaView>
   );
 }

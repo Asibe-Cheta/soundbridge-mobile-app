@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   ScrollView,
   Dimensions,
   StatusBar,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -47,6 +48,11 @@ export default function OnboardingScreen() {
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [trialActivated, setTrialActivated] = useState(false);
 
+  // Animation refs
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
+  const scaleAnim = useRef(new Animated.Value(0.8)).current;
+
   // Profile data
   const [displayName, setDisplayName] = useState(userProfile?.display_name || user?.user_metadata?.display_name || '');
   const [username, setUsername] = useState(userProfile?.username || user?.user_metadata?.username || '');
@@ -62,6 +68,33 @@ export default function OnboardingScreen() {
     if (currentStep === 'genres') {
       loadGenres();
     }
+  }, [currentStep]);
+
+  // Entrance animation effect
+  useEffect(() => {
+    // Reset animation values
+    fadeAnim.setValue(0);
+    slideAnim.setValue(50);
+    scaleAnim.setValue(0.8);
+
+    // Start entrance animation
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+    ]).start();
   }, [currentStep]);
 
   // Load genres from API
@@ -192,12 +225,24 @@ export default function OnboardingScreen() {
           break;
 
         case 'location':
-          // Validate location
+          // Validate country and location
+          if (!country) {
+            Alert.alert('Required', 'Please select your country');
+            setLoading(false);
+            return;
+          }
           if (!location.trim()) {
             Alert.alert('Required', 'Please enter your location');
             setLoading(false);
             return;
           }
+          
+          // Save country and location to profile
+          await updateUserProfile({
+            country: country,
+            location: location.trim(),
+          });
+          
           setCurrentStep('complete');
           break;
 
@@ -231,7 +276,12 @@ export default function OnboardingScreen() {
           }
           
           console.log('✅ Onboarding completed successfully!');
-          // Navigation will be handled automatically by App.tsx when needsOnboarding becomes false
+          
+          // Navigate to main app
+          (navigation as any).reset({
+            index: 0,
+            routes: [{ name: 'MainTabs' }],
+          });
           break;
       }
     } catch (error) {
@@ -239,6 +289,35 @@ export default function OnboardingScreen() {
       Alert.alert('Error', 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Handle back navigation
+  const handleBack = () => {
+    switch (currentStep) {
+      case 'trial':
+        setCurrentStep('role');
+        break;
+      case 'profile':
+        if (userRole === 'creator') {
+          setCurrentStep('trial');
+        } else {
+          setCurrentStep('role');
+        }
+        break;
+      case 'genres':
+        setCurrentStep('profile');
+        break;
+      case 'location':
+        setCurrentStep('genres');
+        break;
+      case 'complete':
+        setCurrentStep('location');
+        break;
+      default:
+        // On role selection, allow going back to close onboarding
+        navigation.goBack();
+        break;
     }
   };
 
@@ -267,20 +346,50 @@ export default function OnboardingScreen() {
         />
       </View>
       
+      {/* Header with back button */}
+      <View style={styles.headerWithBack}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={handleBack}
+        >
+          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
+          Step 1 of 4
+        </Text>
+        <View style={styles.backButtonPlaceholder} />
+      </View>
+
       <ScrollView 
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.headerContainer}>
+        <Animated.View 
+          style={[
+            styles.headerContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
+            }
+          ]}
+        >
           <Text style={[styles.welcomeTitle, { color: theme.colors.text }]}>
             Welcome to SoundBridge
           </Text>
           <Text style={[styles.welcomeSubtitle, { color: theme.colors.textSecondary }]}>
             Join 50,000+ creators building their music careers worldwide
           </Text>
-        </View>
+        </Animated.View>
 
-        <View style={styles.rolesContainer}>
+        <Animated.View 
+          style={[
+            styles.rolesContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }]
+            }
+          ]}
+        >
           <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
             Do you want to be?
           </Text>
@@ -380,7 +489,7 @@ export default function OnboardingScreen() {
               <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
             </LinearGradient>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
       </ScrollView>
     </View>
   );
@@ -410,33 +519,52 @@ export default function OnboardingScreen() {
         />
       </View>
         
+        {/* Header with back button */}
+        <View style={styles.headerWithBack}>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={handleBack}
+          >
+            <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
+          </TouchableOpacity>
+          <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
+            Step 2 of 4
+          </Text>
+          <View style={styles.backButtonPlaceholder} />
+        </View>
+
         <ScrollView 
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.headerContainer}>
+          <Animated.View 
+            style={[
+              styles.headerContainer,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
+              }
+            ]}
+          >
         <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
-          Creator Tools Unlocked!
+          Start your growth by us
         </Text>
         <Text style={[styles.stepSubtitle, { color: theme.colors.textSecondary }]}>
-          Perfect! You're now part of our creator community.
+          Take the opportunity to get the best experience from the get go
         </Text>
-      </View>
+      </Animated.View>
 
-      <View style={styles.trialContainer}>
-        {/* Modern Gift Badge */}
-        <LinearGradient
-          colors={['#F59E0B', '#D97706', '#B45309']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.giftBadgeModern}
-        >
-          <Ionicons name="gift" size={20} color="#FFFFFF" />
-          <Text style={styles.giftTextModern}>Special Welcome Gift</Text>
-        </LinearGradient>
-
+      <Animated.View 
+        style={[
+          styles.trialContainer,
+          {
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }]
+          }
+        ]}
+      >
         <Text style={[styles.trialTitle, { color: theme.colors.text }]}>
-          7-Day Pro Trial - FREE!
+          Proceed free or Try this FREE for 7 days
         </Text>
 
         <Text style={[styles.trialSubtitle, { color: theme.colors.textSecondary }]}>
@@ -499,7 +627,7 @@ export default function OnboardingScreen() {
           onPress={handleTrialActivation}
         >
           <LinearGradient
-            colors={['#DC2626', '#B91C1C', '#991B1B']}
+            colors={['#7C3AED', '#6D28D9', '#5B21B6']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.activateButtonGradient}
@@ -520,7 +648,7 @@ export default function OnboardingScreen() {
         <Text style={[styles.cancelNote, { color: theme.colors.textSecondary }]}>
           Cancel anytime in Settings
         </Text>
-      </View>
+      </Animated.View>
         </ScrollView>
     </View>
   );
@@ -550,6 +678,20 @@ export default function OnboardingScreen() {
         />
       </View>
       
+      {/* Header with back button */}
+      <View style={styles.headerWithBack}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={handleBack}
+        >
+          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
+          Step 3 of 4
+        </Text>
+        <View style={styles.backButtonPlaceholder} />
+      </View>
+
       <ScrollView 
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -601,7 +743,7 @@ export default function OnboardingScreen() {
           disabled={!displayName.trim() || loading}
         >
           <LinearGradient
-            colors={!displayName.trim() ? ['#9CA3AF', '#9CA3AF'] : ['#DC2626', '#B91C1C', '#991B1B']}
+            colors={!displayName.trim() ? ['#9CA3AF', '#9CA3AF'] : ['#7C3AED', '#6D28D9', '#5B21B6']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.modernButtonGradient}
@@ -652,6 +794,20 @@ export default function OnboardingScreen() {
         />
       </View>
       
+      {/* Header with back button */}
+      <View style={styles.headerWithBack}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={handleBack}
+        >
+          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
+          Step 3 of 4
+        </Text>
+        <View style={styles.backButtonPlaceholder} />
+      </View>
+
       <ScrollView contentContainerStyle={styles.scrollContent}>
       <View style={styles.headerContainer}>
         <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
@@ -782,17 +938,47 @@ export default function OnboardingScreen() {
         />
       </View>
       
+      {/* Header with back button */}
+      <View style={styles.headerWithBack}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={handleBack}
+        >
+          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
+          Step 4 of 4
+        </Text>
+        <View style={styles.backButtonPlaceholder} />
+      </View>
+
       <ScrollView contentContainerStyle={styles.scrollContent}>
-      <View style={styles.headerContainer}>
+      <Animated.View 
+        style={[
+          styles.headerContainer,
+          {
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
+          }
+        ]}
+      >
         <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
           Step 3 of 3 - Final Step
         </Text>
         <Text style={[styles.stepSubtitle, { color: theme.colors.textSecondary }]}>
           Help us personalize your experience
         </Text>
-      </View>
+      </Animated.View>
 
-      <View style={styles.formContainer}>
+      <Animated.View 
+        style={[
+          styles.formContainer,
+          {
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }]
+          }
+        ]}
+      >
         <View style={styles.inputGroup}>
           <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Your Country</Text>
           <CountrySelector
@@ -818,37 +1004,40 @@ export default function OnboardingScreen() {
 
         <View style={styles.notificationContainer}>
         <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-          Get notified about:
+          SoundBridge tailors your preferences for the best social experience:
         </Text>
           <View style={styles.notificationOptions}>
             <View style={styles.notificationItem}>
               <Ionicons name="checkmark-circle" size={20} color="#10B981" />
               <Text style={[styles.notificationText, { color: theme.colors.text }]}>
-                New music in your area
+                Your desired music genre(s)
               </Text>
             </View>
             <View style={styles.notificationItem}>
               <Ionicons name="checkmark-circle" size={20} color="#10B981" />
               <Text style={[styles.notificationText, { color: theme.colors.text }]}>
-                Events near you
+                Your preferred events
               </Text>
             </View>
             <View style={styles.notificationItem}>
               <Ionicons name="checkmark-circle" size={20} color="#10B981" />
               <Text style={[styles.notificationText, { color: theme.colors.text }]}>
-                Your favorite creators
+                Like-minded creators to collaborate with
               </Text>
             </View>
           </View>
         </View>
 
         <TouchableOpacity
-          style={styles.heroRoleButton}
+          style={[styles.heroRoleButton, (!country || !location.trim()) && styles.buttonDisabled]}
           onPress={handleNext}
-          disabled={loading}
+          disabled={loading || !country || !location.trim()}
         >
           <LinearGradient
-            colors={['rgba(16, 185, 129, 0.2)', 'rgba(5, 150, 105, 0.15)', 'rgba(4, 120, 87, 0.1)']}
+            colors={(!country || !location.trim()) 
+              ? ['rgba(156, 163, 175, 0.2)', 'rgba(156, 163, 175, 0.15)', 'rgba(156, 163, 175, 0.1)']
+              : ['rgba(16, 185, 129, 0.2)', 'rgba(5, 150, 105, 0.15)', 'rgba(4, 120, 87, 0.1)']
+            }
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.heroRoleGradient}
@@ -871,7 +1060,7 @@ export default function OnboardingScreen() {
             <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
           </LinearGradient>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
       </ScrollView>
     </View>
   );
@@ -983,18 +1172,39 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  headerWithBack: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    paddingTop: 10,
+  },
+  backButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  backButtonPlaceholder: {
+    width: 40,
+    height: 40,
+  },
+  headerStepText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
   progressContainer: {
     paddingHorizontal: 20,
     paddingVertical: 10,
   },
   progressBar: {
     height: 4,
-    backgroundColor: 'rgba(220, 38, 38, 0.2)',
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
     borderRadius: 2,
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#DC2626',
+    backgroundColor: '#7C3AED',
     borderRadius: 2,
   },
   stepContainer: {
@@ -1171,7 +1381,7 @@ const styles = StyleSheet.create({
     minWidth: 240,
     borderRadius: 16,
     overflow: 'hidden',
-    shadowColor: '#DC2626',
+    shadowColor: '#7C3AED',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 12,
@@ -1252,8 +1462,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   genreChipSelected: {
-    backgroundColor: '#DC2626',
-    borderColor: '#DC2626',
+    backgroundColor: '#7C3AED',
+    borderColor: '#7C3AED',
   },
   genreChipDisabled: {
     opacity: 0.5,
@@ -1273,7 +1483,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderRadius: 16,
     overflow: 'hidden',
-    shadowColor: '#DC2626',
+    shadowColor: '#7C3AED',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 12,
@@ -1311,7 +1521,7 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   completeButton: {
-    backgroundColor: '#DC2626',
+    backgroundColor: '#7C3AED',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -1357,7 +1567,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   startButton: {
-    backgroundColor: '#DC2626',
+    backgroundColor: '#7C3AED',
     paddingVertical: 16,
     paddingHorizontal: 40,
     borderRadius: 30,

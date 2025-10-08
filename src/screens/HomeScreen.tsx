@@ -30,7 +30,6 @@ interface AudioTrack {
   artwork_url?: string;       // Alternative field name
   duration?: number;
   play_count?: number;        // Correct field name from schema
-  play_count?: number;       // Alternative field name
   likes_count?: number;
   created_at: string;
   creator?: {
@@ -49,6 +48,7 @@ interface Creator {
   avatar_url?: string;
   followers_count?: number;
   tracks_count?: number;
+  events_count?: number;
 }
 
 interface Event {
@@ -399,8 +399,8 @@ export default function HomeScreen() {
 
   const loadHotCreators = async () => {
     try {
-      console.log('🔧 Loading hot creators...');
-      const { data, error } = await dbHelpers.getHotCreators(5);
+      console.log('🔧 Loading hot creators with real stats...');
+      const { data, error } = await dbHelpers.getCreatorsWithStats(5);
       
       if (error) {
         console.error('❌ Supabase error:', error);
@@ -414,8 +414,9 @@ export default function HomeScreen() {
           display_name: creator.display_name || creator.username || 'Unknown Creator',
           bio: creator.bio || undefined,
           avatar_url: creator.avatar_url || undefined,
-          followers_count: Math.floor(Math.random() * 5000) + 100, // Mock follower count
-          tracks_count: Math.floor(Math.random() * 50) + 5, // Mock track count
+          followers_count: creator.followers_count || 0, // Real data from database
+          tracks_count: creator.tracks_count || 0, // Real data from database
+          events_count: creator.events_count || 0, // Real data from database
         }));
         
         setHotCreators(transformedCreators);

@@ -12,11 +12,17 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import NotificationService, { NotificationSettings } from '../services/NotificationService';
+import { notificationService } from '../services/NotificationService';
 
 export default function NotificationSettingsScreen() {
   const navigation = useNavigation();
-  const [settings, setSettings] = useState<NotificationSettings>(NotificationService.getSettings());
+  const [settings, setSettings] = useState({
+    pushEnabled: true,
+    emailEnabled: true,
+    collaborationRequests: true,
+    messageNotifications: true,
+    eventReminders: true,
+  });
   const [pushToken, setPushToken] = useState<string | null>(null);
 
   useEffect(() => {

@@ -54,11 +54,88 @@ export const dbHelpers = {
         .eq('role', 'creator')
         .order('created_at', { ascending: false })
         .limit(limit);
-
+      
       if (error) throw error;
       return { data, error: null };
     } catch (error) {
       console.error('Error fetching creators:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Get creators with real stats - NO AUTHENTICATION REQUIRED
+  async getCreatorsWithStats(limit = 20) {
+    try {
+      console.log('🔧 Getting creators with real stats...');
+      
+      // First get the creators
+      const { data: creators, error: creatorsError } = await supabase
+        .from('profiles')
+        .select(`
+          id,
+          username,
+          display_name,
+          bio,
+          avatar_url,
+          location,
+          country,
+          genre,
+          role,
+          created_at
+        `)
+        .eq('role', 'creator')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      
+      if (creatorsError) throw creatorsError;
+      if (!creators || creators.length === 0) {
+        return { data: [], error: null };
+      }
+
+      // Get stats for each creator
+      const creatorsWithStats = await Promise.all(
+        creators.map(async (creator) => {
+          try {
+            // Get followers count
+            const { count: followersCount } = await supabase
+              .from('follows')
+              .select('*', { count: 'exact', head: true })
+              .eq('following_id', creator.id);
+
+            // Get tracks count
+            const { count: tracksCount } = await supabase
+              .from('audio_tracks')
+              .select('*', { count: 'exact', head: true })
+              .eq('creator_id', creator.id);
+
+            // Get events count
+            const { count: eventsCount } = await supabase
+              .from('events')
+              .select('*', { count: 'exact', head: true })
+              .eq('creator_id', creator.id);
+
+            return {
+              ...creator,
+              followers_count: followersCount || 0,
+              tracks_count: tracksCount || 0,
+              events_count: eventsCount || 0,
+            };
+          } catch (error) {
+            console.error(`Error getting stats for creator ${creator.id}:`, error);
+            return {
+              ...creator,
+              followers_count: 0,
+              tracks_count: 0,
+              events_count: 0,
+            };
+          }
+        })
+      );
+
+      console.log('✅ Successfully got creators with real stats:', creatorsWithStats.length);
+      return { data: creatorsWithStats, error: null };
+    } catch (error) {
+      console.error('Error fetching creators with stats:', error);
       return { data: null, error };
     }
   },
@@ -151,7 +228,7 @@ export const dbHelpers = {
         .eq('is_public', true)
         .order('play_count', { ascending: false })
         .limit(limit);
-
+      
       if (error) throw error;
       return { success: true, data, error: null };
     } catch (error) {
@@ -311,7 +388,7 @@ export const dbHelpers = {
         `)
         .or(`and(sender_id.eq.${userId},recipient_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},recipient_id.eq.${userId})`)
         .order('created_at', { ascending: true });
-
+      
       if (error) throw error;
       return { data, error: null };
     } catch (error) {
@@ -334,7 +411,7 @@ export const dbHelpers = {
         })
         .select()
         .single();
-
+      
       if (error) throw error;
       return { data, error: null };
     } catch (error) {
@@ -352,7 +429,7 @@ export const dbHelpers = {
         .eq('id', messageId)
         .select()
         .single();
-
+      
       if (error) throw error;
       return { data, error: null };
     } catch (error) {
@@ -500,7 +577,7 @@ export const dbHelpers = {
         .eq('is_public', true)
         .order('created_at', { ascending: false })
         .limit(limit);
-
+      
       if (error) {
         console.log('⚠️ Playlists table might not exist yet or has different structure:', error.message);
         // Return empty result instead of throwing error
@@ -627,7 +704,7 @@ export const dbHelpers = {
         .eq('creator_id', userId)
         .order('created_at', { ascending: false })
         .limit(limit);
-
+      
       if (error) throw error;
       return { data, error: null };
     } catch (error) {
@@ -892,7 +969,7 @@ export const dbHelpers = {
         .gte('event_date', new Date().toISOString())
         .order('event_date', { ascending: true })
         .limit(limit);
-
+      
       if (error) throw error;
       console.log('✅ Found events:', data?.length || 0);
       return { data, error: null };

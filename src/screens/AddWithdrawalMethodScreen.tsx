@@ -444,7 +444,7 @@ export default function AddWithdrawalMethodScreen() {
           <CountryAwareBankForm
             session={session!}
             onSubmit={handleAddMethod}
-            setAsDefault={setAsDefault}
+            setMakeDefault={setMakeDefault}
           />
         )}
         {selectedMethod === 'paypal' && renderPayPalForm()}

@@ -782,7 +782,7 @@ export default function ProfileScreen() {
           <Text style={[styles.settingText, { color: theme.colors.text }]}>Theme Settings</Text>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => (navigation as any).navigate('AudioEnhancement')}>
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => (navigation as any).navigate('AudioEnhancementExpo')}>
           <Ionicons name="musical-notes" size={20} color={theme.colors.primary} />
           <Text style={[styles.settingText, { color: theme.colors.text }]}>Audio Enhancement</Text>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />

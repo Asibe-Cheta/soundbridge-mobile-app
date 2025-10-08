@@ -42,20 +42,20 @@ import PlaylistDetailsScreen from './src/screens/PlaylistDetailsScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import AvailabilityCalendarScreen from './src/screens/AvailabilityCalendarScreen';
 import CollaborationRequestsScreen from './src/screens/CollaborationRequestsScreen';
-import AudioEnhancementScreen from './src/screens/AudioEnhancementScreen';
+import AudioEnhancementExpoScreen from './src/screens/AudioEnhancementScreen.expo';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { AudioPlayerProvider } from './src/contexts/AudioPlayerContext';
 import { ThemeProvider } from './src/contexts/ThemeContext';
-import { CollaborationProvider } from './src/contexts/CollaborationContext';
+// import { CollaborationProvider } from './src/contexts/CollaborationContext';
 
 // Import components
 import MiniPlayer from './src/components/MiniPlayer';
 
 // Import services
-import { notificationService } from './src/services/NotificationService';
-import { deepLinkingService } from './src/services/DeepLinkingService';
+// import { notificationService } from './src/services/NotificationService';
+// import { deepLinkingService } from './src/services/DeepLinkingService';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -135,26 +135,28 @@ function AppNavigator() {
 
   // Initialize services
   React.useEffect(() => {
-    if (user) {
-      // Initialize notification service
-      notificationService.initialize().then(success => {
-        if (success) {
-          console.log('✅ Notification service ready');
-        }
-      });
-    }
+    console.log('🔧 Services initialization temporarily disabled for debugging');
+    // if (user) {
+    //   // Initialize notification service
+    //   notificationService.initialize().then(success => {
+    //     if (success) {
+    //       console.log('✅ Notification service ready');
+    //     }
+    //   });
+    // }
 
-    // Initialize deep linking service
-    if (navigationRef.current) {
-      const cleanup = deepLinkingService.initialize(navigationRef.current);
-      return cleanup;
-    }
+    // // Initialize deep linking service
+    // if (navigationRef.current) {
+    //   const cleanup = deepLinkingService.initialize(navigationRef.current);
+    //   return cleanup;
+    // }
   }, [user]);
 
   // Handle navigation ready
   const onNavigationReady = React.useCallback(() => {
-    deepLinkingService.setNavigationReady();
-    deepLinkingService.processPendingNavigation();
+    console.log('🔧 Deep linking temporarily disabled for debugging');
+    // deepLinkingService.setNavigationReady();
+    // deepLinkingService.processPendingNavigation();
   }, []);
 
   if (loading) {
@@ -202,7 +204,7 @@ function AppNavigator() {
             <Stack.Screen name="PlaylistDetails" component={PlaylistDetailsScreen} />
             <Stack.Screen name="AvailabilityCalendar" component={AvailabilityCalendarScreen} />
             <Stack.Screen name="CollaborationRequests" component={CollaborationRequestsScreen} />
-            <Stack.Screen name="AudioEnhancement" component={AudioEnhancementScreen} />
+            <Stack.Screen name="AudioEnhancementExpo" component={AudioEnhancementExpoScreen} options={{ headerShown: false }} />
             {/* Allow access to onboarding even after completion for testing */}
             <Stack.Screen name="OnboardingTest" component={OnboardingScreen} />
           </>
@@ -215,16 +217,17 @@ function AppNavigator() {
 }
 
 export default function App() {
+  console.log('🚀 SoundBridge Mobile App Loading...');
   return (
     <SafeAreaProvider>
       <ThemeProvider>
         <AuthProvider>
-          <CollaborationProvider>
+          {/* <CollaborationProvider> */}
             <AudioPlayerProvider>
               <StatusBar style="light" backgroundColor="#1A1A1A" />
               <AppNavigator />
             </AudioPlayerProvider>
-          </CollaborationProvider>
+          {/* </CollaborationProvider> */}
         </AuthProvider>
       </ThemeProvider>
     </SafeAreaProvider>
