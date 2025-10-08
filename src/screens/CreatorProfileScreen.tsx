@@ -451,8 +451,8 @@ export default function CreatorProfileScreen() {
           <Ionicons name="share-outline" size={24} color={theme.colors.text} />
         </TouchableOpacity>
       </View>
-
-      <ScrollView
+      
+      <ScrollView 
         style={styles.scrollView}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
@@ -463,7 +463,7 @@ export default function CreatorProfileScreen() {
             <Image source={{ uri: creator.banner_url }} style={styles.bannerImage} />
           )}
           
-          <View style={styles.profileInfo}>
+        <View style={styles.profileInfo}>
             {creator.avatar_url ? (
               <Image source={{ uri: creator.avatar_url }} style={styles.avatar} />
             ) : (
@@ -477,8 +477,8 @@ export default function CreatorProfileScreen() {
                 <Text style={[styles.displayName, { color: theme.colors.text }]}>{creator.display_name}</Text>
               </View>
               <Text style={[styles.username, { color: theme.colors.textSecondary }]}>@{creator.username}</Text>
-            </View>
           </View>
+        </View>
 
           {creator.bio && (
             <Text style={[styles.bio, { color: theme.colors.text }]}>{creator.bio}</Text>
@@ -488,13 +488,13 @@ export default function CreatorProfileScreen() {
             <View style={styles.locationRow}>
               <Ionicons name="location-outline" size={16} color={theme.colors.textSecondary} />
               <Text style={[styles.location, { color: theme.colors.textSecondary }]}>{creator.location}</Text>
-            </View>
+          </View>
           )}
 
           {creator.genre && (
             <View style={[styles.genreTag, { backgroundColor: theme.colors.primary + '20' }]}>
               <Text style={[styles.genreText, { color: theme.colors.primary }]}>{creator.genre}</Text>
-            </View>
+          </View>
           )}
 
           {/* Collaboration Status */}
@@ -505,13 +505,13 @@ export default function CreatorProfileScreen() {
                 <Text style={[styles.statusText, { color: collaborationUtils.getBookingStatusColor(bookingStatus) }]}>
                   {collaborationUtils.getBookingStatusText(bookingStatus)}
                 </Text>
-              </View>
+          </View>
               {bookingStatus.next_available_slot && (
                 <Text style={[styles.nextSlotText, { color: theme.colors.textSecondary }]}>
                   Next available: {collaborationUtils.formatDate(bookingStatus.next_available_slot)}
                 </Text>
               )}
-            </View>
+          </View>
           )}
 
           {/* Available Time Slots */}
@@ -539,12 +539,12 @@ export default function CreatorProfileScreen() {
                   </TouchableOpacity>
                 ))}
               </ScrollView>
-            </View>
+        </View>
           )}
 
-          {/* Action Buttons */}
-          <View style={styles.actionButtons}>
-            <TouchableOpacity
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          <TouchableOpacity 
               style={[
                 styles.followButton,
                 {
@@ -552,7 +552,7 @@ export default function CreatorProfileScreen() {
                   borderColor: theme.colors.primary,
                 }
               ]}
-              onPress={handleFollow}
+            onPress={handleFollow}
             >
               <Text
                 style={[
@@ -601,8 +601,8 @@ export default function CreatorProfileScreen() {
                   total_availability_slots: availability.length,
                   min_notice_days: 1
                 })}
-              >
-                <Ionicons 
+          >
+            <Ionicons 
                   name="people" 
                   size={16} 
                   color={collaborationUtils.isCreatorAvailable(bookingStatus || { 
@@ -630,11 +630,11 @@ export default function CreatorProfileScreen() {
                   ]}
                 >
                   Collaborate
-                </Text>
-              </TouchableOpacity>
+            </Text>
+          </TouchableOpacity>
             )}
-
-            <TouchableOpacity
+          
+          <TouchableOpacity 
               style={[
                 styles.tipButton,
                 {
@@ -653,8 +653,8 @@ export default function CreatorProfileScreen() {
               >
                 Tip
               </Text>
-            </TouchableOpacity>
-          </View>
+          </TouchableOpacity>
+        </View>
 
           {/* Stats */}
           <View style={styles.statsRow}>
@@ -700,34 +700,34 @@ export default function CreatorProfileScreen() {
                   )}
                 </View>
 
-                <View style={styles.trackInfo}>
+              <View style={styles.trackInfo}>
                   <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
                     {track.title}
                   </Text>
-                  <View style={styles.trackStats}>
+                <View style={styles.trackStats}>
                     <Ionicons name="play" size={12} color={theme.colors.textSecondary} />
                     <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>
                       {formatNumber(track.play_count || 0)}
-                    </Text>
+                  </Text>
                     <Ionicons name="heart" size={12} color={theme.colors.textSecondary} style={{ marginLeft: 8 }} />
                     <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>
                       {formatNumber(track.likes_count || 0)}
-                    </Text>
-                  </View>
+                  </Text>
                 </View>
+              </View>
 
-                <View style={styles.trackActions}>
+              <View style={styles.trackActions}>
                   <Text style={[styles.trackDuration, { color: theme.colors.textSecondary }]}>
                     {formatDuration(track.duration)}
                   </Text>
-                  <TouchableOpacity 
+                <TouchableOpacity 
                     style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]}
                     onPress={() => handleTrackPress(track)}
                   >
                     <Ionicons name="play" size={16} color={theme.colors.primary} />
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
             ))
           ) : (
             <View style={styles.emptyTracks}>

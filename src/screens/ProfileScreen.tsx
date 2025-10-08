@@ -448,6 +448,10 @@ export default function ProfileScreen() {
     Alert.alert('Create Playlist', 'Playlist creation will be available soon!');
   };
 
+  const handleManageAvailability = () => {
+    navigation.navigate('AvailabilityCalendar' as never);
+  };
+
   // Settings handlers
   const handlePrivacySecurity = () => {
     navigation.navigate('PrivacySecurity' as never);
@@ -597,6 +601,10 @@ export default function ProfileScreen() {
         <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleCreateEvent}>
           <Ionicons name="calendar" size={24} color={theme.colors.primary} />
           <Text style={[styles.actionText, { color: theme.colors.text }]}>Create Event</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleManageAvailability}>
+          <Ionicons name="time" size={24} color={theme.colors.primary} />
+          <Text style={[styles.actionText, { color: theme.colors.text }]}>Manage Availability</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleCreatePlaylist}>
           <Ionicons name="musical-notes" size={24} color={theme.colors.primary} />
@@ -758,6 +766,21 @@ export default function ProfileScreen() {
         <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleChangePassword}>
           <Ionicons name="key" size={20} color={theme.colors.textSecondary} />
           <Text style={[styles.settingText, { color: theme.colors.text }]}>Change Password</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Creator Tools */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Creator Tools</Text>
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleManageAvailability}>
+          <Ionicons name="calendar-outline" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Collaboration Availability</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => navigation.navigate('CollaborationRequests' as never)}>
+          <Ionicons name="people-outline" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Collaboration Requests</Text>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
       </View>

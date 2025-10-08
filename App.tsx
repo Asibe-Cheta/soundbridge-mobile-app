@@ -48,7 +48,7 @@ import AudioEnhancementExpoScreen from './src/screens/AudioEnhancementScreen.exp
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { AudioPlayerProvider } from './src/contexts/AudioPlayerContext';
 import { ThemeProvider } from './src/contexts/ThemeContext';
-// import { CollaborationProvider } from './src/contexts/CollaborationContext';
+import { CollaborationProvider } from './src/contexts/CollaborationContext';
 
 // Import components
 import MiniPlayer from './src/components/MiniPlayer';
@@ -222,12 +222,12 @@ export default function App() {
     <SafeAreaProvider>
       <ThemeProvider>
         <AuthProvider>
-          {/* <CollaborationProvider> */}
+          <CollaborationProvider>
             <AudioPlayerProvider>
               <StatusBar style="light" backgroundColor="#1A1A1A" />
               <AppNavigator />
             </AudioPlayerProvider>
-          {/* </CollaborationProvider> */}
+          </CollaborationProvider>
         </AuthProvider>
       </ThemeProvider>
     </SafeAreaProvider>

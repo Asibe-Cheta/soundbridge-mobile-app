@@ -71,9 +71,9 @@ export default function MiniPlayer() {
           {/* Track info and cover art */}
           <TouchableOpacity style={styles.trackInfo} onPress={handleExpand}>
             <View style={styles.coverContainer}>
-              {(currentTrack.cover_image_url || currentTrack.artwork_url) ? (
+              {(currentTrack.cover_image_url || currentTrack.cover_art_url || currentTrack.artwork_url) ? (
                 <Image 
-                  source={{ uri: currentTrack.cover_image_url || currentTrack.artwork_url }} 
+                  source={{ uri: currentTrack.cover_image_url || currentTrack.cover_art_url || currentTrack.artwork_url }} 
                   style={styles.coverImage} 
                 />
               ) : (

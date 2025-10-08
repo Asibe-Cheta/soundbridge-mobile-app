@@ -57,7 +57,6 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(height)).current;
-  const rotateAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
   
   // Pan responder for swipe gestures
@@ -104,34 +103,8 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
       }),
     ]).start();
 
-    // Start album rotation animation
-    if (isPlaying) {
-      startRotationAnimation();
-    }
   }, []);
 
-  useEffect(() => {
-    if (isPlaying) {
-      startRotationAnimation();
-    } else {
-      stopRotationAnimation();
-    }
-  }, [isPlaying]);
-
-  const startRotationAnimation = () => {
-    rotateAnim.setValue(0);
-    Animated.loop(
-      Animated.timing(rotateAnim, {
-        toValue: 1,
-        duration: 10000,
-        useNativeDriver: true,
-      })
-    ).start();
-  };
-
-  const stopRotationAnimation = () => {
-    rotateAnim.stopAnimation();
-  };
 
   const closePlayer = () => {
     Animated.parallel([
@@ -226,10 +199,6 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     });
   };
 
-  const rotateInterpolate = rotateAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
 
   const renderProgressBar = () => (
     <View style={styles.progressContainer}>
@@ -353,7 +322,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
             onPress={() => play(track)}
           >
             <Image 
-              source={{ uri: track.cover_image_url || track.artwork_url || 'https://via.placeholder.com/60' }}
+              source={{ uri: track.cover_image_url || track.cover_art_url || track.artwork_url || 'https://via.placeholder.com/60' }}
               style={styles.queueItemImage}
             />
             <View style={styles.queueItemInfo}>
@@ -422,18 +391,13 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
 
       {/* Album Art */}
       <View style={styles.albumContainer}>
-        <Animated.View
-          style={[
-            styles.albumArtContainer,
-            { transform: [{ rotate: rotateInterpolate }] }
-          ]}
-        >
+        <View style={styles.albumArtContainer}>
           <Image 
-            source={{ uri: currentTrack.cover_image_url || currentTrack.artwork_url || 'https://via.placeholder.com/300' }}
+            source={{ uri: currentTrack.cover_image_url || currentTrack.cover_art_url || currentTrack.artwork_url || 'https://via.placeholder.com/300' }}
             style={styles.albumArt}
           />
           <View style={styles.albumArtOverlay} />
-        </Animated.View>
+        </View>
       </View>
 
       {/* Track Info */}

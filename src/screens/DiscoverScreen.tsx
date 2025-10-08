@@ -708,6 +708,25 @@ function DiscoverScreen() {
     (navigation as any).navigate('TrackDetails', { trackId: track.id, track: track });
   };
 
+  const handleTrackPlay = async (track: AudioTrack) => {
+    try {
+      console.log('🎵 Playing track from Discover:', track.title);
+      await play(track);
+      
+      // Add other tracks from current view to queue
+      if (recentTracks.length > 0) {
+        const otherRecentTracks = recentTracks.filter(t => t.id !== track.id);
+        otherRecentTracks.forEach(t => addToQueue(t));
+      }
+      
+      // Mini player will now handle showing the currently playing track
+      // Navigation to full player is handled by mini player expand button
+    } catch (error) {
+      console.error('Error playing track:', error);
+      Alert.alert('Playback Error', 'Failed to play the track. Please try again.');
+    }
+  };
+
   const handleCreatorPress = (creator: Creator) => {
     (navigation as any).navigate('CreatorProfile', { creatorId: creator.id, creator: creator });
   };
@@ -953,7 +972,7 @@ function DiscoverScreen() {
                                 {formatDuration(track.duration)} • {formatNumber(track.play_count)} plays
                               </Text>
                             </View>
-                            <TouchableOpacity style={styles.searchTrackPlayButton} onPress={() => handleTrackPress(track)}>
+                            <TouchableOpacity style={styles.searchTrackPlayButton} onPress={() => handleTrackPlay(track)}>
                               <Ionicons name="play" size={16} color={theme.colors.primary} />
                             </TouchableOpacity>
                           </TouchableOpacity>
@@ -1026,9 +1045,12 @@ function DiscoverScreen() {
                             <Ionicons name="musical-notes" size={40} color={theme.colors.textSecondary} />
                       </View>
                     )}
-                    <View style={styles.playOverlay}>
+                    <TouchableOpacity 
+                      style={styles.playOverlay}
+                      onPress={() => handleTrackPlay(track)}
+                    >
                           <Ionicons name="play" size={20} color="#FFFFFF" />
-                    </View>
+                    </TouchableOpacity>
                   </View>
                       <Text style={[styles.trendingTitle, { color: theme.colors.text }]} numberOfLines={1}>
                         {track.title}
@@ -1136,7 +1158,10 @@ function DiscoverScreen() {
                         </Text>
                 </View>
                       <View style={styles.recentTrackActions}>
-                  <TouchableOpacity style={styles.playButton}>
+                  <TouchableOpacity 
+                    style={styles.playButton}
+                    onPress={() => handleTrackPlay(track)}
+                  >
                     <Ionicons name="play" size={16} color="#DC2626" />
                   </TouchableOpacity>
                         <Text style={[styles.recentTrackDuration, { color: theme.colors.textSecondary }]}>
