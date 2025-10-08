@@ -36,6 +36,8 @@ interface AudioPlayerContextType {
   stop: () => Promise<void>;
   seekTo: (position: number) => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
+  updateCurrentTrack: (updates: Partial<AudioTrack>) => void;
+  incrementPlayCount: (trackId: string) => Promise<void>;
   volume: number;
   isShuffled: boolean;
   isRepeat: boolean;
@@ -202,6 +204,9 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
         setIsPlaying(true);
         setIsPaused(false);
         setIsLoading(false);
+        
+        // Increment play count in database
+        incrementPlayCount(track.id);
         return;
       }
 
@@ -295,6 +300,9 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       setPosition(0);
       setIsLoading(false);
       
+      // Increment play count in database
+      incrementPlayCount(track.id);
+      
       // Start tracking position
       startPositionTracking();
       
@@ -365,14 +373,28 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
 
   const seekTo = async (newPosition: number) => {
     try {
-      if (soundRef.current) {
-        await soundRef.current.setPositionAsync(newPosition);
-        setPosition(newPosition);
-        console.log('🎵 Seeked to:', newPosition);
+      // Validate position
+      if (newPosition < 0 || newPosition > duration) {
+        console.warn('🎵 Invalid seek position:', newPosition, 'Duration:', duration);
+        return;
+      }
+      
+      if (soundRef.current && isPlaying !== undefined) {
+        // Add a small delay to prevent rapid seeking
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+        const status = await soundRef.current.getStatusAsync();
+        if (status.isLoaded) {
+          await soundRef.current.setPositionAsync(Math.floor(newPosition * 1000)); // Convert to milliseconds
+          setPosition(newPosition);
+          console.log('🎵 Successfully seeked to:', newPosition);
+        } else {
+          console.warn('🎵 Audio not loaded, cannot seek');
+        }
       }
     } catch (err) {
-      console.error('Failed to seek:', err);
-      setError('Failed to seek to position');
+      console.warn('🎵 Seek interrupted or failed:', err);
+      // Don't set error state for seeking issues, just log and continue
     }
   };
 
@@ -389,6 +411,55 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     } catch (err) {
       console.error('Failed to set volume:', err);
       setError('Failed to set volume');
+    }
+  };
+
+  const updateCurrentTrack = (updates: Partial<AudioTrack>) => {
+    setCurrentTrack(prev => prev ? { ...prev, ...updates } : null);
+    console.log('🎵 Updated current track:', updates);
+  };
+
+  const incrementPlayCount = async (trackId: string) => {
+    try {
+      console.log('📊 Incrementing play count for track:', trackId);
+      
+      // Get current play count from database
+      const { data: trackData, error: fetchError } = await supabase
+        .from('audio_tracks')
+        .select('play_count')
+        .eq('id', trackId)
+        .single();
+      
+      if (fetchError) {
+        console.error('Error fetching current play count:', fetchError);
+        return;
+      }
+      
+      const currentPlayCount = trackData?.play_count || 0;
+      const newPlayCount = currentPlayCount + 1;
+      
+      // Update play count in database
+      const { error: updateError } = await supabase
+        .from('audio_tracks')
+        .update({ 
+          play_count: newPlayCount 
+        })
+        .eq('id', trackId);
+      
+      if (updateError) {
+        console.error('Error updating play count:', updateError);
+        return;
+      }
+      
+      // Update current track if it's the same track
+      if (currentTrack && currentTrack.id === trackId) {
+        updateCurrentTrack({ plays_count: newPlayCount });
+      }
+      
+      console.log('✅ Play count updated:', newPlayCount);
+      
+    } catch (error) {
+      console.error('❌ Error incrementing play count:', error);
     }
   };
 
@@ -473,6 +544,8 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     stop,
     seekTo,
     setVolume,
+    updateCurrentTrack,
+    incrementPlayCount,
     volume,
     isShuffled,
     isRepeat,

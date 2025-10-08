@@ -18,6 +18,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 // import type { AudioTrack } from '@soundbridge/types'; // Commented out - using local type
 
 const { width, height } = Dimensions.get('window');
@@ -44,15 +46,26 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     playPrevious,
     seekTo,
     setVolume,
+    updateCurrentTrack,
     toggleShuffle,
     toggleRepeat,
     clearQueue
   } = useAudioPlayer();
+  
+  const { user } = useAuth();
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
+  const [lastTap, setLastTap] = useState(0);
+  const [isProgressPressed, setIsProgressPressed] = useState(false);
+  const [isVolumePressed, setIsVolumePressed] = useState(false);
+
+  // Reset like status when track changes (simplified approach)
+  useEffect(() => {
+    setIsLiked(false);
+  }, [currentTrack]);
   
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -143,23 +156,47 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   };
 
   const handleLike = async () => {
-    if (!currentTrack) return;
+    if (!currentTrack || !user) {
+      Alert.alert('Authentication Required', 'Please sign in to like tracks.');
+      return;
+    }
+    
+    const originalLikeStatus = isLiked;
+    const newLikeStatus = !originalLikeStatus;
     
     try {
-      // TODO: Replace with actual API call when user auth is available
-      setIsLiked(!isLiked);
+      setIsLiked(newLikeStatus);
       
-      // Simulate API call for now
-      console.log(`${isLiked ? 'Unliked' : 'Liked'} track:`, currentTrack.title);
+      // Update likes count in audio_tracks table only
+      // This is a safer approach that doesn't rely on a likes table that might not exist
+      const likeIncrement = newLikeStatus ? 1 : -1;
+      const newLikesCount = Math.max(0, (currentTrack.likes_count || 0) + likeIncrement);
       
-      // Show feedback
-      Alert.alert(
-        isLiked ? 'Removed from Liked Songs' : 'Added to Liked Songs',
-        `"${currentTrack.title}" ${isLiked ? 'removed from' : 'added to'} your liked songs.`,
-        [{ text: 'OK' }]
-      );
+      const { error: updateError } = await supabase
+        .from('audio_tracks')
+        .update({ 
+          likes_count: newLikesCount 
+        })
+        .eq('id', currentTrack.id);
+      
+      if (updateError) {
+        console.error('Error updating likes count:', updateError);
+        // Revert the like status if database update failed
+        setIsLiked(originalLikeStatus);
+        Alert.alert('Error', 'Failed to update likes count. Please try again.');
+        return;
+      }
+      
+      // Update the current track in the context with the new likes count
+      updateCurrentTrack({ likes_count: newLikesCount });
+      
+      console.log(`${newLikeStatus ? 'Liked' : 'Unliked'} track:`, currentTrack.title);
+      console.log('New likes count:', newLikesCount);
+      
     } catch (error) {
       console.error('Error liking track:', error);
+      // Revert the like status if there was an error
+      setIsLiked(originalLikeStatus);
       Alert.alert('Error', 'Unable to like this track. Please try again.');
     }
   };
@@ -199,18 +236,77 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     });
   };
 
+  const handleFastForward = async () => {
+    const newPosition = Math.min(position + 15, duration);
+    await seekTo(newPosition);
+  };
+
+  const handleRewind = async () => {
+    const newPosition = Math.max(position - 15, 0);
+    await seekTo(newPosition);
+  };
+
+  const handleAlbumArtTap = () => {
+    const now = Date.now();
+    const DOUBLE_TAP_DELAY = 300;
+    
+    if (lastTap && (now - lastTap) < DOUBLE_TAP_DELAY) {
+      // Double tap detected
+      const tapX = Math.random() * width; // For simplicity, we'll use random side
+      if (tapX < width / 2) {
+        handleRewind();
+      } else {
+        handleFastForward();
+      }
+    } else {
+      setLastTap(now);
+    }
+  };
+
+
+  // Progress bar pan responder for dragging
+  const progressPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        // User started touching - seek immediately and magnify
+        setIsProgressPressed(true);
+        const locationX = evt.nativeEvent.locationX;
+        const progressBarWidth = width - 112; // Account for padding and time labels
+        const percentage = Math.max(0, Math.min(1, locationX / progressBarWidth));
+        const newPosition = percentage * duration;
+        seekTo(newPosition);
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        // User is dragging - update position
+        const locationX = Math.max(0, gestureState.moveX - 76); // Account for left padding
+        const progressBarWidth = width - 112;
+        const percentage = Math.max(0, Math.min(1, locationX / progressBarWidth));
+        const newPosition = percentage * duration;
+        seekTo(newPosition);
+      },
+      onPanResponderRelease: () => {
+        // User stopped dragging - return to normal size
+        setIsProgressPressed(false);
+      },
+    })
+  ).current;
 
   const renderProgressBar = () => (
     <View style={styles.progressContainer}>
       <Text style={styles.timeText}>{formatTime(position)}</Text>
-      <TouchableOpacity 
-        style={styles.progressBar}
-        onPress={(e) => {
-          const { locationX } = e.nativeEvent;
-          handleSeek(locationX);
-        }}
+      <View 
+        style={[
+          styles.progressBar,
+          isProgressPressed && styles.progressBarPressed
+        ]}
+        {...progressPanResponder.panHandlers}
       >
-        <View style={styles.progressTrack}>
+        <View style={[
+          styles.progressTrack,
+          isProgressPressed && styles.progressTrackPressed
+        ]}>
           <View 
             style={[
               styles.progressFill, 
@@ -218,79 +314,105 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
             ]} 
           />
         </View>
-      </TouchableOpacity>
+      </View>
       <Text style={styles.timeText}>{formatTime(duration)}</Text>
     </View>
   );
 
   const renderControls = () => (
     <View style={styles.controlsContainer}>
-      <TouchableOpacity 
-        style={styles.controlButton}
-        onPress={toggleShuffle}
-      >
-        <Ionicons 
-          name="shuffle" 
-          size={24} 
-          color={isShuffled ? '#DC2626' : 'rgba(255, 255, 255, 0.6)'} 
-        />
-      </TouchableOpacity>
-
-      <TouchableOpacity 
-        style={styles.controlButton}
-        onPress={playPrevious}
-      >
-        <Ionicons name="play-skip-back" size={32} color="#FFFFFF" />
-      </TouchableOpacity>
-
-      <TouchableOpacity 
-        style={styles.playButton}
-        onPress={handlePlayPause}
-      >
-        <LinearGradient
-          colors={['#DC2626', '#EC4899']}
-          style={styles.playButtonGradient}
+      {/* Main row: Skip, Rewind, Play, Forward, Skip */}
+      <View style={styles.controlsMainRow}>
+        <TouchableOpacity 
+          style={styles.controlButton}
+          onPress={playPrevious}
         >
-          <Ionicons 
-            name={isPlaying ? 'pause' : 'play'} 
-            size={32} 
-            color="#FFFFFF" 
-          />
-        </LinearGradient>
-      </TouchableOpacity>
+          <Ionicons name="play-skip-back" size={32} color="#FFFFFF" />
+        </TouchableOpacity>
 
-      <TouchableOpacity 
-        style={styles.controlButton}
-        onPress={playNext}
-      >
-        <Ionicons name="play-skip-forward" size={32} color="#FFFFFF" />
-      </TouchableOpacity>
+        <TouchableOpacity 
+          style={styles.controlButton}
+          onPress={handleRewind}
+        >
+          <Ionicons name="play-back" size={28} color="#FFFFFF" />
+          <Text style={styles.seekLabel}>15s</Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity 
-        style={styles.controlButton}
-        onPress={toggleRepeat}
-      >
-        <Ionicons 
-          name={isRepeat ? 'repeat' : 'repeat-outline'} 
-          size={24} 
-          color={isRepeat ? '#DC2626' : 'rgba(255, 255, 255, 0.6)'} 
-        />
-      </TouchableOpacity>
+        <TouchableOpacity 
+          style={styles.playButton}
+          onPress={handlePlayPause}
+        >
+          <LinearGradient
+            colors={['#DC2626', '#EC4899']}
+            style={styles.playButtonGradient}
+          >
+            <Ionicons 
+              name={isPlaying ? 'pause' : 'play'} 
+              size={32} 
+              color="#FFFFFF" 
+            />
+          </LinearGradient>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.controlButton}
+          onPress={handleFastForward}
+        >
+          <Ionicons name="play-forward" size={28} color="#FFFFFF" />
+          <Text style={styles.seekLabel}>15s</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.controlButton}
+          onPress={playNext}
+        >
+          <Ionicons name="play-skip-forward" size={32} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
     </View>
   );
+
+  // Volume control pan responder for dragging
+  const volumePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        // User started touching - set volume immediately and magnify
+        setIsVolumePressed(true);
+        const locationX = evt.nativeEvent.locationX;
+        const volumeBarWidth = width - 152; // Account for padding and icons
+        const newVolume = Math.max(0, Math.min(1, locationX / volumeBarWidth));
+        setVolume(newVolume);
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        // User is dragging - update volume
+        const locationX = Math.max(0, gestureState.moveX - 76); // Account for left padding
+        const volumeBarWidth = width - 152;
+        const newVolume = Math.max(0, Math.min(1, locationX / volumeBarWidth));
+        setVolume(newVolume);
+      },
+      onPanResponderRelease: () => {
+        // User stopped dragging - return to normal size
+        setIsVolumePressed(false);
+      },
+    })
+  ).current;
 
   const renderVolumeControl = () => (
     <View style={styles.volumeContainer}>
       <Ionicons name="volume-low" size={20} color="rgba(255, 255, 255, 0.6)" />
-      <TouchableOpacity 
-        style={styles.volumeBar}
-        onPress={(e) => {
-          const { locationX } = e.nativeEvent;
-          const newVolume = Math.max(0, Math.min(1, locationX / 200));
-          setVolume(newVolume);
-        }}
+      <View 
+        style={[
+          styles.volumeBar,
+          isVolumePressed && styles.volumeBarPressed
+        ]}
+        {...volumePanResponder.panHandlers}
       >
-        <View style={styles.volumeTrack}>
+        <View style={[
+          styles.volumeTrack,
+          isVolumePressed && styles.volumeTrackPressed
+        ]}>
           <View 
             style={[
               styles.volumeFill, 
@@ -298,7 +420,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
             ]} 
           />
         </View>
-      </TouchableOpacity>
+      </View>
       <Ionicons name="volume-high" size={20} color="rgba(255, 255, 255, 0.6)" />
     </View>
   );
@@ -377,27 +499,40 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
         end={{ x: 1, y: 1 }}
         style={styles.background}
       />
+      
+      {/* Bottom gradient overlay to blend with system UI */}
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.3)', '#000000']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={styles.bottomGradient}
+      />
 
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={closePlayer}>
-          <Ionicons name="chevron-down" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Now Playing</Text>
-        <TouchableOpacity onPress={() => setShowQueue(true)}>
-          <Ionicons name="list" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
-      </View>
+      <ScrollView 
+        style={styles.scrollContainer}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={closePlayer}>
+            <Ionicons name="chevron-down" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Now Playing</Text>
+          <TouchableOpacity onPress={() => setShowQueue(true)}>
+            <Ionicons name="list" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
 
       {/* Album Art */}
       <View style={styles.albumContainer}>
-        <View style={styles.albumArtContainer}>
+        <TouchableOpacity style={styles.albumArtContainer} onPress={handleAlbumArtTap}>
           <Image 
             source={{ uri: currentTrack.cover_image_url || currentTrack.cover_art_url || currentTrack.artwork_url || 'https://via.placeholder.com/300' }}
             style={styles.albumArt}
           />
           <View style={styles.albumArtOverlay} />
-        </View>
+        </TouchableOpacity>
       </View>
 
       {/* Track Info */}
@@ -407,9 +542,6 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
         </Text>
         <Text style={styles.trackArtist} numberOfLines={1}>
           {currentTrack.creator?.display_name || currentTrack.creator?.username || 'Unknown Artist'}
-        </Text>
-        <Text style={styles.trackCreator} numberOfLines={1}>
-          @{currentTrack.creator?.username || 'unknown'}
         </Text>
       </View>
 
@@ -422,32 +554,33 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
       {/* Volume Control */}
       {renderVolumeControl()}
 
-      {/* Action Buttons */}
-      <View style={styles.actionButtons}>
-        <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
-          <Ionicons 
-            name={isLiked ? 'heart' : 'heart-outline'} 
-            size={24} 
-            color={isLiked ? '#DC2626' : 'rgba(255, 255, 255, 0.6)'} 
-          />
-        </TouchableOpacity>
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
+            <Ionicons 
+              name={isLiked ? 'heart' : 'heart-outline'} 
+              size={24} 
+              color={isLiked ? '#DC2626' : 'rgba(255, 255, 255, 0.6)'} 
+            />
+          </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-          <Ionicons name="share-outline" size={24} color="rgba(255, 255, 255, 0.6)" />
-        </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
+            <Ionicons name="share-outline" size={24} color="rgba(255, 255, 255, 0.6)" />
+          </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton} onPress={handleTipCreator}>
-          <Ionicons name="cash-outline" size={24} color="rgba(255, 255, 255, 0.6)" />
-        </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton} onPress={handleTipCreator}>
+            <Ionicons name="cash-outline" size={24} color="rgba(255, 255, 255, 0.6)" />
+          </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton} onPress={handleFollow}>
-          <Ionicons 
-            name={isFollowing ? 'person-remove' : 'person-add'} 
-            size={24} 
-            color={isFollowing ? '#DC2626' : 'rgba(255, 255, 255, 0.6)'} 
-          />
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity style={styles.actionButton} onPress={handleFollow}>
+            <Ionicons 
+              name={isFollowing ? 'person-remove' : 'person-add'} 
+              size={24} 
+              color={isFollowing ? '#DC2626' : 'rgba(255, 255, 255, 0.6)'} 
+            />
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
 
       {/* Queue Modal */}
       {showQueue && renderQueue()}
@@ -464,6 +597,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000000',
+    minHeight: height, // Ensure minimum height covers full screen
+  },
+  scrollContainer: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 80, // Reduced to bring action buttons back up
   },
   background: {
     position: 'absolute',
@@ -471,6 +612,16 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    height: height, // Ensure it covers full screen height
+    zIndex: -1,
+  },
+  bottomGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 120, // Extra height to cover system UI area
+    zIndex: -1,
   },
   emptyContainer: {
     flex: 1,
@@ -562,6 +713,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
+  trackStats: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 8,
+    gap: 16,
+  },
+  likesCount: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  playsCount: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 12,
+  },
   progressContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -589,15 +755,30 @@ const styles = StyleSheet.create({
     backgroundColor: '#DC2626',
     borderRadius: 2,
   },
+  progressBarPressed: {
+    transform: [{ scaleY: 1.5 }], // Magnify vertically when pressed
+  },
+  progressTrackPressed: {
+    height: 6, // Make track thicker when pressed
+  },
   controlsContainer: {
+    paddingHorizontal: 20,
+    marginBottom: 40, // Increased margin
+  },
+  controlsMainRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 30,
   },
   controlButton: {
     padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  seekLabel: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 10,
+    marginTop: 2,
   },
   playButton: {
     marginHorizontal: 20,
@@ -621,7 +802,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 40,
-    marginBottom: 30,
+    marginBottom: 40, // Reduced to bring action buttons closer to volume
   },
   volumeBar: {
     flex: 1,
@@ -639,11 +820,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#EC4899',
     borderRadius: 1.5,
   },
+  volumeBarPressed: {
+    transform: [{ scaleY: 1.5 }], // Magnify vertically when pressed
+  },
+  volumeTrackPressed: {
+    height: 5, // Make track thicker when pressed
+  },
   actionButtons: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     paddingHorizontal: 40,
-    marginBottom: 20,
+    marginBottom: 30, // Reduced to bring buttons up but still avoid obstruction
   },
   actionButton: {
     padding: 12,

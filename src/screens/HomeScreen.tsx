@@ -234,7 +234,15 @@ export default function HomeScreen() {
       // Try to load real tracks from Supabase - let's see what columns exist
       const { data, error } = await supabase
         .from('audio_tracks')
-        .select('*')
+        .select(`
+          *,
+          creator:profiles!audio_tracks_creator_id_fkey (
+            id,
+            username,
+            display_name,
+            avatar_url
+          )
+        `)
         .order('created_at', { ascending: false })
         .limit(10);
 
@@ -322,10 +330,10 @@ export default function HomeScreen() {
             likes_count: track.likes_count || 0,
             created_at: track.created_at,
             creator: {
-              id: track.creator_id || 'unknown',
-              username: 'creator',
-              display_name: 'Music Creator',
-              avatar_url: undefined,
+              id: track.creator?.id || track.creator_id || 'unknown',
+              username: track.creator?.username || 'unknown',
+              display_name: track.creator?.display_name || 'Unknown Artist',
+              avatar_url: track.creator?.avatar_url,
             },
           };
         });
