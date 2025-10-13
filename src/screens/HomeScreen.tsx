@@ -18,6 +18,7 @@ import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { supabase, dbHelpers } from '../lib/supabase';
+import AdBanner from '../components/AdBanner';
 
 const { width, height } = Dimensions.get('window');
 
@@ -754,6 +755,9 @@ export default function HomeScreen() {
           </>
         )}
       </View>
+
+      {/* Ad Banner - Only show for free users */}
+      <AdBanner />
 
       {/* Recent Uploads */}
       <View style={styles.section}>

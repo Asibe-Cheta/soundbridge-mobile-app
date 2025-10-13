@@ -12,6 +12,8 @@ import {
   PanResponder,
   Share,
   Alert,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,6 +22,9 @@ import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { offlineDownloadService } from '../services/OfflineDownloadService';
+import { adService } from '../services/AdService';
+import AdInterstitial from '../components/AdInterstitial';
 // import type { AudioTrack } from '@soundbridge/types'; // Commented out - using local type
 
 const { width, height } = Dimensions.get('window');
@@ -61,10 +66,25 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   const [lastTap, setLastTap] = useState(0);
   const [isProgressPressed, setIsProgressPressed] = useState(false);
   const [isVolumePressed, setIsVolumePressed] = useState(false);
+  const [showLyrics, setShowLyrics] = useState(false);
+  const [lyricsData, setLyricsData] = useState<string | null>(null);
+  const [isLoadingLyrics, setIsLoadingLyrics] = useState(false);
+  const lyricsRecoveryAttempted = useRef(false);
+  const [isOffline, setIsOffline] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [showAd, setShowAd] = useState(false);
+  
+  // Lyrics modal drag animation
+  const lyricsModalTranslateY = useRef(new Animated.Value(0)).current;
+  const lyricsModalOpacity = useRef(new Animated.Value(0)).current;
+  const [lyricsModalDragOffset, setLyricsModalDragOffset] = useState(0);
 
-  // Reset like status when track changes (simplified approach)
+  // Reset like status and lyrics when track changes
   useEffect(() => {
     setIsLiked(false);
+    setShowLyrics(false);
+    setLyricsData(null);
+    lyricsRecoveryAttempted.current = false;
   }, [currentTrack]);
   
   // Animation values
@@ -263,6 +283,291 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     }
   };
 
+  // Lyrics recovery mechanism
+  const recoverLyrics = async () => {
+    if (!currentTrack || lyricsRecoveryAttempted.current) return;
+    
+    lyricsRecoveryAttempted.current = true;
+    setIsLoadingLyrics(true);
+    
+    try {
+      console.log('🎵 Attempting lyrics recovery for track:', currentTrack.id);
+      
+      // Fetch track data from database
+      const { data, error } = await supabase
+        .from('audio_tracks')
+        .select('lyrics, lyrics_language, has_lyrics')
+        .eq('id', currentTrack.id)
+        .single();
+      
+      if (error) {
+        console.error('Error fetching lyrics:', error);
+        return;
+      }
+      
+      if (data?.lyrics) {
+        console.log('✅ Lyrics recovered successfully');
+        console.log('🎵 Recovered lyrics length:', data.lyrics.length);
+        console.log('🎵 Recovered lyrics preview:', data.lyrics.substring(0, 100));
+        setLyricsData(data.lyrics);
+        // Update current track with lyrics
+        updateCurrentTrack({
+          lyrics: data.lyrics,
+          lyrics_language: data.lyrics_language,
+          has_lyrics: data.has_lyrics
+        });
+        console.log('🎵 Updated current track with lyrics');
+      } else {
+        console.log('ℹ️ No lyrics available for this track');
+        setLyricsData(null);
+      }
+    } catch (error) {
+      console.error('Failed to recover lyrics:', error);
+    } finally {
+      setIsLoadingLyrics(false);
+    }
+  };
+
+  // Animate lyrics modal in
+  const animateLyricsModalIn = () => {
+    lyricsModalTranslateY.setValue(300);
+    lyricsModalOpacity.setValue(0);
+    setLyricsModalDragOffset(0);
+    
+    Animated.parallel([
+      Animated.timing(lyricsModalTranslateY, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.timing(lyricsModalOpacity, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  // Animate lyrics modal out
+  const animateLyricsModalOut = () => {
+    Animated.parallel([
+      Animated.timing(lyricsModalTranslateY, {
+        toValue: 300,
+        duration: 350,
+        useNativeDriver: true,
+      }),
+      Animated.timing(lyricsModalOpacity, {
+        toValue: 0,
+        duration: 350,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowLyrics(false);
+      lyricsModalTranslateY.setValue(0);
+      lyricsModalOpacity.setValue(0);
+      setLyricsModalDragOffset(0);
+    });
+  };
+
+  // Toggle lyrics display
+  const handleToggleLyrics = () => {
+    if (!currentTrack) return;
+    
+    console.log('🎵 Opening lyrics modal...');
+    
+    // If we don't have lyrics yet, try to recover them
+    if (!currentTrack.lyrics && !lyricsData && !lyricsRecoveryAttempted.current) {
+      recoverLyrics();
+    }
+    
+    setShowLyrics(true);
+    animateLyricsModalIn();
+  };
+
+  // Close lyrics modal
+  const handleCloseLyrics = () => {
+    animateLyricsModalOut();
+  };
+
+  // Simple drag state
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStartY, setDragStartY] = useState(0);
+  const [dragOffset, setDragOffset] = useState(0);
+
+  // Handle drag start
+  const handleDragStart = (event: any) => {
+    event.stopPropagation();
+    setIsDragging(true);
+    setDragStartY(event.nativeEvent.pageY);
+    setDragOffset(lyricsModalTranslateY._value);
+  };
+
+  // Handle drag move
+  const handleDragMove = (event: any) => {
+    if (!isDragging) return;
+    event.stopPropagation();
+    const currentY = event.nativeEvent.pageY;
+    const deltaY = currentY - dragStartY;
+    lyricsModalTranslateY.setValue(dragOffset + deltaY);
+  };
+
+  // Handle drag end
+  const handleDragEnd = (event: any) => {
+    if (!isDragging) return;
+    event.stopPropagation();
+    setIsDragging(false);
+    
+    const currentValue = lyricsModalTranslateY._value;
+    if (currentValue > 80) { // More sensitive threshold
+      // Close modal if dragged down significantly
+      animateLyricsModalOut();
+    } else {
+      // Snap back to original position with smooth animation
+      Animated.spring(lyricsModalTranslateY, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 150,
+        friction: 10,
+      }).start();
+    }
+  };
+
+  // Create PanResponder for drag handle
+  const createDragPanResponder = () => {
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return Math.abs(gestureState.dy) > 5;
+      },
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+        return Math.abs(gestureState.dy) > 5;
+      },
+      onPanResponderGrant: (evt, gestureState) => {
+        setIsDragging(true);
+        setDragStartY(evt.nativeEvent.pageY);
+        setDragOffset(lyricsModalTranslateY._value);
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        if (!isDragging) return;
+        const currentY = evt.nativeEvent.pageY;
+        const deltaY = currentY - dragStartY;
+        lyricsModalTranslateY.setValue(dragOffset + deltaY);
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        setIsDragging(false);
+        const currentValue = lyricsModalTranslateY._value;
+        if (currentValue > 80) {
+          animateLyricsModalOut();
+        } else {
+          Animated.spring(lyricsModalTranslateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            tension: 150,
+            friction: 10,
+          }).start();
+        }
+      },
+    });
+  };
+
+  // Check if track has lyrics (including recovery attempt check)
+  const hasLyrics = !!(currentTrack?.lyrics || currentTrack?.has_lyrics || lyricsData);
+  
+  // Debug logging for lyrics state
+  console.log('🎵 Lyrics state check:', {
+    trackId: currentTrack?.id,
+    hasLyricsField: currentTrack?.has_lyrics,
+    hasLyricsContent: !!currentTrack?.lyrics,
+    hasLyricsData: !!lyricsData,
+    recoveryAttempted: lyricsRecoveryAttempted.current,
+    finalHasLyrics: hasLyrics
+  });
+
+  // Check if track is available offline
+  const checkOfflineStatus = async () => {
+    if (!currentTrack) return;
+    
+    try {
+      const isTrackOffline = await offlineDownloadService.isTrackOffline(currentTrack.id);
+      setIsOffline(isTrackOffline);
+    } catch (error) {
+      console.error('Error checking offline status:', error);
+    }
+  };
+
+  // Check offline status when track changes
+  useEffect(() => {
+    if (currentTrack) {
+      checkOfflineStatus();
+    }
+  }, [currentTrack]);
+
+  // Initialize ad service
+  useEffect(() => {
+    adService.initialize();
+  }, []);
+
+  // Handle track play for ads
+  useEffect(() => {
+    if (currentTrack && isPlaying) {
+      handleTrackPlayForAds();
+    }
+  }, [currentTrack, isPlaying]);
+
+  // Handle track play for ad display logic
+  const handleTrackPlayForAds = async () => {
+    try {
+      // Get user tier (simplified - in real app, get from user profile)
+      const userTier = 'free'; // TODO: Get from user subscription status
+      
+      const shouldShowAd = await adService.onTrackPlay(userTier);
+      
+      if (shouldShowAd) {
+        // Show ad after a short delay to avoid interrupting immediate playback
+        setTimeout(() => {
+          setShowAd(true);
+        }, 2000);
+      }
+    } catch (error) {
+      console.error('Error handling track play for ads:', error);
+    }
+  };
+
+  // Handle download track for offline
+  const handleDownload = async () => {
+    if (!currentTrack || isDownloading) return;
+    
+    try {
+      setIsDownloading(true);
+      
+      const trackForDownload = {
+        id: currentTrack.id,
+        title: currentTrack.title,
+        artist: currentTrack.artist,
+        duration: currentTrack.duration,
+        coverArt: currentTrack.coverArt,
+        url: currentTrack.url,
+      };
+      
+      const success = await offlineDownloadService.downloadTrack(trackForDownload);
+      
+      if (success) {
+        setIsOffline(true);
+        Alert.alert('Download Complete', `${currentTrack.title} is now available offline`);
+      } else {
+        Alert.alert('Download Failed', 'Failed to download track for offline listening');
+      }
+    } catch (error) {
+      console.error('Error downloading track:', error);
+      Alert.alert('Download Error', 'An error occurred while downloading the track');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+  
+  
+
 
   // Progress bar pan responder for dragging
   const progressPanResponder = useRef(
@@ -323,51 +628,51 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     <View style={styles.controlsContainer}>
       {/* Main row: Skip, Rewind, Play, Forward, Skip */}
       <View style={styles.controlsMainRow}>
-        <TouchableOpacity 
-          style={styles.controlButton}
+      <TouchableOpacity 
+        style={styles.controlButton}
           onPress={playPrevious}
         >
           <Ionicons name="play-skip-back" size={32} color="#FFFFFF" />
-        </TouchableOpacity>
+      </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.controlButton}
+      <TouchableOpacity 
+        style={styles.controlButton}
           onPress={handleRewind}
-        >
+      >
           <Ionicons name="play-back" size={28} color="#FFFFFF" />
           <Text style={styles.seekLabel}>15s</Text>
-        </TouchableOpacity>
+      </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.playButton}
-          onPress={handlePlayPause}
+      <TouchableOpacity 
+        style={styles.playButton}
+        onPress={handlePlayPause}
+      >
+        <LinearGradient
+          colors={['#DC2626', '#EC4899']}
+          style={styles.playButtonGradient}
         >
-          <LinearGradient
-            colors={['#DC2626', '#EC4899']}
-            style={styles.playButtonGradient}
-          >
-            <Ionicons 
-              name={isPlaying ? 'pause' : 'play'} 
-              size={32} 
-              color="#FFFFFF" 
-            />
-          </LinearGradient>
-        </TouchableOpacity>
+          <Ionicons 
+            name={isPlaying ? 'pause' : 'play'} 
+            size={32} 
+            color="#FFFFFF" 
+          />
+        </LinearGradient>
+      </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.controlButton}
+      <TouchableOpacity 
+        style={styles.controlButton}
           onPress={handleFastForward}
-        >
+      >
           <Ionicons name="play-forward" size={28} color="#FFFFFF" />
           <Text style={styles.seekLabel}>15s</Text>
-        </TouchableOpacity>
+      </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.controlButton}
+      <TouchableOpacity 
+        style={styles.controlButton}
           onPress={playNext}
         >
           <Ionicons name="play-skip-forward" size={32} color="#FFFFFF" />
-        </TouchableOpacity>
+      </TouchableOpacity>
       </View>
     </View>
   );
@@ -436,7 +741,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
       <ScrollView style={styles.queueList}>
         {queue.map((track, index) => (
           <TouchableOpacity
-            key={track.id}
+            key={`queue-${track.id}-${index}`}
             style={[
               styles.queueItem,
               currentTrack?.id === track.id && styles.currentQueueItem
@@ -499,7 +804,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
         end={{ x: 1, y: 1 }}
         style={styles.background}
       />
-      
+
       {/* Bottom gradient overlay to blend with system UI */}
       <LinearGradient
         colors={['transparent', 'rgba(0,0,0,0.3)', '#000000']}
@@ -512,17 +817,18 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
         style={styles.scrollContainer}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!showLyrics}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={closePlayer}>
-            <Ionicons name="chevron-down" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Now Playing</Text>
-          <TouchableOpacity onPress={() => setShowQueue(true)}>
-            <Ionicons name="list" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={closePlayer}>
+          <Ionicons name="chevron-down" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Now Playing</Text>
+        <TouchableOpacity onPress={() => setShowQueue(true)}>
+          <Ionicons name="list" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
 
       {/* Album Art */}
       <View style={styles.albumContainer}>
@@ -554,37 +860,135 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
       {/* Volume Control */}
       {renderVolumeControl()}
 
-        {/* Action Buttons */}
-        <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
+      {/* Action Buttons */}
+      <View style={styles.actionButtons}>
+        <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
+          <Ionicons 
+            name={isLiked ? 'heart' : 'heart-outline'} 
+            size={24} 
+            color={isLiked ? '#DC2626' : 'rgba(255, 255, 255, 0.6)'} 
+          />
+        </TouchableOpacity>
+
+        {hasLyrics && (
+          <TouchableOpacity style={styles.actionButton} onPress={handleToggleLyrics}>
+            <Ionicons name="chatbubble-outline" size={24} color="rgba(255, 255, 255, 0.6)" />
+          </TouchableOpacity>
+        )}
+
+        <TouchableOpacity 
+          style={styles.actionButton} 
+          onPress={handleDownload}
+          disabled={isDownloading || isOffline}
+        >
+          {isDownloading ? (
+            <ActivityIndicator size="small" color="#FF6B6B" />
+          ) : (
             <Ionicons 
-              name={isLiked ? 'heart' : 'heart-outline'} 
+              name={isOffline ? 'checkmark-circle' : 'download-outline'} 
               size={24} 
-              color={isLiked ? '#DC2626' : 'rgba(255, 255, 255, 0.6)'} 
+              color={isOffline ? '#4CAF50' : 'rgba(255, 255, 255, 0.6)'} 
             />
-          </TouchableOpacity>
+          )}
+        </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-            <Ionicons name="share-outline" size={24} color="rgba(255, 255, 255, 0.6)" />
-          </TouchableOpacity>
+        <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
+          <Ionicons name="share-outline" size={24} color="rgba(255, 255, 255, 0.6)" />
+        </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionButton} onPress={handleTipCreator}>
-            <Ionicons name="cash-outline" size={24} color="rgba(255, 255, 255, 0.6)" />
-          </TouchableOpacity>
+        <TouchableOpacity style={styles.actionButton} onPress={handleTipCreator}>
+          <Ionicons name="cash-outline" size={24} color="rgba(255, 255, 255, 0.6)" />
+        </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionButton} onPress={handleFollow}>
-            <Ionicons 
-              name={isFollowing ? 'person-remove' : 'person-add'} 
-              size={24} 
-              color={isFollowing ? '#DC2626' : 'rgba(255, 255, 255, 0.6)'} 
-            />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity style={styles.actionButton} onPress={handleFollow}>
+          <Ionicons 
+            name={isFollowing ? 'person-remove' : 'person-add'} 
+            size={24} 
+            color={isFollowing ? '#DC2626' : 'rgba(255, 255, 255, 0.6)'} 
+          />
+        </TouchableOpacity>
+      </View>
       </ScrollView>
 
       {/* Queue Modal */}
       {showQueue && renderQueue()}
+
+      {/* Lyrics Modal */}
+      <Modal
+        visible={showLyrics}
+        animationType="none"
+        transparent={true}
+        onRequestClose={handleCloseLyrics}
+      >
+        <View style={styles.lyricsModalOverlay}>
+          <TouchableOpacity 
+            style={styles.lyricsModalBackdrop}
+            activeOpacity={1}
+            onPress={handleCloseLyrics}
+          />
+          <Animated.View
+            style={[
+              styles.lyricsModalContainer,
+              {
+                transform: [{ translateY: lyricsModalTranslateY }],
+                opacity: lyricsModalOpacity,
+              }
+            ]}
+          >
+            {/* Test drag handle with PanResponder */}
+            <View 
+              style={{ 
+                height: 50, 
+                backgroundColor: 'rgba(255,255,255,0.2)', 
+                justifyContent: 'center', 
+                alignItems: 'center',
+                borderTopLeftRadius: 16,
+                borderTopRightRadius: 16,
+              }}
+              {...createDragPanResponder().panHandlers}
+            >
+              <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>DRAG HERE TO MOVE</Text>
+            </View>
+            {/* Header */}
+            <View style={styles.lyricsHeader}>
+              <View>
+                <Text style={styles.lyricsTitle}>Lyrics</Text>
+                {currentTrack?.lyrics_language && (
+                  <Text style={styles.lyricsLanguage}>
+                    Language: {currentTrack.lyrics_language.toUpperCase()}
+                  </Text>
+                )}
+              </View>
+              <TouchableOpacity onPress={handleCloseLyrics}>
+                <Ionicons name="close" size={28} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Lyrics Content */}
+            <ScrollView style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.8)', padding: 20 }}>
+              <Text style={{ 
+                color: '#FFFFFF', 
+                fontSize: 18, 
+                lineHeight: 30, 
+                textAlign: 'left',
+                fontFamily: 'System'
+              }}>
+                {currentTrack?.lyrics || lyricsData || 'No lyrics available for this track'}
+              </Text>
+            </ScrollView>
+          </Animated.View>
+        </View>
+      </Modal>
       </Animated.View>
+
+      {/* Ad Interstitial */}
+      <AdInterstitial
+        visible={showAd}
+        onAdClosed={() => setShowAd(false)}
+        onAdLoaded={() => console.log('Ad loaded')}
+        onAdError={(error) => console.log('Ad error:', error)}
+        onAdClicked={() => console.log('Ad clicked')}
+      />
     </SafeAreaView>
   );
 }
@@ -889,5 +1293,87 @@ const styles = StyleSheet.create({
   queueItemArtist: {
     color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 14,
+  },
+  lyricsModalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lyricsModalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+  },
+  lyricsModalContainer: {
+    width: '90%',
+    height: '70%',
+    borderRadius: 16,
+    overflow: 'visible',
+    backgroundColor: 'rgba(20, 20, 20, 0.95)', // Solid dark background
+    zIndex: 1001,
+  },
+  lyricsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  lyricsTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  lyricsLanguage: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.6)',
+  },
+  lyricsContent: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 0, 0, 0.1)', // Temporary red background to see if content area is visible
+    zIndex: 999,
+  },
+  lyricsScrollContent: {
+    padding: 20,
+    minHeight: 200,
+  },
+  lyricsText: {
+    fontSize: 20,
+    lineHeight: 32,
+    color: '#FF0000', // Bright red text to make it visible
+    fontWeight: 'bold',
+    backgroundColor: 'rgba(0, 255, 0, 0.2)', // Green background to see text area
+    padding: 10,
+    margin: 10,
+    textAlign: 'left',
+    includeFontPadding: false,
+    textAlignVertical: 'top',
+    zIndex: 1000,
+  },
+  lyricsLoadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  lyricsLoadingText: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.6)',
+    marginTop: 16,
+  },
+  noLyricsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  noLyricsText: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.6)',
+    textAlign: 'center',
+    marginTop: 16,
   },
 });

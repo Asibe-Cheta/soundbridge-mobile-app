@@ -3,60 +3,45 @@ import {
   View,
   Text,
   StyleSheet,
-  FlatList,
-  Image,
-  TouchableOpacity,
-  ActivityIndicator,
   ScrollView,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../contexts/ThemeContext';
-import { useAudioPlayer } from '../contexts/AudioPlayerContext';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { dbHelpers } from '../lib/supabase';
-
-interface PlaylistDetailsScreenProps {
-  route: any;
-  navigation: any;
-}
+import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 
 interface PlaylistTrack {
   id: string;
-  position: number;
-  added_at: string;
-  track: {
+  title: string;
+  artist_name: string;
+  duration: number;
+  cover_art_url?: string;
+  file_url: string;
+  likes_count: number;
+  plays_count: number;
+  creator?: {
     id: string;
-    title: string;
-    description?: string;
-    file_url?: string;
-    cover_art_url?: string;
-    duration?: number;
-    genre?: string;
-    play_count?: number;
-    likes_count?: number;
-    is_public: boolean;
-    created_at: string;
-    creator: {
-      id: string;
-      username: string;
-      display_name: string;
-      avatar_url?: string;
-    };
+    username: string;
+    display_name: string;
+    avatar_url?: string;
   };
 }
 
-interface PlaylistDetails {
+interface PlaylistData {
   id: string;
   name: string;
   description?: string;
   cover_image_url?: string;
-  tracks_count?: number;
-  total_duration?: number;
-  followers_count?: number;
-  is_public: boolean;
+  tracks_count: number;
+  total_duration: number;
+  followers_count: number;
   created_at: string;
-  updated_at: string;
   creator: {
     id: string;
     username: string;
@@ -67,151 +52,150 @@ interface PlaylistDetails {
   tracks: PlaylistTrack[];
 }
 
-const PlaylistDetailsScreen: React.FC<PlaylistDetailsScreenProps> = ({ route, navigation }) => {
-  const { playlistId } = route.params;
-  const { theme } = useTheme();
-  const { play, addToQueue } = useAudioPlayer();
+export default function PlaylistDetailsScreen() {
+  const navigation = useNavigation();
+  const route = useRoute();
+  const { playTrack } = useAudioPlayer();
   
-  const [playlist, setPlaylist] = useState<PlaylistDetails | null>(null);
+  const { playlistId } = route.params as { playlistId: string };
+  
+  const [playlist, setPlaylist] = useState<PlaylistData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (playlistId) {
-      loadPlaylistDetails();
-    } else {
-      setError('Playlist ID not provided');
-      setLoading(false);
-    }
-  }, [playlistId]);
 
   const loadPlaylistDetails = async () => {
     try {
-      setLoading(true);
-      setError(null);
-      
       console.log('🎵 Loading playlist details for:', playlistId);
+      
       const { data, error } = await dbHelpers.getPlaylistDetails(playlistId);
       
-      if (error) throw error;
-      if (!data) throw new Error('Playlist not found');
+      if (error) {
+        console.error('❌ Error loading playlist:', error);
+        setError('Failed to load playlist details');
+        return;
+      }
       
+      if (!data) {
+        setError('Playlist not found');
+        return;
+      }
+      
+      console.log('✅ Playlist loaded:', data.name, 'with', data.tracks.length, 'tracks');
       setPlaylist(data);
-      console.log('✅ Playlist loaded:', data.name, 'with', data.tracks?.length || 0, 'tracks');
+      setError(null);
     } catch (err) {
       console.error('❌ Error loading playlist details:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load playlist');
+      setError('Failed to load playlist');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const handlePlayTrack = async (track: PlaylistTrack['track']) => {
-    try {
-      console.log('🎵 Playing track from playlist:', track.title);
-      await play(track);
-      
-      // Add other tracks from playlist to queue
-      if (playlist?.tracks) {
-        const otherTracks = playlist.tracks
-          .filter(t => t.track.id !== track.id)
-          .map(t => t.track);
-        otherTracks.forEach(t => addToQueue(t));
-      }
-    } catch (error) {
-      console.error('Error playing track:', error);
-      Alert.alert('Playback Error', 'Failed to play the track. Please try again.');
-    }
+  useEffect(() => {
+    loadPlaylistDetails();
+  }, [playlistId]);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadPlaylistDetails();
   };
 
-  const handlePlayAll = async () => {
-    if (!playlist?.tracks || playlist.tracks.length === 0) {
-      Alert.alert('No Tracks', 'This playlist is empty.');
-      return;
-    }
-
-    try {
-      const firstTrack = playlist.tracks[0].track;
-      await play(firstTrack);
-      
-      // Add remaining tracks to queue
-      const remainingTracks = playlist.tracks.slice(1).map(t => t.track);
-      remainingTracks.forEach(track => addToQueue(track));
-      
-      Alert.alert('Playing Playlist', `Now playing "${playlist.name}"`);
-    } catch (error) {
-      console.error('Error playing playlist:', error);
-      Alert.alert('Playback Error', 'Failed to play the playlist. Please try again.');
-    }
+  const handlePlayTrack = (track: PlaylistTrack) => {
+    console.log('🎵 Playing track from playlist:', track.title);
+    
+    const audioTrack = {
+      id: track.id,
+      title: track.title,
+      artist: track.creator?.display_name || track.artist_name,
+      duration: track.duration,
+      coverArt: track.cover_art_url,
+      url: track.file_url,
+      likes: track.likes_count,
+      plays: track.plays_count,
+    };
+    
+    playTrack(audioTrack);
   };
 
-  const formatDuration = (seconds?: number) => {
-    if (!seconds) return '0:00';
+  const handlePlayAll = () => {
+    if (!playlist?.tracks.length) return;
+    
+    console.log('🎵 Playing all tracks from playlist:', playlist.name);
+    // Play the first track, others will be added to queue automatically
+    handlePlayTrack(playlist.tracks[0]);
+  };
+
+  const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const formatTotalDuration = (seconds?: number) => {
-    if (!seconds) return '0m';
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
+  const formatTotalDuration = (totalSeconds: number) => {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    
     if (hours > 0) {
       return `${hours}h ${minutes}m`;
     }
     return `${minutes}m`;
   };
 
-  const renderTrackItem = ({ item, index }: { item: PlaylistTrack; index: number }) => (
+  const renderTrackItem = (track: PlaylistTrack, index: number) => (
     <TouchableOpacity
-      style={[styles.trackItem, { borderBottomColor: theme.colors.border }]}
-      onPress={() => handlePlayTrack(item.track)}
+      key={track.id}
+      style={styles.trackItem}
+      onPress={() => handlePlayTrack(track)}
     >
-      <Text style={[styles.trackPosition, { color: theme.colors.textSecondary }]}>
-        {index + 1}
-      </Text>
+      <View style={styles.trackNumber}>
+        <Text style={styles.trackNumberText}>{index + 1}</Text>
+      </View>
       
-      <View style={styles.trackCover}>
-        {item.track.cover_art_url ? (
-          <Image source={{ uri: item.track.cover_art_url }} style={styles.trackImage} />
+      <View style={styles.trackImageContainer}>
+        {track.cover_art_url ? (
+          <Image source={{ uri: track.cover_art_url }} style={styles.trackImage} />
         ) : (
-          <View style={[styles.defaultTrackImage, { backgroundColor: theme.colors.surface }]}>
-            <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />
+          <View style={styles.trackImagePlaceholder}>
+            <Ionicons name="musical-notes" size={24} color="#666" />
           </View>
         )}
       </View>
       
       <View style={styles.trackInfo}>
-        <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
-          {item.track.title}
+        <Text style={styles.trackTitle} numberOfLines={1}>
+          {track.title}
         </Text>
-        <Text style={[styles.trackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-          {item.track.creator.display_name || item.track.creator.username}
+        <Text style={styles.trackArtist} numberOfLines={1}>
+          {track.creator?.display_name || track.artist_name}
         </Text>
       </View>
       
-      <View style={styles.trackActions}>
-        <Text style={[styles.trackDuration, { color: theme.colors.textSecondary }]}>
-          {formatDuration(item.track.duration)}
+      <View style={styles.trackStats}>
+        <Text style={styles.trackDuration}>
+          {formatDuration(track.duration)}
         </Text>
-        <TouchableOpacity 
-          style={styles.playButton}
-          onPress={() => handlePlayTrack(item.track)}
-        >
-          <Ionicons name="play" size={16} color={theme.colors.primary} />
-        </TouchableOpacity>
       </View>
     </TouchableOpacity>
   );
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={theme.colors.primary} />
-          <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>
-            Loading playlist...
-          </Text>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Loading...</Text>
+        </View>
+        
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#FF6B6B" />
+          <Text style={styles.loadingText}>Loading playlist...</Text>
         </View>
       </SafeAreaView>
     );
@@ -219,16 +203,23 @@ const PlaylistDetailsScreen: React.FC<PlaylistDetailsScreenProps> = ({ route, na
 
   if (error || !playlist) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-        <View style={styles.centerContainer}>
-          <Ionicons name="alert-circle" size={48} color={theme.colors.error} />
-          <Text style={[styles.errorText, { color: theme.colors.error }]}>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Error</Text>
+        </View>
+        
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle" size={48} color="#FF6B6B" />
+          <Text style={styles.errorText}>
             {error || 'Playlist not found'}
           </Text>
-          <TouchableOpacity 
-            style={[styles.retryButton, { backgroundColor: theme.colors.primary }]}
-            onPress={loadPlaylistDetails}
-          >
+          <TouchableOpacity style={styles.retryButton} onPress={loadPlaylistDetails}>
             <Text style={styles.retryButtonText}>Try Again</Text>
           </TouchableOpacity>
         </View>
@@ -237,198 +228,259 @@ const PlaylistDetailsScreen: React.FC<PlaylistDetailsScreenProps> = ({ route, na
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={24} color={theme.colors.text} />
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Playlist</Text>
-        <View style={styles.headerRight} />
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {playlist.name}
+        </Text>
+        <TouchableOpacity style={styles.moreButton}>
+          <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
+        </TouchableOpacity>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Playlist Info */}
+      <ScrollView
+        style={styles.scrollView}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#FF6B6B"
+          />
+        }
+      >
+        {/* Playlist Header */}
         <View style={styles.playlistHeader}>
           <View style={styles.coverContainer}>
             {playlist.cover_image_url ? (
               <Image source={{ uri: playlist.cover_image_url }} style={styles.coverImage} />
             ) : (
-              <View style={[styles.defaultCoverImage, { backgroundColor: theme.colors.surface }]}>
-                <Ionicons name="musical-notes" size={48} color={theme.colors.textSecondary} />
+              <View style={styles.coverPlaceholder}>
+                <Ionicons name="musical-notes" size={48} color="#666" />
               </View>
             )}
           </View>
           
-          <Text style={[styles.playlistName, { color: theme.colors.text }]}>
-            {playlist.name}
-          </Text>
-          
-          {playlist.description && (
-            <Text style={[styles.playlistDescription, { color: theme.colors.textSecondary }]}>
-              {playlist.description}
+          <View style={styles.playlistInfo}>
+            <Text style={styles.playlistName}>{playlist.name}</Text>
+            <Text style={styles.playlistCreator}>
+              by {playlist.creator.display_name}
             </Text>
-          )}
-          
-          <Text style={[styles.creatorName, { color: theme.colors.textSecondary }]}>
-            by {playlist.creator.display_name || playlist.creator.username}
-          </Text>
-          
-          <View style={styles.statsContainer}>
-            <Text style={[styles.statsText, { color: theme.colors.textSecondary }]}>
-              {playlist.tracks_count || 0} tracks • {formatTotalDuration(playlist.total_duration)} • {playlist.followers_count || 0} followers
-            </Text>
+            {playlist.description && (
+              <Text style={styles.playlistDescription}>
+                {playlist.description}
+              </Text>
+            )}
+            
+            <View style={styles.playlistStats}>
+              <Text style={styles.statText}>
+                {playlist.tracks_count} tracks • {formatTotalDuration(playlist.total_duration)}
+              </Text>
+              {playlist.followers_count > 0 && (
+                <Text style={styles.statText}>
+                  {playlist.followers_count} followers
+                </Text>
+              )}
+            </View>
           </View>
-          
-          {/* Play All Button */}
-          <TouchableOpacity 
-            style={[styles.playAllButton, { backgroundColor: theme.colors.primary }]}
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          <TouchableOpacity
+            style={styles.playAllButton}
             onPress={handlePlayAll}
+            disabled={!playlist.tracks.length}
           >
-            <Ionicons name="play" size={20} color="#FFFFFF" />
-            <Text style={styles.playAllText}>Play All</Text>
+            <Ionicons name="play" size={20} color="#000" />
+            <Text style={styles.playAllButtonText}>Play All</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.actionButton}>
+            <Ionicons name="heart-outline" size={24} color="#fff" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.actionButton}>
+            <Ionicons name="share-outline" size={24} color="#fff" />
           </TouchableOpacity>
         </View>
 
-        {/* Track List */}
+        {/* Tracks List */}
         <View style={styles.tracksSection}>
-          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-            Tracks ({playlist.tracks?.length || 0})
+          <Text style={styles.tracksSectionTitle}>
+            Tracks ({playlist.tracks.length})
           </Text>
           
-          {playlist.tracks && playlist.tracks.length > 0 ? (
-            <FlatList
-              data={playlist.tracks}
-              renderItem={renderTrackItem}
-              keyExtractor={(item) => item.id}
-              scrollEnabled={false}
-              showsVerticalScrollIndicator={false}
-            />
-          ) : (
-            <View style={styles.emptyTracksContainer}>
-              <Ionicons name="musical-notes" size={48} color={theme.colors.textSecondary} />
-              <Text style={[styles.emptyTracksText, { color: theme.colors.textSecondary }]}>
-                This playlist is empty
-              </Text>
+          {playlist.tracks.length === 0 ? (
+            <View style={styles.emptyTracks}>
+              <Ionicons name="musical-notes" size={48} color="#666" />
+              <Text style={styles.emptyTracksText}>No tracks in this playlist</Text>
             </View>
+          ) : (
+            playlist.tracks.map((track, index) => renderTrackItem(track, index))
           )}
         </View>
       </ScrollView>
     </SafeAreaView>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-  },
-  errorText: {
-    fontSize: 16,
-    marginTop: 16,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  retryButton: {
-    paddingHorizontal: 30,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+    backgroundColor: '#000',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
   },
   backButton: {
-    padding: 4,
+    marginRight: 16,
   },
   headerTitle: {
     flex: 1,
     fontSize: 18,
     fontWeight: '600',
-    textAlign: 'center',
+    color: '#fff',
   },
-  headerRight: {
-    width: 32,
+  moreButton: {
+    marginLeft: 16,
   },
-  playlistHeader: {
-    alignItems: 'center',
-    padding: 24,
+  scrollView: {
+    flex: 1,
   },
-  coverContainer: {
-    marginBottom: 16,
-  },
-  coverImage: {
-    width: 200,
-    height: 200,
-    borderRadius: 12,
-  },
-  defaultCoverImage: {
-    width: 200,
-    height: 200,
-    borderRadius: 12,
+  loadingContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 16,
+    marginTop: 16,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  errorText: {
+    color: '#fff',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 16,
+    marginBottom: 24,
+  },
+  retryButton: {
+    backgroundColor: '#FF6B6B',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  playlistHeader: {
+    flexDirection: 'row',
+    padding: 20,
+  },
+  coverContainer: {
+    marginRight: 16,
+  },
+  coverImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 8,
+  },
+  coverPlaceholder: {
+    width: 120,
+    height: 120,
+    borderRadius: 8,
+    backgroundColor: '#333',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playlistInfo: {
+    flex: 1,
+    justifyContent: 'center',
   },
   playlistName: {
     fontSize: 24,
     fontWeight: '700',
-    textAlign: 'center',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  playlistCreator: {
+    fontSize: 16,
+    color: '#ccc',
     marginBottom: 8,
   },
   playlistDescription: {
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 8,
-    lineHeight: 22,
-  },
-  creatorName: {
-    fontSize: 16,
+    fontSize: 14,
+    color: '#aaa',
+    lineHeight: 20,
     marginBottom: 12,
   },
-  statsContainer: {
-    marginBottom: 20,
+  playlistStats: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
   },
-  statsText: {
+  statText: {
     fontSize: 14,
-    textAlign: 'center',
+    color: '#888',
+    marginRight: 16,
+    marginBottom: 4,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
   playAllButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 32,
+    backgroundColor: '#FF6B6B',
+    paddingHorizontal: 20,
     paddingVertical: 12,
-    borderRadius: 24,
+    borderRadius: 8,
+    marginRight: 16,
   },
-  playAllText: {
-    color: '#FFFFFF',
+  playAllButtonText: {
+    color: '#000',
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
   },
-  tracksSection: {
-    paddingHorizontal: 16,
-    paddingBottom: 100,
+  actionButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
-  sectionTitle: {
+  tracksSection: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  tracksSectionTitle: {
     fontSize: 18,
     fontWeight: '600',
+    color: '#fff',
     marginBottom: 16,
   },
   trackItem: {
@@ -436,66 +488,62 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
-  trackPosition: {
-    width: 24,
-    fontSize: 14,
-    textAlign: 'center',
+  trackNumber: {
+    width: 32,
+    alignItems: 'center',
     marginRight: 12,
   },
-  trackCover: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
+  trackNumberText: {
+    color: '#888',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  trackImageContainer: {
     marginRight: 12,
   },
   trackImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 8,
+    width: 48,
+    height: 48,
+    borderRadius: 4,
   },
-  defaultTrackImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 8,
+  trackImagePlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 4,
+    backgroundColor: '#333',
     justifyContent: 'center',
     alignItems: 'center',
   },
   trackInfo: {
     flex: 1,
+    marginRight: 12,
   },
   trackTitle: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '500',
+    color: '#fff',
     marginBottom: 2,
   },
   trackArtist: {
     fontSize: 14,
+    color: '#aaa',
   },
-  trackActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  trackStats: {
+    alignItems: 'flex-end',
   },
   trackDuration: {
-    fontSize: 12,
-    marginRight: 12,
+    fontSize: 14,
+    color: '#888',
   },
-  playButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(220, 38, 38, 0.2)',
-    justifyContent: 'center',
+  emptyTracks: {
     alignItems: 'center',
-  },
-  emptyTracksContainer: {
-    alignItems: 'center',
-    paddingVertical: 48,
+    paddingVertical: 40,
   },
   emptyTracksText: {
+    color: '#666',
     fontSize: 16,
-    marginTop: 16,
+    marginTop: 12,
   },
 });
-
-export default PlaylistDetailsScreen;

@@ -465,6 +465,10 @@ export default function ProfileScreen() {
     navigation.navigate('NotificationSettings' as never);
   };
 
+  const handleOfflineDownloads = () => {
+    navigation.navigate('OfflineDownloads' as never);
+  };
+
   // Support & About handlers
   const handleHelpSupport = () => {
     Alert.alert(
@@ -766,6 +770,11 @@ export default function ProfileScreen() {
         <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleChangePassword}>
           <Ionicons name="key" size={20} color={theme.colors.textSecondary} />
           <Text style={[styles.settingText, { color: theme.colors.text }]}>Change Password</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleOfflineDownloads}>
+          <Ionicons name="download" size={20} color={theme.colors.textSecondary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Offline Downloads</Text>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
       </View>

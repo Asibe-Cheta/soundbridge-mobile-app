@@ -91,6 +91,9 @@ export interface Database {
           is_public: boolean
           tags: string[] | null
           created_at: string
+          lyrics: string | null
+          lyrics_language: string | null
+          has_lyrics: boolean
         }
         Insert: {
           id?: string
@@ -108,6 +111,9 @@ export interface Database {
           is_public?: boolean
           tags?: string[] | null
           created_at?: string
+          lyrics?: string | null
+          lyrics_language?: string | null
+          has_lyrics?: boolean
         }
         Update: {
           id?: string
@@ -133,6 +139,9 @@ export interface Database {
           created_at?: string
           updated_at?: string
           deleted_at?: string | null
+          lyrics?: string | null
+          lyrics_language?: string | null
+          has_lyrics?: boolean
         }
       }
       events: {

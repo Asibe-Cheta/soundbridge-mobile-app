@@ -20,7 +20,10 @@
       "associatedDomains": [
         "applinks:soundbridge.live",
         "applinks:www.soundbridge.live"
-      ]
+      ],
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -28,6 +31,11 @@
         "backgroundColor": "#000000"
       },
       "package": "com.soundbridge.mobile",
+      "permissions": [
+        "android.permission.WAKE_LOCK",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ],
       "intentFilters": [
         {
           "action": "VIEW",
@@ -73,7 +81,20 @@
     },
     "plugins": [
       "expo-font",
-      "expo-localization"
+      "expo-localization",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow SoundBridge to access your microphone for audio recording."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#ffffff"
+        }
+      ]
     ]
   }
 }

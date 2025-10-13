@@ -1409,5 +1409,147 @@ export const dbHelpers = {
       console.error('❌ Error responding to collaboration request:', error);
       return { success: false, error: 'Failed to respond to collaboration request' };
     }
+  },
+
+  // PLAYLIST FUNCTIONS
+  async getPublicPlaylists(limit = 20) {
+    try {
+      console.log('🎵 Getting public playlists...');
+      
+      const { data, error } = await supabase
+        .from('playlists')
+        .select(`
+          id,
+          name,
+          description,
+          cover_image_url,
+          tracks_count,
+          total_duration,
+          followers_count,
+          created_at,
+          creator:profiles!playlists_creator_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url
+          )
+        `)
+        .eq('is_public', true)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.error('❌ Error getting public playlists:', error);
+        return { data: [], error };
+      }
+
+      console.log('✅ Found public playlists:', data?.length || 0);
+      return { data: data || [], error: null };
+    } catch (error) {
+      console.error('❌ Error getting public playlists:', error);
+      return { data: [], error };
+    }
+  },
+
+  async getPlaylistDetails(playlistId: string) {
+    try {
+      console.log('🎵 Getting playlist details for:', playlistId);
+      
+      const { data: playlist, error: playlistError } = await supabase
+        .from('playlists')
+        .select(`
+          *,
+          creator:profiles!playlists_creator_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url,
+            bio
+          )
+        `)
+        .eq('id', playlistId)
+        .single();
+
+      if (playlistError) {
+        console.error('❌ Error getting playlist:', playlistError);
+        return { data: null, error: playlistError };
+      }
+
+      const { data: tracks, error: tracksError } = await supabase
+        .from('playlist_tracks')
+        .select(`
+          position,
+          added_at,
+          track:audio_tracks!playlist_tracks_track_id_fkey(
+            id,
+            title,
+            artist_name,
+            duration,
+            cover_art_url,
+            file_url,
+            likes_count,
+            plays_count,
+            creator:profiles!audio_tracks_creator_id_fkey(
+              id,
+              username,
+              display_name,
+              avatar_url
+            )
+          )
+        `)
+        .eq('playlist_id', playlistId)
+        .order('position', { ascending: true });
+
+      if (tracksError) {
+        console.error('❌ Error getting playlist tracks:', tracksError);
+        return { data: null, error: tracksError };
+      }
+
+      const playlistData = {
+        ...playlist,
+        tracks: tracks?.map(t => t.track) || []
+      };
+
+      console.log('✅ Found playlist with tracks:', playlistData.tracks.length);
+      return { data: playlistData, error: null };
+    } catch (error) {
+      console.error('❌ Error getting playlist details:', error);
+      return { data: null, error };
+    }
+  },
+
+  async getUserPlaylists(userId: string, limit = 20) {
+    try {
+      console.log('🎵 Getting user playlists for:', userId);
+      
+      const { data, error } = await supabase
+        .from('playlists')
+        .select(`
+          id,
+          name,
+          description,
+          cover_image_url,
+          is_public,
+          tracks_count,
+          total_duration,
+          followers_count,
+          created_at,
+          updated_at
+        `)
+        .eq('creator_id', userId)
+        .order('updated_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.error('❌ Error getting user playlists:', error);
+        return { data: [], error };
+      }
+
+      console.log('✅ Found user playlists:', data?.length || 0);
+      return { data: data || [], error: null };
+    } catch (error) {
+      console.error('❌ Error getting user playlists:', error);
+      return { data: [], error };
+    }
   }
 };

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { Audio, AVPlaybackStatus } from 'expo-av';
 import { supabase } from '../lib/supabase';
+import { backgroundAudioService, BackgroundAudioTrack } from '../services/BackgroundAudioService';
 // import { realAudioProcessor } from '../services/RealAudioProcessor';
 
 interface AudioTrack {
@@ -20,6 +21,10 @@ interface AudioTrack {
     display_name: string;
     avatar_url?: string;
   };
+  // Lyrics fields
+  lyrics?: string;
+  lyrics_language?: string;
+  has_lyrics?: boolean;
 }
 
 interface AudioPlayerContextType {
@@ -76,17 +81,18 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   const soundRef = useRef<Audio.Sound | null>(null);
   const positionUpdateRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize audio session
+  // Initialize audio session - let BackgroundAudioService handle background config
   useEffect(() => {
     const setupAudio = async () => {
       try {
+        // Use basic audio mode, BackgroundAudioService will handle background playback
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
-          staysActiveInBackground: false,
           playsInSilentModeIOS: true,
           shouldDuckAndroid: true,
           playThroughEarpieceAndroid: false,
         });
+        console.log('✅ Audio session configured');
       } catch (err) {
         console.error('Failed to setup audio session:', err);
         setError('Failed to setup audio session');
@@ -212,6 +218,31 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
 
       console.log('⚠️ Real audio processor failed, falling back to Expo AV');
       
+      // Use background audio service for background playback
+      const backgroundTrack: BackgroundAudioTrack = {
+        id: track.id,
+        title: track.title,
+        artist: track.creator?.display_name || track.creator?.username || 'Unknown Artist',
+        url: audioUrl,
+        artwork: track.cover_image_url,
+        duration: track.duration,
+      };
+
+      await backgroundAudioService.playTrack(backgroundTrack);
+      
+      // Update context state
+      setCurrentTrack(track);
+      setIsPlaying(true);
+      setIsPaused(false);
+      setIsLoading(false);
+      
+      // Increment play count in database
+      incrementPlayCount(track.id);
+      
+      console.log('🎵 Successfully started playing with background audio service');
+      return;
+      
+      // Fallback to original implementation (commented out for now)
       // Test URL accessibility and try different URL approaches
       let finalAudioUrl = audioUrl;
       let urlTestFailed = false;
@@ -318,8 +349,8 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
 
   const pause = async () => {
     try {
-      // Try real audio processor first
-      // await realAudioProcessor.pausePlayback(); // Disabled for Expo compatibility
+      // Use background audio service
+      await backgroundAudioService.pause();
       
       // Also pause Expo AV if it's being used
       if (soundRef.current) {
@@ -338,8 +369,8 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
 
   const resume = async () => {
     try {
-      // Try real audio processor first
-      // await realAudioProcessor.resumePlayback(); // Disabled for Expo compatibility
+      // Use background audio service
+      await backgroundAudioService.resume();
       
       // Also resume Expo AV if it's being used
       if (soundRef.current) {
@@ -358,6 +389,9 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
 
   const stop = async () => {
     try {
+      // Use background audio service
+      await backgroundAudioService.stop();
+      
       if (soundRef.current) {
         await soundRef.current.stopAsync();
         setIsPlaying(false);
@@ -379,6 +413,9 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
         console.warn('🎵 Invalid seek position:', newPosition, 'Duration:', duration);
         return;
       }
+      
+      // Use background audio service
+      await backgroundAudioService.seekTo(newPosition * 1000); // Convert to milliseconds
       
       if (soundRef.current && isPlaying !== undefined) {
         // Add a small delay to prevent rapid seeking
@@ -403,6 +440,9 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     try {
       const clampedVolume = Math.max(0, Math.min(1, newVolume));
       setVolumeState(clampedVolume);
+      
+      // Use background audio service
+      await backgroundAudioService.setVolume(clampedVolume);
       
       if (soundRef.current) {
         await soundRef.current.setVolumeAsync(clampedVolume);

@@ -39,6 +39,7 @@ import AllEventsScreen from './src/screens/AllEventsScreen';
 import EventDetailsScreen from './src/screens/EventDetailsScreen';
 import TrackDetailsScreen from './src/screens/TrackDetailsScreen';
 import PlaylistDetailsScreen from './src/screens/PlaylistDetailsScreen';
+import OfflineDownloadScreen from './src/screens/OfflineDownloadScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import AvailabilityCalendarScreen from './src/screens/AvailabilityCalendarScreen';
 import CollaborationRequestsScreen from './src/screens/CollaborationRequestsScreen';
@@ -202,6 +203,7 @@ function AppNavigator() {
             <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
             <Stack.Screen name="TrackDetails" component={TrackDetailsScreen} />
             <Stack.Screen name="PlaylistDetails" component={PlaylistDetailsScreen} />
+            <Stack.Screen name="OfflineDownloads" component={OfflineDownloadScreen} />
             <Stack.Screen name="AvailabilityCalendar" component={AvailabilityCalendarScreen} />
             <Stack.Screen name="CollaborationRequests" component={CollaborationRequestsScreen} />
             <Stack.Screen name="AudioEnhancementExpo" component={AudioEnhancementExpoScreen} options={{ headerShown: false }} />

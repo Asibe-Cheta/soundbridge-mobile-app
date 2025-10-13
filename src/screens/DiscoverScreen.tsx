@@ -21,6 +21,7 @@ import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { supabase, dbHelpers } from '../lib/supabase';
+import AdvancedSearchFilters, { SearchFilters } from '../components/AdvancedSearchFilters';
 
 const { width } = Dimensions.get('window');
 
@@ -109,6 +110,18 @@ function DiscoverScreen() {
   const [activeTab, setActiveTab] = useState<TabType>('Music');
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [searchFilters, setSearchFilters] = useState<SearchFilters>({
+    contentType: 'all',
+    genre: [],
+    duration: { min: 0, max: 3600 },
+    dateRange: { start: null, end: null },
+    sortBy: 'relevance',
+    sortOrder: 'desc',
+    isExplicit: null,
+    language: [],
+    location: '',
+  });
   
   // Content states
   const [trendingTracks, setTrendingTracks] = useState<AudioTrack[]>([]);
@@ -844,6 +857,12 @@ function DiscoverScreen() {
             autoCorrect={false}
             autoCapitalize="none"
           />
+          <TouchableOpacity 
+            onPress={() => setShowAdvancedFilters(true)} 
+            style={styles.filterButton}
+          >
+            <Ionicons name="options-outline" size={20} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
               <Ionicons name="close-circle" size={20} color={theme.colors.textSecondary} />
@@ -1467,6 +1486,33 @@ function DiscoverScreen() {
           </>
         )}
       </ScrollView>
+
+      {/* Advanced Search Filters */}
+      {showAdvancedFilters && (
+        <AdvancedSearchFilters
+          visible={showAdvancedFilters}
+          filters={searchFilters}
+          onFiltersChange={setSearchFilters}
+          onClose={() => setShowAdvancedFilters(false)}
+          onApply={() => {
+            // Apply filters logic here
+            setShowAdvancedFilters(false);
+          }}
+          onReset={() => {
+            setSearchFilters({
+              contentType: 'all',
+              genre: [],
+              duration: { min: 0, max: 600 },
+              dateRange: { start: null, end: null },
+              sortBy: 'relevance',
+              sortOrder: 'desc',
+              isExplicit: null,
+              language: [],
+              location: ''
+            });
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -1520,6 +1566,10 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     height: '100%',
+  },
+  filterButton: {
+    padding: 8,
+    marginLeft: 8,
   },
   clearButton: {
     marginLeft: 8,

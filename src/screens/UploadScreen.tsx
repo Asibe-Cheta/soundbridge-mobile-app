@@ -37,6 +37,8 @@ interface UploadFormData {
   podcastCategory: string;
   // Common fields
   tags: string;
+  lyrics: string;
+  lyricsLanguage: string;
   privacy: 'public' | 'followers' | 'private';
   publishOption: 'now' | 'schedule' | 'draft';
   scheduleDate: string;
@@ -58,6 +60,8 @@ export default function UploadScreen() {
     episodeNumber: '',
     podcastCategory: '',
     tags: '',
+    lyrics: '',
+    lyricsLanguage: 'en',
     privacy: 'public',
     publishOption: 'now',
     scheduleDate: '',
@@ -341,7 +345,10 @@ export default function UploadScreen() {
         duration: 0, // TODO: Extract duration from audio file
         tags: tagsArray.length > 0 ? tagsArray.join(',') : null,
         is_public: formData.privacy === 'public',
-        genre: formData.contentType === 'music' ? formData.genre : formData.podcastCategory
+        genre: formData.contentType === 'music' ? formData.genre : formData.podcastCategory,
+        lyrics: formData.lyrics.trim() || null,
+        lyrics_language: formData.lyricsLanguage,
+        has_lyrics: formData.lyrics.trim().length > 0
       };
       
       const trackResult = await db.createAudioTrack(user.id, trackData);
@@ -363,6 +370,8 @@ export default function UploadScreen() {
         episodeNumber: '',
         podcastCategory: '',
         tags: '',
+        lyrics: '',
+        lyricsLanguage: 'en',
         privacy: 'public',
         publishOption: 'now',
         scheduleDate: '',
@@ -641,6 +650,57 @@ export default function UploadScreen() {
                 onChangeText={(value) => handleInputChange('tags', value)}
             />
           </View>
+
+          {/* Lyrics Section (for music only) */}
+          {formData.contentType === 'music' && (
+            <>
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: theme.colors.text }]}>Lyrics (Optional)</Text>
+                <TextInput
+                  style={[styles.textInput, styles.textArea, styles.lyricsInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
+                  placeholder="Enter song lyrics..."
+                  placeholderTextColor={theme.colors.textSecondary}
+                  value={formData.lyrics}
+                  onChangeText={(value) => handleInputChange('lyrics', value)}
+                  multiline
+                  numberOfLines={8}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: theme.colors.text }]}>Lyrics Language</Text>
+                <View style={styles.genreContainer}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {[
+                      { value: 'en', label: 'English' },
+                      { value: 'yo', label: 'Yoruba' },
+                      { value: 'ig', label: 'Igbo' },
+                      { value: 'pcm', label: 'Pidgin' }
+                    ].map((language) => (
+                      <TouchableOpacity
+                        key={language.value}
+                        style={[
+                          styles.genreChip,
+                          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                          formData.lyricsLanguage === language.value && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }
+                        ]}
+                        onPress={() => handleInputChange('lyricsLanguage', language.value)}
+                      >
+                        <Text style={[
+                          styles.genreChipText,
+                          { color: theme.colors.text },
+                          formData.lyricsLanguage === language.value && { color: '#FFFFFF' }
+                        ]}>
+                          {language.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              </View>
+            </>
+          )}
         </View>
 
         {/* Privacy Settings */}
@@ -811,6 +871,9 @@ const styles = StyleSheet.create({
   textArea: {
     height: 80,
     textAlignVertical: 'top',
+  },
+  lyricsInput: {
+    height: 160,
   },
   genreContainer: {
     marginTop: 8,
