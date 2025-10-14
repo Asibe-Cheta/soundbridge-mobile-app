@@ -33,9 +33,19 @@ export interface AdEvent {
 }
 
 class AdService {
+  // Mobile-specific conservative configuration (per web team recommendations)
+  private static readonly MOBILE_CONFIG = {
+    bannersPerScreen: 1,
+    interstitialFrequency: 5, // Every 5 tracks (mobile best practice, not 3)
+    skipDelay: 3000, // 3 seconds in milliseconds
+    maxAdTimePerHour: 60, // 1 minute total
+    bannerSize: '320x50', // Standard mobile banner
+    minTimeBetweenAds: 30000 // 30 seconds minimum
+  };
+
   private config: AdConfig = {
     enabled: true,
-    frequency: 3, // Show ad every 3 tracks for free users
+    frequency: AdService.MOBILE_CONFIG.interstitialFrequency, // 5 tracks for mobile UX
     types: {
       banner: true,
       interstitial: true,
@@ -240,6 +250,16 @@ class AdService {
 
   getAdFrequency(): number {
     return this.config.frequency;
+  }
+
+  // Get skip delay for interstitial ads (3 seconds per mobile UX best practices)
+  getSkipDelay(): number {
+    return AdService.MOBILE_CONFIG.skipDelay;
+  }
+
+  // Get mobile configuration
+  getMobileConfig() {
+    return { ...AdService.MOBILE_CONFIG };
   }
 
   // ===== MOCK AD DISPLAY (for development) =====

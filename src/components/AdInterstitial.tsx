@@ -36,7 +36,8 @@ export default function AdInterstitial({
   const [loading, setLoading] = useState(true);
   const [adLoaded, setAdLoaded] = useState(false);
   const [adError, setAdError] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState(5);
+  // Use 3 seconds per mobile UX best practices (web team recommendation)
+  const [countdown, setCountdown] = useState(3);
 
   useEffect(() => {
     if (visible) {
@@ -46,7 +47,7 @@ export default function AdInterstitial({
       setLoading(true);
       setAdLoaded(false);
       setAdError(null);
-      setCountdown(5);
+      setCountdown(3); // 3 seconds per mobile UX best practices
     }
   }, [visible]);
 
