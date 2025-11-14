@@ -291,11 +291,21 @@ export default function MessagesScreen() {
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
-      <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} />
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
       
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: theme.colors.surface }]}>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: theme.colors.surface }]}>
         <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Messages</Text>
         <TouchableOpacity style={styles.headerButton}>
           <Ionicons name="add" size={24} color={theme.colors.text} />
@@ -404,13 +414,25 @@ export default function MessagesScreen() {
           </View>
         )}
       </View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
@@ -450,6 +472,7 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   conversationsList: {
     paddingVertical: 8,

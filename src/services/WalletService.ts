@@ -1,7 +1,7 @@
 import { Session } from '@supabase/supabase-js';
 import { currencyService } from './CurrencyService';
 
-const API_BASE_URL = 'https://soundbridge.live';
+const API_BASE_URL = 'https://www.soundbridge.live';
 
 export interface WalletBalance {
   balance: number;
@@ -174,6 +174,9 @@ class WalletService {
         }
         if (error.message.includes('HTTP 404')) {
           throw new Error('Service not found. Please try again later.');
+        }
+        if (error.message.includes('HTTP 405')) {
+          throw new Error('Method not allowed. The endpoint may not support this request type.');
         }
         if (error.message.includes('HTTP 500')) {
           throw new Error('Server error. Please try again later.');
@@ -467,7 +470,7 @@ class WalletService {
   async checkStripeAccountStatus(session: Session): Promise<any> {
     try {
       console.log('🔍 Checking Stripe account status...');
-      const data = await this.makeRequest('/api/stripe/check-account-status', session, {
+      const data = await this.makeRequest('/stripe/check-account-status', session, {
         method: 'POST',
       });
       console.log('✅ Account status checked:', data);
@@ -484,7 +487,7 @@ class WalletService {
   async cleanupRestrictedAccounts(session: Session): Promise<any> {
     try {
       console.log('🧹 Cleaning up restricted accounts...');
-      const data = await this.makeRequest('/api/stripe/cleanup-restricted-accounts', session, {
+      const data = await this.makeRequest('/stripe/cleanup-restricted-accounts', session, {
         method: 'POST',
       });
       console.log('✅ Restricted accounts cleaned:', data);

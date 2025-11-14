@@ -14,6 +14,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   Linking,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -24,6 +25,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
+import { becomeServiceProvider } from '../services/creatorExpansionService';
 
 const { width } = Dimensions.get('window');
 
@@ -70,7 +72,7 @@ interface UserTrack {
 }
 
 export default function ProfileScreen() {
-  const { user, signOut, updatePassword, refreshUser } = useAuth();
+  const { user, userProfile, signOut, updatePassword, refreshUser, session } = useAuth();
   const { autoPlay, toggleAutoPlay } = useAudioPlayer();
   const { theme } = useTheme();
   const navigation = useNavigation();
@@ -85,6 +87,7 @@ export default function ProfileScreen() {
   const [isEditing, setIsEditing] = useState(false);
   const [editingProfile, setEditingProfile] = useState<Partial<UserProfile>>({});
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [becomingServiceProvider, setBecomingServiceProvider] = useState(false);
 
   useEffect(() => {
     loadProfileData();
@@ -441,15 +444,115 @@ export default function ProfileScreen() {
   };
 
   const handleCreateEvent = () => {
-    Alert.alert('Create Event', 'Event creation will be available soon!');
+    navigation.navigate('CreateEvent' as never);
   };
 
   const handleCreatePlaylist = () => {
-    Alert.alert('Create Playlist', 'Playlist creation will be available soon!');
+    navigation.navigate('CreatePlaylist' as never);
   };
 
   const handleManageAvailability = () => {
     navigation.navigate('AvailabilityCalendar' as never);
+  };
+
+  const handleBecomeServiceProvider = async () => {
+    if (!user?.id || !session) {
+      Alert.alert('Error', 'Please sign in to become a service provider');
+      return;
+    }
+
+    Alert.alert(
+      'Become a Service Provider',
+      'Join SoundBridge as a service provider to offer your professional services (mixing, mastering, sound engineering, etc.) to creators. You\'ll be able to set your rates, showcase your portfolio, and manage bookings.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          onPress: async () => {
+            setBecomingServiceProvider(true);
+            try {
+              console.log('🚀 Starting becomeServiceProvider flow...');
+              console.log('User ID:', user.id);
+              console.log('Session exists:', !!session);
+              
+              const result = await becomeServiceProvider(user.id, { session });
+              
+              console.log('✅ becomeServiceProvider result:', result);
+              
+              if (result.success) {
+                console.log('✅ Success! Refreshing user profile...');
+                // Refresh user profile to get updated creator types
+                await refreshUser();
+                
+                Alert.alert(
+                  'Success!',
+                  'You are now a service provider! Let\'s set up your profile.',
+                  [
+                    {
+                      text: 'Set Up Profile',
+                      onPress: () => {
+                        setBecomingServiceProvider(false);
+                        navigation.navigate('ServiceProviderOnboarding' as never);
+                      },
+                    },
+                    {
+                      text: 'Later',
+                      style: 'cancel',
+                      onPress: () => setBecomingServiceProvider(false),
+                    },
+                  ]
+                );
+              } else {
+                console.error('❌ becomeServiceProvider returned success: false');
+                Alert.alert(
+                  'Error',
+                  'Failed to become a service provider. Please try again.',
+                  [{ text: 'OK', onPress: () => setBecomingServiceProvider(false) }]
+                );
+              }
+            } catch (error: any) {
+              console.error('❌ Error becoming service provider:', error);
+              console.error('Error details:', {
+                message: error?.message,
+                status: error?.status,
+                body: error?.body,
+                isNetworkError: error?.isNetworkError,
+                stack: error?.stack,
+              });
+              
+              // Extract error message from various possible sources
+              let errorMessage = 'Something went wrong. Please try again.';
+              
+              // Handle network errors specifically
+              if (error?.isNetworkError || error?.message === 'Network request failed') {
+                errorMessage = 'Unable to connect to the server. Please check your internet connection and try again.';
+              } else if (error?.body) {
+                if (typeof error.body === 'string') {
+                  errorMessage = error.body;
+                } else if (error.body?.message) {
+                  errorMessage = error.body.message;
+                } else if (error.body?.error) {
+                  errorMessage = error.body.error;
+                }
+              } else if (error?.message) {
+                errorMessage = error.message;
+              }
+              
+              // Add status code info if available (but not for network errors)
+              if (error?.status && error.status !== 0) {
+                errorMessage += ` (Status: ${error.status})`;
+              }
+              
+              Alert.alert(
+                'Error',
+                errorMessage,
+                [{ text: 'OK', onPress: () => setBecomingServiceProvider(false) }]
+              );
+            }
+          },
+        },
+      ]
+    );
   };
 
   // Settings handlers
@@ -792,6 +895,19 @@ export default function ProfileScreen() {
           <Text style={[styles.settingText, { color: theme.colors.text }]}>Collaboration Requests</Text>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
+        {userProfile?.creator_types?.includes('service_provider') ? (
+          <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => navigation.navigate('ServiceProviderDashboard' as never, { userId: user?.id } as never)}>
+            <Ionicons name="briefcase" size={20} color={theme.colors.accentPurple} />
+            <Text style={[styles.settingText, { color: theme.colors.text }]}>Service Provider Dashboard</Text>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleBecomeServiceProvider}>
+            <Ionicons name="briefcase-outline" size={20} color={theme.colors.accentPurple} />
+            <Text style={[styles.settingText, { color: theme.colors.text }]}>Become a Service Provider</Text>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* App Settings */}
@@ -874,11 +990,21 @@ export default function ProfileScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
-      <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} />
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
       
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
         <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Profile</Text>
         <View style={styles.headerButtons}>
           {isEditing ? (
@@ -1022,25 +1148,54 @@ export default function ProfileScreen() {
       </View>
 
       {/* Tab Content */}
-      <View style={[styles.content, { backgroundColor: theme.colors.background }]}>
+      <View style={[styles.content, { backgroundColor: 'transparent' }]}>
         {activeTab === 'overview' && renderOverviewTab()}
         {activeTab === 'earnings' && renderEarningsTab()}
         {activeTab === 'settings' && renderSettingsTab()}
       </View>
-    </SafeAreaView>
+
+      {/* Loading Modal for Becoming Service Provider */}
+      <Modal
+        visible={becomingServiceProvider}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBecomingServiceProvider(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Loading</Text>
+            <Text style={[styles.modalMessage, { color: theme.colors.textSecondary }]}>
+              Setting up your service provider account...
+            </Text>
+          </View>
+        </View>
+      </Modal>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+  },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000000',
+    backgroundColor: 'transparent',
   },
   loadingText: {
     // color applied dynamically in JSX
@@ -1170,6 +1325,7 @@ const styles = StyleSheet.create({
   tabContent: {
     flex: 1,
     padding: 16,
+    backgroundColor: 'transparent',
   },
   statsContainer: {
     flexDirection: 'row',
@@ -1452,5 +1608,30 @@ const styles = StyleSheet.create({
     padding: 4,
     borderWidth: 2,
     borderColor: '#FFFFFF',
+  },
+  // Loading Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    minWidth: 280,
+    borderWidth: 1,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  modalMessage: {
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });

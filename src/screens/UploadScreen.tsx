@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,9 +17,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { db } from '../lib/supabase';
+import UploadLimitCard from '../components/UploadLimitCard';
+import { getUploadQuota, UploadQuota } from '../services/UploadQuotaService';
 
 const { width } = Dimensions.get('window');
 
@@ -47,10 +50,13 @@ interface UploadFormData {
 }
 
 export default function UploadScreen() {
-  const { user } = useAuth();
+  const navigation = useNavigation<any>();
+  const { user, session } = useAuth();
   const { theme } = useTheme();
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadQuota, setUploadQuota] = useState<UploadQuota | null>(null);
+  const [quotaLoading, setQuotaLoading] = useState(true);
   const [formData, setFormData] = useState<UploadFormData>({
     contentType: 'music',
     title: '',
@@ -86,6 +92,38 @@ export default function UploadScreen() {
   ];
 
   const maxFileSize = 100 * 1024 * 1024; // 100MB limit
+  const supabaseFunctions = db as any;
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchQuota = async () => {
+      if (!session) {
+        if (isMounted) {
+          setUploadQuota(null);
+          setQuotaLoading(false);
+        }
+        return;
+      }
+
+      setQuotaLoading(true);
+      const quota = await getUploadQuota(session);
+      if (isMounted) {
+        setUploadQuota(quota);
+        setQuotaLoading(false);
+      }
+    };
+
+    fetchQuota();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [session]);
+
+  const handleUpgradePress = () => {
+    navigation.navigate('Upgrade' as never);
+  };
 
   const handleInputChange = (field: keyof UploadFormData, value: string | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -289,6 +327,18 @@ export default function UploadScreen() {
       return;
     }
 
+    if (uploadQuota && !uploadQuota.can_upload) {
+      Alert.alert(
+        'Upload Limit Reached',
+        'You have reached your upload limit for this billing period. Upgrade to Pro to continue uploading.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Upgrade', onPress: handleUpgradePress },
+        ],
+      );
+      return;
+    }
+
     try {
       setIsUploading(true);
       setUploadProgress(0);
@@ -297,7 +347,7 @@ export default function UploadScreen() {
 
       // Step 1: Upload audio file (70% of progress)
       setUploadProgress(10);
-      const audioUploadResult = await db.uploadAudioFile(user.id, formData.audioFile!);
+      const audioUploadResult = await supabaseFunctions.uploadAudioFile(user.id, formData.audioFile!);
       
       if (!audioUploadResult.success) {
         throw new Error('Failed to upload audio file: ' + audioUploadResult.error?.message);
@@ -310,7 +360,7 @@ export default function UploadScreen() {
       let artworkUrl = null;
       if (formData.coverImage) {
         setUploadProgress(60);
-        const imageUploadResult = await db.uploadImage(user.id, formData.coverImage, 'cover-art');
+        const imageUploadResult = await supabaseFunctions.uploadImage(user.id, formData.coverImage, 'cover-art');
         
         if (imageUploadResult.success) {
           artworkUrl = imageUploadResult.data?.url;
@@ -351,7 +401,7 @@ export default function UploadScreen() {
         has_lyrics: formData.lyrics.trim().length > 0
       };
       
-      const trackResult = await db.createAudioTrack(user.id, trackData);
+      const trackResult = await supabaseFunctions.createAudioTrack(user.id, trackData);
       
       if (!trackResult.success) {
         throw new Error('Failed to create track record: ' + trackResult.error?.message);
@@ -384,6 +434,23 @@ export default function UploadScreen() {
         `Your ${formData.contentType} has been uploaded successfully.`,
         [{ text: 'OK' }]
       );
+
+      setUploadQuota((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        const remaining = prev.remaining != null ? Math.max(prev.remaining - 1, 0) : prev.remaining;
+        const uploadsThisMonth = (prev.uploads_this_month ?? 0) + 1;
+        const canUpload =
+          prev.is_unlimited ||
+          (prev.upload_limit == null ? prev.can_upload : uploadsThisMonth < prev.upload_limit);
+        return {
+          ...prev,
+          uploads_this_month: uploadsThisMonth,
+          remaining,
+          can_upload: canUpload,
+        };
+      });
 
     } catch (error) {
       console.error('Upload failed:', error);
@@ -483,10 +550,20 @@ export default function UploadScreen() {
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} />
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
       
-      <View style={[styles.gradient, { backgroundColor: theme.colors.background }]}>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        
+        <View style={styles.gradient}>
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
           <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Upload Content</Text>
@@ -523,6 +600,12 @@ export default function UploadScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
+          <UploadLimitCard
+            quota={uploadQuota}
+            loading={quotaLoading}
+            onUpgrade={handleUpgradePress}
+          />
+
           {/* Content Type Selection */}
           <ContentTypeSelector />
 
@@ -736,8 +819,9 @@ export default function UploadScreen() {
           {/* Cover Art */}
           {renderFileUpload('coverImage', 'Cover Art (Optional)', formData.coverImage)}
       </ScrollView>
-      </View>
-    </SafeAreaView>
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -745,8 +829,20 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
   gradient: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',

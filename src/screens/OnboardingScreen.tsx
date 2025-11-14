@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import BackButton from '../components/BackButton';
 import {
   View,
   Text,
@@ -323,7 +324,7 @@ export default function OnboardingScreen() {
 
   // Render role selection step
   const renderRoleSelection = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
       {/* Apple Music-style animated background */}
       <View style={styles.animatedBackground}>
         <LinearGradient
@@ -348,12 +349,10 @@ export default function OnboardingScreen() {
       
       {/* Header with back button */}
       <View style={styles.headerWithBack}>
-        <TouchableOpacity 
+        <BackButton 
           style={styles.backButton}
           onPress={handleBack}
-        >
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
+         />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           Step 1 of 4
         </Text>
@@ -496,7 +495,7 @@ export default function OnboardingScreen() {
 
   // Render trial activation step
   const renderTrialActivation = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
       {/* Apple Music-style animated background */}
       <View style={styles.animatedBackground}>
         <LinearGradient
@@ -521,12 +520,10 @@ export default function OnboardingScreen() {
         
         {/* Header with back button */}
         <View style={styles.headerWithBack}>
-          <TouchableOpacity 
+          <BackButton 
             style={styles.backButton}
             onPress={handleBack}
-          >
-            <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-          </TouchableOpacity>
+           />
           <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
             Step 2 of 4
           </Text>
@@ -655,7 +652,7 @@ export default function OnboardingScreen() {
 
   // Render profile setup step
   const renderProfileSetup = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
       {/* Apple Music-style animated background */}
       <View style={styles.animatedBackground}>
         <LinearGradient
@@ -680,12 +677,10 @@ export default function OnboardingScreen() {
       
       {/* Header with back button */}
       <View style={styles.headerWithBack}>
-        <TouchableOpacity 
+        <BackButton 
           style={styles.backButton}
           onPress={handleBack}
-        >
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
+         />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           Step 3 of 4
         </Text>
@@ -771,7 +766,7 @@ export default function OnboardingScreen() {
 
   // Render genre selection step
   const renderGenreSelection = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
       {/* Apple Music-style animated background */}
       <View style={styles.animatedBackground}>
         <LinearGradient
@@ -796,12 +791,10 @@ export default function OnboardingScreen() {
       
       {/* Header with back button */}
       <View style={styles.headerWithBack}>
-        <TouchableOpacity 
+        <BackButton 
           style={styles.backButton}
           onPress={handleBack}
-        >
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
+         />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           Step 3 of 4
         </Text>
@@ -915,7 +908,7 @@ export default function OnboardingScreen() {
 
   // Render location setup step
   const renderLocationSetup = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
       {/* Apple Music-style animated background */}
       <View style={styles.animatedBackground}>
         <LinearGradient
@@ -940,12 +933,10 @@ export default function OnboardingScreen() {
       
       {/* Header with back button */}
       <View style={styles.headerWithBack}>
-        <TouchableOpacity 
+        <BackButton 
           style={styles.backButton}
           onPress={handleBack}
-        >
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
+         />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           Step 4 of 4
         </Text>
@@ -1067,7 +1058,7 @@ export default function OnboardingScreen() {
 
   // Render completion step
   const renderCompletion = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
       {/* Apple Music-style animated background */}
       <View style={styles.animatedBackground}>
         <LinearGradient
@@ -1133,8 +1124,18 @@ export default function OnboardingScreen() {
 
   // Main render
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
-      <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} />
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
+      
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
       
       {/* Progress indicator */}
       {currentStep !== 'role' && currentStep !== 'complete' && (
@@ -1164,13 +1165,25 @@ export default function OnboardingScreen() {
       {currentStep === 'genres' && renderGenreSelection()}
       {currentStep === 'location' && renderLocationSetup()}
       {currentStep === 'complete' && renderCompletion()}
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   headerWithBack: {
     flexDirection: 'row',
@@ -1209,6 +1222,7 @@ const styles = StyleSheet.create({
   },
   stepContainer: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   scrollContent: {
     flexGrow: 1,

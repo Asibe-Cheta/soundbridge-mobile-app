@@ -1,3 +1,4 @@
+import BackButton from '../components/BackButton';
 // src/screens/AudioEnhancementScreen.expo.tsx
 // Expo-compatible version of Audio Enhancement Screen
 
@@ -11,8 +12,10 @@ import {
   Switch,
   Alert,
   ActivityIndicator,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
@@ -289,37 +292,61 @@ export default function AudioEnhancementScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: theme.colors.background }]}>
-        <ActivityIndicator size="large" color={theme.colors.primary} />
-        <Text style={[styles.loadingText, { color: theme.colors.text }]}>
-          Loading audio enhancement...
-        </Text>
+      <View style={styles.container}>
+        {/* Main Background Gradient - Uses theme colors */}
+        <LinearGradient
+          colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          locations={[0, 0.5, 1]}
+          style={styles.mainGradient}
+        />
+        
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
+          <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={[styles.loadingText, { color: theme.colors.text }]}>
+              Loading audio enhancement...
+            </Text>
+          </View>
+        </SafeAreaView>
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Audio Enhancement</Text>
-        <TouchableOpacity onPress={showImplementationStatus}>
-          <Ionicons name="information-circle" size={24} color={theme.colors.primary} />
-        </TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
+      
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        
+        {/* Header */}
+        <View style={styles.header}>
+          <BackButton onPress={() => navigation.goBack()} />
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Audio Enhancement</Text>
+          <TouchableOpacity onPress={showImplementationStatus}>
+            <Ionicons name="information-circle" size={24} color={theme.colors.primary} />
+          </TouchableOpacity>
+        </View>
 
-      {/* Status Indicator */}
-      <View style={[styles.statusBar, { backgroundColor: theme.colors.primary + '20' }]}>
-        <Ionicons name="checkmark-circle" size={16} color={theme.colors.primary} />
-        <Text style={[styles.statusText, { color: theme.colors.primary }]}>
-          Enhancement Ready (Expo Mode)
-        </Text>
-      </View>
+        {/* Status Indicator */}
+        <View style={[styles.statusBar, { backgroundColor: theme.colors.primary + '20' }]}>
+          <Ionicons name="checkmark-circle" size={16} color={theme.colors.primary} />
+          <Text style={[styles.statusText, { color: theme.colors.primary }]}>
+            Enhancement Ready (Expo Mode)
+          </Text>
+        </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Upgrade prompt for free users */}
         {userTier === 'free' && renderTierUpgrade()}
 
@@ -349,7 +376,8 @@ export default function AudioEnhancementScreen() {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -357,10 +385,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'transparent',
   },
   loadingText: {
     marginTop: 16,
@@ -391,6 +431,7 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 16,
+    backgroundColor: 'transparent',
   },
   section: {
     borderRadius: 12,

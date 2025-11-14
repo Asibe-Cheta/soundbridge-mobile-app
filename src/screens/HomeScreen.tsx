@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,16 +9,26 @@ import {
   Dimensions,
   RefreshControl,
   Alert,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../contexts/AuthContext';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { supabase, dbHelpers } from '../lib/supabase';
 import AdBanner from '../components/AdBanner';
+import ValuePropCard from '../components/ValuePropCard';
+import FirstTimeTooltip from '../components/FirstTimeTooltip';
+import { useUserPreferences } from '../hooks/useUserPreferences';
+import EventMatchIndicator from '../components/EventMatchIndicator';
+import { getRelativeTime } from '../utils/collaborationUtils';
+import TipModal from '../components/TipModal';
+import CollaborationRequestForm from '../components/CollaborationRequestForm';
 
 const { width, height } = Dimensions.get('window');
 
@@ -47,9 +57,16 @@ interface Creator {
   display_name: string;
   bio?: string;
   avatar_url?: string;
+  genre?: string | null;
+  location?: string | null;
+  country?: string | null;
+  is_collaboration_available?: boolean;
+  next_available_slot?: string | null;
   followers_count?: number;
   tracks_count?: number;
   events_count?: number;
+  total_tips_received?: number;
+  total_tip_count?: number;
 }
 
 interface Event {
@@ -58,6 +75,10 @@ interface Event {
   description?: string;
   event_date: string;
   location?: string;
+  category?: string | null;
+  genres?: string[] | null;
+  tags?: string[] | null;
+  distance_miles?: number | null;
   image_url?: string;         // Correct field name from schema
   organizer: {
     id: string;
@@ -67,12 +88,20 @@ interface Event {
   };
 }
 
+type CreatorRecord = {
+  id?: string;
+  username?: string;
+  display_name?: string;
+  avatar_url?: string;
+} | null;
+
 export default function HomeScreen() {
-  const { user } = useAuth();
-  const { play, addToQueue } = useAudioPlayer();
+  const { user, userProfile } = useAuth();
+  const { play, addToQueue, currentTrack } = useAudioPlayer();
   const { theme } = useTheme();
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const [refreshing, setRefreshing] = useState(false);
+  const { preferences } = useUserPreferences();
   
   // Content states
   const [featuredCreator, setFeaturedCreator] = useState<Creator | null>(null);
@@ -83,31 +112,12 @@ export default function HomeScreen() {
   
   // UI states
   const [isTrendingExpanded, setIsTrendingExpanded] = useState(false);
+  const [showEventsTooltip, setShowEventsTooltip] = useState(false);
+  const [showTipModal, setShowTipModal] = useState(false);
+  const [tipTargetCreator, setTipTargetCreator] = useState<Creator | null>(null);
+  const [showCollabModal, setShowCollabModal] = useState(false);
+  const [collabTargetCreator, setCollabTargetCreator] = useState<Creator | null>(null);
 
-  // Navigation functions
-  const navigateToTrending = () => {
-    // Navigate to trending tracks page
-    console.log('Navigate to trending tracks');
-  };
-
-  const navigateToRecentMusic = () => {
-    navigation.navigate('Discover' as never);
-  };
-
-  const navigateToHotCreators = () => {
-    navigation.navigate('AllCreators' as never);
-  };
-
-  const navigateToEvents = () => {
-    navigation.navigate('AllEvents' as never);
-  };
-
-  const navigateToCreatorSetup = () => {
-    // Navigate to creator profile setup
-    console.log('Navigate to creator setup');
-    navigation.navigate('CreatorSetup' as never);
-  };
-  
   // Loading states
   const [loadingFeatured, setLoadingFeatured] = useState(true);
   const [loadingTrending, setLoadingTrending] = useState(true);
@@ -115,9 +125,139 @@ export default function HomeScreen() {
   const [loadingCreators, setLoadingCreators] = useState(true);
   const [loadingEvents, setLoadingEvents] = useState(true);
 
+  const userGenres = useMemo(() => {
+    const genres = preferences?.preferred_genres ?? [];
+    return genres.filter((genre): genre is string => !!genre && genre.trim().length > 0);
+  }, [preferences?.preferred_genres]);
+
+  const primaryGenreLabel = formatLabel(userGenres[0]);
+  const secondaryGenreLabel = formatLabel(userGenres[1]);
+  const userCityLabel = formatLabel(preferences?.preferred_city || userProfile?.location);
+  const eventDistanceLabel =
+    typeof preferences?.preferred_event_distance === 'number' && !Number.isNaN(preferences?.preferred_event_distance)
+      ? `${preferences?.preferred_event_distance} miles`
+      : undefined;
+
+  const trendingSectionTitle = useMemo(() => {
+    if (primaryGenreLabel || userCityLabel) {
+      const genrePart = primaryGenreLabel ?? 'Your Genres';
+      const cityPart = userCityLabel ?? 'Your Area';
+      return `Trending in ${genrePart} · ${cityPart} 🔥`;
+    }
+    return 'Trending Now';
+  }, [primaryGenreLabel, userCityLabel]);
+
+  const featuredGenreLabel = formatLabel(featuredCreator?.genre ?? userGenres[0]);
+  const featuredLocationLabel = formatLabel(
+    featuredCreator?.location ?? preferences?.preferred_city ?? userProfile?.location
+  );
+
+  const featuredSectionTitle = useMemo(() => {
+    if (featuredGenreLabel || featuredLocationLabel) {
+      const segments = [featuredGenreLabel, featuredLocationLabel].filter(Boolean);
+      return `Featured Creator - ${segments.join(' · ')}`;
+    }
+    return 'Featured Creator';
+  }, [featuredGenreLabel, featuredLocationLabel]);
+
+  const featuredSectionSubtitle = loadingFeatured ? 'Loading...' : 'Matches your taste';
+
+  const eventsSubtitleParts = [
+    primaryGenreLabel,
+    secondaryGenreLabel,
+    eventDistanceLabel,
+  ].filter((value): value is string => !!value && value.trim().length > 0);
+
+  const eventsSectionTitle = 'Events Near You - Based on Your Preferences';
+  const eventsSectionSubtitle = eventsSubtitleParts.length > 0 ? eventsSubtitleParts.join(' · ') : null;
+
+  // Navigation functions
+  const navigateToTrending = () => {
+    navigation.navigate('Discover');
+  };
+
+  const navigateToRecentMusic = () => {
+    navigation.navigate('Discover');
+  };
+
+  const navigateToHotCreators = () => {
+    navigation.navigate('AllCreators');
+  };
+
+  const navigateToEvents = () => {
+    navigation.navigate('AllEvents');
+  };
+
+  const navigateToUpload = () => {
+    navigation.navigate('Upload');
+  };
+  const openTipModalForCreator = (creator: Creator) => {
+    setTipTargetCreator(creator);
+    setShowTipModal(true);
+  };
+
+  const handleTipModalClose = () => {
+    setShowTipModal(false);
+    setTipTargetCreator(null);
+  };
+
+  const handleCreatorTipSuccess = (amount: number) => {
+    if (!tipTargetCreator) {
+      return;
+    }
+    setHotCreators((prev) =>
+      prev.map((creator) =>
+        creator.id === tipTargetCreator.id
+          ? {
+              ...creator,
+              total_tips_received: (creator.total_tips_received || 0) + amount,
+              total_tip_count: (creator.total_tip_count || 0) + 1,
+            }
+          : creator,
+      ),
+    );
+    handleTipModalClose();
+  };
+
+  const openCollaborationModalForCreator = (creator: Creator) => {
+    setCollabTargetCreator(creator);
+    setShowCollabModal(true);
+  };
+
+  const handleCollabModalClose = () => {
+    setShowCollabModal(false);
+    setCollabTargetCreator(null);
+  };
+  
   useEffect(() => {
     loadHomeContent();
   }, []);
+
+  useEffect(() => {
+    if (!loadingEvents) {
+      (async () => {
+        try {
+          const hasSeen = await AsyncStorage.getItem('tooltip_events_seen');
+          if (!hasSeen) {
+            setShowEventsTooltip(true);
+          }
+        } catch (error) {
+          console.warn('HomeScreen: Unable to read tooltip state', error);
+          setShowEventsTooltip(true);
+        }
+      })();
+    }
+  }, [loadingEvents]);
+
+  const dismissEventsTooltip = async () => {
+    try {
+      await AsyncStorage.setItem('tooltip_events_seen', 'true');
+    } catch (error) {
+      console.warn('HomeScreen: Unable to persist tooltip state', error);
+    } finally {
+      setShowEventsTooltip(false);
+    }
+  };
 
   const loadHomeContent = async () => {
     try {
@@ -144,6 +284,8 @@ export default function HomeScreen() {
         display_name: 'Featured Artist',
         bio: 'Amazing music creator',
         avatar_url: null,
+        genre: 'afrobeats',
+        location: 'Lagos',
         followers_count: 1500,
         tracks_count: 25,
       });
@@ -284,6 +426,9 @@ export default function HomeScreen() {
           
           const transformedTracks: AudioTrack[] = simpleData.map((track, index) => {
             const imageUrl = fallbackImages[index % fallbackImages.length];
+            const rawCreator = Array.isArray(track.creator)
+              ? (track.creator[0] as CreatorRecord)
+              : (track.creator as CreatorRecord);
             return {
               id: track.id,
               title: track.title || 'Untitled Track',
@@ -297,10 +442,10 @@ export default function HomeScreen() {
               likes_count: 0,
               created_at: track.created_at,
               creator: {
-                id: track.creator?.id || track.creator_id || 'unknown',
-                username: track.creator?.username || 'unknown',
-                display_name: track.creator?.display_name || 'Unknown Artist',
-                avatar_url: track.creator?.avatar_url,
+                id: rawCreator?.id || track.creator_id || 'unknown',
+                username: rawCreator?.username || 'unknown',
+                display_name: rawCreator?.display_name || 'Unknown Artist',
+                avatar_url: rawCreator?.avatar_url,
               },
             };
           });
@@ -326,6 +471,9 @@ export default function HomeScreen() {
         const transformedTracks: AudioTrack[] = data.map((track, index) => {
           // Use the correct field name from schema
           const imageUrl = track.cover_art_url || fallbackImages[index % fallbackImages.length];
+          const rawCreator = Array.isArray(track.creator)
+            ? (track.creator[0] as CreatorRecord)
+            : (track.creator as CreatorRecord);
           
           console.log(`🖼️ Track "${track.title}" artwork check:`, {
             cover_art_url: track.cover_art_url,
@@ -343,10 +491,10 @@ export default function HomeScreen() {
             likes_count: track.likes_count || 0,
             created_at: track.created_at,
             creator: {
-              id: track.creator?.id || track.creator_id || 'unknown',
-              username: track.creator?.username || 'unknown',
-              display_name: track.creator?.display_name || 'Unknown Artist',
-              avatar_url: track.creator?.avatar_url,
+              id: rawCreator?.id || track.creator_id || 'unknown',
+              username: rawCreator?.username || 'unknown',
+              display_name: rawCreator?.display_name || 'Unknown Artist',
+              avatar_url: rawCreator?.avatar_url,
             },
           };
         });
@@ -430,12 +578,39 @@ export default function HomeScreen() {
       }
       
       if (data && data.length > 0) {
+        const creatorIds = data.map(creator => creator.id).filter(Boolean);
+        const availabilityMap = new Map<string, string | null>();
+
+        if (creatorIds.length > 0) {
+          const { data: availabilityRows, error: availabilityError } = await supabase
+            .from('creator_availability')
+            .select('creator_id,start_date,end_date')
+            .eq('is_available', true)
+            .gte('end_date', new Date().toISOString())
+            .in('creator_id', creatorIds);
+
+          if (!availabilityError && availabilityRows) {
+            availabilityRows.forEach((slot: any) => {
+              const existing = availabilityMap.get(slot.creator_id);
+              if (!existing || new Date(slot.start_date) < new Date(existing)) {
+                availabilityMap.set(slot.creator_id, slot.start_date);
+              }
+            });
+          } else if (availabilityError) {
+            console.log('ℹ️ Could not load availability for creators:', availabilityError.message);
+          }
+        }
+
         const transformedCreators: Creator[] = data.map(creator => ({
           id: creator.id,
           username: creator.username || '',
           display_name: creator.display_name || creator.username || 'Unknown Creator',
           bio: creator.bio || undefined,
           avatar_url: creator.avatar_url || undefined,
+          genre: creator.genre || undefined,
+          location: creator.location || creator.country || undefined,
+          is_collaboration_available: availabilityMap.has(creator.id),
+          next_available_slot: availabilityMap.get(creator.id) || null,
           followers_count: creator.followers_count || 0, // Real data from database
           tracks_count: creator.tracks_count || 0, // Real data from database
           events_count: creator.events_count || 0, // Real data from database
@@ -449,11 +624,17 @@ export default function HomeScreen() {
         const mockCreators: Creator[] = [
           {
             id: 'mock-creator-1',
-            username: 'asibe_cheta',
-            display_name: 'Asibe Cheta',
-            bio: 'Music creator',
-            followers_count: 0,
-            tracks_count: 0,
+            username: 'beat_master',
+            display_name: 'Beat Master',
+            bio: 'Producer and beat maker',
+            avatar_url: 'https://images.unsplash.com/photo-1521335629791-ce4aec67dd47?w=300&h=300&fit=crop',
+            genre: 'hip hop',
+            location: 'New York',
+            is_collaboration_available: true,
+            next_available_slot: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+            followers_count: 2400,
+            tracks_count: 120,
+            events_count: 12,
           },
         ];
         setHotCreators(mockCreators);
@@ -464,11 +645,17 @@ export default function HomeScreen() {
       const mockCreators: Creator[] = [
         {
           id: 'fallback-creator-1',
-          username: 'asibe_cheta',
-          display_name: 'Asibe Cheta',
-          bio: 'Music creator',
-          followers_count: 0,
-          tracks_count: 0,
+        username: 'melody_queen',
+        display_name: 'Melody Queen',
+        bio: 'Singer-songwriter',
+        avatar_url: 'https://images.unsplash.com/photo-1511288591490-9c89d9a86e43?w=300&h=300&fit=crop',
+        genre: 'pop',
+        location: 'London',
+        is_collaboration_available: false,
+        next_available_slot: null,
+        followers_count: 4600,
+        tracks_count: 85,
+        events_count: 18,
         },
       ];
       setHotCreators(mockCreators);
@@ -496,6 +683,9 @@ export default function HomeScreen() {
             description: 'Join us for an evening of new music from talented creators',
             event_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
             location: 'Online Event',
+            category: 'indie',
+            genres: ['indie', 'alternative'],
+            distance_miles: 0,
             image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
             organizer: {
               id: 'organizer-1',
@@ -510,6 +700,9 @@ export default function HomeScreen() {
             description: 'Learn the fundamentals of music production',
             event_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
             location: 'Community Center',
+            category: 'hip hop',
+            genres: ['hip hop', 'producer'],
+            distance_miles: 12,
             image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
             organizer: {
               id: 'organizer-2',
@@ -522,12 +715,22 @@ export default function HomeScreen() {
         setEvents(mockEvents);
         console.log('✅ HomeScreen: Events loaded (mock data):', mockEvents.length);
       } else {
-        const transformedEvents: Event[] = data.map(event => ({
+        const transformedEvents: Event[] = data.map(event => {
+          const rawTags = Array.isArray((event as any).genres)
+            ? (event as any).genres
+            : Array.isArray((event as any).tags)
+              ? (event as any).tags
+              : undefined;
+          return {
           id: event.id,
           title: event.title,
           description: event.description,
           event_date: event.event_date,
           location: event.location,
+          category: event.category ?? null,
+          genres: rawTags ?? (event.category ? [event.category] : null),
+          tags: rawTags ?? null,
+          distance_miles: typeof (event as any).distance_miles === 'number' ? (event as any).distance_miles : null,
           image_url: event.image_url,
           organizer: {
             id: event.organizer?.id || 'organizer-1',
@@ -535,7 +738,8 @@ export default function HomeScreen() {
             display_name: event.organizer?.display_name || 'Event Organizer',
             avatar_url: event.organizer?.avatar_url,
           },
-        }));
+          };
+        });
         
         setEvents(transformedEvents);
         console.log('✅ HomeScreen: Events loaded:', transformedEvents.length, user?.id ? '(personalized)' : '(general)');
@@ -550,6 +754,9 @@ export default function HomeScreen() {
           description: 'Connect with local musicians and creators',
           event_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
           location: 'Local Venue',
+          category: 'live',
+          genres: ['live', 'networking'],
+          distance_miles: 8,
           image_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
           organizer: {
             id: 'fallback-organizer',
@@ -624,15 +831,36 @@ export default function HomeScreen() {
     });
   };
 
+  const formatDistanceMiles = (distance?: number | null) => {
+    if (distance == null || Number.isNaN(distance)) {
+      return '';
+    }
+    if (distance < 1) {
+      return `${(Math.round(distance * 10) / 10).toFixed(1)} mi`;
+    }
+    return `${Math.round(distance)} mi`;
+  };
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        showsVerticalScrollIndicator={false}
-      >
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
+      
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        <ScrollView
+          style={styles.scrollView}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          showsVerticalScrollIndicator={false}
+        >
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={[styles.notificationButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
@@ -640,19 +868,38 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Creator Banner */}
-      <TouchableOpacity style={[styles.creatorBanner, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={navigateToCreatorSetup}>
+      {/* Creator Earnings Banner */}
+      <View
+        style={[
+          styles.creatorBanner,
+          {
+            backgroundColor: theme.isDark ? '#111827' : '#FFF6E6',
+            borderColor: theme.colors.border,
+          },
+        ]}
+      >
         <View style={styles.creatorBannerContent}>
           <View style={styles.creatorBannerLeft}>
-            <Ionicons name="star" size={20} color={theme.colors.primary} />
-            <Text style={[styles.creatorBannerTitle, { color: theme.colors.text }]}>Share Your Sound</Text>
+            <View style={styles.creatorBannerIcon}>
+              <Ionicons name="cash-outline" size={24} color="#F59E0B" />
+            </View>
+            <View style={styles.creatorBannerText}>
+              <Text style={[styles.creatorBannerTitle, { color: theme.colors.text }]}>Creators Earn Here</Text>
+              <Text style={[styles.creatorBannerSubtitle, { color: theme.colors.textSecondary }]}>
+                Upload free · Get discovered · Receive tips
+              </Text>
+            </View>
           </View>
-          <View style={styles.creatorBannerRight}>
-            <Text style={[styles.creatorBannerSubtitle, { color: theme.colors.textSecondary }]}>Get support from fans</Text>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.primary} />
-          </View>
+
+          <TouchableOpacity
+            onPress={navigateToUpload}
+            style={styles.creatorBannerCta}
+            accessibilityRole="button"
+          >
+            <Text style={styles.creatorBannerCtaText}>Start Earning</Text>
+          </TouchableOpacity>
         </View>
-      </TouchableOpacity>
+      </View>
 
       {/* Featured Creator Hero */}
       <View style={styles.heroSection}>
@@ -663,9 +910,9 @@ export default function HomeScreen() {
           style={styles.heroGradient}
         >
           <View style={styles.heroContent}>
-            <Text style={styles.heroTitle}>Featured Creator</Text>
+            <Text style={styles.heroTitle}>{featuredSectionTitle}</Text>
             <Text style={styles.heroSubtitle}>
-              {loadingFeatured ? 'Loading...' : 'Discover amazing talent'}
+              {featuredSectionSubtitle}
             </Text>
             <TouchableOpacity style={styles.heroButton}>
               <Ionicons name="play" size={16} color="#FFFFFF" />
@@ -675,6 +922,8 @@ export default function HomeScreen() {
         </LinearGradient>
       </View>
 
+      <ValuePropCard />
+
       {/* Trending Tracks - Collapsible */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -682,7 +931,7 @@ export default function HomeScreen() {
             style={styles.sectionTitleContainer}
             onPress={() => setIsTrendingExpanded(!isTrendingExpanded)}
           >
-            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Trending Now</Text>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>{trendingSectionTitle}</Text>
             <Ionicons 
               name={isTrendingExpanded ? "chevron-up" : "chevron-down"} 
               size={16} 
@@ -804,51 +1053,67 @@ export default function HomeScreen() {
                   cover_art_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
                   artwork_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
                 }
-              ]).map((track, index) => (
-                <TouchableOpacity
-                  key={track.id}
-                  style={[styles.trackRow, { backgroundColor: theme.colors.background, borderBottomColor: theme.colors.border }]}
-                  onPress={() => handleTrackPress(track)}
-                >
-                  <View style={[styles.trackRowCover, { backgroundColor: theme.colors.surface }]}>
-                    {(() => {
-                      const imageUrl = track.cover_art_url;
-                      return imageUrl ? (
-                        <Image 
-                          source={{ uri: imageUrl }} 
-                          style={styles.trackRowImage}
-                          onError={(error) => {
-                            console.log(`❌ Image failed to load for "${track.title}": ${imageUrl}`, error);
-                          }}
-                          onLoad={() => {
-                            console.log(`✅ Image loaded successfully for "${track.title}": ${imageUrl}`);
-                          }}
-                        />
-                      ) : (
-                        <View style={[styles.defaultTrackRowImage, { backgroundColor: theme.colors.surface }]}>
-                          <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />
+              ]).map((track, index) => {
+                const isActive = currentTrack?.id === track.id;
+                return (
+                  <TouchableOpacity
+                    key={track.id}
+                    style={styles.trackRowContainer}
+                    onPress={() => handleTrackPress(track)}
+                    activeOpacity={0.7}
+                  >
+                    <BlurView
+                      intensity={isActive ? 20 : 10}
+                      tint="dark"
+                      style={[
+                        styles.trackRowBlur,
+                        isActive && styles.trackRowBlurActive
+                      ]}
+                    >
+                      <View style={styles.trackRow}>
+                        <View style={[styles.trackRowCover, { backgroundColor: 'rgba(30, 41, 59, 0.2)' }]}>
+                          {(() => {
+                            const imageUrl = track.cover_art_url;
+                            return imageUrl ? (
+                              <Image 
+                                source={{ uri: imageUrl }} 
+                                style={styles.trackRowImageCircular}
+                                onError={(error) => {
+                                  console.log(`❌ Image failed to load for "${track.title}": ${imageUrl}`, error);
+                                }}
+                                onLoad={() => {
+                                  console.log(`✅ Image loaded successfully for "${track.title}": ${imageUrl}`);
+                                }}
+                              />
+                            ) : (
+                              <View style={[styles.defaultTrackRowImageCircular, { backgroundColor: 'rgba(30, 41, 59, 0.3)' }]}>
+                                <Ionicons name="musical-notes" size={16} color={theme.colors.textSecondary} />
+                              </View>
+                            );
+                          })()}
                         </View>
-                      );
-                    })()}
-                  </View>
-                  <View style={styles.trackRowInfo}>
-                    <Text style={[styles.trackRowTitle, { color: theme.colors.text }]} numberOfLines={1}>
-                      {track.title}
-                    </Text>
-                    <Text style={[styles.trackRowArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                      {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
-                    </Text>
-                  </View>
-                  <View style={styles.trackRowActions}>
-                      <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]} onPress={() => handleTrackPlay(track)}>
-                        <Ionicons name="play" size={16} color={theme.colors.primary} />
-                      </TouchableOpacity>
-                    <Text style={[styles.trackRowDuration, { color: theme.colors.textSecondary }]}>
-                      {formatDuration(track.duration)}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
+                        <View style={styles.trackRowInfo}>
+                          <Text style={styles.trackRowArtist} numberOfLines={1}>
+                            {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
+                          </Text>
+                          <Text style={styles.trackRowTitle} numberOfLines={1}>
+                            {track.title}
+                          </Text>
+                        </View>
+                        <View style={styles.trackRowActions}>
+                          <TouchableOpacity 
+                            style={styles.playTextButton} 
+                            onPress={() => handleTrackPlay(track)}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={styles.playTextButtonLabel}>PLAY</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </BlurView>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             {/* Column 2 */}
@@ -876,42 +1141,58 @@ export default function HomeScreen() {
                   cover_art_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop',
                   artwork_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop',
                 }
-              ].map((track, index) => (
-                <TouchableOpacity
-                  key={track.id}
-                  style={[styles.trackRow, { backgroundColor: theme.colors.background, borderBottomColor: theme.colors.border }]}
-                  onPress={() => handleTrackPress(track)}
-                >
-                  <View style={[styles.trackRowCover, { backgroundColor: theme.colors.surface }]}>
-                    <Image 
-                      source={{ uri: track.cover_art_url }} 
-                      style={styles.trackRowImage}
-                      onError={(error) => {
-                        console.log(`❌ Image failed to load for "${track.title}": ${track.cover_art_url}`, error);
-                      }}
-                      onLoad={() => {
-                        console.log(`✅ Image loaded successfully for "${track.title}": ${track.cover_art_url}`);
-                      }}
-                    />
-                  </View>
-                  <View style={styles.trackRowInfo}>
-                    <Text style={[styles.trackRowTitle, { color: theme.colors.text }]} numberOfLines={1}>
-                      {track.title}
-                    </Text>
-                    <Text style={[styles.trackRowArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                      {track.creator?.display_name || 'Unknown Artist'}
-                    </Text>
-                  </View>
-                  <View style={styles.trackRowActions}>
-                      <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]} onPress={() => handleTrackPlay(track)}>
-                        <Ionicons name="play" size={16} color={theme.colors.primary} />
-                      </TouchableOpacity>
-                    <Text style={[styles.trackRowDuration, { color: theme.colors.textSecondary }]}>
-                      {formatDuration(track.duration)}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
+              ].map((track, index) => {
+                const isActive = currentTrack?.id === track.id;
+                return (
+                  <TouchableOpacity
+                    key={track.id}
+                    style={styles.trackRowContainer}
+                    onPress={() => handleTrackPress(track)}
+                    activeOpacity={0.7}
+                  >
+                    <BlurView
+                      intensity={isActive ? 20 : 10}
+                      tint="dark"
+                      style={[
+                        styles.trackRowBlur,
+                        isActive && styles.trackRowBlurActive
+                      ]}
+                    >
+                      <View style={styles.trackRow}>
+                        <View style={[styles.trackRowCover, { backgroundColor: 'rgba(30, 41, 59, 0.2)' }]}>
+                          <Image 
+                            source={{ uri: track.cover_art_url }} 
+                            style={styles.trackRowImageCircular}
+                            onError={(error) => {
+                              console.log(`❌ Image failed to load for "${track.title}": ${track.cover_art_url}`, error);
+                            }}
+                            onLoad={() => {
+                              console.log(`✅ Image loaded successfully for "${track.title}": ${track.cover_art_url}`);
+                            }}
+                          />
+                        </View>
+                        <View style={styles.trackRowInfo}>
+                          <Text style={[styles.trackRowArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            {track.creator?.display_name || 'Unknown Artist'}
+                          </Text>
+                          <Text style={[styles.trackRowTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                            {track.title}
+                          </Text>
+                        </View>
+                        <View style={styles.trackRowActions}>
+                          <TouchableOpacity 
+                            style={styles.playTextButton} 
+                            onPress={() => handleTrackPlay(track)}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={styles.playTextButtonLabel}>PLAY</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </BlurView>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             {/* Column 3 */}
@@ -939,42 +1220,58 @@ export default function HomeScreen() {
                   cover_art_url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=300&h=300&fit=crop',
                   artwork_url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=300&h=300&fit=crop',
                 }
-              ].map((track, index) => (
-                <TouchableOpacity
-                  key={track.id}
-                  style={[styles.trackRow, { backgroundColor: theme.colors.background, borderBottomColor: theme.colors.border }]}
-                  onPress={() => handleTrackPress(track)}
-                >
-                  <View style={[styles.trackRowCover, { backgroundColor: theme.colors.surface }]}>
-                    <Image 
-                      source={{ uri: track.cover_art_url }} 
-                      style={styles.trackRowImage}
-                      onError={(error) => {
-                        console.log(`❌ Image failed to load for "${track.title}": ${track.cover_art_url}`, error);
-                      }}
-                      onLoad={() => {
-                        console.log(`✅ Image loaded successfully for "${track.title}": ${track.cover_art_url}`);
-                      }}
-                    />
-                  </View>
-                  <View style={styles.trackRowInfo}>
-                    <Text style={[styles.trackRowTitle, { color: theme.colors.text }]} numberOfLines={1}>
-                      {track.title}
-                    </Text>
-                    <Text style={[styles.trackRowArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                      {track.creator?.display_name || 'Unknown Artist'}
-                    </Text>
-                  </View>
-                  <View style={styles.trackRowActions}>
-                      <TouchableOpacity style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]} onPress={() => handleTrackPlay(track)}>
-                        <Ionicons name="play" size={16} color={theme.colors.primary} />
-                      </TouchableOpacity>
-                    <Text style={[styles.trackRowDuration, { color: theme.colors.textSecondary }]}>
-                      {formatDuration(track.duration)}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
+              ].map((track, index) => {
+                const isActive = currentTrack?.id === track.id;
+                return (
+                  <TouchableOpacity
+                    key={track.id}
+                    style={styles.trackRowContainer}
+                    onPress={() => handleTrackPress(track)}
+                    activeOpacity={0.7}
+                  >
+                    <BlurView
+                      intensity={isActive ? 20 : 10}
+                      tint="dark"
+                      style={[
+                        styles.trackRowBlur,
+                        isActive && styles.trackRowBlurActive
+                      ]}
+                    >
+                      <View style={styles.trackRow}>
+                        <View style={[styles.trackRowCover, { backgroundColor: 'rgba(30, 41, 59, 0.2)' }]}>
+                          <Image 
+                            source={{ uri: track.cover_art_url }} 
+                            style={styles.trackRowImageCircular}
+                            onError={(error) => {
+                              console.log(`❌ Image failed to load for "${track.title}": ${track.cover_art_url}`, error);
+                            }}
+                            onLoad={() => {
+                              console.log(`✅ Image loaded successfully for "${track.title}": ${track.cover_art_url}`);
+                            }}
+                          />
+                        </View>
+                        <View style={styles.trackRowInfo}>
+                          <Text style={[styles.trackRowArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            {track.creator?.display_name || 'Unknown Artist'}
+                          </Text>
+                          <Text style={[styles.trackRowTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                            {track.title}
+                          </Text>
+                        </View>
+                        <View style={styles.trackRowActions}>
+                          <TouchableOpacity 
+                            style={styles.playTextButton} 
+                            onPress={() => handleTrackPlay(track)}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={styles.playTextButtonLabel}>PLAY</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </BlurView>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </ScrollView>
         )}
@@ -1024,6 +1321,59 @@ export default function HomeScreen() {
                 <Text style={[styles.creatorStats, { color: theme.colors.textSecondary }]}>
                   {creator.followers_count?.toLocaleString()} followers
                 </Text>
+                {(creator.genre || creator.location) && (
+                  <Text style={[styles.creatorMeta, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                    {[formatLabel(creator.genre), formatLabel(creator.location)].filter(Boolean).join(' · ')}
+                  </Text>
+                )}
+                {creator.is_collaboration_available ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.collabBadge,
+                      {
+                        backgroundColor: theme.colors.surface,
+                        borderColor: theme.colors.primary + '40',
+                      },
+                    ]}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      openCollaborationModalForCreator(creator);
+                    }}
+                    accessibilityRole="button"
+                  >
+                    <Ionicons
+                      name="calendar-outline"
+                      size={12}
+                      color={theme.colors.primary}
+                      style={styles.collabBadgeIcon}
+                    />
+                    <Text style={[styles.collabBadgeText, { color: theme.colors.primary }]}>
+                      Available to Collaborate
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {creator.next_available_slot ? (
+                  <Text style={[styles.collabSubtext, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                    Next slot {getRelativeTime(creator.next_available_slot)}
+                  </Text>
+                ) : null}
+                <TouchableOpacity
+                  style={[
+                    styles.creatorTipButton,
+                    {
+                      backgroundColor: theme.isDark ? 'rgba(253, 224, 71, 0.12)' : 'rgba(250, 204, 21, 0.18)',
+                      borderColor: 'rgba(250, 204, 21, 0.35)',
+                    },
+                  ]}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    openTipModalForCreator(creator);
+                  }}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="gift" size={14} color="#FACC15" style={styles.creatorTipIcon} />
+                  <Text style={styles.creatorTipText}>Tip</Text>
+                </TouchableOpacity>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -1042,7 +1392,14 @@ export default function HomeScreen() {
               style={styles.sectionTitleContainer}
               onPress={navigateToEvents}
             >
-              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Upcoming Events</Text>
+              <View>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>{eventsSectionTitle}</Text>
+                {eventsSectionSubtitle ? (
+                  <Text style={[styles.sectionSubtitle, { color: theme.colors.textSecondary }]}>
+                    {eventsSectionSubtitle}
+                  </Text>
+                ) : null}
+              </View>
             </TouchableOpacity>
             <TouchableOpacity onPress={navigateToEvents}>
               <Ionicons name="chevron-forward" size={16} color="#DC2626" />
@@ -1064,6 +1421,8 @@ export default function HomeScreen() {
                     description: 'Join us for an evening of new music from talented creators',
                     event_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
                     location: 'Online Event',
+                    category: 'indie',
+                    genres: ['indie', 'showcase'],
                     image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-1', username: 'event_organizer', display_name: 'Music Events', avatar_url: undefined },
                   },
@@ -1073,13 +1432,17 @@ export default function HomeScreen() {
                     description: 'An intimate jazz performance featuring local artists',
                     event_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
                     location: 'Blue Note Cafe',
+                    category: 'jazz',
+                    genres: ['jazz'],
+                    distance_miles: 5,
+                    image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
                     cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-2', username: 'jazz_events', display_name: 'Jazz Collective', avatar_url: undefined },
                   }
                 ]).map((event) => (
                   <TouchableOpacity
                     key={event.id}
-                    style={[styles.eventCard, { backgroundColor: theme.colors.background, borderBottomColor: theme.colors.border }]}
+                    style={[styles.eventCard, { backgroundColor: 'transparent', borderBottomColor: theme.colors.border }]}
                     onPress={() => handleEventPress(event)}
                   >
                     <View style={[styles.eventImageContainer, { backgroundColor: theme.colors.card }]}>
@@ -1101,11 +1464,18 @@ export default function HomeScreen() {
                       {event.location && (
                         <Text style={[styles.eventLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                           📍 {event.location}
+                          {event.distance_miles != null
+                            ? ` · ${formatDistanceMiles(event.distance_miles)}`
+                            : ''}
                         </Text>
                       )}
                       <Text style={[styles.eventOrganizer, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                         by {event.organizer?.display_name || event.organizer?.username || 'Unknown Organizer'}
                       </Text>
+                      <EventMatchIndicator
+                        eventGenres={event.genres || (event.category ? [event.category] : undefined)}
+                        userGenres={userGenres}
+                      />
                     </View>
                   </TouchableOpacity>
                 ))}
@@ -1120,6 +1490,10 @@ export default function HomeScreen() {
                     description: 'A day-long celebration of electronic music and digital art',
                     event_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
                     location: 'City Park Amphitheater',
+                    category: 'electronic',
+                    genres: ['electronic', 'festival'],
+                    distance_miles: 18,
+                    image_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop',
                     cover_art_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-3', username: 'electronic_events', display_name: 'EDM Collective', avatar_url: undefined },
                   },
@@ -1129,13 +1503,17 @@ export default function HomeScreen() {
                     description: 'Intimate acoustic performances in a cozy setting',
                     event_date: new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString(),
                     location: 'The Coffee House',
+                    category: 'acoustic',
+                    genres: ['acoustic'],
+                    distance_miles: 3,
+                    image_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
                     cover_art_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-4', username: 'acoustic_nights', display_name: 'Acoustic Vibes', avatar_url: undefined },
                   }
                 ].map((event) => (
                   <TouchableOpacity
                     key={event.id}
-                    style={[styles.eventCard, { backgroundColor: theme.colors.background, borderBottomColor: theme.colors.border }]}
+                    style={[styles.eventCard, { backgroundColor: 'transparent', borderBottomColor: theme.colors.border }]}
                     onPress={() => handleEventPress(event)}
                   >
                     <View style={[styles.eventImageContainer, { backgroundColor: theme.colors.card }]}>
@@ -1151,11 +1529,18 @@ export default function HomeScreen() {
                       {event.location && (
                         <Text style={[styles.eventLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                           📍 {event.location}
+                          {event.distance_miles != null
+                            ? ` · ${formatDistanceMiles(event.distance_miles)}`
+                            : ''}
                         </Text>
                       )}
                       <Text style={[styles.eventOrganizer, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                         by {event.organizer?.display_name || 'Unknown Organizer'}
                       </Text>
+                      <EventMatchIndicator
+                        eventGenres={event.genres || (event.category ? [event.category] : undefined)}
+                        userGenres={userGenres}
+                      />
                     </View>
                   </TouchableOpacity>
                 ))}
@@ -1170,6 +1555,10 @@ export default function HomeScreen() {
                     description: 'Open mic night for hip-hop artists and freestyle battles',
                     event_date: new Date(Date.now() + 35 * 24 * 60 * 60 * 1000).toISOString(),
                     location: 'Underground Club',
+                    category: 'hip hop',
+                    genres: ['hip hop', 'open mic'],
+                    distance_miles: 9,
+                    image_url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=300&h=300&fit=crop',
                     cover_art_url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-5', username: 'hiphop_events', display_name: 'Hip-Hop Community', avatar_url: undefined },
                   },
@@ -1179,13 +1568,17 @@ export default function HomeScreen() {
                     description: 'Monthly classical music performances by local orchestra',
                     event_date: new Date(Date.now() + 42 * 24 * 60 * 60 * 1000).toISOString(),
                     location: 'Symphony Hall',
+                    category: 'classical',
+                    genres: ['classical'],
+                    distance_miles: 2,
+                    image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
                     cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-6', username: 'classical_music', display_name: 'City Orchestra', avatar_url: undefined },
                   }
                 ].map((event) => (
                   <TouchableOpacity
                     key={event.id}
-                    style={[styles.eventCard, { backgroundColor: theme.colors.background, borderBottomColor: theme.colors.border }]}
+                    style={[styles.eventCard, { backgroundColor: 'transparent', borderBottomColor: theme.colors.border }]}
                     onPress={() => handleEventPress(event)}
                   >
                     <View style={[styles.eventImageContainer, { backgroundColor: theme.colors.card }]}>
@@ -1201,11 +1594,18 @@ export default function HomeScreen() {
                       {event.location && (
                         <Text style={[styles.eventLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                           📍 {event.location}
+                          {event.distance_miles != null
+                            ? ` · ${formatDistanceMiles(event.distance_miles)}`
+                            : ''}
                         </Text>
                       )}
                       <Text style={[styles.eventOrganizer, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                         by {event.organizer?.display_name || 'Unknown Organizer'}
                       </Text>
+                      <EventMatchIndicator
+                        eventGenres={event.genres || (event.category ? [event.category] : undefined)}
+                        userGenres={userGenres}
+                      />
                     </View>
                   </TouchableOpacity>
                 ))}
@@ -1214,19 +1614,75 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {/* Bottom padding for tab bar */}
-        <View style={styles.bottomPadding} />
-      </ScrollView>
-    </SafeAreaView>
+      {/* Bottom padding for tab bar */}
+      <View style={styles.bottomPadding} />
+        </ScrollView>
+
+      <FirstTimeTooltip
+        visible={showEventsTooltip}
+        title="Events Tailored to You"
+        description="These events match YOUR preferences (Genre · Location). You'll never see irrelevant events."
+        actions={[
+          {
+            label: 'Got it',
+            onPress: dismissEventsTooltip,
+            variant: 'primary',
+          },
+        ]}
+      />
+      {tipTargetCreator && (
+        <TipModal
+          visible={showTipModal}
+          creatorId={tipTargetCreator.id}
+          creatorName={tipTargetCreator.display_name || tipTargetCreator.username}
+          onClose={handleTipModalClose}
+          onTipSuccess={(amount) => handleCreatorTipSuccess(amount)}
+        />
+      )}
+      {collabTargetCreator && (
+        <CollaborationRequestForm
+          visible={showCollabModal}
+          onClose={handleCollabModalClose}
+          creatorId={collabTargetCreator.id}
+          creatorName={collabTargetCreator.display_name || collabTargetCreator.username}
+        />
+      )}
+      </SafeAreaView>
+    </View>
   );
+}
+
+function formatLabel(value?: string | null, fallbackCase?: 'upper' | 'lower'): string | undefined {
+  if (!value) return undefined;
+  const base = value.toString().trim();
+  if (!base) return undefined;
+  if (fallbackCase === 'upper') {
+    return base.toUpperCase();
+  }
+  return base
+    .split(/[\s_-]+/)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
   scrollView: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
@@ -1257,20 +1713,39 @@ const styles = StyleSheet.create({
   creatorBannerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    flex: 1,
+  },
+  creatorBannerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  creatorBannerText: {
+    flex: 1,
   },
   creatorBannerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  creatorBannerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
   },
   creatorBannerSubtitle: {
     fontSize: 13,
     fontWeight: '500',
+  },
+  creatorBannerCta: {
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 999,
+  },
+  creatorBannerCtaText: {
+    color: '#111827',
+    fontWeight: '700',
+    fontSize: 14,
   },
   notificationButton: {
     padding: 8,
@@ -1330,6 +1805,11 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 4,
   },
   sectionTitleContainer: {
     flexDirection: 'row',
@@ -1392,25 +1872,58 @@ const styles = StyleSheet.create({
   tracksList: {
     paddingHorizontal: 16,
   },
+  trackRowContainer: {
+    marginHorizontal: 8,
+    marginVertical: 4,
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
+  trackRowBlur: {
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.02,
+    shadowRadius: 2,
+    elevation: 0,
+  },
+  trackRowBlurActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderWidth: 0.5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
   trackRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderBottomWidth: 0.5,
+    paddingHorizontal: 16,
+    minHeight: 60,
   },
   trackRowCover: {
     width: 48,
     height: 48,
-    borderRadius: 8,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 16,
+    overflow: 'hidden',
   },
   trackRowImage: {
     width: '100%',
     height: '100%',
     borderRadius: 8,
+  },
+  trackRowImageCircular: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
   },
   defaultTrackRowImage: {
     width: '100%',
@@ -1419,16 +1932,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 8,
   },
+  defaultTrackRowImageCircular: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 24,
+  },
   trackRowInfo: {
     flex: 1,
   },
   trackRowTitle: {
     fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 2,
+    fontWeight: '400',
+    marginTop: 2,
+    color: 'rgba(255, 255, 255, 0.75)',
   },
   trackRowArtist: {
-    fontSize: 12,
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2,
+    color: 'rgba(255, 255, 255, 0.95)',
   },
   trackRowActions: {
     flexDirection: 'row',
@@ -1441,6 +1965,17 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  playTextButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  playTextButtonLabel: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 1,
   },
   trackRowDuration: {
     fontSize: 11,
@@ -1484,6 +2019,11 @@ const styles = StyleSheet.create({
   creatorStats: {
     fontSize: 9,
     textAlign: 'center',
+  },
+  creatorMeta: {
+    fontSize: 10,
+    textAlign: 'center',
+    marginTop: 2,
   },
   eventsList: {
     paddingHorizontal: 16,
@@ -1532,6 +2072,47 @@ const styles = StyleSheet.create({
   eventOrganizer: {
     fontSize: 11,
   },
+  collabBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginTop: 6,
+  },
+  collabBadgeIcon: {
+    marginRight: 6,
+  },
+  collabBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  collabSubtext: {
+    fontSize: 10,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  creatorTipButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginTop: 8,
+    alignSelf: 'center',
+    gap: 4,
+  },
+  creatorTipIcon: {
+    marginRight: 2,
+  },
+  creatorTipText: {
+    color: '#FACC15',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   loadingContainer: {
     paddingHorizontal: 16,
     paddingVertical: 24,
@@ -1552,11 +2133,10 @@ const styles = StyleSheet.create({
   bottomPadding: {
     height: 100,
   },
-  // Apple Music-style horizontal scrolling columns
+  // Apple Music-style horizontal scrolling columns - wider for ElevenLabs style
   musicColumn: {
-    width: width * 0.85, // 85% of screen width
-    marginRight: 16,
-    paddingHorizontal: 16,
+    width: width * 0.92, // 92% of screen width - wider
+    marginRight: 12,
   },
   eventsColumn: {
     width: width * 0.85, // 85% of screen width

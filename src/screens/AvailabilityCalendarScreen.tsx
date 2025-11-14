@@ -1,3 +1,4 @@
+import BackButton from '../components/BackButton';
 // src/screens/AvailabilityCalendarScreen.tsx
 // Screen for creators to manage their availability calendar
 
@@ -14,8 +15,10 @@ import {
   Modal,
   TextInput,
   Platform,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
@@ -340,17 +343,27 @@ export default function AvailabilityCalendarScreen() {
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>My Availability</Text>
-        <TouchableOpacity onPress={handleCreateSlot}>
-          <Ionicons name="add" size={24} color={theme.colors.primary} />
-        </TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
+      
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        
+        {/* Header */}
+        <View style={styles.header}>
+          <BackButton onPress={() => navigation.goBack()} />
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>My Availability</Text>
+          <TouchableOpacity onPress={handleCreateSlot}>
+            <Ionicons name="add" size={24} color={theme.colors.primary} />
+          </TouchableOpacity>
+        </View>
 
       {/* Error Message */}
       {error && (
@@ -413,13 +426,25 @@ export default function AvailabilityCalendarScreen() {
 
       {/* Create/Edit Modal */}
       {renderCreateModal()}
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
@@ -449,6 +474,7 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 16,
+    backgroundColor: 'transparent',
   },
   infoCard: {
     flexDirection: 'row',

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import BackButton from '../components/BackButton';
 import {
   View,
   Text,
@@ -7,8 +8,10 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
@@ -309,35 +312,55 @@ export default function BillingScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-        <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-          </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Billing & Usage</Text>
-          <View style={{ width: 24 }} />
-        </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#DC2626" />
-          <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading...</Text>
-        </View>
-      </SafeAreaView>
+      <View style={styles.container}>
+        {/* Main Background Gradient - Uses theme colors */}
+        <LinearGradient
+          colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          locations={[0, 0.5, 1]}
+          style={styles.mainGradient}
+        />
+        
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
+          <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+          <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
+            <BackButton onPress={() => navigation.goBack()} />
+            <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Billing & Usage</Text>
+            <View style={{ width: 24 }} />
+          </View>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={[styles.loadingText, { color: theme.colors.text }]}>Loading billing info...</Text>
+          </View>
+        </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Billing & Usage</Text>
-        <TouchableOpacity onPress={() => navigation.navigate('Upgrade' as never)}>
-          <Ionicons name="rocket" size={20} color="#DC2626" />
-        </TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
+      
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        
+        <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
+          <BackButton onPress={() => navigation.goBack()} />
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Billing & Usage</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('Upgrade' as never)}>
+            <Ionicons name="rocket" size={20} color={theme.colors.primary} />
+          </TouchableOpacity>
+        </View>
 
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 100 }}>
+        <ScrollView style={styles.scrollView} contentContainerStyle={{ paddingBottom: 100 }}>
         {/* Subscription Status */}
         {subscription && (
           <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
@@ -640,13 +663,25 @@ export default function BillingScreen() {
           )}
         </View>
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
@@ -660,6 +695,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+  scrollView: {
+    flex: 1,
+    padding: 16,
+    backgroundColor: 'transparent',
+  },
   content: {
     flex: 1,
     padding: 16,
@@ -668,6 +708,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'transparent',
   },
   loadingText: {
     marginTop: 16,

@@ -10,13 +10,17 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, dbHelpers } from '../lib/supabase';
+import BackButton from '../components/BackButton';
+import TipModal from '../components/TipModal';
 
 interface Creator {
   id: string;
@@ -48,6 +52,8 @@ export default function AllCreatorsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('recent');
   const [selectedGenre, setSelectedGenre] = useState<FilterGenre>('all');
+  const [showTipModal, setShowTipModal] = useState(false);
+  const [tipTarget, setTipTarget] = useState<Creator | null>(null);
 
   const sortOptions = [
     { key: 'recent', label: 'Most Recent' },
@@ -208,6 +214,16 @@ export default function AllCreatorsScreen() {
     }
   };
 
+  const openTipModal = (creator: Creator) => {
+    setTipTarget(creator);
+    setShowTipModal(true);
+  };
+
+  const handleTipModalClose = () => {
+    setShowTipModal(false);
+    setTipTarget(null);
+  };
+
   const onRefresh = () => {
     loadCreators(true);
   };
@@ -240,31 +256,48 @@ export default function AllCreatorsScreen() {
             </Text>
           )}
         </View>
-        
-        <TouchableOpacity
-          style={[
-            styles.followButton,
-            {
-              backgroundColor: creator.isFollowing ? theme.colors.surface : theme.colors.primary,
-              borderColor: theme.colors.primary,
-            }
-          ]}
-          onPress={(e) => {
-            e.stopPropagation();
-            handleFollowCreator(creator);
-          }}
-        >
-          <Text
+        <View style={styles.creatorHeaderActions}>
+          <TouchableOpacity
             style={[
-              styles.followButtonText,
+              styles.followButton,
               {
-                color: creator.isFollowing ? theme.colors.primary : '#FFFFFF',
+                backgroundColor: creator.isFollowing ? theme.colors.surface : theme.colors.primary,
+                borderColor: theme.colors.primary,
               }
             ]}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleFollowCreator(creator);
+            }}
           >
-            {creator.isFollowing ? 'Following' : 'Follow'}
-          </Text>
-        </TouchableOpacity>
+            <Text
+              style={[
+                styles.followButtonText,
+                {
+                  color: creator.isFollowing ? theme.colors.primary : '#FFFFFF',
+                }
+              ]}
+            >
+              {creator.isFollowing ? 'Following' : 'Follow'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.tipButton,
+              {
+                backgroundColor: theme.isDark ? 'rgba(253, 224, 71, 0.12)' : 'rgba(250, 204, 21, 0.18)',
+                borderColor: 'rgba(250, 204, 21, 0.35)',
+              },
+            ]}
+            onPress={(e) => {
+              e.stopPropagation();
+              openTipModal(creator);
+            }}
+          >
+            <Ionicons name="gift" size={16} color="#FACC15" style={styles.tipButtonIcon} />
+            <Text style={styles.tipButtonText}>Tip</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {creator.bio && (
@@ -290,28 +323,52 @@ export default function AllCreatorsScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: theme.colors.background }]}>
-        <ActivityIndicator size="large" color={theme.colors.primary} />
-        <Text style={[styles.loadingText, { color: theme.colors.text }]}>
-          Loading creators...
-        </Text>
+      <View style={styles.container}>
+        {/* Main Background Gradient - Uses theme colors */}
+        <LinearGradient
+          colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          locations={[0, 0.5, 1]}
+          style={styles.mainGradient}
+        />
+        
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
+          <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={[styles.loadingText, { color: theme.colors.text }]}>
+              Loading creators...
+            </Text>
+          </View>
+        </SafeAreaView>
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      {error && (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Error: {error}</Text>
-        </View>
-      )}
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
       
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        
+        {error && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>Error: {error}</Text>
+          </View>
+        )}
+        
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+        <BackButton onPress={() => navigation.goBack()} />
         <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
           All Creators ({filteredCreators.length})
         </Text>
@@ -381,7 +438,17 @@ export default function AllCreatorsScreen() {
           </View>
         }
       />
-    </SafeAreaView>
+      {tipTarget && (
+        <TipModal
+          visible={showTipModal}
+          creatorId={tipTarget.id}
+          creatorName={tipTarget.display_name || tipTarget.username}
+          onClose={handleTipModalClose}
+          onTipSuccess={() => handleTipModalClose()}
+        />
+      )}
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -389,10 +456,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'transparent',
   },
   loadingText: {
     marginTop: 10,
@@ -469,6 +548,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     padding: 16,
+    backgroundColor: 'transparent',
   },
   creatorCard: {
     padding: 16,
@@ -485,6 +565,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
+  },
+  creatorHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  creatorHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
   },
   followButton: {
     paddingHorizontal: 16,
@@ -548,6 +637,25 @@ const styles = StyleSheet.create({
   },
   joinDate: {
     fontSize: 12,
+  },
+  tipButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginLeft: 8,
+    gap: 4,
+  },
+  tipButtonIcon: {
+    marginRight: 2,
+  },
+  tipButtonText: {
+    color: '#FACC15',
+    fontSize: 12,
+    fontWeight: '700',
   },
   emptyContainer: {
     flex: 1,

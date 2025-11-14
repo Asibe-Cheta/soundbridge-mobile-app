@@ -48,28 +48,35 @@ export default function SplashScreen() {
 
   return (
     <LinearGradient
-      colors={['#000000', '#0D0D0D', '#1A0A0A']}
+      colors={['#0A0E1A', '#1A2332', '#0F1419']}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.container}
     >
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+      <StatusBar barStyle="light-content" backgroundColor="#0A0E1A" />
       
-      {/* Background Gradients */}
+      {/* Background Gradients - ElevenLabs-inspired blues */}
       <LinearGradient
-        colors={['#DC2626', '#EC4899']}
+        colors={['rgba(59, 130, 246, 0.2)', 'rgba(147, 197, 253, 0.15)', 'rgba(96, 165, 250, 0.1)']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={[styles.gradient1, { opacity: 0.15 }]}
+        style={[styles.gradient1, { opacity: 0.4 }]}
       />
       <LinearGradient
-        colors={['#EC4899', '#DC2626']}
+        colors={['rgba(96, 165, 250, 0.15)', 'rgba(59, 130, 246, 0.2)', 'rgba(37, 99, 235, 0.1)']}
         start={{ x: 1, y: 0 }}
         end={{ x: 0, y: 1 }}
-        style={[styles.gradient2, { opacity: 0.1 }]}
+        style={[styles.gradient2, { opacity: 0.3 }]}
+      />
+      {/* Accent gradients (red/pink) */}
+      <LinearGradient
+        colors={['rgba(220, 38, 38, 0.1)', 'rgba(236, 72, 153, 0.08)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.gradient3, { opacity: 0.2 }]}
       />
 
-      {/* Main Content */}
+      {/* Main Content - Logo directly in blue gradient */}
       <Animated.View
         style={[
           styles.contentContainer,
@@ -89,22 +96,24 @@ export default function SplashScreen() {
         </View>
       </Animated.View>
 
-      {/* Progress Bar */}
+      {/* Progress Bar with Glassmorphism */}
       <View style={styles.progressContainer}>
-        <View style={styles.progressBar}>
-          <Animated.View
-            style={[
-              styles.progressFill,
-              { width: progressWidth },
-            ]}
-          >
-            <LinearGradient
-              colors={['#DC2626', '#EC4899']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.progressGradient}
-            />
-          </Animated.View>
+        <View style={styles.progressBarGlass}>
+          <View style={styles.progressBar}>
+            <Animated.View
+              style={[
+                styles.progressFill,
+                { width: progressWidth },
+              ]}
+            >
+              <LinearGradient
+                colors={['#DC2626', '#EC4899']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.progressGradient}
+              />
+            </Animated.View>
+          </View>
         </View>
         <Text style={styles.loadingText}>Loading...</Text>
       </View>
@@ -134,6 +143,14 @@ const styles = StyleSheet.create({
     bottom: -72,
     right: -72,
   },
+  gradient3: {
+    position: 'absolute',
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    top: '30%',
+    right: '20%',
+  },
   contentContainer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -143,8 +160,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   logo: {
-    width: 352,
-    height: 141,
+    width: width * 1.5, // Much bigger - 150% of screen width (will be constrained by maxWidth)
+    height: width * 0.6, // Much taller to match
+    maxWidth: width * 1.1, // Use 110% of screen width as maximum (will scale down to fit)
+    maxHeight: height * 0.7, // Use up to 70% of screen height
   },
   progressContainer: {
     position: 'absolute',
@@ -153,10 +172,18 @@ const styles = StyleSheet.create({
     right: 40,
     alignItems: 'center',
   },
+  progressBarGlass: {
+    width: '100%',
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    borderRadius: 8,
+    padding: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(147, 197, 253, 0.2)',
+  },
   progressBar: {
     width: '100%',
     height: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(26, 35, 50, 0.4)',
     borderRadius: 5,
     overflow: 'hidden',
   },

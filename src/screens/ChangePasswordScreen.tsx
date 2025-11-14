@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import BackButton from '../components/BackButton';
 import {
   View,
   Text,
@@ -12,13 +13,16 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 
 export default function ChangePasswordScreen() {
   const navigation = useNavigation();
   const { updatePassword } = useAuth();
+  const { theme } = useTheme();
   
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -84,37 +88,45 @@ export default function ChangePasswordScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
       
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Change Password</Text>
-        <View style={{ width: 24 }} />
-      </View>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        
+        {/* Header */}
+        <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
+          <BackButton onPress={() => navigation.goBack()} />
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Change Password</Text>
+          <View style={{ width: 24 }} />
+        </View>
 
-      <KeyboardAvoidingView 
-        style={styles.content}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+        <KeyboardAvoidingView 
+          style={styles.content}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
         <View style={styles.form}>
-          <Text style={styles.subtitle}>
+          <Text style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
             Create a strong password to keep your account secure
           </Text>
 
           {/* Current Password */}
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Current Password</Text>
-            <View style={styles.inputContainer}>
+            <Text style={[styles.label, { color: theme.colors.text }]}>Current Password</Text>
+            <View style={[styles.inputContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { color: theme.colors.text }]}
                 value={currentPassword}
                 onChangeText={setCurrentPassword}
                 placeholder="Enter current password"
-                placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                placeholderTextColor={theme.colors.textMuted}
                 secureTextEntry={!showCurrentPassword}
                 autoCapitalize="none"
               />
@@ -125,7 +137,7 @@ export default function ChangePasswordScreen() {
                 <Ionicons
                   name={showCurrentPassword ? 'eye-off' : 'eye'}
                   size={20}
-                  color="rgba(255, 255, 255, 0.6)"
+                  color={theme.colors.textMuted}
                 />
               </TouchableOpacity>
             </View>
@@ -133,14 +145,14 @@ export default function ChangePasswordScreen() {
 
           {/* New Password */}
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>New Password</Text>
-            <View style={styles.inputContainer}>
+            <Text style={[styles.label, { color: theme.colors.text }]}>New Password</Text>
+            <View style={[styles.inputContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { color: theme.colors.text }]}
                 value={newPassword}
                 onChangeText={setNewPassword}
                 placeholder="Enter new password"
-                placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                placeholderTextColor={theme.colors.textMuted}
                 secureTextEntry={!showNewPassword}
                 autoCapitalize="none"
               />
@@ -151,23 +163,23 @@ export default function ChangePasswordScreen() {
                 <Ionicons
                   name={showNewPassword ? 'eye-off' : 'eye'}
                   size={20}
-                  color="rgba(255, 255, 255, 0.6)"
+                  color={theme.colors.textMuted}
                 />
               </TouchableOpacity>
             </View>
-            <Text style={styles.hint}>Minimum 6 characters</Text>
+            <Text style={[styles.hint, { color: theme.colors.textMuted }]}>Minimum 6 characters</Text>
           </View>
 
           {/* Confirm Password */}
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Confirm New Password</Text>
-            <View style={styles.inputContainer}>
+            <Text style={[styles.label, { color: theme.colors.text }]}>Confirm New Password</Text>
+            <View style={[styles.inputContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { color: theme.colors.text }]}
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
                 placeholder="Confirm new password"
-                placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                placeholderTextColor={theme.colors.textMuted}
                 secureTextEntry={!showConfirmPassword}
                 autoCapitalize="none"
               />
@@ -178,7 +190,7 @@ export default function ChangePasswordScreen() {
                 <Ionicons
                   name={showConfirmPassword ? 'eye-off' : 'eye'}
                   size={20}
-                  color="rgba(255, 255, 255, 0.6)"
+                  color={theme.colors.textMuted}
                 />
               </TouchableOpacity>
             </View>
@@ -188,6 +200,7 @@ export default function ChangePasswordScreen() {
           <TouchableOpacity
             style={[
               styles.changeButton,
+              { backgroundColor: theme.colors.primary },
               (!currentPassword || !newPassword || !confirmPassword || isLoading) &&
                 styles.changeButtonDisabled,
             ]}
@@ -202,35 +215,46 @@ export default function ChangePasswordScreen() {
           </TouchableOpacity>
 
           {/* Security Tips */}
-          <View style={styles.securityTips}>
-            <Text style={styles.tipsTitle}>Password Security Tips:</Text>
+          <View style={[styles.securityTips, { backgroundColor: theme.colors.card }]}>
+            <Text style={[styles.tipsTitle, { color: theme.colors.text }]}>Password Security Tips:</Text>
             <View style={styles.tipItem}>
-              <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-              <Text style={styles.tipText}>Use at least 8 characters</Text>
+              <Ionicons name="checkmark-circle" size={16} color={theme.colors.success} />
+              <Text style={[styles.tipText, { color: theme.colors.textSecondary }]}>Use at least 8 characters</Text>
             </View>
             <View style={styles.tipItem}>
-              <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-              <Text style={styles.tipText}>Include uppercase and lowercase letters</Text>
+              <Ionicons name="checkmark-circle" size={16} color={theme.colors.success} />
+              <Text style={[styles.tipText, { color: theme.colors.textSecondary }]}>Include uppercase and lowercase letters</Text>
             </View>
             <View style={styles.tipItem}>
-              <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-              <Text style={styles.tipText}>Add numbers and special characters</Text>
+              <Ionicons name="checkmark-circle" size={16} color={theme.colors.success} />
+              <Text style={[styles.tipText, { color: theme.colors.textSecondary }]}>Add numbers and special characters</Text>
             </View>
             <View style={styles.tipItem}>
-              <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-              <Text style={styles.tipText}>Avoid common words or phrases</Text>
+              <Ionicons name="checkmark-circle" size={16} color={theme.colors.success} />
+              <Text style={[styles.tipText, { color: theme.colors.textSecondary }]}>Avoid common words or phrases</Text>
             </View>
           </View>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+  },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
@@ -239,21 +263,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   headerTitle: {
-    color: '#FFFFFF',
     fontSize: 18,
     fontWeight: 'bold',
   },
   content: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   form: {
     padding: 20,
   },
   subtitle: {
-    color: 'rgba(255, 255, 255, 0.7)',
     fontSize: 16,
     marginBottom: 32,
     textAlign: 'center',
@@ -262,7 +284,6 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   label: {
-    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '500',
     marginBottom: 8,
@@ -270,14 +291,11 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   input: {
     flex: 1,
-    color: '#FFFFFF',
     fontSize: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -286,19 +304,17 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   hint: {
-    color: 'rgba(255, 255, 255, 0.5)',
     fontSize: 12,
     marginTop: 4,
   },
   changeButton: {
-    backgroundColor: '#DC2626',
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 16,
   },
   changeButtonDisabled: {
-    backgroundColor: 'rgba(220, 38, 38, 0.5)',
+    opacity: 0.5,
   },
   changeButtonText: {
     color: '#FFFFFF',
@@ -308,11 +324,9 @@ const styles = StyleSheet.create({
   securityTips: {
     marginTop: 32,
     padding: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
   },
   tipsTitle: {
-    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: 'bold',
     marginBottom: 12,
@@ -323,7 +337,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   tipText: {
-    color: 'rgba(255, 255, 255, 0.7)',
     fontSize: 13,
     marginLeft: 8,
   },

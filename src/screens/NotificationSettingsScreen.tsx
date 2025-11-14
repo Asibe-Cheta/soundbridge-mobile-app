@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import BackButton from '../components/BackButton';
 import {
   View,
   Text,
@@ -86,9 +87,7 @@ export default function NotificationSettingsScreen() {
       
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
+        <BackButton onPress={() => navigation.goBack()} />
         <Text style={styles.headerTitle}>Notifications</Text>
         <TouchableOpacity onPress={testNotification}>
           <Ionicons name="notifications" size={24} color="#DC2626" />

@@ -1,4 +1,5 @@
 import React from 'react';
+import BackButton from '../components/BackButton';
 import {
   View,
   Text,
@@ -8,6 +9,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme, ThemeMode } from '../contexts/ThemeContext';
@@ -38,22 +40,31 @@ export default function ThemeSettingsScreen() {
   ];
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
-      <StatusBar 
-        barStyle={theme.isDark ? 'light-content' : 'dark-content'} 
-        backgroundColor={theme.colors.background} 
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
       />
       
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Theme</Text>
-        <View style={{ width: 24 }} />
-      </View>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar 
+          barStyle={theme.isDark ? "light-content" : "dark-content"} 
+          backgroundColor="transparent" 
+          translucent
+        />
+        
+        {/* Header */}
+        <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
+          <BackButton onPress={() => navigation.goBack()} />
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Theme</Text>
+          <View style={{ width: 24 }} />
+        </View>
 
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 100 }}>
+        <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 100 }}>
         {/* Current Theme Preview */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Current Theme</Text>
@@ -142,13 +153,25 @@ export default function ThemeSettingsScreen() {
           </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
@@ -165,6 +188,7 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: 16,
+    backgroundColor: 'transparent',
   },
   section: {
     marginBottom: 32,

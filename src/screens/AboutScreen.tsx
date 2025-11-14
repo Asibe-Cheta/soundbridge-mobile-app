@@ -1,9 +1,11 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Linking } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Linking, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
+import BackButton from '../components/BackButton';
 
 const features = [
   { icon: 'musical-notes', title: 'Discover New Music', description: 'Explore a vast library of tracks from independent artists worldwide.' },
@@ -17,16 +19,26 @@ export default function AboutScreen() {
   const { theme } = useTheme();
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
-      <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>About SoundBridge</Text>
-        <View style={{ width: 24 }} />
-      </View>
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
+      
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        
+        <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
+          <BackButton onPress={() => navigation.goBack()} style={styles.backButton} />
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>About SoundBridge</Text>
+          <View style={{ width: 24 }} />
+        </View>
 
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 100 }}>
+        <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 100 }}>
         {/* Logo & Mission */}
         <View style={styles.heroSection}>
           <View style={styles.logoContainer}>
@@ -118,13 +130,25 @@ export default function AboutScreen() {
           <Text style={[styles.footerSubtext, { color: theme.colors.textSecondary }]}>Built with passion for music creators.</Text>
         </View>
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
   safeArea: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
@@ -144,6 +168,7 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 16,
+    backgroundColor: 'transparent',
   },
   heroSection: {
     alignItems: 'center',

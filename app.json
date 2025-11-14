@@ -17,12 +17,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.soundbridge.mobile",
-      "associatedDomains": [
-        "applinks:soundbridge.live",
-        "applinks:www.soundbridge.live"
-      ],
+      "buildNumber": "81",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": ["audio"],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -76,7 +74,7 @@
     "scheme": "soundbridge",
     "extra": {
       "eas": {
-        "projectId": "your-project-id"
+        "projectId": "96a15afd-b1fd-4031-a790-2701fa0bffdf"
       }
     },
     "plugins": [

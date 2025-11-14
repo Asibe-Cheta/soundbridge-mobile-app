@@ -6,6 +6,9 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { StripeProvider } from '@stripe/stripe-react-native';
+import { useTheme } from './src/contexts/ThemeContext';
+import GlassmorphicTabBar from './src/components/GlassmorphicTabBar';
 
 // Import screens
 import SplashScreen from './src/screens/SplashScreen';
@@ -43,6 +46,8 @@ import OfflineDownloadScreen from './src/screens/OfflineDownloadScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import AvailabilityCalendarScreen from './src/screens/AvailabilityCalendarScreen';
 import CollaborationRequestsScreen from './src/screens/CollaborationRequestsScreen';
+import ServiceProviderOnboardingScreen from './src/screens/ServiceProviderOnboardingScreen';
+import ServiceProviderDashboardScreen from './src/screens/ServiceProviderDashboardScreen';
 import AudioEnhancementExpoScreen from './src/screens/AudioEnhancementScreen.expo';
 
 // Import contexts
@@ -53,6 +58,9 @@ import { CollaborationProvider } from './src/contexts/CollaborationContext';
 
 // Import components
 import MiniPlayer from './src/components/MiniPlayer';
+import SoundBridgeErrorBoundary from './src/components/SoundBridgeErrorBoundary';
+import CreateEventScreen from './src/screens/CreateEventScreen';
+import CreatePlaylistScreen from './src/screens/CreatePlaylistScreen';
 
 // Import services
 // import { notificationService } from './src/services/NotificationService';
@@ -64,9 +72,15 @@ const Stack = createStackNavigator();
 // Main Tab Navigator
 function MainTabs() {
   const insets = useSafeAreaInsets();
+  const { theme } = useTheme();
   
   return (
     <Tab.Navigator
+      tabBar={(props) => (
+        <View style={{ paddingBottom: insets.bottom }}>
+          <GlassmorphicTabBar {...props} />
+        </View>
+      )}
       screenOptions={({ route }) => ({
         tabBarIcon: ({ focused, color, size }) => {
           let iconName: keyof typeof Ionicons.glyphMap;
@@ -89,22 +103,6 @@ function MainTabs() {
         },
         tabBarActiveTintColor: '#DC2626',
         tabBarInactiveTintColor: 'rgba(255, 255, 255, 0.6)',
-        tabBarStyle: {
-          backgroundColor: '#000000',
-          borderTopColor: 'rgba(255, 255, 255, 0.1)',
-          borderTopWidth: 1,
-          paddingBottom: insets.bottom + 10,
-          paddingTop: 8,
-          height: 70 + insets.bottom,
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-        },
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '500',
-        },
         headerShown: false,
       })}
     >
@@ -132,6 +130,7 @@ function MainTabs() {
 // Main App Navigator
 function AppNavigator() {
   const { user, loading, needsOnboarding } = useAuth();
+  const { theme } = useTheme();
   const navigationRef = React.useRef<any>(null);
 
   // Initialize services
@@ -165,10 +164,21 @@ function AppNavigator() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: 'transparent' }}>
       <NavigationContainer 
         ref={navigationRef} 
         onReady={onNavigationReady}
+        theme={{
+          dark: theme.isDark,
+          colors: {
+            primary: theme.colors.primary,
+            background: 'transparent',
+            card: 'transparent',
+            text: theme.colors.text,
+            border: theme.colors.border,
+            notification: theme.colors.primary,
+          },
+        }}
       >
         <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!user ? (
@@ -201,11 +211,15 @@ function AppNavigator() {
             <Stack.Screen name="AllEvents" component={AllEventsScreen} />
             <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} />
             <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
+            <Stack.Screen name="CreateEvent" component={CreateEventScreen} />
+            <Stack.Screen name="CreatePlaylist" component={CreatePlaylistScreen} />
             <Stack.Screen name="TrackDetails" component={TrackDetailsScreen} />
             <Stack.Screen name="PlaylistDetails" component={PlaylistDetailsScreen} />
             <Stack.Screen name="OfflineDownloads" component={OfflineDownloadScreen} />
             <Stack.Screen name="AvailabilityCalendar" component={AvailabilityCalendarScreen} />
             <Stack.Screen name="CollaborationRequests" component={CollaborationRequestsScreen} />
+            <Stack.Screen name="ServiceProviderOnboarding" component={ServiceProviderOnboardingScreen} />
+            <Stack.Screen name="ServiceProviderDashboard" component={ServiceProviderDashboardScreen} />
             <Stack.Screen name="AudioEnhancementExpo" component={AudioEnhancementExpoScreen} options={{ headerShown: false }} />
             {/* Allow access to onboarding even after completion for testing */}
             <Stack.Screen name="OnboardingTest" component={OnboardingScreen} />
@@ -220,18 +234,76 @@ function AppNavigator() {
 
 export default function App() {
   console.log('🚀 SoundBridge Mobile App Loading...');
+  
+  // Validate environment variables with fallbacks
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aunxdbqukbxyyiusaeqi.supabase.co';
+  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1bnhkYnF1a2J4eXlpdXNhZXFpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI2OTA2MTUsImV4cCI6MjA2ODI2NjYxNX0.IP-c4_S7Fkbq6F2UkgzL-TibkoBN49yQ1Cqz4CkMzB0';
+  
+  // Stripe publishable key - required for event tickets and tips
+  const stripePublishableKey = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
+  
+  // Log environment status safely
+  console.log('🔍 Environment variables:');
+  console.log('EXPO_PUBLIC_SUPABASE_URL:', process.env.EXPO_PUBLIC_SUPABASE_URL ? 'SET' : 'NOT SET (using fallback)');
+  console.log('EXPO_PUBLIC_SUPABASE_ANON_KEY:', process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ? 'SET' : 'NOT SET (using fallback)');
+  console.log('EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY:', process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ? 'SET' : 'NOT SET');
+  
+  if (!process.env.EXPO_PUBLIC_SUPABASE_URL || !process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY) {
+    console.warn('⚠️ Environment variables not set, using fallback values');
+  } else {
+    console.log('✅ Environment variables loaded successfully');
+  }
+  
+  if (!stripePublishableKey) {
+    console.warn('⚠️ EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY is not set - Stripe features (event tickets, tips) will not work');
+  } else {
+    console.log('✅ Stripe publishable key loaded - Event tickets and tips are enabled');
+  }
+  
+  // Only render StripeProvider if we have a valid publishable key
+  const appContent = (
+    <>
+      <StatusBar style="light" backgroundColor="#1A1A1A" />
+      <AppNavigator />
+    </>
+  );
+
+  // Render Stripe Provider with error handling
+  const renderWithStripe = () => {
+    if (!stripePublishableKey) {
+      console.warn('⚠️ Stripe not configured - running without Stripe support');
+      return appContent;
+    }
+
+    try {
+      return (
+        <StripeProvider 
+          publishableKey={stripePublishableKey}
+          merchantIdentifier="merchant.com.soundbridge.mobile"
+          urlScheme="soundbridge"
+        >
+          {appContent}
+        </StripeProvider>
+      );
+    } catch (error) {
+      console.error('❌ Error initializing Stripe, continuing without it:', error);
+      return appContent;
+    }
+  };
+
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <AuthProvider>
-          <CollaborationProvider>
-            <AudioPlayerProvider>
-              <StatusBar style="light" backgroundColor="#1A1A1A" />
-              <AppNavigator />
-            </AudioPlayerProvider>
-          </CollaborationProvider>
-        </AuthProvider>
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <SoundBridgeErrorBoundary>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <CollaborationProvider>
+              <AudioPlayerProvider>
+                {renderWithStripe()}
+              </AudioPlayerProvider>
+            </CollaborationProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </SoundBridgeErrorBoundary>
   );
 }

@@ -2,6 +2,8 @@ import React, { createContext, useContext, useEffect, useState, ReactNode } from
 import { Linking } from 'react-native';
 import type { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import type { CreatorType } from '../types';
+import { fetchCreatorTypes } from '../services/creatorExpansionService';
 
 interface UserProfile {
   id: string;
@@ -14,6 +16,8 @@ interface UserProfile {
   country?: string;
   location?: string;
   created_at: string;
+  creator_types?: CreatorType[];
+  primary_creator_type?: CreatorType | null;
 }
 
 interface AuthContextType {
@@ -83,7 +87,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     getInitialSession();
 
     // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    const { data: { subscription }} = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('Auth state changed:', event, session?.user?.email);
         setSession(session);
@@ -339,7 +343,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   // Load user profile from database
-  const loadUserProfile = async (userId: string) => {
+  const loadUserProfile = async (userId: string, activeSession: Session | null = session) => {
     try {
       console.log('🔍 Loading user profile for:', userId);
       const { data, error } = await supabase
@@ -356,8 +360,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       
       if (data) {
+        let creatorTypes: CreatorType[] = [];
+        try {
+          if (activeSession) {
+            creatorTypes = await fetchCreatorTypes(userId, { session: activeSession });
+          } else {
+            const { data: { session: latestSession } } = await supabase.auth.getSession();
+            if (latestSession) {
+              creatorTypes = await fetchCreatorTypes(userId, { session: latestSession });
+            }
+          }
+        } catch (creatorTypeError) {
+          console.warn('⚠️ Unable to load creator types:', creatorTypeError);
+        }
+
         console.log('✅ User profile loaded:', data);
-        setUserProfile(data);
+        setUserProfile({
+          ...data,
+          creator_types: creatorTypes,
+          primary_creator_type: creatorTypes[0] ?? null,
+        });
         // Check if user needs onboarding
         const needsOnboarding = !data.onboarding_completed;
         setNeedsOnboarding(needsOnboarding);
@@ -371,11 +393,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const refreshUser = async () => {
     try {
-      const { data: { session }, error } = await supabase.auth.getSession();
-      if (session && !error) {
-        setSession(session);
-        setUser(session.user);
-        await loadUserProfile(session.user.id);
+        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+        if (currentSession && !error) {
+          setSession(currentSession);
+          setUser(currentSession.user);
+          await loadUserProfile(currentSession.user.id, currentSession);
       }
     } catch (err) {
       console.error('Error refreshing user:', err);

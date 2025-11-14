@@ -1,4 +1,5 @@
 import React from 'react';
+import BackButton from '../components/BackButton';
 import {
   View,
   Text,
@@ -20,9 +21,7 @@ export default function TermsOfServiceScreen() {
       
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
+        <BackButton onPress={() => navigation.goBack()} />
         <Text style={styles.headerTitle}>Terms of Service</Text>
         <View style={{ width: 24 }} />
       </View>

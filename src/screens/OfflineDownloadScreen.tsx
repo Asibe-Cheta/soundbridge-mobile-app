@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import BackButton from '../components/BackButton';
 import {
   View,
   Text,
@@ -199,12 +200,10 @@ export default function OfflineDownloadScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity
+          <BackButton
             style={styles.backButton}
             onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
+           />
           <Text style={styles.headerTitle}>Offline Downloads</Text>
         </View>
         
@@ -219,12 +218,10 @@ export default function OfflineDownloadScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity
+        <BackButton
           style={styles.backButton}
           onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
+         />
         <Text style={styles.headerTitle}>Offline Downloads</Text>
         {offlineTracks.length > 0 && (
           <TouchableOpacity

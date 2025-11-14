@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -19,9 +19,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { supabase, dbHelpers } from '../lib/supabase';
 import AdvancedSearchFilters, { SearchFilters } from '../components/AdvancedSearchFilters';
+import { fetchDiscoverServiceProviders } from '../services/creatorExpansionService';
+import type { PublicProfile } from '../types/database';
 
 const { width } = Dimensions.get('window');
 
@@ -100,10 +102,86 @@ interface Playlist {
   };
 }
 
-type TabType = 'Music' | 'Artists' | 'Events' | 'Playlists';
+type TabType = 'Music' | 'Artists' | 'Events' | 'Playlists' | 'Services' | 'Venues';
+
+const DISCOVER_MOCK_TRACKS: AudioTrack[] = [
+  {
+    id: 'discover-mock-track-1',
+    title: 'Electric Dreams',
+    cover_art_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+    artwork_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+    creator: { id: 'discover-artist-a', username: 'artist1', display_name: 'Artist One' },
+    duration: 188,
+    plays_count: 4400,
+    likes_count: 200,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'discover-mock-track-2',
+    title: 'Midnight City',
+    cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+    artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+    creator: { id: 'discover-artist-b', username: 'artist2', display_name: 'City Sounds' },
+    duration: 206,
+    plays_count: 3800,
+    likes_count: 160,
+    created_at: new Date().toISOString(),
+  },
+];
+
+const DISCOVER_MOCK_ARTISTS: Creator[] = [
+  {
+    id: 'discover-mock-creator-1',
+    username: 'beat_master',
+    display_name: 'Beat Master',
+    bio: 'Producer and beat maker',
+    avatar_url: 'https://images.unsplash.com/photo-1521335629791-ce4aec67dd47?w=300&h=300&fit=crop',
+    followers_count: 2500,
+    tracks_count: 120,
+    events_count: 12,
+  },
+  {
+    id: 'discover-mock-creator-2',
+    username: 'melody_queen',
+    display_name: 'Melody Queen',
+    bio: 'Singer-songwriter',
+    avatar_url: 'https://images.unsplash.com/photo-1511288591490-9c89d9a86e43?w=300&h=300&fit=crop',
+    followers_count: 4700,
+    tracks_count: 86,
+    events_count: 18,
+  },
+];
+
+const DISCOVER_MOCK_EVENTS: Event[] = [
+  {
+    id: 'discover-mock-event-1',
+    title: 'Virtual Music Showcase',
+    description: 'Discover fresh sounds from upcoming creators.',
+    event_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    location: 'Online',
+    category: 'indie',
+    image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+    organizer: { id: 'discover-organizer-1', username: 'event_team', display_name: 'SoundBridge Events', avatar_url: undefined },
+    genres: ['indie', 'alternative'],
+    distance_miles: 0,
+  },
+];
+
+const DISCOVER_MOCK_PLAYLISTS: Playlist[] = [
+  {
+    id: 'discover-mock-playlist-1',
+    name: 'Weekend Vibes',
+    description: 'Curated tunes to soundtrack your weekend.',
+    cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+    tracks_count: 24,
+    followers_count: 1200,
+    created_at: new Date().toISOString(),
+    creator: { id: 'playlist-creator-1', username: 'soundbridge', display_name: 'SoundBridge' },
+  },
+];
 
 function DiscoverScreen() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { play, addToQueue } = useAudioPlayer();
   const { theme } = useTheme();
   const navigation = useNavigation();
@@ -129,6 +207,7 @@ function DiscoverScreen() {
   const [featuredArtists, setFeaturedArtists] = useState<Creator[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [serviceProviders, setServiceProviders] = useState<PublicProfile[]>([]);
   
   // Search states
   const [searchResults, setSearchResults] = useState<{
@@ -142,15 +221,21 @@ function DiscoverScreen() {
   const [loadingArtists, setLoadingArtists] = useState(true);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [loadingPlaylists, setLoadingPlaylists] = useState(false); // Playlists not implemented
+  const [loadingServices, setLoadingServices] = useState(false);
 
-  const tabs: TabType[] = ['Music', 'Artists', 'Events', 'Playlists'];
+  const tabs: TabType[] = ['Music', 'Artists', 'Events', 'Playlists', 'Services', 'Venues'];
 
   useEffect(() => {
-    loadDiscoverContent();
-  }, [activeTab]);
+    if (!authLoading) {
+      loadDiscoverContent();
+    }
+  }, [activeTab, authLoading, user?.id]);
 
-  // Load main content on component mount
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
     const loadInitialContent = async () => {
       console.log('🚀 DiscoverScreen: Loading initial content...');
       await Promise.all([
@@ -164,11 +249,67 @@ function DiscoverScreen() {
     };
 
     loadInitialContent();
-    // Also test search data availability
     testSearchData();
-    // Test playlists tables
     dbHelpers.testPlaylistsTables();
-  }, []); // Only run once on mount
+  }, [authLoading, user?.id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (authLoading) {
+        return;
+      }
+
+      const missingContent =
+        trendingTracks.length === 0 ||
+        recentTracks.length === 0 ||
+        featuredArtists.length === 0 ||
+        events.length === 0 ||
+        playlists.length === 0;
+
+      if (missingContent) {
+        loadDiscoverContent();
+      }
+    }, [authLoading, trendingTracks.length, recentTracks.length, featuredArtists.length, events.length, playlists.length, activeTab])
+  );
+
+  useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!loadingTracks && !loadingArtists && !loadingEvents && !loadingPlaylists) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      if (loadingTracks) {
+        console.warn('DiscoverScreen: Track data timed out, using fallback dataset.');
+        setTrendingTracks(prev => (prev.length > 0 ? prev : DISCOVER_MOCK_TRACKS));
+        setRecentTracks(prev => (prev.length > 0 ? prev : DISCOVER_MOCK_TRACKS));
+        setLoadingTracks(false);
+      }
+
+      if (loadingArtists) {
+        console.warn('DiscoverScreen: Artist data timed out, using fallback dataset.');
+        setFeaturedArtists(prev => (prev.length > 0 ? prev : DISCOVER_MOCK_ARTISTS));
+        setLoadingArtists(false);
+      }
+
+      if (loadingEvents) {
+        console.warn('DiscoverScreen: Event data timed out, using fallback dataset.');
+        setEvents(prev => (prev.length > 0 ? prev : DISCOVER_MOCK_EVENTS));
+        setLoadingEvents(false);
+      }
+
+      if (loadingPlaylists) {
+        console.warn('DiscoverScreen: Playlist data timed out, using fallback dataset.');
+        setPlaylists(prev => (prev.length > 0 ? prev : DISCOVER_MOCK_PLAYLISTS));
+        setLoadingPlaylists(false);
+      }
+    }, 6000);
+
+    return () => clearTimeout(timeout);
+  }, [authLoading, loadingTracks, loadingArtists, loadingEvents, loadingPlaylists]);
 
   const loadDiscoverContent = async () => {
     try {
@@ -184,6 +325,12 @@ function DiscoverScreen() {
           break;
         case 'Playlists':
           await loadPlaylists();
+          break;
+        case 'Services':
+          await loadServiceProviders();
+          break;
+        case 'Venues':
+          // Venues coming soon - no loading needed
           break;
         default:
           // Load all content for main discover page
@@ -213,57 +360,8 @@ function DiscoverScreen() {
       
       if (error || !data || data.length === 0) {
         console.log('⚠️ Using fallback mock data. Error:', error?.message);
-        // Enhanced mock trending tracks with artwork (fallback)
-        const mockTrending: AudioTrack[] = [
-          {
-            id: 'discover-trending-1',
-            title: 'Electric Dreams',
-            cover_art_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-            artwork_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-            creator: {
-              id: '1',
-              username: 'artist1',
-              display_name: 'Artist One',
-            },
-            duration: 180,
-            plays_count: 5500,
-            likes_count: 234,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: 'discover-trending-2',
-            title: 'Midnight City',
-            cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-            artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-            creator: {
-              id: '2',
-              username: 'artist2',
-              display_name: 'City Sounds',
-            },
-            duration: 210,
-            plays_count: 4200,
-            likes_count: 189,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: 'discover-trending-3',
-            title: 'Ocean Waves',
-            cover_art_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-            artwork_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-            creator: {
-              id: '3',
-              username: 'artist3',
-              display_name: 'Wave Sounds',
-            },
-            duration: 195,
-            plays_count: 3800,
-            likes_count: 156,
-            created_at: new Date().toISOString(),
-          },
-        ];
-        setTrendingTracks(mockTrending);
-        console.log('✅ DiscoverScreen: Trending tracks loaded (mock data):', mockTrending.length);
-        console.log('🔍 Mock trending track creator data:', mockTrending[0]?.creator);
+        setTrendingTracks(DISCOVER_MOCK_TRACKS);
+        console.log('✅ DiscoverScreen: Trending tracks loaded (mock data):', DISCOVER_MOCK_TRACKS.length);
       } else {
         console.log('✅ DiscoverScreen: Loaded tracks:', data.length, user?.id ? '(personalized)' : '(general)');
         console.log('🔍 DiscoverScreen trending track creator data:', data[0]?.creator);
@@ -271,6 +369,7 @@ function DiscoverScreen() {
       }
     } catch (error) {
       console.error('❌ DiscoverScreen: Error loading trending tracks:', error);
+      setTrendingTracks(DISCOVER_MOCK_TRACKS);
     } finally {
       setLoadingTracks(false);
     }
@@ -297,40 +396,8 @@ function DiscoverScreen() {
       if (error) {
         console.error('❌ DiscoverScreen: Supabase error loading recent tracks:', error);
         // Fallback to mock data
-        const mockTracks: AudioTrack[] = [
-          {
-            id: 'discover-recent-1',
-            title: 'Untitled Audio File',
-            cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
-            artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
-            creator: {
-              id: 'discover-creator-1',
-              username: 'asibe_cheta',
-              display_name: 'Asibe Cheta',
-            },
-            duration: 180,
-            plays_count: 45,
-            likes_count: 12,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: 'discover-recent-2',
-            title: 'My Song Hits',
-            cover_art_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-            artwork_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-            creator: {
-              id: 'discover-creator-2',
-              username: 'asibe_cheta',
-              display_name: 'Asibe Cheta',
-            },
-            duration: 210,
-            plays_count: 89,
-            likes_count: 23,
-            created_at: new Date().toISOString(),
-          },
-        ];
-        setRecentTracks(mockTracks);
-        console.log('✅ DiscoverScreen: Recent tracks loaded (fallback mock data):', mockTracks.length);
+        setRecentTracks(DISCOVER_MOCK_TRACKS);
+        console.log('✅ DiscoverScreen: Recent tracks loaded (fallback mock data):', DISCOVER_MOCK_TRACKS.length);
       } else if (data && data.length > 0) {
         const fallbackImages = [
           'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
@@ -366,7 +433,8 @@ function DiscoverScreen() {
             cover_art_url: imageUrl,
             artwork_url: imageUrl,
             duration: track.duration || 180,
-            plays_count: track.plays_count || track.play_count || 0,
+            play_count: track.play_count || 0,
+            plays_count: track.plays_count || 0,
             likes_count: track.likes_count || track.like_count || 0,
             created_at: track.created_at,
             creator: {
@@ -396,6 +464,7 @@ function DiscoverScreen() {
               display_name: 'Demo Artist',
             },
             duration: 180,
+            play_count: 0,
             plays_count: 0,
             likes_count: 0,
             created_at: new Date().toISOString(),
@@ -405,7 +474,9 @@ function DiscoverScreen() {
       }
     } catch (error) {
       console.error('❌ DiscoverScreen: Error loading recent tracks:', error);
-      setRecentTracks([]);
+      setRecentTracks(DISCOVER_MOCK_TRACKS);
+    } finally {
+      setLoadingTracks(false);
     }
   };
 
@@ -439,61 +510,12 @@ function DiscoverScreen() {
       } else if (error) {
         console.log('❌ DiscoverScreen: Database error, using mock data:', error.message);
         // Use mock data on error
-      const mockArtists: Creator[] = [
-        {
-            id: 'discover-artist-1',
-            username: 'asibe_cheta',
-            display_name: 'Asibe Cheta',
-            bio: 'Music creator and producer',
-            avatar_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=150&h=150&fit=crop&crop=face',
-          followers_count: 1250,
-            tracks_count: 25,
-          },
-          {
-            id: 'discover-artist-2',
-            username: 'beat_maker_pro',
-            display_name: 'Beat Maker Pro',
-            bio: 'Electronic music producer',
-            avatar_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=150&h=150&fit=crop&crop=face',
-          followers_count: 890,
-            tracks_count: 18,
-          },
-          {
-            id: 'discover-artist-3',
-            username: 'indie_sound',
-            display_name: 'Indie Sound',
-            bio: 'Indie rock and alternative music',
-            avatar_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=150&h=150&fit=crop&crop=face',
-            followers_count: 2100,
-            tracks_count: 32,
-          },
-          {
-            id: 'discover-artist-4',
-            username: 'vocal_vibes',
-            display_name: 'Vocal Vibes',
-            bio: 'R&B and soul vocalist',
-            avatar_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=150&h=150&fit=crop&crop=face',
-            followers_count: 756,
-            tracks_count: 14,
-          },
-        ];
-        setFeaturedArtists(mockArtists);
+        setFeaturedArtists(DISCOVER_MOCK_ARTISTS);
         console.log('✅ DiscoverScreen: Using mock artists data');
       } else {
         console.log('ℹ️ DiscoverScreen: No creators found, using mock data');
         // Use mock data if no creators found
-        const mockArtists: Creator[] = [
-          {
-            id: 'discover-artist-1',
-            username: 'demo_artist',
-            display_name: 'Demo Artist',
-            bio: 'Featured music creator',
-            avatar_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=150&h=150&fit=crop&crop=face',
-            followers_count: 500,
-            tracks_count: 12,
-        },
-      ];
-      setFeaturedArtists(mockArtists);
+        setFeaturedArtists(DISCOVER_MOCK_ARTISTS);
         console.log('✅ DiscoverScreen: Using fallback mock data');
       }
     } catch (error) {
@@ -555,72 +577,12 @@ function DiscoverScreen() {
       } else if (error) {
         console.log('❌ DiscoverScreen: Database error, using mock events:', error.message);
         // Use mock data on error
-        const mockEvents: Event[] = [
-          {
-            id: 'discover-event-1',
-            title: 'Virtual Music Showcase',
-            description: 'Join us for an evening of new music from talented creators',
-            event_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-            location: 'Online Event',
-            image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-            organizer: {
-              id: 'discover-organizer-1',
-              username: 'event_organizer',
-              display_name: 'Music Events',
-            avatar_url: undefined,
-          },
-        },
-        {
-            id: 'discover-event-2',
-            title: 'Beat Making Workshop',
-            description: 'Learn the fundamentals of music production',
-            event_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-            location: 'Community Center',
-            image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-            organizer: {
-              id: 'discover-organizer-2',
-              username: 'workshop_host',
-              display_name: 'Production Academy',
-            avatar_url: undefined,
-          },
-        },
-        {
-            id: 'discover-event-3',
-            title: 'Live Music Night',
-            description: 'Experience live performances from local artists',
-            event_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
-            location: 'Music Venue Downtown',
-            image_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-            organizer: {
-              id: 'discover-organizer-3',
-              username: 'live_music_co',
-              display_name: 'Live Music Co',
-            avatar_url: undefined,
-          },
-        },
-      ];
-        setEvents(mockEvents);
+        setEvents(DISCOVER_MOCK_EVENTS);
         console.log('✅ DiscoverScreen: Using mock events data');
       } else {
         console.log('ℹ️ DiscoverScreen: No events found, using mock data');
         // Use mock data if no events found
-        const mockEvents: Event[] = [
-          {
-            id: 'discover-event-1',
-            title: 'SoundBridge Showcase',
-            description: 'Discover new music from emerging artists',
-            event_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-            location: 'Virtual Event',
-            image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-            organizer: {
-              id: 'soundbridge-team',
-              username: 'soundbridge',
-              display_name: 'SoundBridge Team',
-              avatar_url: undefined,
-            },
-          },
-        ];
-        setEvents(mockEvents);
+        setEvents(DISCOVER_MOCK_EVENTS);
         console.log('✅ DiscoverScreen: Using fallback mock events');
       }
     } catch (error) {
@@ -670,10 +632,33 @@ function DiscoverScreen() {
       setPlaylists(transformedPlaylists);
     } catch (error) {
       console.error('❌ DiscoverScreen: Error loading playlists:', error);
-      setPlaylists([]);
+      setPlaylists(DISCOVER_MOCK_PLAYLISTS);
     } finally {
       setLoadingPlaylists(false);
       console.log('🏁 DiscoverScreen: Playlists loading completed');
+    }
+  };
+
+  const loadServiceProviders = async () => {
+    setLoadingServices(true);
+    try {
+      console.log('💼 DiscoverScreen: Loading service providers...');
+      
+      const providers = await fetchDiscoverServiceProviders();
+      
+      if (providers && providers.length > 0) {
+        console.log('✅ DiscoverScreen: Service providers loaded:', providers.length);
+        setServiceProviders(providers);
+      } else {
+        console.log('ℹ️ DiscoverScreen: No service providers found');
+        setServiceProviders([]);
+      }
+    } catch (error) {
+      console.error('❌ DiscoverScreen: Error loading service providers:', error);
+      setServiceProviders([]);
+    } finally {
+      setLoadingServices(false);
+      console.log('🏁 DiscoverScreen: Service providers loading completed');
     }
   };
 
@@ -685,7 +670,8 @@ function DiscoverScreen() {
       loadEvents(),
       loadTrendingTracks(),
       loadRecentTracks(),
-      loadPlaylists()
+      loadPlaylists(),
+      loadServiceProviders()
     ]);
     setRefreshing(false);
   };
@@ -828,20 +814,30 @@ function DiscoverScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      {/* Header */}
-      <View style={styles.header}>
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
+      
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        
+        {/* Header */}
+        <View style={styles.header}>
         <TouchableOpacity style={styles.menuButton}>
           <Ionicons name="menu" size={24} color={theme.colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Discover</Text>
-        {/* Temporary Test Button - Remove after testing */}
-        <TouchableOpacity 
-          style={styles.testButton}
-          onPress={() => (navigation as any).navigate('OnboardingTest')}
-        >
-          <Text style={styles.testButtonText}>Test Onboarding</Text>
-        </TouchableOpacity>
+        <View style={styles.headerTextGroup}>
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Discover</Text>
+          <Text style={[styles.headerSubtitle, { color: theme.colors.textSecondary }]}>
+            Find music, events, and creators based on YOUR preferences
+          </Text>
+        </View>
       </View>
 
       {/* Search Header */}
@@ -1483,6 +1479,102 @@ function DiscoverScreen() {
             </View>
           </>
         )}
+
+        {activeTab === 'Services' && (
+          <>
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Service Providers</Text>
+              </View>
+              
+              {loadingServices ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading services...</Text>
+                </View>
+              ) : serviceProviders.length > 0 ? (
+                <View style={styles.servicesContainer}>
+                  {serviceProviders.map((provider) => (
+                    <TouchableOpacity
+                      key={provider.user_id}
+                      style={[styles.serviceCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                      onPress={() => (navigation as any).navigate('CreatorProfile', { userId: provider.user_id })}
+                    >
+                      <View style={styles.serviceHeader}>
+                        {provider.avatar_url ? (
+                          <Image source={{ uri: provider.avatar_url }} style={styles.serviceAvatar} />
+                        ) : (
+                          <View style={[styles.serviceAvatarPlaceholder, { backgroundColor: theme.colors.surface }]}>
+                            <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
+                          </View>
+                        )}
+                        <View style={styles.serviceInfo}>
+                          <Text style={[styles.serviceName, { color: theme.colors.text }]} numberOfLines={1}>
+                            {provider.display_name || provider.username || 'Service Provider'}
+                          </Text>
+                          {provider.headline && (
+                            <Text style={[styles.serviceHeadline, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                              {provider.headline}
+                            </Text>
+                          )}
+                          {provider.average_rating && (
+                            <View style={styles.serviceRating}>
+                              <Ionicons name="star" size={14} color="#FCD34D" />
+                              <Text style={[styles.serviceRatingText, { color: theme.colors.textSecondary }]}>
+                                {provider.average_rating.toFixed(1)} ({provider.review_count || 0} reviews)
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                      {provider.categories && provider.categories.length > 0 && (
+                        <View style={styles.serviceCategories}>
+                          {provider.categories.slice(0, 3).map((cat, idx) => (
+                            <View key={idx} style={[styles.categoryChip, { backgroundColor: theme.colors.surface }]}>
+                              <Text style={[styles.categoryText, { color: theme.colors.textSecondary }]}>
+                                {cat.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                      {provider.price_band && (
+                        <Text style={[styles.servicePrice, { color: theme.colors.primary }]}>
+                          From {provider.price_band}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="briefcase-outline" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No service providers available yet</Text>
+                  <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
+                    Service providers will appear here once they start offering services!
+                  </Text>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+
+        {activeTab === 'Venues' && (
+          <>
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Venues</Text>
+              </View>
+              <View style={styles.emptyState}>
+                <Ionicons name="location-outline" size={48} color={theme.colors.textSecondary} />
+                <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>Coming Soon</Text>
+                <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
+                  Venue discovery will be available in a future update!
+                </Text>
+              </View>
+            </View>
+          </>
+        )}
           </>
         )}
       </ScrollView>
@@ -1513,13 +1605,25 @@ function DiscoverScreen() {
           }}
         />
       )}
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
@@ -1531,21 +1635,17 @@ const styles = StyleSheet.create({
   menuButton: {
     padding: 8,
   },
+  headerTextGroup: {
+    flex: 1,
+  },
   headerTitle: {
     fontSize: 20,
     fontWeight: '700',
   },
-  // Temporary test button styles - Remove after testing
-  testButton: {
-    backgroundColor: '#DC2626',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  testButtonText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
+  headerSubtitle: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '500',
   },
   searchHeader: {
     paddingHorizontal: 16,
@@ -1602,6 +1702,7 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   // Inline Tabs (inside main ScrollView)
   inlineTabsScrollView: {
@@ -2270,6 +2371,73 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  // Service Provider Styles
+  servicesContainer: {
+    paddingHorizontal: 16,
+  },
+  serviceCard: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  serviceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  serviceAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    marginRight: 12,
+  },
+  serviceAvatarPlaceholder: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  serviceInfo: {
+    flex: 1,
+  },
+  serviceName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  serviceHeadline: {
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  serviceRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  serviceRatingText: {
+    fontSize: 12,
+  },
+  serviceCategories: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  categoryChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  categoryText: {
+    fontSize: 12,
+  },
+  servicePrice: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

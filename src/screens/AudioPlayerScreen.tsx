@@ -25,6 +25,7 @@ import { supabase } from '../lib/supabase';
 import { offlineDownloadService } from '../services/OfflineDownloadService';
 import { adService } from '../services/AdService';
 import AdInterstitial from '../components/AdInterstitial';
+import TipModal from '../components/TipModal';
 // import type { AudioTrack } from '@soundbridge/types'; // Commented out - using local type
 
 const { width, height } = Dimensions.get('window');
@@ -58,6 +59,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   } = useAudioPlayer();
   
   const { user } = useAuth();
+  const { theme } = useTheme();
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
@@ -73,6 +75,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   const [isOffline, setIsOffline] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [showAd, setShowAd] = useState(false);
+  const [showTipModal, setShowTipModal] = useState(false);
   
   // Lyrics modal drag animation
   const lyricsModalTranslateY = useRef(new Animated.Value(0)).current;
@@ -226,6 +229,10 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     // TODO: Implement follow functionality
   };
 
+  const handleTipSuccess = () => {
+    setShowTipModal(false);
+  };
+
   const handleShare = async () => {
     if (!currentTrack) return;
     
@@ -250,10 +257,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
       return;
     }
     
-    navigation.navigate('CreatorProfile', { 
-      creatorId: currentTrack.creator.id,
-      creator: currentTrack.creator 
-    });
+    setShowTipModal(true);
   };
 
   const handleFastForward = async () => {
@@ -796,18 +800,19 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
         ]}
         {...panResponder.panHandlers}
       >
-        <StatusBar barStyle="light-content" backgroundColor="#000000" />
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
       
       <LinearGradient
-        colors={['#000000', '#1A0A0A', '#2D1B1B']}
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
         style={styles.background}
       />
 
       {/* Bottom gradient overlay to blend with system UI */}
       <LinearGradient
-        colors={['transparent', 'rgba(0,0,0,0.3)', '#000000']}
+        colors={['transparent', theme.colors.backgroundGradient.middle + '4D', theme.colors.backgroundGradient.end]}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
         style={styles.bottomGradient}
@@ -982,6 +987,19 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
       </Animated.View>
 
       {/* Ad Interstitial */}
+      {currentTrack?.creator?.id && (
+        <TipModal
+          visible={showTipModal}
+          creatorId={currentTrack.creator.id}
+          creatorName={
+            currentTrack.creator.display_name ||
+            currentTrack.creator.username ||
+            'Creator'
+          }
+          onClose={() => setShowTipModal(false)}
+          onTipSuccess={(amount) => handleTipSuccess()}
+        />
+      )}
       <AdInterstitial
         visible={showAd}
         onAdClosed={() => setShowAd(false)}
@@ -996,11 +1014,11 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: 'transparent',
   },
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: 'transparent',
     minHeight: height, // Ensure minimum height covers full screen
   },
   scrollContainer: {

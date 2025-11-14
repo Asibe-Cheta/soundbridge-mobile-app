@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import BackButton from '../components/BackButton';
 import {
   View,
   Text,
@@ -121,9 +122,7 @@ export default function HelpSupportScreen() {
       
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
+        <BackButton onPress={() => navigation.goBack()} />
         <Text style={styles.headerTitle}>Help & Support</Text>
         <TouchableOpacity onPress={handleContactSupport}>
           <Ionicons name="chatbubble-ellipses" size={24} color="#DC2626" />

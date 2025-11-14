@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import BackButton from '../components/BackButton';
 import {
   View,
   Text,
@@ -9,12 +10,15 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { dbHelpers } from '../lib/supabase';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface PlaylistTrack {
   id: string;
@@ -56,6 +60,7 @@ export default function PlaylistDetailsScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { playTrack } = useAudioPlayer();
+  const { theme } = useTheme();
   
   const { playlistId } = route.params as { playlistId: string };
   
@@ -146,34 +151,34 @@ export default function PlaylistDetailsScreen() {
   const renderTrackItem = (track: PlaylistTrack, index: number) => (
     <TouchableOpacity
       key={track.id}
-      style={styles.trackItem}
+      style={[styles.trackItem, { borderBottomColor: theme.colors.border }]}
       onPress={() => handlePlayTrack(track)}
     >
       <View style={styles.trackNumber}>
-        <Text style={styles.trackNumberText}>{index + 1}</Text>
+        <Text style={[styles.trackNumberText, { color: theme.colors.textMuted }]}>{index + 1}</Text>
       </View>
       
       <View style={styles.trackImageContainer}>
         {track.cover_art_url ? (
           <Image source={{ uri: track.cover_art_url }} style={styles.trackImage} />
         ) : (
-          <View style={styles.trackImagePlaceholder}>
-            <Ionicons name="musical-notes" size={24} color="#666" />
+          <View style={[styles.trackImagePlaceholder, { backgroundColor: theme.colors.card }]}>
+            <Ionicons name="musical-notes" size={24} color={theme.colors.textMuted} />
           </View>
         )}
       </View>
       
       <View style={styles.trackInfo}>
-        <Text style={styles.trackTitle} numberOfLines={1}>
+        <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
           {track.title}
         </Text>
-        <Text style={styles.trackArtist} numberOfLines={1}>
+        <Text style={[styles.trackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
           {track.creator?.display_name || track.artist_name}
         </Text>
       </View>
       
       <View style={styles.trackStats}>
-        <Text style={styles.trackDuration}>
+        <Text style={[styles.trackDuration, { color: theme.colors.textMuted }]}>
           {formatDuration(track.duration)}
         </Text>
       </View>
@@ -182,78 +187,107 @@ export default function PlaylistDetailsScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Loading...</Text>
-        </View>
+      <View style={styles.container}>
+        {/* Main Background Gradient - Uses theme colors */}
+        <LinearGradient
+          colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          locations={[0, 0.5, 1]}
+          style={styles.mainGradient}
+        />
         
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#FF6B6B" />
-          <Text style={styles.loadingText}>Loading playlist...</Text>
-        </View>
-      </SafeAreaView>
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
+          <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+          <View style={styles.header}>
+            <BackButton
+              style={styles.backButton}
+              onPress={() => navigation.goBack()}
+             />
+            <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Loading...</Text>
+          </View>
+          
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={[styles.loadingText, { color: theme.colors.text }]}>Loading playlist...</Text>
+          </View>
+        </SafeAreaView>
+      </View>
     );
   }
 
   if (error || !playlist) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Error</Text>
-        </View>
+      <View style={styles.container}>
+        {/* Main Background Gradient - Uses theme colors */}
+        <LinearGradient
+          colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          locations={[0, 0.5, 1]}
+          style={styles.mainGradient}
+        />
         
-        <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle" size={48} color="#FF6B6B" />
-          <Text style={styles.errorText}>
-            {error || 'Playlist not found'}
-          </Text>
-          <TouchableOpacity style={styles.retryButton} onPress={loadPlaylistDetails}>
-            <Text style={styles.retryButtonText}>Try Again</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
+          <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+          <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+            <BackButton
+              style={styles.backButton}
+              onPress={() => navigation.goBack()}
+             />
+            <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Error</Text>
+          </View>
+          
+          <View style={styles.errorContainer}>
+            <Ionicons name="alert-circle" size={48} color={theme.colors.error} />
+            <Text style={[styles.errorText, { color: theme.colors.text }]}>
+              {error || 'Playlist not found'}
+            </Text>
+            <TouchableOpacity style={[styles.retryButton, { backgroundColor: theme.colors.primary }]} onPress={loadPlaylistDetails}>
+              <Text style={styles.retryButtonText}>Try Again</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {playlist.name}
-        </Text>
-        <TouchableOpacity style={styles.moreButton}>
-          <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
-        </TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
+      
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+          <BackButton
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+           />
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]} numberOfLines={1}>
+            {playlist.name}
+          </Text>
+          <TouchableOpacity style={styles.moreButton}>
+            <Ionicons name="ellipsis-horizontal" size={24} color={theme.colors.text} />
+          </TouchableOpacity>
+        </View>
 
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor="#FF6B6B"
-          />
-        }
-      >
+        <ScrollView
+          style={styles.scrollView}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={theme.colors.primary}
+            />
+          }
+        >
         {/* Playlist Header */}
         <View style={styles.playlistHeader}>
           <View style={styles.coverContainer}>
@@ -267,22 +301,22 @@ export default function PlaylistDetailsScreen() {
           </View>
           
           <View style={styles.playlistInfo}>
-            <Text style={styles.playlistName}>{playlist.name}</Text>
-            <Text style={styles.playlistCreator}>
+            <Text style={[styles.playlistName, { color: theme.colors.text }]}>{playlist.name}</Text>
+            <Text style={[styles.playlistCreator, { color: theme.colors.textSecondary }]}>
               by {playlist.creator.display_name}
             </Text>
             {playlist.description && (
-              <Text style={styles.playlistDescription}>
+              <Text style={[styles.playlistDescription, { color: theme.colors.textMuted }]}>
                 {playlist.description}
               </Text>
             )}
             
             <View style={styles.playlistStats}>
-              <Text style={styles.statText}>
+              <Text style={[styles.statText, { color: theme.colors.textMuted }]}>
                 {playlist.tracks_count} tracks • {formatTotalDuration(playlist.total_duration)}
               </Text>
               {playlist.followers_count > 0 && (
-                <Text style={styles.statText}>
+                <Text style={[styles.statText, { color: theme.colors.textMuted }]}>
                   {playlist.followers_count} followers
                 </Text>
               )}
@@ -293,54 +327,65 @@ export default function PlaylistDetailsScreen() {
         {/* Action Buttons */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
-            style={styles.playAllButton}
+            style={[styles.playAllButton, { backgroundColor: theme.colors.primary }]}
             onPress={handlePlayAll}
             disabled={!playlist.tracks.length}
           >
-            <Ionicons name="play" size={20} color="#000" />
+            <Ionicons name="play" size={20} color="#FFFFFF" />
             <Text style={styles.playAllButtonText}>Play All</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="heart-outline" size={24} color="#fff" />
+          <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card }]}>
+            <Ionicons name="heart-outline" size={24} color={theme.colors.text} />
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="share-outline" size={24} color="#fff" />
+          <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card }]}>
+            <Ionicons name="share-outline" size={24} color={theme.colors.text} />
           </TouchableOpacity>
         </View>
 
         {/* Tracks List */}
         <View style={styles.tracksSection}>
-          <Text style={styles.tracksSectionTitle}>
+          <Text style={[styles.tracksSectionTitle, { color: theme.colors.text }]}>
             Tracks ({playlist.tracks.length})
           </Text>
           
           {playlist.tracks.length === 0 ? (
             <View style={styles.emptyTracks}>
-              <Ionicons name="musical-notes" size={48} color="#666" />
-              <Text style={styles.emptyTracksText}>No tracks in this playlist</Text>
+              <Ionicons name="musical-notes" size={48} color={theme.colors.textMuted} />
+              <Text style={[styles.emptyTracksText, { color: theme.colors.textMuted }]}>No tracks in this playlist</Text>
             </View>
           ) : (
             playlist.tracks.map((track, index) => renderTrackItem(track, index))
           )}
         </View>
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+  },
+  mainGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    borderBottomWidth: 1,
   },
   backButton: {
     marginRight: 16,
@@ -349,22 +394,22 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     fontWeight: '600',
-    color: '#fff',
   },
   moreButton: {
     marginLeft: 16,
   },
   scrollView: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
+    backgroundColor: 'transparent',
   },
   loadingText: {
-    color: '#fff',
     fontSize: 16,
     marginTop: 16,
   },
@@ -373,16 +418,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
+    backgroundColor: 'transparent',
   },
   errorText: {
-    color: '#fff',
     fontSize: 16,
     textAlign: 'center',
     marginTop: 16,
     marginBottom: 24,
   },
   retryButton: {
-    backgroundColor: '#FF6B6B',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
@@ -408,7 +452,6 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     borderRadius: 8,
-    backgroundColor: '#333',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -419,17 +462,14 @@ const styles = StyleSheet.create({
   playlistName: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#fff',
     marginBottom: 4,
   },
   playlistCreator: {
     fontSize: 16,
-    color: '#ccc',
     marginBottom: 8,
   },
   playlistDescription: {
     fontSize: 14,
-    color: '#aaa',
     lineHeight: 20,
     marginBottom: 12,
   },
@@ -439,7 +479,6 @@ const styles = StyleSheet.create({
   },
   statText: {
     fontSize: 14,
-    color: '#888',
     marginRight: 16,
     marginBottom: 4,
   },
@@ -452,7 +491,6 @@ const styles = StyleSheet.create({
   playAllButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FF6B6B',
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 8,
@@ -468,7 +506,6 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -480,7 +517,6 @@ const styles = StyleSheet.create({
   tracksSectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#fff',
     marginBottom: 16,
   },
   trackItem: {
@@ -488,7 +524,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   trackNumber: {
     width: 32,
@@ -496,7 +531,6 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   trackNumberText: {
-    color: '#888',
     fontSize: 16,
     fontWeight: '500',
   },
@@ -512,7 +546,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 4,
-    backgroundColor: '#333',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -523,26 +556,22 @@ const styles = StyleSheet.create({
   trackTitle: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#fff',
     marginBottom: 2,
   },
   trackArtist: {
     fontSize: 14,
-    color: '#aaa',
   },
   trackStats: {
     alignItems: 'flex-end',
   },
   trackDuration: {
     fontSize: 14,
-    color: '#888',
   },
   emptyTracks: {
     alignItems: 'center',
     paddingVertical: 40,
   },
   emptyTracksText: {
-    color: '#666',
     fontSize: 16,
     marginTop: 12,
   },
