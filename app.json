@@ -83,19 +83,6 @@
       "eas": {
         "projectId": "96a15afd-b1fd-4031-a790-2701fa0bffdf"
       }
-    },
-    "plugins": [
-      "expo-dev-client",
-      "expo-font",
-      "expo-localization",
-      [
-        "expo-av",
-        {
-          "microphonePermission": "Allow SoundBridge to access your microphone for audio recording and live sessions."
-        }
-      ],
-      "expo-notifications",
-      "expo-web-browser"
-    ]
+    }
   }
 }
