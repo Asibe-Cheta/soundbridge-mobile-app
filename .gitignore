@@ -35,7 +35,6 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# NOTE: For development builds with native modules (like react-native-agora),
-# we need to commit the native folders so EAS can build with pre-configured native code
-# /ios
-# /android
+# Native folders - let EAS generate them during build
+/ios
+/android
