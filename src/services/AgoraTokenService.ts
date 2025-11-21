@@ -19,18 +19,26 @@ export async function generateAgoraToken(
   role: 'audience' | 'broadcaster'
 ): Promise<AgoraTokenResponse> {
   try {
-    console.log('🔑 Generating Agora token...', { sessionId, role });
+    console.log('🔑 [TOKEN SERVICE] Generating Agora token...', { sessionId, role });
     
     // Get current user's session
     const { data: { session }, error: authError } = await supabase.auth.getSession();
     
+    console.log('🔐 [TOKEN SERVICE] Auth check:', { 
+      hasSession: !!session, 
+      hasAccessToken: !!session?.access_token,
+      authError: authError?.message 
+    });
+    
     if (authError || !session) {
-      console.error('❌ User not authenticated:', authError);
+      console.error('❌ [TOKEN SERVICE] User not authenticated:', authError);
       return {
         success: false,
-        error: 'User not authenticated. Please log in.',
+        error: `Authentication failed: ${authError?.message || 'No session found'}`,
       };
     }
+
+    console.log('📡 [TOKEN SERVICE] Calling token API:', TOKEN_API_URL);
 
     // Call token generation API
     const response = await fetch(TOKEN_API_URL, {
@@ -45,28 +53,39 @@ export async function generateAgoraToken(
       }),
     });
 
+    console.log('📥 [TOKEN SERVICE] API response status:', response.status);
+
     // Parse response
     const data: AgoraTokenResponse = await response.json();
+    console.log('📦 [TOKEN SERVICE] API response data:', { 
+      success: data.success, 
+      hasToken: !!data.token,
+      error: data.error 
+    });
 
     // Handle HTTP errors
     if (!response.ok) {
-      console.error('❌ Token API error:', response.status, data);
+      console.error('❌ [TOKEN SERVICE] Token API HTTP error:', { 
+        status: response.status, 
+        statusText: response.statusText,
+        error: data.error 
+      });
       return {
         success: false,
-        error: data.error || `API error: ${response.status}`,
+        error: data.error || `API error: ${response.status} ${response.statusText}`,
       };
     }
 
     // Handle unsuccessful response
     if (!data.success) {
-      console.error('❌ Token generation failed:', data.error);
+      console.error('❌ [TOKEN SERVICE] Token generation failed:', data.error);
       return {
         success: false,
         error: data.error || 'Failed to generate token',
       };
     }
 
-    console.log('✅ Token generated successfully', {
+    console.log('✅ [TOKEN SERVICE] Token generated successfully!', {
       channelName: data.channelName,
       uid: data.uid,
       expiresAt: data.expiresAt,
@@ -75,7 +94,7 @@ export async function generateAgoraToken(
     return data;
 
   } catch (error) {
-    console.error('❌ Token generation error:', error);
+    console.error('❌ [TOKEN SERVICE] Exception occurred:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error occurred',

@@ -120,16 +120,18 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
       // 3. Initialize Agora engine
       await agoraService.initialize();
       
-      // 4. Check authentication status
-      const { data: sessionAuth, error: sessionAuthError } = await supabase.auth.getSession();
-      if (sessionAuthError || !sessionAuth.session) {
-        throw new Error('Authentication required. Please log in again.');
-      }
-      
-      // 5. Generate Agora token
-      console.log('🔑 Generating Agora token...');
+      // 4. Generate Agora token (token service will check authentication)
+      console.log('🔑 [ROOM] Generating Agora token...');
       const agoraRole = (userRole === 'host' || userRole === 'speaker') ? 'publisher' : 'audience';
       const tokenData = await generateAgoraTokenWithRetry(sessionId, agoraRole);
+      
+      console.log('🎫 [ROOM] Token result:', { 
+        success: tokenData.success, 
+        hasToken: !!tokenData.token,
+        channelName: tokenData.channelName,
+        uid: tokenData.uid,
+        error: tokenData.error 
+      });
       
       if (!tokenData.success || !tokenData.token || !tokenData.channelName || !tokenData.uid) {
         throw new Error(tokenData.error || 'Failed to generate token');
