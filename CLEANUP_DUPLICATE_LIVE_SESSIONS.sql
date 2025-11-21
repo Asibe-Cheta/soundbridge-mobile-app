@@ -37,10 +37,10 @@ ORDER BY actual_start_time DESC;
 UPDATE live_sessions
 SET 
   status = 'ended',
-  actual_end_time = NOW()
+  end_time = NOW()
 WHERE 
   status = 'live'
-  AND actual_end_time IS NULL;
+  AND end_time IS NULL;
 */
 
 -- OPTION B: End only duplicate/older sessions (keep the newest one per creator)
@@ -59,7 +59,7 @@ WITH ranked_sessions AS (
 UPDATE live_sessions
 SET 
   status = 'ended',
-  actual_end_time = NOW()
+  end_time = NOW()
 WHERE 
   id IN (
     SELECT id 
@@ -77,7 +77,7 @@ SELECT
   session_type,
   status,
   actual_start_time,
-  actual_end_time,
+  end_time,
   created_at
 FROM live_sessions
 WHERE status = 'live'
@@ -92,7 +92,7 @@ ORDER BY actual_start_time DESC;
 UPDATE live_sessions
 SET 
   status = 'ended',
-  actual_end_time = NOW()
+  end_time = NOW()
 WHERE 
   id = 'SESSION_ID_HERE'
   AND status = 'live';
