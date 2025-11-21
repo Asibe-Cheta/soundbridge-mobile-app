@@ -2025,6 +2025,8 @@ export const dbHelpers = {
    * Subscribe to real-time comments
    */
   subscribeToSessionComments(sessionId: string, callback: (comment: any) => void) {
+    console.log('📡 [DB] Setting up real-time subscription for comments:', sessionId);
+    
     const subscription = supabase
       .channel(`session_comments:${sessionId}`)
       .on(
@@ -2036,8 +2038,10 @@ export const dbHelpers = {
           filter: `session_id=eq.${sessionId}`,
         },
         async (payload) => {
+          console.log('📨 [DB] New comment insert detected:', payload.new);
+          
           // Fetch full comment with user details
-          const { data } = await supabase
+          const { data, error } = await supabase
             .from('live_session_comments')
             .select(`
               *,
@@ -2051,12 +2055,25 @@ export const dbHelpers = {
             .eq('id', payload.new.id)
             .single();
 
+          if (error) {
+            console.error('❌ [DB] Error fetching full comment:', error);
+            return;
+          }
+
           if (data) {
+            console.log('✅ [DB] Full comment fetched, calling callback');
             callback(data);
+          } else {
+            console.warn('⚠️ [DB] No data returned for comment:', payload.new.id);
           }
         }
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        console.log('🔌 [DB] Subscription status:', status, err);
+        if (err) {
+          console.error('❌ [DB] Subscription error:', err);
+        }
+      });
 
     return subscription;
   },

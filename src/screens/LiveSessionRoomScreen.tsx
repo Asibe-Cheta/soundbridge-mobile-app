@@ -218,6 +218,8 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
   };
 
   const subscribeToUpdates = () => {
+    console.log('📡 [REALTIME] Subscribing to updates for session:', sessionId);
+    
     // Subscribe to comments
     commentsSubscriptionRef.current = dbHelpers.subscribeToSessionComments(
       sessionId,
@@ -239,6 +241,18 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
         }, 100);
       }
     );
+    
+    // Log subscription status
+    if (commentsSubscriptionRef.current) {
+      console.log('✅ [REALTIME] Comments subscription created');
+      
+      // Subscribe to subscription status changes
+      commentsSubscriptionRef.current.on('system', {}, (payload: any) => {
+        console.log('🔌 [REALTIME] Subscription status:', payload);
+      });
+    } else {
+      console.error('❌ [REALTIME] Failed to create comments subscription');
+    }
     
     // Subscribe to participants
     participantsSubscriptionRef.current = dbHelpers.subscribeToSessionParticipants(
