@@ -1666,14 +1666,14 @@ export const dbHelpers = {
   /**
    * Join a live session (create participant record)
    */
-  async joinLiveSession(sessionId: string, userId: string, role: 'listener' | 'speaker' = 'listener') {
+  async joinLiveSession(sessionId: string, userId: string, role: 'listener' | 'speaker' | 'host' = 'listener') {
     try {
       const { data, error } = await supabase
         .from('live_session_participants')
         .upsert({
           session_id: sessionId,
           user_id: userId,
-          role: role === 'speaker' ? 'speaker' : 'listener',
+          role: role, // Use the role as-is (listener, speaker, or host)
           joined_at: new Date().toISOString(),
           left_at: null,
         }, {

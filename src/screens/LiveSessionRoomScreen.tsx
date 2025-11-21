@@ -18,6 +18,7 @@ import {
   StatusBar,
   FlatList,
   Modal,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -221,7 +222,17 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
     commentsSubscriptionRef.current = dbHelpers.subscribeToSessionComments(
       sessionId,
       (newComment) => {
-        setComments(prev => [...prev, newComment]);
+        console.log('💬 [REALTIME] New comment received:', newComment);
+        setComments(prev => {
+          // Check if comment already exists (avoid duplicates)
+          const exists = prev.find(c => c.id === newComment.id);
+          if (exists) {
+            console.log('💬 [REALTIME] Comment already exists, skipping');
+            return prev;
+          }
+          console.log('💬 [REALTIME] Adding comment to list');
+          return [...prev, newComment];
+        });
         // Auto-scroll to bottom
         setTimeout(() => {
           commentsScrollRef.current?.scrollToEnd({ animated: true });
@@ -331,9 +342,10 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
         throw new Error(sendError?.message || 'Failed to send comment');
       }
       
-      // Clear input only for text comments
+      // Clear input and dismiss keyboard for text comments
       if (!content) {
         setCommentText('');
+        Keyboard.dismiss(); // Hide keyboard after sending
       }
       
     } catch (error) {
@@ -503,31 +515,40 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
     const myParticipant = participants.find(p => p.user_id === user?.id);
     if (myParticipant && myParticipant.role !== myRole) {
       const newRole = myParticipant.role as 'listener' | 'speaker' | 'host';
-      console.log('🔄 Role changed from', myRole, 'to', newRole);
+      const previousRole = myRole;
+      console.log('🔄 Role changed from', previousRole, 'to', newRole);
       
       // Update local state
       setMyRole(newRole);
       
-      // Update Agora role
-      if (newRole === 'speaker' || newRole === 'host') {
-        agoraService.promoteToSpeaker().then(() => {
-          setIsMuted(true); // Start muted
-          Alert.alert(
-            '🎤 You\'re now a speaker!',
-            'You can now unmute and speak in the session.',
-            [{ text: 'Got it!' }]
-          );
-        });
-      } else if (newRole === 'listener' && myRole !== 'listener') {
-        agoraService.demoteToListener().then(() => {
-          setIsMuted(false);
-          setHandRaised(false);
-          Alert.alert(
-            'Demoted to Listener',
-            'You can no longer speak in the session.',
-            [{ text: 'OK' }]
-          );
-        });
+      // Only show alerts and update Agora if this is a real role change (not initial sync)
+      // Skip if we're just joining (no previous participants) or if going from undefined to initial role
+      const isRealRoleChange = participants.length > 0 && previousRole;
+      
+      if (isRealRoleChange) {
+        // Update Agora role
+        if (newRole === 'speaker' || newRole === 'host') {
+          if (previousRole === 'listener') {
+            agoraService.promoteToSpeaker().then(() => {
+              setIsMuted(true); // Start muted
+              Alert.alert(
+                '🎤 You\'re now a speaker!',
+                'You can now unmute and speak in the session.',
+                [{ text: 'Got it!' }]
+              );
+            });
+          }
+        } else if (newRole === 'listener' && (previousRole === 'speaker' || previousRole === 'host')) {
+          agoraService.demoteToListener().then(() => {
+            setIsMuted(false);
+            setHandRaised(false);
+            Alert.alert(
+              'Demoted to Listener',
+              'You can no longer speak in the session.',
+              [{ text: 'OK' }]
+            );
+          });
+        }
       }
     }
   }, [participants, user?.id, myRole]);
