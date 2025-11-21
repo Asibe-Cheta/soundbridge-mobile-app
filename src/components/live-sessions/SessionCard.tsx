@@ -19,10 +19,14 @@ import { useTheme } from '../../contexts/ThemeContext';
 interface SessionCardProps {
   session: LiveSession;
   onPress: () => void;
+  currentUserId?: string; // Add current user ID to determine ownership
 }
 
-export default function SessionCard({ session, onPress }: SessionCardProps) {
+export default function SessionCard({ session, onPress, currentUserId }: SessionCardProps) {
   const { theme } = useTheme();
+  
+  // Check if this is the current user's session
+  const isOwnSession = currentUserId && session.creator_id === currentUserId;
 
   const formatListenerCount = (count: number): string => {
     if (count >= 1000) {
@@ -136,13 +140,18 @@ export default function SessionCard({ session, onPress }: SessionCardProps) {
           </Text>
         </View>
 
-        {/* Scheduled Time or Join Button */}
+        {/* Scheduled Time, Join Button, or Manage Button */}
         {isScheduled ? (
           <View style={styles.scheduledBadge}>
             <Ionicons name="time-outline" size={12} color={theme.colors.textSecondary} />
             <Text style={[styles.scheduledText, { color: theme.colors.textSecondary }]}>
               {formatScheduledTime(session.scheduled_start_time)}
             </Text>
+          </View>
+        ) : isOwnSession ? (
+          <View style={[styles.manageButton, { backgroundColor: '#8B5CF6' }]}>
+            <Text style={styles.manageButtonText}>Manage</Text>
+            <Ionicons name="settings-outline" size={14} color="#FFFFFF" />
           </View>
         ) : (
           <View style={[styles.joinButton, { backgroundColor: theme.colors.primary }]}>
@@ -287,6 +296,19 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   joinButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  manageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+  },
+  manageButtonText: {
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '600',

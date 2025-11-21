@@ -116,7 +116,13 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
       // 3. Initialize Agora engine
       await agoraService.initialize();
       
-      // 4. Generate Agora token
+      // 4. Check authentication status
+      const { data: sessionAuth, error: sessionAuthError } = await supabase.auth.getSession();
+      if (sessionAuthError || !sessionAuth.session) {
+        throw new Error('Authentication required. Please log in again.');
+      }
+      
+      // 5. Generate Agora token
       console.log('🔑 Generating Agora token...');
       const agoraRole = (userRole === 'host' || userRole === 'speaker') ? 'publisher' : 'audience';
       const tokenData = await generateAgoraTokenWithRetry(sessionId, agoraRole);
@@ -125,7 +131,7 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
         throw new Error(tokenData.error || 'Failed to generate token');
       }
       
-      // 5. Join Agora channel with appropriate role
+      // 6. Join Agora channel with appropriate role
       setIsJoining(true);
       if (userRole === 'host' || userRole === 'speaker') {
         await agoraService.joinAsBroadcaster(tokenData.token, tokenData.channelName, tokenData.uid);
@@ -134,21 +140,21 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
         await agoraService.joinAsListener(tokenData.token, tokenData.channelName, tokenData.uid);
       }
       
-      // 6. Create participant record in database
+      // 7. Create participant record in database
       if (user) {
         await dbHelpers.joinLiveSession(sessionId, user.id, userRole);
       }
       
-      // 7. Load initial data
+      // 8. Load initial data
       await Promise.all([
         loadParticipants(),
         loadComments(),
       ]);
       
-      // 8. Subscribe to real-time updates
+      // 9. Subscribe to real-time updates
       subscribeToUpdates();
       
-      // 9. Setup Agora event listeners for speaking indicators
+      // 10. Setup Agora event listeners for speaking indicators
       setupAgoraListeners();
       
       console.log('✅ Session initialized successfully');

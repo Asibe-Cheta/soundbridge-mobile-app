@@ -82,6 +82,7 @@ export default function LiveSessionsScreen({ navigation }: any) {
     <SessionCard
       session={item}
       onPress={() => handleSessionPress(item)}
+      currentUserId={user?.id}
     />
   );
 

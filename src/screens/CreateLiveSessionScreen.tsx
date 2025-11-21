@@ -144,6 +144,23 @@ export default function CreateLiveSessionScreen() {
 
       // If starting now, navigate to session room
       if (startNow) {
+        // Verify authentication before navigating
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError || !sessionData.session) {
+          Alert.alert(
+            'Authentication Required',
+            'Your session has expired. Please log in again to go live.',
+            [
+              {
+                text: 'OK',
+                onPress: () => navigation.navigate('Auth'),
+              },
+            ]
+          );
+          return;
+        }
+        
         Alert.alert(
           '🎉 Session Created!',
           'Your live session is now active. Ready to go live?',
