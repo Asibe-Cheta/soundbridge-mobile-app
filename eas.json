@@ -13,8 +13,7 @@
     },
     "production": {
       "autoIncrement": true,
-      "developmentClient": true,
-      "prebuildCommand": "echo 'Skipping prebuild - using pre-generated native code'"
+      "developmentClient": true
     }
   },
   "submit": {
