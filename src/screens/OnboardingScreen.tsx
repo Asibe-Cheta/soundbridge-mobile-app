@@ -22,6 +22,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import CountrySelector from '../components/CountrySelector';
+import { supabase } from '../lib/supabase';
 
 const { width } = Dimensions.get('window');
 
@@ -39,7 +40,7 @@ type UserRole = 'creator' | 'listener';
 type OnboardingStep = 'role' | 'trial' | 'profile' | 'genres' | 'location' | 'complete';
 
 export default function OnboardingScreen() {
-  const { user, userProfile, updateUserProfile, completeOnboarding } = useAuth();
+  const { user, userProfile, updateUserProfile, completeOnboarding, refreshUser } = useAuth();
   const { theme } = useTheme();
   const navigation = useNavigation();
 
@@ -153,9 +154,39 @@ export default function OnboardingScreen() {
   };
 
   // Handle role selection
-  const handleRoleSelection = (role: UserRole) => {
+  const handleRoleSelection = async (role: UserRole) => {
     setUserRole(role);
     console.log('👤 User selected role:', role);
+    
+    // Save role selection via API with Bearer token
+    try {
+      const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (currentSession && !sessionError) {
+        console.log('💾 Saving role selection via API...');
+        const response = await fetch('https://www.soundbridge.live/api/user/onboarding-progress', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${currentSession.access_token}`,
+          },
+          body: JSON.stringify({
+            userId: user?.id,
+            selectedRole: role,
+            currentStep: role === 'creator' ? 'trial' : 'profile',
+          }),
+        });
+        
+        if (response.ok) {
+          console.log('✅ Role selection saved');
+        } else {
+          console.warn('⚠️ Failed to save role selection, continuing anyway');
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ Error saving role selection:', error);
+      // Continue anyway - not critical
+    }
     
     if (role === 'creator') {
       setCurrentStep('trial');
@@ -248,41 +279,86 @@ export default function OnboardingScreen() {
           break;
 
         case 'complete':
-          // Complete onboarding and update profile
+          // Complete onboarding and update profile via API with Bearer tokens
           console.log('🎉 Completing onboarding...');
           
-          // Update final profile data
-          const profileUpdates = {
-            display_name: displayName,
-            username: username,
-            location: location,
-            country: country,
-            role: userRole || 'listener',
-            onboarding_completed: true
-          };
-          
-          const profileResult = await updateUserProfile(profileUpdates);
-          if (!profileResult.success) {
-            Alert.alert('Error', 'Failed to save your profile. Please try again.');
+          try {
+            const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
+            
+            if (sessionError || !currentSession) {
+              Alert.alert('Error', 'Session expired. Please sign in again.');
+              setLoading(false);
+              return;
+            }
+
+            // Step 1: Complete profile via API
+            console.log('💾 Completing profile via API...');
+            const profileResponse = await fetch('https://www.soundbridge.live/api/user/complete-profile', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentSession.access_token}`,
+              },
+              body: JSON.stringify({
+                role: userRole || 'listener',
+                display_name: displayName,
+                username: username || undefined,
+                country: country,
+                location: location,
+                bio: undefined, // Optional
+                genres: selectedGenres.length > 0 ? selectedGenres : undefined,
+              }),
+            });
+
+            if (!profileResponse.ok) {
+              const errorData = await profileResponse.json().catch(() => ({}));
+              console.error('❌ Profile completion failed:', errorData);
+              Alert.alert('Error', errorData.error || 'Failed to save your profile. Please try again.');
+              setLoading(false);
+              return;
+            }
+
+            const profileData = await profileResponse.json();
+            console.log('✅ Profile completed successfully:', profileData);
+
+            // Step 2: Complete onboarding via API
+            console.log('🎯 Completing onboarding via API...');
+            const onboardingResponse = await fetch('https://www.soundbridge.live/api/user/complete-onboarding', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentSession.access_token}`,
+              },
+              body: JSON.stringify({
+                userId: user?.id,
+              }),
+            });
+
+            if (!onboardingResponse.ok) {
+              const errorData = await onboardingResponse.json().catch(() => ({}));
+              console.error('❌ Onboarding completion failed:', errorData);
+              Alert.alert('Error', errorData.error || 'Failed to complete onboarding. Please try again.');
+              setLoading(false);
+              return;
+            }
+
+            const onboardingData = await onboardingResponse.json();
+            console.log('✅ Onboarding completed successfully:', onboardingData);
+            
+            // Refresh user profile in context
+            await refreshUser();
+            
+            // Navigate to main app
+            (navigation as any).reset({
+              index: 0,
+              routes: [{ name: 'MainTabs' }],
+            });
+          } catch (error) {
+            console.error('❌ Error completing onboarding:', error);
+            Alert.alert('Error', 'Something went wrong. Please try again.');
             setLoading(false);
             return;
           }
-          
-          // Mark onboarding as completed
-          const onboardingResult = await completeOnboarding();
-          if (!onboardingResult.success) {
-            Alert.alert('Error', 'Failed to complete onboarding. Please try again.');
-            setLoading(false);
-            return;
-          }
-          
-          console.log('✅ Onboarding completed successfully!');
-          
-          // Navigate to main app
-          (navigation as any).reset({
-            index: 0,
-            routes: [{ name: 'MainTabs' }],
-          });
           break;
       }
     } catch (error) {

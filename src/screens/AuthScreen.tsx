@@ -15,11 +15,16 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
+import PasswordStrengthIndicator from '../components/PasswordStrengthIndicator';
+import * as BiometricAuth from '../services/biometricAuth';
+import { loginWithTwoFactorCheck } from '../services/twoFactorAuthConfig';
 
 const { width, height } = Dimensions.get('window');
 
 export default function AuthScreen() {
+  const navigation = useNavigation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -30,7 +35,12 @@ export default function AuthScreen() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const { signIn, signUp, signInWithGoogle, resetPassword, error } = useAuth();
+  const [needsEmailVerification, setNeedsEmailVerification] = useState(false);
+  const [verificationEmail, setVerificationEmail] = useState('');
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [biometricType, setBiometricType] = useState('');
+  const { signIn, signUp, signInWithGoogle, resetPassword, resendConfirmation, error } = useAuth();
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -62,8 +72,80 @@ export default function AuthScreen() {
     ]).start();
   }, [isSignUp, isForgotPassword]);
 
+  // Check biometric availability on mount
+  useEffect(() => {
+    const checkBiometric = async () => {
+      const capability = await BiometricAuth.checkBiometricAvailability();
+      setBiometricAvailable(capability.available && capability.enrolled);
+      
+      if (capability.available && capability.enrolled) {
+        const typeName = BiometricAuth.getBiometricTypeName(capability.types);
+        setBiometricType(typeName);
+        
+        const enabled = await BiometricAuth.isBiometricLoginEnabled();
+        setBiometricEnabled(enabled);
+        console.log(`✅ ${typeName} available and ${enabled ? 'enabled' : 'not enabled'}`);
+      }
+    };
+    
+    checkBiometric();
+  }, []);
+
   const hasNeonEffect = (inputName: string) => {
     return focusedInput === inputName;
+  };
+
+  const handleResendVerification = async () => {
+    if (!verificationEmail && !email) {
+      Alert.alert('Error', 'Please enter your email address');
+      return;
+    }
+
+    const emailToUse = verificationEmail || email;
+    setIsLoading(true);
+    
+    try {
+      const { success, error } = await resendConfirmation(emailToUse);
+      
+      if (success) {
+        Alert.alert(
+          'Email Sent',
+          'Verification email has been resent. Please check your inbox.'
+        );
+      } else {
+        Alert.alert('Error', error?.message || 'Failed to resend verification email');
+      }
+    } catch (err) {
+      Alert.alert('Error', 'An unexpected error occurred');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleBiometricLogin = async () => {
+    setIsLoading(true);
+    
+    try {
+      const credentials = await BiometricAuth.getBiometricCredentials();
+      
+      if (!credentials) {
+        Alert.alert('Biometric Login Failed', 'Could not retrieve stored credentials');
+        setIsLoading(false);
+        return;
+      }
+
+      console.log('🔐 Attempting biometric login...');
+      const { success, error } = await signIn(credentials.email, credentials.password);
+      
+      if (!success) {
+        Alert.alert('Login Failed', error?.message || 'An error occurred during login');
+      }
+      // Success is handled by auth state change
+    } catch (err) {
+      Alert.alert('Biometric Login Error', 'An unexpected error occurred');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleLogin = async () => {
@@ -80,14 +162,62 @@ export default function AuthScreen() {
     setIsLoading(true);
     
     try {
-      const { success, error } = await signIn(email, password);
+      // Use the new 2FA-aware login flow
+      const result = await loginWithTwoFactorCheck(email, password);
       
-      if (!success) {
-        Alert.alert('Login Failed', error?.message || 'An error occurred during login');
+      if (result.requires2FA) {
+        // 2FA is required - navigate to verification screen
+        console.log('🔐 2FA required - navigating to verification');
+        (navigation as any).navigate('TwoFactorVerification', {
+          userId: result.userId,
+          email: result.email,
+          sessionToken: result.sessionToken,
+        });
+      } else {
+        // Login successful without 2FA - offer to enable biometric login
+        console.log('✅ Login successful without 2FA');
+        if (biometricAvailable && !biometricEnabled) {
+          setTimeout(() => {
+            Alert.alert(
+              `Enable ${biometricType} Login?`,
+              'Would you like to enable biometric login for faster access next time?',
+              [
+                { text: 'Not Now', style: 'cancel' },
+                {
+                  text: 'Enable',
+                  onPress: async () => {
+                    const result = await BiometricAuth.enableBiometricLogin(email, password);
+                    if (result.success) {
+                      setBiometricEnabled(true);
+                      Alert.alert('Success', `${biometricType} login enabled!`);
+                    } else {
+                      Alert.alert('Error', result.error || 'Failed to enable biometric login');
+                    }
+                  },
+                },
+              ]
+            );
+          }, 500);
+        }
       }
-      // Success is handled by auth state change
-    } catch (err) {
-      Alert.alert('Login Error', 'An unexpected error occurred');
+    } catch (err: any) {
+      console.error('❌ Login error:', err);
+      
+      // Handle email verification errors
+      if (err.message?.includes('Email not confirmed')) {
+        setNeedsEmailVerification(true);
+        setVerificationEmail(email);
+        Alert.alert(
+          'Email Verification Required',
+          'Please verify your email before signing in. Check your inbox for the verification link.',
+          [
+            { text: 'Resend Email', onPress: handleResendVerification },
+            { text: 'OK' }
+          ]
+        );
+      } else {
+        Alert.alert('Login Failed', err.message || 'An error occurred during login');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -112,17 +242,37 @@ export default function AuthScreen() {
     setIsLoading(true);
     
     try {
-      const { success, error } = await signUp(email, password);
+      const result = await signUp(email, password);
       
-      if (!success) {
-        Alert.alert('Sign Up Failed', error?.message || 'An error occurred during sign up');
+      if (!result.success) {
+        Alert.alert('Sign Up Failed', result.error?.message || 'An error occurred during sign up');
       } else {
-        Alert.alert('Success', 'Account created successfully! Please check your email to verify your account.');
-        setIsSignUp(false);
-        setEmail('');
-        setPassword('');
-        setConfirmPassword('');
-        setTermsAccepted(false);
+        // Check if email verification is needed
+        if (result.needsEmailVerification) {
+          setNeedsEmailVerification(true);
+          setVerificationEmail(email);
+          Alert.alert(
+            'Verify Your Email',
+            'We\'ve sent a verification link to your email. Please check your inbox and click the link to verify your account.',
+            [
+              { text: 'Resend Email', onPress: handleResendVerification },
+              { text: 'OK', onPress: () => {
+                setIsSignUp(false);
+                setEmail('');
+                setPassword('');
+                setConfirmPassword('');
+                setTermsAccepted(false);
+              }}
+            ]
+          );
+        } else {
+          Alert.alert('Success', 'Account created successfully!');
+          setIsSignUp(false);
+          setEmail('');
+          setPassword('');
+          setConfirmPassword('');
+          setTermsAccepted(false);
+        }
       }
     } catch (err) {
       Alert.alert('Sign Up Error', 'An unexpected error occurred');
@@ -183,6 +333,8 @@ export default function AuthScreen() {
     setConfirmPassword('');
     setTermsAccepted(false);
     setFocusedInput(null);
+    setNeedsEmailVerification(false);
+    setVerificationEmail('');
   };
 
   const toggleForgotPassword = () => {
@@ -192,6 +344,8 @@ export default function AuthScreen() {
     setConfirmPassword('');
     setTermsAccepted(false);
     setFocusedInput(null);
+    setNeedsEmailVerification(false);
+    setVerificationEmail('');
   };
 
   const openLink = async (url: string) => {
@@ -400,7 +554,30 @@ export default function AuthScreen() {
           <View style={styles.form}>
             {renderInput('email', 'Email', email, setEmail)}
             
+            {/* Email Verification Notice */}
+            {needsEmailVerification && verificationEmail && (
+              <View style={styles.verificationNotice}>
+                <Ionicons name="mail-outline" size={20} color="#F59E0B" />
+                <View style={styles.verificationTextContainer}>
+                  <Text style={styles.verificationText}>
+                    Verification email sent to {verificationEmail}
+                  </Text>
+                  <TouchableOpacity onPress={handleResendVerification}>
+                    <Text style={styles.resendLink}>Resend Email</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+            
             {!isForgotPassword && renderPasswordInput('password', 'Password', password, setPassword, showPassword, setShowPassword)}
+            
+            {/* Password Strength Indicator (Sign Up Only) */}
+            {isSignUp && !isForgotPassword && password && (
+              <PasswordStrengthIndicator 
+                password={password} 
+                showSuggestions={true} 
+              />
+            )}
             
             {isSignUp && !isForgotPassword && renderPasswordInput('confirmPassword', 'Confirm Password', confirmPassword, setConfirmPassword, showConfirmPassword, setShowConfirmPassword)}
 
@@ -473,6 +650,26 @@ export default function AuthScreen() {
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
+
+            {/* Biometric Login Button (only on login screen when enabled) */}
+            {!isSignUp && !isForgotPassword && biometricEnabled && (
+              <TouchableOpacity
+                style={[styles.biometricButton, isLoading && styles.buttonDisabled]}
+                onPress={handleBiometricLogin}
+                disabled={isLoading}
+              >
+                <BlurView intensity={20} tint="dark" style={styles.biometricButtonBlur}>
+                  <Ionicons 
+                    name={Platform.OS === 'ios' ? 'finger-print' : 'fingerprint'} 
+                    size={22} 
+                    color="#10B981" 
+                  />
+                  <Text style={styles.biometricButtonText}>
+                    Login with {biometricType}
+                  </Text>
+                </BlurView>
+              </TouchableOpacity>
+            )}
 
             {/* Google Login Button (not shown for forgot password) */}
             {!isForgotPassword && (
@@ -763,6 +960,29 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
+  // Biometric Button Styles
+  biometricButton: {
+    height: 48,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+    marginTop: 16,
+  },
+  biometricButtonBlur: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    gap: 10,
+    paddingHorizontal: 16,
+  },
+  biometricButtonText: {
+    color: '#10B981',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   signUpContainer: {
     marginTop: 32,
     alignItems: 'center',
@@ -774,5 +994,31 @@ const styles = StyleSheet.create({
   signUpLink: {
     color: '#FFFFFF',
     fontWeight: 'bold',
+  },
+  // Email Verification Styles
+  verificationNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+  },
+  verificationTextContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  verificationText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  resendLink: {
+    color: '#F59E0B',
+    fontSize: 13,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });

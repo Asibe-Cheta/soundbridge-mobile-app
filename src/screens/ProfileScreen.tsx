@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
   Linking,
   Modal,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -26,6 +27,7 @@ import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { becomeServiceProvider } from '../services/creatorExpansionService';
+import * as BiometricAuth from '../services/biometricAuth';
 
 const { width } = Dimensions.get('window');
 
@@ -88,10 +90,28 @@ export default function ProfileScreen() {
   const [editingProfile, setEditingProfile] = useState<Partial<UserProfile>>({});
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [becomingServiceProvider, setBecomingServiceProvider] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [biometricType, setBiometricType] = useState('');
 
   useEffect(() => {
     loadProfileData();
+    checkBiometricAvailability();
   }, []);
+
+  const checkBiometricAvailability = async () => {
+    const capability = await BiometricAuth.checkBiometricAvailability();
+    setBiometricAvailable(capability.available && capability.enrolled);
+    
+    if (capability.available && capability.enrolled) {
+      const typeName = BiometricAuth.getBiometricTypeName(capability.types);
+      setBiometricType(typeName);
+      
+      const enabled = await BiometricAuth.isBiometricLoginEnabled();
+      setBiometricEnabled(enabled);
+      console.log(`✅ ${typeName} available and ${enabled ? 'enabled' : 'not enabled'}`);
+    }
+  };
 
   const loadProfileData = async () => {
     setLoading(true);
@@ -568,6 +588,64 @@ export default function ProfileScreen() {
     navigation.navigate('NotificationSettings' as never);
   };
 
+  const handleBiometricToggle = async () => {
+    if (!biometricAvailable) {
+      await BiometricAuth.showBiometricSetupPrompt();
+      return;
+    }
+
+    if (biometricEnabled) {
+      // Disable biometric login
+      const result = await BiometricAuth.disableBiometricLogin();
+      if (result.success) {
+        setBiometricEnabled(false);
+        Alert.alert('Success', `${biometricType} login disabled`);
+      } else {
+        Alert.alert('Error', result.error || 'Failed to disable biometric login');
+      }
+    } else {
+      // Enable biometric login - need to get current credentials
+      Alert.alert(
+        `Enable ${biometricType} Login`,
+        'Please enter your password to enable biometric login',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Continue',
+            onPress: () => {
+              // Navigate to a password confirmation screen or show a modal
+              Alert.prompt(
+                'Enter Password',
+                'Please enter your current password to enable biometric login',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Enable',
+                    onPress: async (password) => {
+                      if (!password || !user?.email) {
+                        Alert.alert('Error', 'Password is required');
+                        return;
+                      }
+                      
+                      const result = await BiometricAuth.enableBiometricLogin(user.email, password);
+                      if (result.success) {
+                        setBiometricEnabled(true);
+                        Alert.alert('Success', `${biometricType} login enabled!`);
+                      } else {
+                        Alert.alert('Error', result.error || 'Failed to enable biometric login');
+                      }
+                    },
+                  },
+                ],
+                'secure-text'
+              );
+            },
+          },
+        ]
+      );
+    }
+  };
+
   const handleOfflineDownloads = () => {
     navigation.navigate('OfflineDownloads' as never);
   };
@@ -870,11 +948,45 @@ export default function ProfileScreen() {
           <Text style={[styles.settingText, { color: theme.colors.text }]}>Privacy & Security</Text>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
+          onPress={() => (navigation as any).navigate('TwoFactorSettings')}
+        >
+          <Ionicons name="lock-closed" size={20} color="#4ECDC4" />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Two-Factor Authentication</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
         <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleChangePassword}>
           <Ionicons name="key" size={20} color={theme.colors.textSecondary} />
           <Text style={[styles.settingText, { color: theme.colors.text }]}>Change Password</Text>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
+        {/* Biometric Login Toggle */}
+        {biometricAvailable && (
+          <View style={[styles.settingRow, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <View style={styles.settingInfo}>
+              <Ionicons 
+                name={Platform.OS === 'ios' ? 'finger-print' : 'fingerprint'} 
+                size={20} 
+                color={biometricEnabled ? '#10B981' : theme.colors.textSecondary} 
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.settingText, { color: theme.colors.text }]}>
+                  {biometricType} Login
+                </Text>
+                <Text style={[styles.settingSubtext, { color: theme.colors.textSecondary }]}>
+                  Quick login with biometrics
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={biometricEnabled}
+              onValueChange={handleBiometricToggle}
+              trackColor={{ false: theme.colors.border, true: '#10B981' + '40' }}
+              thumbColor={biometricEnabled ? '#10B981' : theme.colors.textSecondary}
+            />
+          </View>
+        )}
         <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleOfflineDownloads}>
           <Ionicons name="download" size={20} color={theme.colors.textSecondary} />
           <Text style={[styles.settingText, { color: theme.colors.text }]}>Offline Downloads</Text>
@@ -1464,6 +1576,11 @@ const styles = StyleSheet.create({
     // color applied dynamically in JSX
     fontSize: 16,
     marginLeft: 12,
+  },
+  settingSubtext: {
+    fontSize: 13,
+    marginLeft: 12,
+    marginTop: 2,
   },
   signOutButton: {
     // backgroundColor applied dynamically in JSX

@@ -1,12 +1,13 @@
 // src/services/NotificationService.ts
-// Push notification service for collaboration requests
+// Comprehensive push notification service
 
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
-import { Platform } from 'react-native';
+import * as Location from 'expo-location';
+import * as Localization from 'expo-localization';
+import { Platform, Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
-import { collaborationUtils } from '../utils/collaborationUtils';
 
 // Configure notification behavior
 Notifications.setNotificationHandler({
@@ -17,25 +18,98 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// ============================================
+// TYPES & INTERFACES
+// ============================================
+
+export type NotificationType = 
+  | 'event'
+  | 'tip'
+  | 'message'
+  | 'collaboration_request'
+  | 'collaboration_accepted'
+  | 'collaboration_declined'
+  | 'collaboration_confirmed'
+  | 'event_reminder'
+  | 'withdrawal'
+  | 'track_approved'
+  | 'track_featured'
+  | 'creator_post'
+  | 'live_session';
+
 export interface NotificationData {
-  type: 'collaboration.request.received' | 'collaboration.request.accepted' | 'collaboration.request.declined';
-  requestId: string;
-  requesterName?: string;
-  creatorName?: string;
-  subject?: string;
-  proposedDate?: string;
+  type: NotificationType;
+  deepLink?: string;
+  
+  // Entity references
+  entityId?: string;
+  entityType?: string;
+  
+  // Type-specific data
+  eventId?: string;
+  trackId?: string;
+  creatorId?: string;
+  conversationId?: string;
+  tipId?: string;
+  requestId?: string;
+  withdrawalId?: string;
+  sessionId?: string;
+  
+  // Additional context
+  amount?: number;
+  currency?: string;
+  username?: string;
+  title?: string;
+  body?: string;
+  [key: string]: any;
 }
 
 export interface PushNotificationToken {
   token: string;
   platform: 'ios' | 'android';
   deviceId: string;
+  deviceName?: string;
 }
+
+export interface NotificationPreferences {
+  notificationsEnabled: boolean;
+  notificationStartHour: number;
+  notificationEndHour: number;
+  timezone: string;
+  
+  // Type toggles
+  eventNotificationsEnabled: boolean;
+  messageNotificationsEnabled: boolean;
+  tipNotificationsEnabled: boolean;
+  collaborationNotificationsEnabled: boolean;
+  walletNotificationsEnabled: boolean;
+  
+  // Targeting preferences
+  preferredEventGenres: string[];
+  locationState: string;
+  locationCountry: string;
+}
+
+export interface UserLocation {
+  state: string;
+  country: string;
+  source: 'gps' | 'onboarding';
+  coordinates?: {
+    latitude: number;
+    longitude: number;
+  };
+}
+
+// ============================================
+// NOTIFICATION SERVICE CLASS
+// ============================================
 
 class NotificationService {
   private expoPushToken: string | null = null;
   private notificationListener: any = null;
   private responseListener: any = null;
+  private preferences: NotificationPreferences | null = null;
+  private userLocation: UserLocation | null = null;
 
   // ===== INITIALIZATION =====
 
@@ -64,27 +138,25 @@ class NotificationService {
       }
 
       // Get push token
-      const tokenData = await Notifications.getExpoPushTokenAsync({
-        projectId: process.env.EXPO_PROJECT_ID || 'your-expo-project-id',
-      });
+      const projectId = '96a15afd-b1fd-4031-a790-2701fa0bffdf'; // From app.json
+      const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
 
       this.expoPushToken = tokenData.data;
       console.log('✅ Push token obtained:', this.expoPushToken);
 
-      // Configure notification channel for Android
+      // Configure notification channels for Android
       if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('collaboration', {
-          name: 'Collaboration Requests',
-          description: 'Notifications for collaboration requests and responses',
-          importance: Notifications.AndroidImportance.HIGH,
-          vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#FF6B6B',
-          sound: 'default',
-        });
+        await this.setupAndroidChannels();
       }
 
       // Set up notification listeners
       this.setupNotificationListeners();
+
+      // Initialize location and timezone
+      await this.initializeLocationAndTimezone();
+
+      // Load preferences
+      await this.loadPreferences();
 
       // Register token with backend
       await this.registerPushToken();
@@ -95,6 +167,51 @@ class NotificationService {
       console.error('❌ Error initializing notification service:', error);
       return false;
     }
+  }
+
+  private async setupAndroidChannels(): Promise<void> {
+    const channels = [
+      {
+        id: 'default',
+        name: 'General Notifications',
+        description: 'General app notifications',
+        importance: Notifications.AndroidImportance.HIGH,
+      },
+      {
+        id: 'events',
+        name: 'Event Notifications',
+        description: 'Notifications about nearby events',
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: 'default',
+      },
+      {
+        id: 'tips',
+        name: 'Tips & Payments',
+        description: 'Notifications about tips and payments you receive',
+        importance: Notifications.AndroidImportance.MAX,
+        sound: 'default',
+      },
+      {
+        id: 'messages',
+        name: 'Messages',
+        description: 'New message notifications',
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: 'default',
+      },
+      {
+        id: 'collaboration',
+        name: 'Collaboration Requests',
+        description: 'Notifications for collaboration requests and responses',
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: 'default',
+      },
+    ];
+
+    for (const channel of channels) {
+      await Notifications.setNotificationChannelAsync(channel.id, channel);
+    }
+
+    console.log('✅ Android notification channels created');
   }
 
   private setupNotificationListeners() {
@@ -125,8 +242,221 @@ class NotificationService {
   private async handleNotificationResponse(response: Notifications.NotificationResponse) {
     const data = response.notification.request.content.data as NotificationData;
     
-    // Handle deep linking based on notification type
+    // Mark as read
+    await this.markNotificationAsRead(response.notification.request.identifier);
+    
+    // Handle deep linking
     await this.handleDeepLink(data);
+  }
+
+  // ===== LOCATION & TIMEZONE =====
+
+  private async initializeLocationAndTimezone(): Promise<void> {
+    try {
+      // Get timezone
+      const timezone = Localization.timezone || 'UTC';
+      console.log('🌍 User timezone:', timezone);
+
+      // Try to get GPS location
+      const location = await this.requestLocationPermission();
+      if (location) {
+        this.userLocation = location;
+        console.log('📍 User location:', location);
+        
+        // Update backend
+        await this.updateLocationOnBackend(location);
+      } else {
+        // Fallback to onboarding location
+        await this.loadLocationFromBackend();
+      }
+    } catch (error) {
+      console.error('❌ Error initializing location/timezone:', error);
+    }
+  }
+
+  async requestLocationPermission(): Promise<UserLocation | null> {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      
+      if (status !== 'granted') {
+        console.log('⚠️ Location permission denied, using onboarding location');
+        return null;
+      }
+
+      const location = await Location.getCurrentPositionAsync({});
+      const reverseGeocode = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+
+      if (reverseGeocode.length > 0) {
+        const place = reverseGeocode[0];
+        return {
+          state: place.region || place.city || 'Unknown',
+          country: place.country || 'Unknown',
+          source: 'gps',
+          coordinates: {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          },
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error('❌ Error getting GPS location:', error);
+      return null;
+    }
+  }
+
+  private async updateLocationOnBackend(location: UserLocation): Promise<void> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+
+      const response = await fetch('https://www.soundbridge.live/api/user/location', {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          locationState: location.state,
+          locationCountry: location.country,
+          source: location.source,
+        }),
+      });
+
+      if (!response.ok) {
+        console.error('Failed to update location on backend');
+      } else {
+        console.log('✅ Location updated on backend');
+      }
+    } catch (error) {
+      console.error('❌ Error updating location:', error);
+    }
+  }
+
+  private async loadLocationFromBackend(): Promise<void> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+
+      const response = await fetch('https://www.soundbridge.live/api/user/notification-preferences', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        this.userLocation = {
+          state: data.locationState || 'Unknown',
+          country: data.locationCountry || 'Unknown',
+          source: 'onboarding',
+        };
+        console.log('✅ Loaded location from backend:', this.userLocation);
+      }
+    } catch (error) {
+      console.error('❌ Error loading location from backend:', error);
+    }
+  }
+
+  // ===== PREFERENCES MANAGEMENT =====
+
+  private async loadPreferences(): Promise<void> {
+    try {
+      // Try to load from backend first
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        // Load default preferences
+        this.preferences = this.getDefaultPreferences();
+        return;
+      }
+
+      const response = await fetch('https://www.soundbridge.live/api/user/notification-preferences', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (response.ok) {
+        this.preferences = await response.json();
+        console.log('✅ Preferences loaded from backend');
+      } else {
+        this.preferences = this.getDefaultPreferences();
+      }
+
+      // Cache locally
+      await AsyncStorage.setItem('notificationPreferences', JSON.stringify(this.preferences));
+    } catch (error) {
+      console.error('❌ Error loading preferences:', error);
+      
+      // Try to load from cache
+      const cached = await AsyncStorage.getItem('notificationPreferences');
+      if (cached) {
+        this.preferences = JSON.parse(cached);
+      } else {
+        this.preferences = this.getDefaultPreferences();
+      }
+    }
+  }
+
+  private getDefaultPreferences(): NotificationPreferences {
+    return {
+      notificationsEnabled: true,
+      notificationStartHour: 8,
+      notificationEndHour: 22,
+      timezone: Localization.timezone || 'UTC',
+      eventNotificationsEnabled: true,
+      messageNotificationsEnabled: true,
+      tipNotificationsEnabled: true,
+      collaborationNotificationsEnabled: true,
+      walletNotificationsEnabled: true,
+      preferredEventGenres: [],
+      locationState: 'Unknown',
+      locationCountry: 'Unknown',
+    };
+  }
+
+  async updatePreferences(updates: Partial<NotificationPreferences>): Promise<boolean> {
+    try {
+      const newPreferences = { ...this.preferences, ...updates } as NotificationPreferences;
+      
+      // Update backend
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const response = await fetch('https://www.soundbridge.live/api/user/notification-preferences', {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updates),
+        });
+
+        if (!response.ok) {
+          console.error('Failed to update preferences on backend');
+          return false;
+        }
+      }
+
+      // Update local
+      this.preferences = newPreferences;
+      await AsyncStorage.setItem('notificationPreferences', JSON.stringify(newPreferences));
+      
+      console.log('✅ Preferences updated');
+      return true;
+    } catch (error) {
+      console.error('❌ Error updating preferences:', error);
+      return false;
+    }
+  }
+
+  getPreferences(): NotificationPreferences | null {
+    return this.preferences;
   }
 
   // ===== PUSH TOKEN MANAGEMENT =====
@@ -135,31 +465,27 @@ class NotificationService {
     if (!this.expoPushToken) return;
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
 
-      const tokenData: PushNotificationToken = {
-        token: this.expoPushToken,
-        platform: Platform.OS as 'ios' | 'android',
+      const tokenData = {
+        pushToken: this.expoPushToken,
+        platform: Platform.OS,
         deviceId: Device.osInternalBuildId || 'unknown',
+        deviceName: Device.deviceName || 'Unknown Device',
       };
 
-      // Store token in user profile or separate table
-      const { error } = await supabase
-        .from('user_push_tokens')
-        .upsert({
-          user_id: user.id,
-          push_token: tokenData.token,
-          platform: tokenData.platform,
-          device_id: tokenData.deviceId,
-          is_active: true,
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: 'user_id,device_id'
-        });
+      const response = await fetch('https://www.soundbridge.live/api/user/push-token', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(tokenData),
+      });
 
-      if (error) {
-        console.error('❌ Error registering push token:', error);
+      if (!response.ok) {
+        console.error('❌ Failed to register push token');
       } else {
         console.log('✅ Push token registered successfully');
       }
@@ -173,163 +499,21 @@ class NotificationService {
   }
 
   async unregisterPushToken(): Promise<void> {
-    if (!this.expoPushToken) return;
-
+    // Mark token as inactive on backend
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
 
-      const { error } = await supabase
-        .from('user_push_tokens')
-        .update({ is_active: false })
-        .eq('user_id', user.id)
-        .eq('push_token', this.expoPushToken);
+      await fetch('https://www.soundbridge.live/api/user/push-token', {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
 
-      if (error) {
-        console.error('❌ Error unregistering push token:', error);
-      } else {
-        console.log('✅ Push token unregistered successfully');
-      }
+      console.log('✅ Push token unregistered');
     } catch (error) {
       console.error('❌ Error unregistering push token:', error);
-    }
-  }
-
-  // ===== NOTIFICATION SENDING =====
-
-  async sendCollaborationRequestNotification(
-    recipientUserId: string,
-    requesterName: string,
-    subject: string,
-    requestId: string,
-    proposedDate: string
-  ): Promise<boolean> {
-    try {
-      console.log('📤 Sending collaboration request notification...');
-
-      const notificationData: NotificationData = {
-        type: 'collaboration.request.received',
-        requestId,
-        requesterName,
-        subject,
-        proposedDate,
-      };
-
-      const title = collaborationUtils.generateNotificationTitle(
-        'collaboration.request.received',
-        requesterName
-      );
-
-      const body = `${requesterName} wants to collaborate: "${subject}"`;
-
-      // Send via backend API (which will handle the actual push)
-      const { error } = await supabase.functions.invoke('send-push-notification', {
-        body: {
-          recipientUserId,
-          title,
-          body,
-          data: notificationData,
-          channelId: 'collaboration',
-        },
-      });
-
-      if (error) {
-        console.error('❌ Error sending notification:', error);
-        return false;
-      }
-
-      console.log('✅ Collaboration request notification sent');
-      return true;
-    } catch (error) {
-      console.error('❌ Error sending collaboration request notification:', error);
-      return false;
-    }
-  }
-
-  async sendCollaborationResponseNotification(
-    recipientUserId: string,
-    creatorName: string,
-    response: 'accepted' | 'declined',
-    subject: string,
-    requestId: string
-  ): Promise<boolean> {
-    try {
-      console.log('📤 Sending collaboration response notification...');
-
-      const notificationData: NotificationData = {
-        type: response === 'accepted' ? 'collaboration.request.accepted' : 'collaboration.request.declined',
-        requestId,
-        creatorName,
-        subject,
-      };
-
-      const title = collaborationUtils.generateNotificationTitle(
-        response === 'accepted' ? 'collaboration.request.accepted' : 'collaboration.request.declined',
-        creatorName
-      );
-
-      const body = response === 'accepted' 
-        ? `${creatorName} accepted your collaboration request!`
-        : `${creatorName} declined your collaboration request`;
-
-      // Send via backend API
-      const { error } = await supabase.functions.invoke('send-push-notification', {
-        body: {
-          recipientUserId,
-          title,
-          body,
-          data: notificationData,
-          channelId: 'collaboration',
-        },
-      });
-
-      if (error) {
-        console.error('❌ Error sending notification:', error);
-        return false;
-      }
-
-      console.log('✅ Collaboration response notification sent');
-      return true;
-    } catch (error) {
-      console.error('❌ Error sending collaboration response notification:', error);
-      return false;
-    }
-  }
-
-  // ===== LOCAL NOTIFICATIONS =====
-
-  async scheduleLocalNotification(
-    title: string,
-    body: string,
-    data: NotificationData,
-    scheduledDate?: Date
-  ): Promise<string | null> {
-    try {
-      const notificationId = await Notifications.scheduleNotificationAsync({
-        content: {
-          title,
-          body,
-          data,
-          sound: 'default',
-          priority: Notifications.AndroidNotificationPriority.HIGH,
-        },
-        trigger: scheduledDate ? { date: scheduledDate } : null,
-      });
-
-      console.log('✅ Local notification scheduled:', notificationId);
-      return notificationId;
-    } catch (error) {
-      console.error('❌ Error scheduling local notification:', error);
-      return null;
-    }
-  }
-
-  async cancelLocalNotification(notificationId: string): Promise<void> {
-    try {
-      await Notifications.cancelScheduledNotificationAsync(notificationId);
-      console.log('✅ Local notification cancelled:', notificationId);
-    } catch (error) {
-      console.error('❌ Error cancelling local notification:', error);
     }
   }
 
@@ -342,8 +526,13 @@ class NotificationService {
       // Store deep link data for navigation
       await AsyncStorage.setItem('pendingDeepLink', JSON.stringify(data));
 
-      // The actual navigation will be handled by the app's navigation system
-      // when it detects the stored deep link data
+      // Try to open deep link directly if provided
+      if (data.deepLink) {
+        const supported = await Linking.canOpenURL(data.deepLink);
+        if (supported) {
+          await Linking.openURL(data.deepLink);
+        }
+      }
     } catch (error) {
       console.error('❌ Error handling deep link:', error);
     }
@@ -363,6 +552,44 @@ class NotificationService {
     }
   }
 
+  generateDeepLink(type: NotificationType, entityId: string): string {
+    const baseUrl = 'soundbridge://';
+    
+    switch (type) {
+      case 'event':
+      case 'event_reminder':
+        return `${baseUrl}event/${entityId}`;
+      
+      case 'tip':
+        return `${baseUrl}wallet/tips`;
+      
+      case 'message':
+        return `${baseUrl}messages/${entityId}`;
+      
+      case 'collaboration_request':
+      case 'collaboration_accepted':
+      case 'collaboration_declined':
+      case 'collaboration_confirmed':
+        return `${baseUrl}collaboration/${entityId}`;
+      
+      case 'track_approved':
+      case 'track_featured':
+        return `${baseUrl}track/${entityId}`;
+      
+      case 'withdrawal':
+        return `${baseUrl}wallet/withdrawal/${entityId}`;
+      
+      case 'creator_post':
+        return `${baseUrl}creator/${entityId}`;
+      
+      case 'live_session':
+        return `${baseUrl}live/${entityId}`;
+      
+      default:
+        return baseUrl;
+    }
+  }
+
   // ===== NOTIFICATION STORAGE =====
 
   private async storeNotification(notification: Notifications.Notification): Promise<void> {
@@ -379,8 +606,8 @@ class NotificationService {
         read: false,
       });
 
-      // Keep only last 50 notifications
-      const trimmed = notifications.slice(0, 50);
+      // Keep only last 100 notifications
+      const trimmed = notifications.slice(0, 100);
       await AsyncStorage.setItem('storedNotifications', JSON.stringify(trimmed));
     } catch (error) {
       console.error('❌ Error storing notification:', error);
@@ -399,17 +626,59 @@ class NotificationService {
 
   async markNotificationAsRead(notificationId: string): Promise<void> {
     try {
+      // Update local storage
       const stored = await AsyncStorage.getItem('storedNotifications');
-      if (!stored) return;
+      if (stored) {
+        const notifications = JSON.parse(stored);
+        const updated = notifications.map((n: any) => 
+          n.id === notificationId ? { ...n, read: true } : n
+        );
+        await AsyncStorage.setItem('storedNotifications', JSON.stringify(updated));
+      }
 
-      const notifications = JSON.parse(stored);
-      const updated = notifications.map((n: any) => 
-        n.id === notificationId ? { ...n, read: true } : n
-      );
+      // Update backend
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        await fetch(`https://www.soundbridge.live/api/user/notifications/${notificationId}/read`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        });
+      }
 
-      await AsyncStorage.setItem('storedNotifications', JSON.stringify(updated));
+      // Update badge
+      await this.updateBadgeCount();
     } catch (error) {
       console.error('❌ Error marking notification as read:', error);
+    }
+  }
+
+  async markAllAsRead(): Promise<void> {
+    try {
+      // Update local storage
+      const stored = await AsyncStorage.getItem('storedNotifications');
+      if (stored) {
+        const notifications = JSON.parse(stored);
+        const updated = notifications.map((n: any) => ({ ...n, read: true }));
+        await AsyncStorage.setItem('storedNotifications', JSON.stringify(updated));
+      }
+
+      // Update backend
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        await fetch('https://www.soundbridge.live/api/user/notifications/read-all', {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        });
+      }
+
+      // Clear badge
+      await this.clearBadge();
+    } catch (error) {
+      console.error('❌ Error marking all as read:', error);
     }
   }
 
@@ -433,6 +702,64 @@ class NotificationService {
     }
   }
 
+  async getUnreadCount(): Promise<number> {
+    try {
+      const notifications = await this.getStoredNotifications();
+      return notifications.filter(n => !n.read).length;
+    } catch (error) {
+      console.error('❌ Error getting unread count:', error);
+      return 0;
+    }
+  }
+
+  // ===== LOCAL NOTIFICATIONS (FOR TESTING) =====
+
+  async scheduleLocalNotification(
+    title: string,
+    body: string,
+    data: NotificationData,
+    scheduledDate?: Date
+  ): Promise<string | null> {
+    try {
+      const channel = this.getChannelForType(data.type);
+      
+      const notificationId = await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          data,
+          sound: 'default',
+          priority: Notifications.AndroidNotificationPriority.HIGH,
+          ...(Platform.OS === 'android' && { channelId: channel }),
+        },
+        trigger: scheduledDate ? { date: scheduledDate } : null,
+      });
+
+      console.log('✅ Local notification scheduled:', notificationId);
+      return notificationId;
+    } catch (error) {
+      console.error('❌ Error scheduling local notification:', error);
+      return null;
+    }
+  }
+
+  private getChannelForType(type: NotificationType): string {
+    if (type.includes('event')) return 'events';
+    if (type === 'tip') return 'tips';
+    if (type === 'message') return 'messages';
+    if (type.includes('collaboration')) return 'collaboration';
+    return 'default';
+  }
+
+  async cancelLocalNotification(notificationId: string): Promise<void> {
+    try {
+      await Notifications.cancelScheduledNotificationAsync(notificationId);
+      console.log('✅ Local notification cancelled:', notificationId);
+    } catch (error) {
+      console.error('❌ Error cancelling local notification:', error);
+    }
+  }
+
   // ===== CLEANUP =====
 
   cleanup(): void {
@@ -453,7 +780,16 @@ class NotificationService {
   get isInitialized(): boolean {
     return this.expoPushToken !== null;
   }
+
+  get location(): UserLocation | null {
+    return this.userLocation;
+  }
+
+  get timezone(): string {
+    return Localization.timezone || 'UTC';
+  }
 }
 
 // Export singleton instance
 export const notificationService = new NotificationService();
+

@@ -27,6 +27,7 @@ import { collaborationUtils } from '../utils/collaborationUtils';
 import type { BookingStatus, CreatorAvailability } from '../types/collaboration';
 import FirstTimeTooltip from '../components/FirstTimeTooltip';
 import BackButton from '../components/BackButton';
+import { Modal, Switch } from 'react-native';
 
 interface Creator {
   id: string;
@@ -118,6 +119,13 @@ export default function CreatorProfileScreen() {
   const [selectedAvailabilitySlot, setSelectedAvailabilitySlot] = useState<CreatorAvailability | null>(null);
   const [showTipTooltip, setShowTipTooltip] = useState(false);
   const [showCollabTooltip, setShowCollabTooltip] = useState(false);
+  
+  // Notification preferences state
+  const [showNotifPrefsModal, setShowNotifPrefsModal] = useState(false);
+  const [notifyOnMusicUpload, setNotifyOnMusicUpload] = useState(false);
+  const [notifyOnEventPost, setNotifyOnEventPost] = useState(true); // Default true for events
+  const [notifyOnPodcastUpload, setNotifyOnPodcastUpload] = useState(false);
+  const [notifyOnCollabAvailability, setNotifyOnCollabAvailability] = useState(false);
 
   const canRequestCollaboration = useMemo(() => {
     if (bookingStatus) {
@@ -360,6 +368,9 @@ export default function CreatorProfileScreen() {
 
         setIsFollowing(false);
         setCreator(prev => prev ? { ...prev, followers_count: Math.max(0, (prev.followers_count || 0) - 1) } : null);
+        
+        // Also remove notification preferences
+        await removeCreatorNotificationPreferences();
       } else {
         // Follow
         const { error } = await supabase
@@ -374,10 +385,61 @@ export default function CreatorProfileScreen() {
 
         setIsFollowing(true);
         setCreator(prev => prev ? { ...prev, followers_count: (prev.followers_count || 0) + 1 } : null);
+        
+        // Show notification preferences modal
+        setShowNotifPrefsModal(true);
       }
     } catch (error) {
       console.error('❌ Error following/unfollowing:', error);
       Alert.alert('Error', 'Failed to update follow status');
+    }
+  };
+
+  const saveCreatorNotificationPreferences = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+
+      const response = await fetch(`https://www.soundbridge.live/api/user/follow/${creatorId}/notifications`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          notifyOnMusicUpload,
+          notifyOnEventPost,
+          notifyOnPodcastUpload,
+          notifyOnCollaborationAvailability,
+        }),
+      });
+
+      if (response.ok) {
+        console.log('✅ Notification preferences saved');
+        setShowNotifPrefsModal(false);
+      } else {
+        console.error('Failed to save notification preferences');
+      }
+    } catch (error) {
+      console.error('❌ Error saving notification preferences:', error);
+    }
+  };
+
+  const removeCreatorNotificationPreferences = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+
+      await fetch(`https://www.soundbridge.live/api/user/follow/${creatorId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+
+      console.log('✅ Notification preferences removed');
+    } catch (error) {
+      console.error('❌ Error removing notification preferences:', error);
     }
   };
 
@@ -927,6 +989,133 @@ export default function CreatorProfileScreen() {
         ]}
         style={{ alignSelf: 'stretch', marginHorizontal: 16 }}
       />
+
+      {/* Notification Preferences Modal */}
+      <Modal
+        visible={showNotifPrefsModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowNotifPrefsModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { backgroundColor: theme.colors.card }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}>
+              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>
+                Notification Preferences
+              </Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowNotifPrefsModal(false)}
+              >
+                <Ionicons name="close" size={24} color={theme.colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalContent}>
+              <Text style={[styles.modalDescription, { color: theme.colors.textSecondary }]}>
+                Choose what notifications you'd like to receive from {creator?.display_name || 'this creator'}:
+              </Text>
+
+              <View style={[styles.notifPrefItem, { borderBottomColor: theme.colors.border }]}>
+                <View style={styles.notifPrefLeft}>
+                  <Ionicons name="musical-notes" size={24} color="#4ECDC4" />
+                  <View style={styles.notifPrefText}>
+                    <Text style={[styles.notifPrefTitle, { color: theme.colors.text }]}>
+                      Music Uploads
+                    </Text>
+                    <Text style={[styles.notifPrefSubtitle, { color: theme.colors.textSecondary }]}>
+                      New tracks and albums
+                    </Text>
+                  </View>
+                </View>
+                <Switch
+                  value={notifyOnMusicUpload}
+                  onValueChange={setNotifyOnMusicUpload}
+                  trackColor={{ false: '#767577', true: '#4ECDC4' }}
+                  thumbColor={notifyOnMusicUpload ? '#fff' : '#f4f3f4'}
+                />
+              </View>
+
+              <View style={[styles.notifPrefItem, { borderBottomColor: theme.colors.border }]}>
+                <View style={styles.notifPrefLeft}>
+                  <Ionicons name="calendar" size={24} color="#FFD700" />
+                  <View style={styles.notifPrefText}>
+                    <Text style={[styles.notifPrefTitle, { color: theme.colors.text }]}>
+                      Event Posts
+                    </Text>
+                    <Text style={[styles.notifPrefSubtitle, { color: theme.colors.textSecondary }]}>
+                      New events and concerts (Recommended)
+                    </Text>
+                  </View>
+                </View>
+                <Switch
+                  value={notifyOnEventPost}
+                  onValueChange={setNotifyOnEventPost}
+                  trackColor={{ false: '#767577', true: '#4ECDC4' }}
+                  thumbColor={notifyOnEventPost ? '#fff' : '#f4f3f4'}
+                />
+              </View>
+
+              <View style={[styles.notifPrefItem, { borderBottomColor: theme.colors.border }]}>
+                <View style={styles.notifPrefLeft}>
+                  <Ionicons name="mic" size={24} color="#FF6B6B" />
+                  <View style={styles.notifPrefText}>
+                    <Text style={[styles.notifPrefTitle, { color: theme.colors.text }]}>
+                      Podcast Uploads
+                    </Text>
+                    <Text style={[styles.notifPrefSubtitle, { color: theme.colors.textSecondary }]}>
+                      New podcast episodes
+                    </Text>
+                  </View>
+                </View>
+                <Switch
+                  value={notifyOnPodcastUpload}
+                  onValueChange={setNotifyOnPodcastUpload}
+                  trackColor={{ false: '#767577', true: '#4ECDC4' }}
+                  thumbColor={notifyOnPodcastUpload ? '#fff' : '#f4f3f4'}
+                />
+              </View>
+
+              <View style={[styles.notifPrefItem, { borderBottomWidth: 0 }]}>
+                <View style={styles.notifPrefLeft}>
+                  <Ionicons name="people" size={24} color="#9B59B6" />
+                  <View style={styles.notifPrefText}>
+                    <Text style={[styles.notifPrefTitle, { color: theme.colors.text }]}>
+                      Collaboration Availability
+                    </Text>
+                    <Text style={[styles.notifPrefSubtitle, { color: theme.colors.textSecondary }]}>
+                      When they open collaboration slots
+                    </Text>
+                  </View>
+                </View>
+                <Switch
+                  value={notifyOnCollabAvailability}
+                  onValueChange={setNotifyOnCollabAvailability}
+                  trackColor={{ false: '#767577', true: '#4ECDC4' }}
+                  thumbColor={notifyOnCollabAvailability ? '#fff' : '#f4f3f4'}
+                />
+              </View>
+
+              <View style={[styles.notifNote, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                <Ionicons name="information-circle" size={20} color={theme.colors.primary} />
+                <Text style={[styles.notifNoteText, { color: theme.colors.textSecondary }]}>
+                  You can change these preferences anytime from your notification settings.
+                </Text>
+              </View>
+            </ScrollView>
+
+            <View style={[styles.modalFooter, { borderTopColor: theme.colors.border }]}>
+              <TouchableOpacity
+                style={[styles.saveButton, { backgroundColor: theme.colors.primary }]}
+                onPress={saveCreatorNotificationPreferences}
+              >
+                <Text style={styles.saveButtonText}>Save Preferences</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       </SafeAreaView>
     </View>
   );
@@ -1279,5 +1468,91 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 16,
     marginTop: 16,
+  },
+  // Notification preferences modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
+    borderBottomWidth: 1,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalContent: {
+    padding: 20,
+  },
+  modalDescription: {
+    fontSize: 15,
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  notifPrefItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+  },
+  notifPrefLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 12,
+  },
+  notifPrefText: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  notifPrefTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  notifPrefSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  notifNote: {
+    flexDirection: 'row',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 16,
+    gap: 8,
+  },
+  notifNoteText: {
+    fontSize: 13,
+    lineHeight: 18,
+    flex: 1,
+  },
+  modalFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+  },
+  saveButton: {
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

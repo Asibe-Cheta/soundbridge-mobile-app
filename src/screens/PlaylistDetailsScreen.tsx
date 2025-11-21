@@ -59,7 +59,7 @@ interface PlaylistData {
 export default function PlaylistDetailsScreen() {
   const navigation = useNavigation();
   const route = useRoute();
-  const { playTrack } = useAudioPlayer();
+  const { play } = useAudioPlayer();
   const { theme } = useTheme();
   
   const { playlistId } = route.params as { playlistId: string };
@@ -113,15 +113,17 @@ export default function PlaylistDetailsScreen() {
     const audioTrack = {
       id: track.id,
       title: track.title,
-      artist: track.creator?.display_name || track.artist_name,
+      artist_name: track.artist_name,
       duration: track.duration,
-      coverArt: track.cover_art_url,
-      url: track.file_url,
-      likes: track.likes_count,
-      plays: track.plays_count,
+      cover_art_url: track.cover_art_url,
+      file_url: track.file_url,
+      likes_count: track.likes_count,
+      plays_count: track.plays_count,
+      created_at: new Date().toISOString(),
+      creator: track.creator,
     };
     
-    playTrack(audioTrack);
+    play(audioTrack);
   };
 
   const handlePlayAll = () => {

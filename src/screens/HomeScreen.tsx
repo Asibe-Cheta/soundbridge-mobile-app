@@ -924,6 +924,40 @@ export default function HomeScreen() {
 
       <ValuePropCard />
 
+      {/* Live Sessions Card */}
+      <TouchableOpacity 
+        style={styles.liveSessionsCard}
+        onPress={() => navigation.navigate('LiveSessions')}
+        activeOpacity={0.8}
+      >
+        <LinearGradient
+          colors={['#7C3AED', '#8B5CF6', '#A78BFA']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.liveSessionsGradient}
+        >
+          <View style={styles.liveSessionsContent}>
+            <View style={styles.liveSessionsHeader}>
+              <View style={styles.liveSessionsIconContainer}>
+                <Ionicons name="radio" size={28} color="#FFFFFF" />
+              </View>
+              <View style={styles.livePulse}>
+                <View style={[styles.liveDot, styles.liveDotOuter]} />
+                <View style={styles.liveDot} />
+              </View>
+            </View>
+            <Text style={styles.liveSessionsTitle}>Live Audio Sessions</Text>
+            <Text style={styles.liveSessionsSubtitle}>
+              Join live rooms • Host your own • Connect in real-time
+            </Text>
+            <View style={styles.liveSessionsButton}>
+              <Text style={styles.liveSessionsButtonText}>Explore Live Rooms</Text>
+              <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+            </View>
+          </View>
+        </LinearGradient>
+      </TouchableOpacity>
+
       {/* Trending Tracks - Collapsible */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -1788,6 +1822,84 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   heroButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  liveSessionsCard: {
+    marginHorizontal: 16,
+    marginVertical: 16,
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  liveSessionsGradient: {
+    padding: 20,
+  },
+  liveSessionsContent: {
+    gap: 12,
+  },
+  liveSessionsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  liveSessionsIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  livePulse: {
+    position: 'relative',
+    width: 16,
+    height: 16,
+  },
+  liveDot: {
+    position: 'absolute',
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22C55E',
+    top: 4,
+    left: 4,
+  },
+  liveDotOuter: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(34, 197, 94, 0.4)',
+    top: 0,
+    left: 0,
+  },
+  liveSessionsTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  liveSessionsSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.9)',
+    lineHeight: 20,
+  },
+  liveSessionsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    gap: 8,
+    marginTop: 4,
+  },
+  liveSessionsButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',

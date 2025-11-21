@@ -44,23 +44,24 @@ interface Message {
 }
 
 interface Conversation {
-  id: string;
-  other_user: {
+  id: string; // Format: "userId1_userId2" (alphabetically sorted)
+  otherUser: {
     id: string;
     username: string;
     display_name: string;
     avatar_url?: string;
+    role: string;
   };
-  last_message?: {
+  lastMessage: {
     content: string;
     created_at: string;
     sender_id: string;
   };
-  unread_count: number;
-  updated_at: string;
+  unreadCount: number;
+  updatedAt: string;
 }
 
-export default function MessagesScreen() {
+export default function MessagesScreen({ navigation }: any) {
   const { user } = useAuth();
   const { theme } = useTheme();
   const [activeTab, setActiveTab] = useState<'conversations' | 'search'>('conversations');
@@ -88,30 +89,7 @@ export default function MessagesScreen() {
       
       if (success && data && data.length > 0) {
         console.log('✅ Conversations loaded:', data.length, 'conversations');
-        // Transform the data to match our interface
-        const transformedConversations: Conversation[] = data.map((conv: any) => {
-          // Determine which participant is the "other user"
-          const otherUser = conv.participant1_id === user.id ? conv.participant2 : conv.participant1;
-          
-          return {
-            id: conv.id,
-            other_user: {
-              id: otherUser.id,
-              username: otherUser.username,
-              display_name: otherUser.display_name,
-              avatar_url: otherUser.avatar_url,
-            },
-            last_message: conv.last_message?.[0] ? {
-              content: conv.last_message[0].content,
-              created_at: conv.last_message[0].created_at,
-              sender_id: conv.last_message[0].sender_id,
-            } : null,
-            unread_count: 0, // TODO: Implement unread count logic
-            updated_at: conv.updated_at,
-          };
-        });
-        
-        setConversations(transformedConversations);
+        setConversations(data);
       } else {
         console.log('ℹ️ No conversations found for user');
         setConversations([]);
@@ -119,7 +97,6 @@ export default function MessagesScreen() {
     } catch (error) {
       console.error('Error loading conversations:', error);
       setConversations([]);
-      // Don't show alert for empty conversations - it's normal for new users
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -163,16 +140,25 @@ export default function MessagesScreen() {
     loadConversations();
   };
 
-  const handleConversationPress = (conversation: Conversation) => {
-    // Navigate to chat screen
+  const handleConversationPress = (conversation: Conversation, navigation: any) => {
+    // Navigate to chat screen with conversation data
     console.log('Navigate to conversation:', conversation.id);
-    Alert.alert('Navigation', `Open conversation with ${conversation.other_user.display_name}`);
+    navigation.navigate('Chat', {
+      conversationId: conversation.id,
+      otherUser: conversation.otherUser
+    });
   };
 
-  const handleUserPress = (user: any) => {
-    // Start new conversation
-    console.log('Start conversation with:', user.username);
-    Alert.alert('New Chat', `Start conversation with ${user.display_name}`);
+  const handleUserPress = (selectedUser: any, navigation: any) => {
+    // Start new conversation - create conversation ID
+    if (!selectedUser?.id || !user?.id) return;
+    const conversationId = [user.id, selectedUser.id].sort().join('_');
+    
+    console.log('Start conversation with:', selectedUser.username);
+    navigation.navigate('Chat', {
+      conversationId,
+      otherUser: selectedUser
+    });
   };
 
   const formatTime = (dateString: string) => {
@@ -199,12 +185,12 @@ export default function MessagesScreen() {
   const renderConversationItem = ({ item }: { item: Conversation }) => (
     <TouchableOpacity
       style={[styles.conversationItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-      onPress={() => handleConversationPress(item)}
+      onPress={() => handleConversationPress(item, navigation)}
     >
       <View style={styles.conversationAvatar}>
-        {item.other_user.avatar_url ? (
+        {item.otherUser.avatar_url ? (
           <Image
-            source={{ uri: item.other_user.avatar_url }}
+            source={{ uri: item.otherUser.avatar_url }}
             style={styles.avatarImage}
           />
         ) : (
@@ -212,10 +198,10 @@ export default function MessagesScreen() {
             <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
           </View>
         )}
-        {item.unread_count > 0 && (
+        {item.unreadCount > 0 && (
           <View style={styles.unreadBadge}>
             <Text style={styles.unreadCount}>
-              {item.unread_count > 99 ? '99+' : item.unread_count}
+              {item.unreadCount > 99 ? '99+' : item.unreadCount}
             </Text>
           </View>
         )}
@@ -224,10 +210,10 @@ export default function MessagesScreen() {
       <View style={styles.conversationContent}>
         <View style={styles.conversationHeader}>
           <Text style={[styles.conversationName, { color: theme.colors.text }]} numberOfLines={1}>
-            {item.other_user.display_name}
+            {item.otherUser.display_name}
           </Text>
           <Text style={[styles.conversationTime, { color: theme.colors.textSecondary }]}>
-            {item.last_message ? formatTime(item.last_message.created_at) : ''}
+            {item.lastMessage ? formatTime(item.lastMessage.created_at) : ''}
           </Text>
         </View>
         
@@ -236,13 +222,13 @@ export default function MessagesScreen() {
             style={[
               styles.lastMessage,
               { color: theme.colors.textSecondary },
-              item.unread_count > 0 && { color: theme.colors.text, fontWeight: '500' }
+              item.unreadCount > 0 && { color: theme.colors.text, fontWeight: '500' }
             ]} 
             numberOfLines={1}
           >
-            {item.last_message ? item.last_message.content : 'No messages yet'}
+            {item.lastMessage ? item.lastMessage.content : 'No messages yet'}
           </Text>
-          {item.unread_count > 0 && (
+          {item.unreadCount > 0 && (
             <View style={styles.unreadIndicator} />
           )}
         </View>
@@ -253,7 +239,7 @@ export default function MessagesScreen() {
   const renderSearchResult = ({ item }: { item: any }) => (
     <TouchableOpacity
       style={[styles.searchResultItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-      onPress={() => handleUserPress(item)}
+      onPress={() => handleUserPress(item, navigation)}
     >
       <View style={styles.searchResultAvatar}>
         {item.avatar_url ? (

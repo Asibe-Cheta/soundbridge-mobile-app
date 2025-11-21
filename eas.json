@@ -12,7 +12,9 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "developmentClient": true,
+      "prebuildCommand": "echo 'Skipping prebuild - using pre-generated native code'"
     }
   },
   "submit": {

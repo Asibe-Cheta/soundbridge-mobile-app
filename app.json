@@ -19,8 +19,12 @@
       "bundleIdentifier": "com.soundbridge.mobile",
       "buildNumber": "81",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"],
-        "ITSAppUsesNonExemptEncryption": false
+        "UIBackgroundModes": [
+          "audio"
+        ],
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "SoundBridge needs access to your microphone for live audio sessions, voice recording, and communication.",
+        "NSCameraUsageDescription": "SoundBridge may need camera access for future video features."
       }
     },
     "android": {
@@ -32,7 +36,10 @@
       "permissions": [
         "android.permission.WAKE_LOCK",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.INTERNET"
       ],
       "intentFilters": [
         {
@@ -78,21 +85,17 @@
       }
     },
     "plugins": [
+      "expo-dev-client",
       "expo-font",
       "expo-localization",
       [
         "expo-av",
         {
-          "microphonePermission": "Allow SoundBridge to access your microphone for audio recording."
+          "microphonePermission": "Allow SoundBridge to access your microphone for audio recording and live sessions."
         }
       ],
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/notification-icon.png",
-          "color": "#ffffff"
-        }
-      ]
+      "expo-notifications",
+      "expo-web-browser"
     ]
   }
 }

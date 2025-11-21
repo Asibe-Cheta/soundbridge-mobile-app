@@ -17,6 +17,10 @@ import HomeScreen from './src/screens/HomeScreen';
 import DiscoverScreen from './src/screens/DiscoverScreen';
 import UploadScreen from './src/screens/UploadScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
+import ChatScreen from './src/screens/ChatScreen';
+import LiveSessionsScreen from './src/screens/LiveSessionsScreen';
+import LiveSessionRoomScreen from './src/screens/LiveSessionRoomScreen';
+import CreateLiveSessionScreen from './src/screens/CreateLiveSessionScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import AudioPlayerScreen from './src/screens/AudioPlayerScreen';
 import CreatorProfileScreen from './src/screens/CreatorProfileScreen';
@@ -24,6 +28,8 @@ import CreatorSetupScreen from './src/screens/CreatorSetupScreen';
 import PrivacySecurityScreen from './src/screens/PrivacySecurityScreen';
 import ChangePasswordScreen from './src/screens/ChangePasswordScreen';
 import NotificationSettingsScreen from './src/screens/NotificationSettingsScreen';
+import NotificationPreferencesScreen from './src/screens/NotificationPreferencesScreen';
+import NotificationInboxScreen from './src/screens/NotificationInboxScreen';
 import ThemeSettingsScreen from './src/screens/ThemeSettingsScreen';
 import HelpSupportScreen from './src/screens/HelpSupportScreen';
 import AboutScreen from './src/screens/AboutScreen';
@@ -49,6 +55,9 @@ import CollaborationRequestsScreen from './src/screens/CollaborationRequestsScre
 import ServiceProviderOnboardingScreen from './src/screens/ServiceProviderOnboardingScreen';
 import ServiceProviderDashboardScreen from './src/screens/ServiceProviderDashboardScreen';
 import AudioEnhancementExpoScreen from './src/screens/AudioEnhancementScreen.expo';
+import TwoFactorVerificationScreen from './src/screens/TwoFactorVerificationScreen';
+import TwoFactorSetupScreen from './src/screens/TwoFactorSetupScreen';
+import TwoFactorSettingsScreen from './src/screens/TwoFactorSettingsScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -63,8 +72,8 @@ import CreateEventScreen from './src/screens/CreateEventScreen';
 import CreatePlaylistScreen from './src/screens/CreatePlaylistScreen';
 
 // Import services
-// import { notificationService } from './src/services/NotificationService';
-// import { deepLinkingService } from './src/services/DeepLinkingService';
+import { notificationService } from './src/services/NotificationService';
+import * as Linking from 'expo-linking';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -135,28 +144,100 @@ function AppNavigator() {
 
   // Initialize services
   React.useEffect(() => {
-    console.log('🔧 Services initialization temporarily disabled for debugging');
-    // if (user) {
-    //   // Initialize notification service
-    //   notificationService.initialize().then(success => {
-    //     if (success) {
-    //       console.log('✅ Notification service ready');
-    //     }
-    //   });
-    // }
+    console.log('🔧 Initializing services...');
+    if (user) {
+      // Initialize notification service
+      notificationService.initialize().then(success => {
+        if (success) {
+          console.log('✅ Notification service ready');
+        }
+      });
+    }
 
-    // // Initialize deep linking service
-    // if (navigationRef.current) {
-    //   const cleanup = deepLinkingService.initialize(navigationRef.current);
-    //   return cleanup;
-    // }
+    // Initialize deep linking
+    const handleDeepLink = async (event: { url: string }) => {
+      const { path, queryParams } = Linking.parse(event.url);
+      console.log('🔗 Deep link received:', path, queryParams);
+      
+      if (path && navigationRef.current) {
+        handleDeepLinkNavigation(path, queryParams);
+      }
+    };
+
+    // Listen for URL events
+    const subscription = Linking.addEventListener('url', handleDeepLink);
+
+    // Check for initial URL
+    Linking.getInitialURL().then(url => {
+      if (url) {
+        const { path, queryParams } = Linking.parse(url);
+        if (path && navigationRef.current) {
+          handleDeepLinkNavigation(path, queryParams);
+        }
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
   }, [user]);
+
+  // Handle deep link navigation
+  const handleDeepLinkNavigation = (path: string, params: any) => {
+    if (!navigationRef.current) return;
+
+    // Parse the path and navigate accordingly
+    const segments = path.split('/');
+    const firstSegment = segments[0];
+
+    switch (firstSegment) {
+      case 'event':
+        if (segments[1]) {
+          navigationRef.current.navigate('EventDetails', { eventId: segments[1] });
+        }
+        break;
+      case 'track':
+        if (segments[1]) {
+          navigationRef.current.navigate('TrackDetails', { trackId: segments[1] });
+        }
+        break;
+      case 'creator':
+        if (segments[1]) {
+          navigationRef.current.navigate('CreatorProfile', { creatorId: segments[1] });
+        }
+        break;
+      case 'messages':
+        if (segments[1]) {
+          navigationRef.current.navigate('Messages', { conversationId: segments[1] });
+        } else {
+          navigationRef.current.navigate('Messages');
+        }
+        break;
+      case 'wallet':
+        navigationRef.current.navigate('Wallet');
+        break;
+      case 'collaboration':
+        if (segments[1]) {
+          navigationRef.current.navigate('CollaborationRequests', { requestId: segments[1] });
+        }
+        break;
+      default:
+        console.log('Unknown deep link path:', path);
+    }
+  };
 
   // Handle navigation ready
   const onNavigationReady = React.useCallback(() => {
-    console.log('🔧 Deep linking temporarily disabled for debugging');
-    // deepLinkingService.setNavigationReady();
-    // deepLinkingService.processPendingNavigation();
+    console.log('✅ Navigation ready');
+    // Check for pending deep links from notifications
+    notificationService.getPendingDeepLink().then(data => {
+      if (data && data.deepLink && navigationRef.current) {
+        const { path, queryParams } = Linking.parse(data.deepLink);
+        if (path) {
+          handleDeepLinkNavigation(path, queryParams);
+        }
+      }
+    });
   }, []);
 
   if (loading) {
@@ -194,6 +275,15 @@ function AppNavigator() {
             <Stack.Screen name="PrivacySecurity" component={PrivacySecurityScreen} />
             <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
             <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
+            <Stack.Screen name="NotificationPreferences" component={NotificationPreferencesScreen} />
+            <Stack.Screen name="NotificationInbox" component={NotificationInboxScreen} />
+            <Stack.Screen name="Chat" component={ChatScreen} />
+            <Stack.Screen name="LiveSessions" component={LiveSessionsScreen} />
+            <Stack.Screen name="LiveSessionRoom" component={LiveSessionRoomScreen} />
+            <Stack.Screen name="CreateLiveSession" component={CreateLiveSessionScreen} />
+            <Stack.Screen name="TwoFactorVerification" component={TwoFactorVerificationScreen} />
+            <Stack.Screen name="TwoFactorSetup" component={TwoFactorSetupScreen} />
+            <Stack.Screen name="TwoFactorSettings" component={TwoFactorSettingsScreen} />
             <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
             <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
             <Stack.Screen name="About" component={AboutScreen} />

@@ -295,25 +295,26 @@ export const dbHelpers = {
             id,
             username,
             display_name,
-            avatar_url
+            avatar_url,
+            role
           ),
           recipient:profiles!messages_recipient_id_fkey(
             id,
             username,
             display_name,
-            avatar_url
+            avatar_url,
+            role
           )
         `)
         .or(`sender_id.eq.${userId},recipient_id.eq.${userId}`)
-        .order('created_at', { ascending: false })
-        .limit(50);
+        .order('created_at', { ascending: false });
 
       if (error) {
         console.log('⚠️ Messages table might not exist or has different structure:', error.message);
         return { success: true, data: [], error: null };
       }
 
-      // Group messages into conversations
+      // Group messages into conversations (following web team's guide)
       const conversationsMap = new Map();
       
       messages?.forEach((message) => {
@@ -325,32 +326,51 @@ export const dbHelpers = {
           ? message.recipient 
           : message.sender;
 
-        if (!conversationsMap.has(otherUserId)) {
-          conversationsMap.set(otherUserId, {
-            id: otherUserId,
-            participant1_id: userId,
-            participant2_id: otherUserId,
-            participant1: userId === message.sender_id ? message.sender : message.recipient,
-            participant2: otherUser,
-            last_message: [{
+        // Create conversation ID (always alphabetically sorted - per web team spec)
+        const conversationId = [userId, otherUserId].sort().join('_');
+
+        if (!conversationsMap.has(conversationId)) {
+          conversationsMap.set(conversationId, {
+            id: conversationId,
+            otherUser: {
+              id: otherUser.id,
+              username: otherUser.username,
+              display_name: otherUser.display_name,
+              avatar_url: otherUser.avatar_url,
+              role: otherUser.role
+            },
+            lastMessage: {
               content: message.content,
               created_at: message.created_at,
               sender_id: message.sender_id
-            }],
-            updated_at: message.created_at,
-            unreadCount: 0
+            },
+            unreadCount: 0,
+            updatedAt: message.created_at
           });
         }
 
-        const conversation = conversationsMap.get(otherUserId);
+        const conversation = conversationsMap.get(conversationId);
         
         // Count unread messages (where current user is recipient)
         if (!message.is_read && message.recipient_id === userId) {
           conversation.unreadCount++;
         }
+
+        // Update last message if this one is newer
+        if (new Date(message.created_at) > new Date(conversation.lastMessage.created_at)) {
+          conversation.lastMessage = {
+            content: message.content,
+            created_at: message.created_at,
+            sender_id: message.sender_id
+          };
+          conversation.updatedAt = message.created_at;
+        }
       });
 
-      const conversations = Array.from(conversationsMap.values());
+      // Convert to array and sort by most recent
+      const conversations = Array.from(conversationsMap.values())
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      
       console.log('✅ Conversations loaded:', conversations.length);
       
       return { success: true, data: conversations, error: null };
@@ -1551,5 +1571,605 @@ export const dbHelpers = {
       console.error('❌ Error getting user playlists:', error);
       return { data: [], error };
     }
-  }
+  },
+
+  // ========================================
+  // LIVE AUDIO SESSIONS
+  // ========================================
+
+  /**
+   * Get currently live sessions
+   */
+  async getLiveSessions() {
+    try {
+      const { data, error } = await supabase
+        .from('live_sessions')
+        .select(`
+          *,
+          creator:profiles!live_sessions_creator_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url,
+            role
+          )
+        `)
+        .eq('status', 'live')
+        .order('actual_start_time', { ascending: false });
+
+      if (error) throw error;
+      return { success: true, data: data || [], error: null };
+    } catch (error) {
+      console.error('❌ Error getting live sessions:', error);
+      return { success: false, data: [], error };
+    }
+  },
+
+  /**
+   * Get upcoming scheduled sessions
+   */
+  async getUpcomingSessions(limit = 10) {
+    try {
+      const { data, error } = await supabase
+        .from('live_sessions')
+        .select(`
+          *,
+          creator:profiles!live_sessions_creator_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url,
+            role
+          )
+        `)
+        .eq('status', 'scheduled')
+        .gte('scheduled_start_time', new Date().toISOString())
+        .order('scheduled_start_time', { ascending: true })
+        .limit(limit);
+
+      if (error) throw error;
+      return { success: true, data: data || [], error: null };
+    } catch (error) {
+      console.error('❌ Error getting upcoming sessions:', error);
+      return { success: false, data: [], error };
+    }
+  },
+
+  /**
+   * Get session details by ID
+   */
+  async getSessionDetails(sessionId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('live_sessions')
+        .select(`
+          *,
+          creator:profiles!live_sessions_creator_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url,
+            role
+          )
+        `)
+        .eq('id', sessionId)
+        .single();
+
+      if (error) throw error;
+      return { success: true, data, error: null };
+    } catch (error) {
+      console.error('❌ Error getting session details:', error);
+      return { success: false, data: null, error };
+    }
+  },
+
+  /**
+   * Join a live session (create participant record)
+   */
+  async joinLiveSession(sessionId: string, userId: string, role: 'listener' | 'speaker' = 'listener') {
+    try {
+      const { data, error } = await supabase
+        .from('live_session_participants')
+        .upsert({
+          session_id: sessionId,
+          user_id: userId,
+          role: role === 'speaker' ? 'speaker' : 'listener',
+          joined_at: new Date().toISOString(),
+          left_at: null,
+        }, {
+          onConflict: 'session_id,user_id'
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { success: true, data, error: null };
+    } catch (error) {
+      console.error('❌ Error joining session:', error);
+      return { success: false, data: null, error };
+    }
+  },
+
+  /**
+   * Leave a live session (update participant record)
+   */
+  async leaveLiveSession(sessionId: string, userId: string) {
+    try {
+      const { error } = await supabase
+        .from('live_session_participants')
+        .update({
+          left_at: new Date().toISOString()
+        })
+        .eq('session_id', sessionId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+      return { success: true, error: null };
+    } catch (error) {
+      console.error('❌ Error leaving session:', error);
+      return { success: false, error };
+    }
+  },
+
+  /**
+   * Get participants in a session
+   */
+  async getSessionParticipants(sessionId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('live_session_participants')
+        .select(`
+          *,
+          user:profiles!live_session_participants_user_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url,
+            role
+          )
+        `)
+        .eq('session_id', sessionId)
+        .is('left_at', null)
+        .order('joined_at', { ascending: true });
+
+      if (error) throw error;
+      return { success: true, data: data || [], error: null };
+    } catch (error) {
+      console.error('❌ Error getting participants:', error);
+      return { success: false, data: [], error };
+    }
+  },
+
+  /**
+   * Raise hand in a live session (listener requests to speak)
+   */
+  async raiseHand(sessionId: string, userId: string) {
+    try {
+      const { error } = await supabase
+        .from('live_session_participants')
+        .update({
+          hand_raised: true,
+          hand_raised_at: new Date().toISOString()
+        })
+        .eq('session_id', sessionId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+      console.log('✅ Hand raised successfully');
+      return { success: true, error: null };
+    } catch (error) {
+      console.error('❌ Error raising hand:', error);
+      return { success: false, error };
+    }
+  },
+
+  /**
+   * Lower hand in a live session
+   */
+  async lowerHand(sessionId: string, userId: string) {
+    try {
+      const { error } = await supabase
+        .from('live_session_participants')
+        .update({
+          hand_raised: false,
+          hand_raised_at: null
+        })
+        .eq('session_id', sessionId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+      console.log('✅ Hand lowered successfully');
+      return { success: true, error: null };
+    } catch (error) {
+      console.error('❌ Error lowering hand:', error);
+      return { success: false, error };
+    }
+  },
+
+  /**
+   * Promote participant to speaker (host only)
+   */
+  async promoteToSpeaker(sessionId: string, userId: string) {
+    try {
+      const { error } = await supabase
+        .from('live_session_participants')
+        .update({
+          role: 'speaker',
+          hand_raised: false,
+          hand_raised_at: null,
+          is_muted: true // Start muted for safety
+        })
+        .eq('session_id', sessionId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+      console.log('✅ Participant promoted to speaker');
+      return { success: true, error: null };
+    } catch (error) {
+      console.error('❌ Error promoting to speaker:', error);
+      return { success: false, error };
+    }
+  },
+
+  /**
+   * Demote speaker to listener (host only)
+   */
+  async demoteToListener(sessionId: string, userId: string) {
+    try {
+      const { error } = await supabase
+        .from('live_session_participants')
+        .update({
+          role: 'listener',
+          is_muted: false,
+          is_speaking: false
+        })
+        .eq('session_id', sessionId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+      console.log('✅ Speaker demoted to listener');
+      return { success: true, error: null };
+    } catch (error) {
+      console.error('❌ Error demoting to listener:', error);
+      return { success: false, error };
+    }
+  },
+
+  /**
+   * Toggle microphone mute status
+   */
+  async toggleMute(sessionId: string, userId: string, isMuted: boolean) {
+    try {
+      const { error } = await supabase
+        .from('live_session_participants')
+        .update({
+          is_muted: isMuted,
+          is_speaking: isMuted ? false : undefined // Stop speaking if muted
+        })
+        .eq('session_id', sessionId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+      console.log(`✅ Microphone ${isMuted ? 'muted' : 'unmuted'}`);
+      return { success: true, error: null };
+    } catch (error) {
+      console.error('❌ Error toggling mute:', error);
+      return { success: false, error };
+    }
+  },
+
+  /**
+   * Remove participant from session (host only)
+   */
+  async removeParticipant(sessionId: string, userId: string) {
+    try {
+      const { error } = await supabase
+        .from('live_session_participants')
+        .update({
+          left_at: new Date().toISOString()
+        })
+        .eq('session_id', sessionId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+      console.log('✅ Participant removed from session');
+      return { success: true, error: null };
+    } catch (error) {
+      console.error('❌ Error removing participant:', error);
+      return { success: false, error };
+    }
+  },
+
+  /**
+   * Update participant's speaking status (used by Agora volume callbacks)
+   */
+  async updateSpeakingStatus(sessionId: string, userId: string, isSpeaking: boolean) {
+    try {
+      const { error } = await supabase
+        .from('live_session_participants')
+        .update({
+          is_speaking: isSpeaking
+        })
+        .eq('session_id', sessionId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+      return { success: true, error: null };
+    } catch (error) {
+      console.error('❌ Error updating speaking status:', error);
+      return { success: false, error };
+    }
+  },
+
+  /**
+   * Send a comment in a live session
+   */
+  async sendSessionComment(
+    sessionId: string,
+    userId: string,
+    content: string,
+    commentType: 'text' | 'emoji' = 'text'
+  ) {
+    try {
+      const { data, error } = await supabase
+        .from('live_session_comments')
+        .insert({
+          session_id: sessionId,
+          user_id: userId,
+          content,
+          comment_type: commentType,
+        })
+        .select(`
+          *,
+          user:profiles!live_session_comments_user_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url
+          )
+        `)
+        .single();
+
+      if (error) throw error;
+      return { success: true, data, error: null };
+    } catch (error) {
+      console.error('❌ Error sending comment:', error);
+      return { success: false, data: null, error };
+    }
+  },
+
+  /**
+   * Get comments for a session
+   */
+  async getSessionComments(sessionId: string, limit = 100) {
+    try {
+      const { data, error } = await supabase
+        .from('live_session_comments')
+        .select(`
+          *,
+          user:profiles!live_session_comments_user_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url
+          )
+        `)
+        .eq('session_id', sessionId)
+        .eq('is_deleted', false)
+        .order('created_at', { ascending: true })
+        .limit(limit);
+
+      if (error) throw error;
+      return { success: true, data: data || [], error: null };
+    } catch (error) {
+      console.error('❌ Error getting comments:', error);
+      return { success: false, data: [], error };
+    }
+  },
+
+  /**
+   * Subscribe to real-time comments
+   */
+  subscribeToSessionComments(sessionId: string, callback: (comment: any) => void) {
+    const subscription = supabase
+      .channel(`session_comments:${sessionId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'live_session_comments',
+          filter: `session_id=eq.${sessionId}`,
+        },
+        async (payload) => {
+          // Fetch full comment with user details
+          const { data } = await supabase
+            .from('live_session_comments')
+            .select(`
+              *,
+              user:profiles!live_session_comments_user_id_fkey(
+                id,
+                username,
+                display_name,
+                avatar_url
+              )
+            `)
+            .eq('id', payload.new.id)
+            .single();
+
+          if (data) {
+            callback(data);
+          }
+        }
+      )
+      .subscribe();
+
+    return subscription;
+  },
+
+  /**
+   * Subscribe to real-time participants
+   */
+  subscribeToSessionParticipants(sessionId: string, callback: () => void) {
+    const subscription = supabase
+      .channel(`session_participants:${sessionId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'live_session_participants',
+          filter: `session_id=eq.${sessionId}`,
+        },
+        () => {
+          callback();
+        }
+      )
+      .subscribe();
+
+    return subscription;
+  },
+
+  /**
+   * Send a tip during a live session
+   */
+  async sendLiveTip(
+    sessionId: string,
+    tipperId: string,
+    creatorId: string,
+    amount: number,
+    message?: string,
+    stripePaymentIntentId?: string
+  ) {
+    try {
+      const platformFeePercentage = 15;
+      const platformFeeAmount = amount * (platformFeePercentage / 100);
+      const creatorAmount = amount - platformFeeAmount;
+
+      const { data, error } = await supabase
+        .from('live_session_tips')
+        .insert({
+          session_id: sessionId,
+          tipper_id: tipperId,
+          creator_id: creatorId,
+          amount,
+          currency: 'USD',
+          platform_fee_percentage: platformFeePercentage,
+          platform_fee_amount: platformFeeAmount,
+          creator_amount: creatorAmount,
+          message: message || null,
+          stripe_payment_intent_id: stripePaymentIntentId || null,
+          status: 'completed',
+        })
+        .select(`
+          *,
+          tipper:profiles!live_session_tips_tipper_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url
+          ),
+          creator:profiles!live_session_tips_creator_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url
+          )
+        `)
+        .single();
+
+      if (error) throw error;
+
+      // Update session total tips
+      await supabase.rpc('increment_session_tips', {
+        session_id: sessionId,
+        tip_amount: amount,
+      });
+
+      console.log('✅ Live tip sent successfully:', data);
+      return { success: true, data, error: null };
+    } catch (error) {
+      console.error('❌ Error sending live tip:', error);
+      return { success: false, data: null, error };
+    }
+  },
+
+  /**
+   * Get tips for a live session
+   */
+  async getSessionTips(sessionId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('live_session_tips')
+        .select(`
+          *,
+          tipper:profiles!live_session_tips_tipper_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url
+          ),
+          creator:profiles!live_session_tips_creator_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url
+          )
+        `)
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return { success: true, data: data || [], error: null };
+    } catch (error) {
+      console.error('❌ Error getting session tips:', error);
+      return { success: false, data: [], error };
+    }
+  },
+
+  /**
+   * Subscribe to real-time tips
+   */
+  subscribeToSessionTips(sessionId: string, callback: (tip: any) => void) {
+    const subscription = supabase
+      .channel(`session_tips:${sessionId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'live_session_tips',
+          filter: `session_id=eq.${sessionId}`,
+        },
+        async (payload) => {
+          // Fetch full tip with user details
+          const { data } = await supabase
+            .from('live_session_tips')
+            .select(`
+              *,
+              tipper:profiles!live_session_tips_tipper_id_fkey(
+                id,
+                username,
+                display_name,
+                avatar_url
+              ),
+              creator:profiles!live_session_tips_creator_id_fkey(
+                id,
+                username,
+                display_name,
+                avatar_url
+              )
+            `)
+            .eq('id', payload.new.id)
+            .single();
+
+          if (data) {
+            callback(data);
+          }
+        }
+      )
+      .subscribe();
+
+    return subscription;
+  },
 };
