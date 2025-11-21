@@ -116,7 +116,7 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
       // 3. Initialize Agora engine
       await agoraService.initialize();
       
-      // 4. Generate token
+      // 4. Generate Agora token
       console.log('🔑 Generating Agora token...');
       const agoraRole = (userRole === 'host' || userRole === 'speaker') ? 'publisher' : 'audience';
       const tokenData = await generateAgoraTokenWithRetry(sessionId, agoraRole);
