@@ -1881,6 +1881,60 @@ export const dbHelpers = {
   },
 
   /**
+   * End a live session (host only)
+   * Updates session status to 'ended' and sets end time
+   */
+  async endLiveSession(sessionId: string, creatorId: string) {
+    try {
+      console.log('🔴 Ending live session:', sessionId);
+      
+      // Calculate session duration
+      const { data: sessionData, error: fetchError } = await supabase
+        .from('live_sessions')
+        .select('actual_start_time')
+        .eq('id', sessionId)
+        .eq('creator_id', creatorId) // Verify ownership
+        .single();
+
+      if (fetchError) throw fetchError;
+      if (!sessionData) {
+        throw new Error('Session not found or you are not the host');
+      }
+
+      // Update session status to ended
+      const { error: updateError } = await supabase
+        .from('live_sessions')
+        .update({
+          status: 'ended',
+          end_time: new Date().toISOString(),
+        })
+        .eq('id', sessionId)
+        .eq('creator_id', creatorId);
+
+      if (updateError) throw updateError;
+
+      // Mark all active participants as left
+      const { error: participantsError } = await supabase
+        .from('live_session_participants')
+        .update({
+          left_at: new Date().toISOString()
+        })
+        .eq('session_id', sessionId)
+        .is('left_at', null);
+
+      if (participantsError) {
+        console.warn('⚠️ Error updating participants on session end:', participantsError);
+      }
+
+      console.log('✅ Live session ended successfully');
+      return { success: true, error: null };
+    } catch (error) {
+      console.error('❌ Error ending live session:', error);
+      return { success: false, error };
+    }
+  },
+
+  /**
    * Update participant's speaking status (used by Agora volume callbacks)
    */
   async updateSpeakingStatus(sessionId: string, userId: string, isSpeaking: boolean) {

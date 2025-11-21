@@ -17,6 +17,7 @@ import {
   Alert,
   StatusBar,
   FlatList,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -71,12 +72,15 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
   const [showParticipantModal, setShowParticipantModal] = useState(false);
   const [selectedParticipant, setSelectedParticipant] = useState<LiveSessionParticipant | null>(null);
   const [speakingUids, setSpeakingUids] = useState<Set<number>>(new Set());
+  const [showHostMenu, setShowHostMenu] = useState(false);
+  const [sessionEnded, setSessionEnded] = useState(false);
   
   // Refs
   const commentsScrollRef = useRef<FlatList>(null);
   const commentsSubscriptionRef = useRef<any>(null);
   const participantsSubscriptionRef = useRef<any>(null);
   const tipsSubscriptionRef = useRef<any>(null);
+  const sessionSubscriptionRef = useRef<any>(null);
 
   useEffect(() => {
     initializeSession();
@@ -243,12 +247,39 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
         setActiveTipNotifications(prev => [...prev, newTip]);
       }
     );
+
+    // Subscribe to session status changes (to detect when host ends session)
+    sessionSubscriptionRef.current = supabase
+      .channel(`session_status_${sessionId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'live_sessions',
+          filter: `id=eq.${sessionId}`,
+        },
+        (payload) => {
+          console.log('📡 Session status changed:', payload);
+          if (payload.new && payload.new.status === 'ended') {
+            setSessionEnded(true);
+            setSession(prev => prev ? { ...prev, status: 'ended' } : null);
+          }
+        }
+      )
+      .subscribe();
   };
 
   const cleanup = async () => {
     console.log('🧹 Cleaning up session...');
     
     try {
+      // If host is leaving, end the session
+      if (myRole === 'host' && user && !sessionEnded) {
+        console.log('🔴 Host leaving - ending session...');
+        await dbHelpers.endLiveSession(sessionId, user.id);
+      }
+      
       // Leave Agora channel
       await agoraService.leaveChannel();
       
@@ -266,6 +297,9 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
       }
       if (tipsSubscriptionRef.current) {
         await supabase.removeChannel(tipsSubscriptionRef.current);
+      }
+      if (sessionSubscriptionRef.current) {
+        await supabase.removeChannel(sessionSubscriptionRef.current);
       }
       
       console.log('✅ Cleanup complete');
@@ -516,6 +550,67 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
     );
   };
 
+  const handleEndSession = () => {
+    Alert.alert(
+      'End Live Session',
+      'Are you sure you want to end this session? All participants will be disconnected.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'End Session',
+          style: 'destructive',
+          onPress: async () => {
+            if (!user) return;
+            
+            try {
+              console.log('🔴 Ending session...');
+              const { success, error } = await dbHelpers.endLiveSession(sessionId, user.id);
+              
+              if (!success || error) {
+                throw new Error('Failed to end session');
+              }
+              
+              setSessionEnded(true);
+              
+              Alert.alert(
+                'Session Ended',
+                'Your live session has been ended successfully.',
+                [
+                  {
+                    text: 'OK',
+                    onPress: () => navigation.goBack(),
+                  },
+                ]
+              );
+            } catch (error) {
+              console.error('❌ Error ending session:', error);
+              Alert.alert('Error', 'Failed to end the session. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Handle session ended state (when host ends session)
+  useEffect(() => {
+    if (sessionEnded && myRole !== 'host') {
+      Alert.alert(
+        'Session Ended',
+        'The host has ended this live session.',
+        [
+          {
+            text: 'OK',
+            onPress: () => navigation.goBack(),
+          },
+        ]
+      );
+    }
+  }, [sessionEnded, myRole]);
+
   if (isLoading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: theme.colors.background }]}>
@@ -577,9 +672,15 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
             </View>
           </View>
           
-          <TouchableOpacity style={styles.headerButton}>
-            <Ionicons name="ellipsis-vertical" size={24} color={theme.colors.text} />
-          </TouchableOpacity>
+          {myRole === 'host' && (
+            <TouchableOpacity 
+              style={styles.headerButton}
+              onPress={() => setShowHostMenu(true)}
+            >
+              <Ionicons name="ellipsis-vertical" size={24} color={theme.colors.text} />
+            </TouchableOpacity>
+          )}
+          {myRole !== 'host' && <View style={styles.headerButton} />}
         </View>
 
         <KeyboardAvoidingView 
@@ -790,6 +891,49 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
           onRemoveParticipant={handleRemoveParticipant}
         />
       )}
+
+      {/* Host Menu Modal */}
+      <Modal
+        visible={showHostMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowHostMenu(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowHostMenu(false)}
+        >
+          <View style={[styles.hostMenuContainer, { backgroundColor: theme.colors.card }]}>
+            <Text style={[styles.hostMenuTitle, { color: theme.colors.text }]}>
+              Host Menu
+            </Text>
+            
+            <TouchableOpacity
+              style={[styles.hostMenuItem, { borderBottomColor: theme.colors.border }]}
+              onPress={() => {
+                setShowHostMenu(false);
+                handleEndSession();
+              }}
+            >
+              <Ionicons name="stop-circle" size={24} color="#EF4444" />
+              <Text style={[styles.hostMenuItemText, { color: '#EF4444' }]}>
+                End Session
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.hostMenuItem}
+              onPress={() => setShowHostMenu(false)}
+            >
+              <Ionicons name="close" size={24} color={theme.colors.textSecondary} />
+              <Text style={[styles.hostMenuItemText, { color: theme.colors.textSecondary }]}>
+                Cancel
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -1029,6 +1173,39 @@ const styles = StyleSheet.create({
   },
   handEmoji: {
     fontSize: 24,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  hostMenuContainer: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 16,
+    padding: 0,
+    overflow: 'hidden',
+  },
+  hostMenuTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    textAlign: 'center',
+  },
+  hostMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    gap: 16,
+    borderBottomWidth: 1,
+  },
+  hostMenuItemText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 
