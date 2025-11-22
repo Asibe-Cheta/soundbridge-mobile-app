@@ -72,10 +72,30 @@ export default function TwoFactorSetupScreen() {
       console.error('❌ Setup initialization failed:', err);
       const parsedError = parseTwoFactorError(err);
       
-      Alert.alert('Setup Failed', parsedError.message, [
-        { text: 'Go Back', onPress: () => navigation.goBack() },
-        { text: 'Retry', onPress: initializeSetup },
-      ]);
+      // Check if 2FA is already enabled
+      if (parsedError.message?.includes('already enabled') || parsedError.title === '2FA Already Enabled') {
+        Alert.alert(
+          '2FA Already Enabled',
+          'Two-factor authentication is already set up for your account. Go to 2FA Settings to manage it.',
+          [
+            {
+              text: 'Go to Settings',
+              onPress: () => {
+                navigation.goBack();
+                setTimeout(() => {
+                  (navigation as any).navigate('TwoFactorSettings');
+                }, 100);
+              },
+            },
+            { text: 'Cancel', onPress: () => navigation.goBack() },
+          ]
+        );
+      } else {
+        Alert.alert('Setup Failed', parsedError.message, [
+          { text: 'Go Back', onPress: () => navigation.goBack() },
+          { text: 'Retry', onPress: initializeSetup },
+        ]);
+      }
     }
   };
 
