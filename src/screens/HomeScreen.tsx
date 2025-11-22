@@ -29,7 +29,6 @@ import EventMatchIndicator from '../components/EventMatchIndicator';
 import { getRelativeTime } from '../utils/collaborationUtils';
 import TipModal from '../components/TipModal';
 import CollaborationRequestForm from '../components/CollaborationRequestForm';
-import { notificationService } from '../services/NotificationService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -181,37 +180,6 @@ export default function HomeScreen() {
     navigation.navigate('Discover');
   };
 
-  // TEST NOTIFICATION BUTTON - TEMPORARY
-  const handleTestNotification = async () => {
-    try {
-      console.log('🔔 Testing notification...');
-      
-      // Schedule a local notification immediately
-      await notificationService.scheduleLocalNotification(
-        'Test Notification 🎉',
-        'This is how you will receive notifications! Tap to test deep linking.',
-        {
-          type: 'event',
-          entityId: 'test-123',
-          title: 'Test Event',
-          deepLink: 'soundbridge://home',
-        }
-      );
-
-      Alert.alert(
-        '✅ Test Sent!',
-        'Check your notification tray. You should see a notification now!',
-        [{ text: 'OK' }]
-      );
-    } catch (error) {
-      console.error('❌ Error sending test notification:', error);
-      Alert.alert(
-        'Error',
-        'Failed to send test notification. Make sure you granted notification permissions.',
-        [{ text: 'OK' }]
-      );
-    }
-  };
 
   const navigateToHotCreators = () => {
     navigation.navigate('AllCreators');
@@ -989,16 +957,6 @@ export default function HomeScreen() {
             </View>
           </View>
         </LinearGradient>
-      </TouchableOpacity>
-
-      {/* TEST NOTIFICATION BUTTON - TEMPORARY */}
-      <TouchableOpacity 
-        style={styles.testNotificationButton}
-        onPress={handleTestNotification}
-        activeOpacity={0.7}
-      >
-        <Ionicons name="notifications-outline" size={20} color="#FFFFFF" />
-        <Text style={styles.testNotificationButtonText}>Test Notification</Text>
       </TouchableOpacity>
 
       {/* Trending Tracks - Collapsible */}
@@ -1945,29 +1903,6 @@ const styles = StyleSheet.create({
   liveSessionsButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '600',
-  },
-  // TEST NOTIFICATION BUTTON - TEMPORARY
-  testNotificationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#10B981',
-    marginHorizontal: 16,
-    marginTop: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  testNotificationButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
     fontWeight: '600',
   },
   section: {
