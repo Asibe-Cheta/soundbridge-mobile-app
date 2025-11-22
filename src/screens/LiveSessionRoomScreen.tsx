@@ -76,6 +76,10 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
   const [showHostMenu, setShowHostMenu] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
   
+  // DEBUG: Real-time subscription status (visible in app)
+  const [realtimeStatus, setRealtimeStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
+  const [commentsReceivedCount, setCommentsReceivedCount] = useState(0);
+  
   // Refs
   const commentsScrollRef = useRef<FlatList>(null);
   const commentsSubscriptionRef = useRef<any>(null);
@@ -219,12 +223,17 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
 
   const subscribeToUpdates = () => {
     console.log('📡 [REALTIME] Subscribing to updates for session:', sessionId);
+    setRealtimeStatus('connecting');
     
     // Subscribe to comments
     commentsSubscriptionRef.current = dbHelpers.subscribeToSessionComments(
       sessionId,
       (newComment) => {
         console.log('💬 [REALTIME] New comment received:', newComment);
+        
+        // Update debug counter
+        setCommentsReceivedCount(prev => prev + 1);
+        
         setComments(prev => {
           // Check if comment already exists (avoid duplicates)
           const exists = prev.find(c => c.id === newComment.id);
@@ -249,9 +258,19 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
       // Subscribe to subscription status changes
       commentsSubscriptionRef.current.on('system', {}, (payload: any) => {
         console.log('🔌 [REALTIME] Subscription status:', payload);
+        
+        // Update debug status
+        if (payload.status === 'SUBSCRIBED') {
+          setRealtimeStatus('connected');
+        } else if (payload.status === 'CLOSED' || payload.status === 'TIMED_OUT') {
+          setRealtimeStatus('disconnected');
+        } else if (payload.status === 'CHANNEL_ERROR') {
+          setRealtimeStatus('error');
+        }
       });
     } else {
       console.error('❌ [REALTIME] Failed to create comments subscription');
+      setRealtimeStatus('error');
     }
     
     // Subscribe to participants
@@ -759,9 +778,30 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
 
             {/* Comments */}
             <View style={styles.commentsSection}>
-              <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>
-                Live Chat
-              </Text>
+              <View style={styles.chatHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>
+                  Live Chat
+                </Text>
+                {/* DEBUG: Real-time status indicator */}
+                <View style={[
+                  styles.realtimeStatusBadge,
+                  {
+                    backgroundColor: 
+                      realtimeStatus === 'connected' ? '#10B981' :
+                      realtimeStatus === 'connecting' ? '#F59E0B' :
+                      realtimeStatus === 'disconnected' ? '#6B7280' :
+                      '#EF4444'
+                  }
+                ]}>
+                  <View style={styles.statusDot} />
+                  <Text style={styles.realtimeStatusText}>
+                    {realtimeStatus === 'connected' ? `Live (${commentsReceivedCount})` :
+                     realtimeStatus === 'connecting' ? 'Connecting...' :
+                     realtimeStatus === 'disconnected' ? 'Offline' :
+                     'Error'}
+                  </Text>
+                </View>
+              </View>
               <FlatList
                 ref={commentsScrollRef}
                 data={comments.slice(-50)} // Show last 50 comments
@@ -1091,6 +1131,33 @@ const styles = StyleSheet.create({
   commentsSection: {
     padding: 16,
     flex: 1,
+  },
+  chatHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  realtimeStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
+  },
+  realtimeStatusText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   commentsList: {
     marginTop: 8,
