@@ -9,19 +9,25 @@
 
 export interface TwoFactorSetupResponse {
   success: true;
+  // Normalized fields (what mobile app expects)
   secret: string; // Base32 encoded secret for manual entry
-  qrCodeUrl: string; // Base64 PNG image: "data:image/png;base64,..."
+  qrCode: string; // Base64 PNG image: "data:image/png;base64,..."
   otpauthUrl: string; // OTPAuth URL for deep linking
-  backupCodes: string[]; // 10 codes, 8-char alphanumeric uppercase
+  backupCodes: string[]; // Empty array if not available yet (filled after verification)
   sessionToken: string; // Temporary session for verification
   expiresAt: string; // ISO timestamp
 }
 
 export interface TwoFactorVerifySetupResponse {
   success: true;
-  enabled: true;
-  backupCodesStored: number;
-  message: string;
+  data?: {
+    backupCodes: string[]; // Web API returns codes in data object
+  };
+  backupCodes?: string[]; // Direct format (mock)
+  message?: string;
+  // Legacy fields
+  enabled?: boolean;
+  backupCodesStored?: number;
 }
 
 export interface TwoFactorCheckRequiredResponse {

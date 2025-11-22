@@ -54,12 +54,17 @@ export default function TwoFactorSetupScreen() {
       console.log('🔧 Initializing 2FA setup...');
       const response = await setupTOTP();
       
-      setQrCodeUrl(response.qrCodeUrl);
-      setOtpauthUrl(response.otpauthUrl);
-      setSecret(response.secret);
-      setBackupCodes(response.backupCodes);
-      setSessionToken(response.sessionToken);
-      setExpiresAt(new Date(response.expiresAt));
+      console.log('📦 Setup response:', response);
+      
+      setQrCodeUrl(response.qrCode || '');
+      setOtpauthUrl(response.otpauthUrl || '');
+      setSecret(response.secret || '');
+      setBackupCodes(response.backupCodes || []); // Empty if not provided yet
+      setSessionToken(response.sessionToken || '');
+      
+      if (response.expiresAt) {
+        setExpiresAt(new Date(response.expiresAt));
+      }
       
       setCurrentStep('qrcode');
       console.log('✅ Setup initialized successfully');
@@ -89,17 +94,29 @@ export default function TwoFactorSetupScreen() {
 
     try {
       console.log('🔐 Verifying setup code...');
-      await verifySetup(sessionToken, code);
+      const verifyResponse = await verifySetup(sessionToken, code);
       
       console.log('✅ Setup verified successfully');
+      
+      // Store backup codes from verification response
+      if (verifyResponse.data?.backupCodes && Array.isArray(verifyResponse.data.backupCodes)) {
+        setBackupCodes(verifyResponse.data.backupCodes);
+        console.log(`✅ Received ${verifyResponse.data.backupCodes.length} backup codes`);
+      }
+      
       setCurrentStep('complete');
       
-      // Show success message
-      Alert.alert(
-        'Success!',
-        'Two-factor authentication has been enabled for your account.',
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
-      );
+      // Show backup codes modal if available
+      if (verifyResponse.data?.backupCodes && verifyResponse.data.backupCodes.length > 0) {
+        setShowBackupCodes(true);
+      } else {
+        // If no backup codes, just show success
+        Alert.alert(
+          'Success!',
+          'Two-factor authentication has been enabled for your account.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+      }
     } catch (err: any) {
       console.error('❌ Verification failed:', err);
       
@@ -249,19 +266,12 @@ export default function TwoFactorSetupScreen() {
                 </TouchableOpacity>
               </View>
 
-              {/* Backup Codes Preview */}
+              {/* Backup Codes Info */}
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>🔑 Backup Codes</Text>
                 <Text style={styles.sectionText}>
-                  You'll receive 10 backup codes after verification. Keep them safe!
+                  You'll receive 10 backup codes after verification. Keep them safe - they can be used to access your account if you lose your authenticator device.
                 </Text>
-                <TouchableOpacity
-                  style={styles.previewButton}
-                  onPress={() => setShowBackupCodes(true)}
-                >
-                  <Text style={styles.previewButtonText}>Preview Backup Codes</Text>
-                  <Ionicons name="chevron-forward" size={16} color="#4ECDC4" />
-                </TouchableOpacity>
               </View>
 
               {/* Next Button */}
@@ -365,18 +375,30 @@ export default function TwoFactorSetupScreen() {
         </ScrollView>
 
         {/* Backup Codes Modal */}
-        <BackupCodesModal
-          visible={showBackupCodes}
-          backupCodes={backupCodes}
-          onClose={() => setShowBackupCodes(false)}
-          onConfirm={currentStep === 'complete' ? () => setBackupCodesSaved(true) : undefined}
-          title={currentStep === 'complete' ? 'Save Your Backup Codes' : 'Preview: Backup Codes'}
-          message={
-            currentStep === 'complete'
-              ? 'Store these codes in a safe place. You can use them to log in if you lose access to your authenticator app.'
-              : 'These are your backup codes. You will be asked to save them after completing setup.'
-          }
-        />
+        {backupCodes && backupCodes.length > 0 && (
+          <BackupCodesModal
+            visible={showBackupCodes}
+            backupCodes={backupCodes}
+            onClose={() => {
+              setShowBackupCodes(false);
+              if (currentStep === 'complete') {
+                // After closing backup codes, go back
+                Alert.alert(
+                  'Success!',
+                  'Two-factor authentication has been enabled. Your backup codes have been saved.',
+                  [{ text: 'OK', onPress: () => navigation.goBack() }]
+                );
+              }
+            }}
+            onConfirm={currentStep === 'complete' ? () => setBackupCodesSaved(true) : undefined}
+            title={currentStep === 'complete' ? 'Save Your Backup Codes' : 'Preview: Backup Codes'}
+            message={
+              currentStep === 'complete'
+                ? 'Store these codes in a safe place. You can use them to log in if you lose access to your authenticator app.'
+                : 'These are your backup codes. You will be asked to save them after completing setup.'
+            }
+          />
+        )}
       </LinearGradient>
     </SafeAreaView>
   );

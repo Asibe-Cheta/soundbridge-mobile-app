@@ -208,13 +208,27 @@ export async function setupTOTP(): Promise<TwoFactorSetupResponse> {
 
     if (!response.ok) {
       const errorData = await response.json();
+      console.error('❌ Setup API error:', errorData);
       throw { response: { data: errorData } };
     }
 
-    const data: TwoFactorSetupResponse = await response.json();
-    console.log('✅ 2FA setup initialized');
+    const apiResponse = await response.json();
+    console.log('✅ 2FA setup API response:', apiResponse);
     
-    return data;
+    // Normalize the response (web API returns data in nested 'data' object)
+    const normalizedData: TwoFactorSetupResponse = {
+      success: true,
+      secret: apiResponse.data?.secret || apiResponse.secret || '',
+      qrCode: apiResponse.data?.qrCode || apiResponse.qrCodeUrl || '',
+      otpauthUrl: apiResponse.data?.otpauthUrl || apiResponse.otpauthUrl || '',
+      backupCodes: apiResponse.backupCodes || [], // Empty array if not provided (will get after verification)
+      sessionToken: apiResponse.sessionToken || '', // May not be needed
+      expiresAt: apiResponse.expiresAt || new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 min default
+    };
+    
+    console.log('✅ 2FA setup initialized (normalized)');
+    
+    return normalizedData;
   } catch (error: any) {
     console.error('❌ Setup error:', error);
     throw error;
