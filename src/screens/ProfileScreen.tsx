@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { 
+  loadQueriesInParallel, 
+  waitForValidSession,
+  LoadingStateManager,
+  CancellableQuery,
+  withQueryTimeout
+} from '../utils/dataLoading';
 import * as ImagePicker from 'expo-image-picker';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -74,7 +81,7 @@ interface UserTrack {
 }
 
 export default function ProfileScreen() {
-  const { user, userProfile, signOut, updatePassword, refreshUser, session } = useAuth();
+  const { user, userProfile, signOut, updatePassword, refreshUser, session, loading: authLoading } = useAuth();
   const { autoPlay, toggleAutoPlay } = useAudioPlayer();
   const { theme } = useTheme();
   const navigation = useNavigation();
@@ -94,10 +101,33 @@ export default function ProfileScreen() {
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricType, setBiometricType] = useState('');
 
+  // Loading state management
+  const loadingManager = useRef(new LoadingStateManager()).current;
+  const cancellableQuery = useRef(new CancellableQuery()).current;
+
+  // Subscribe to loading state changes
   useEffect(() => {
-    loadProfileData();
-    checkBiometricAvailability();
+    const unsubscribe = loadingManager.onChange(() => {
+      setLoading(loadingManager.isAnyLoading());
+    });
+    return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (user?.id) {
+      loadProfileData();
+    }
+    checkBiometricAvailability();
+
+    return () => {
+      cancellableQuery.cancel();
+      loadingManager.reset();
+    };
+  }, [authLoading, user?.id]);
 
   const checkBiometricAvailability = async () => {
     const capability = await BiometricAuth.checkBiometricAvailability();
@@ -114,65 +144,110 @@ export default function ProfileScreen() {
   };
 
   const loadProfileData = async () => {
-    setLoading(true);
+    console.log('👤 ProfileScreen: Loading profile data...');
+    loadingManager.setLoading('profile', true, 10000);
+
     try {
       if (!user?.id) {
         console.log('No user ID available');
         return;
       }
 
-      console.log('🔧 Loading profile data for user:', user.id);
-      
-      // Load real profile data
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      
-      console.log('🔍 Raw profile data:', data);
-      console.log('🔍 Profile error:', error);
-      
-      // Get real counts from database
-      const [followersResult, followingResult, tracksCountResult] = await Promise.all([
-        supabase
-          .from('followers')
-          .select('id', { count: 'exact' })
-          .eq('following_id', user.id),
-        supabase
-          .from('followers')
-          .select('id', { count: 'exact' })
-          .eq('follower_id', user.id),
-        supabase
-          .from('audio_tracks')
-          .select('id', { count: 'exact' })
-          .eq('creator_id', user.id)
-      ]);
-      
-      const followersCount = followersResult.count || 0;
-      const followingCount = followingResult.count || 0;
-      const tracksCount = tracksCountResult.count || 0;
-      
-      console.log('📊 Real counts - Followers:', followersCount, 'Following:', followingCount, 'Tracks:', tracksCount);
-      
-      if (data && !error) {
-        console.log('✅ Profile loaded:', data.username);
+      // Wait for valid session
+      await waitForValidSession(supabase, 3000);
+
+      // Load all profile data in parallel with timeouts
+      const results = await loadQueriesInParallel({
+        profile: {
+          name: 'profile',
+          query: () => withQueryTimeout(
+            supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', user.id)
+              .single(),
+            { timeout: 5000, fallback: null }
+          ),
+          timeout: 5000,
+          fallback: null,
+        },
+        followers: {
+          name: 'followers',
+          query: () => withQueryTimeout(
+            supabase
+              .from('followers')
+              .select('id', { count: 'exact', head: true })
+              .eq('following_id', user.id),
+            { timeout: 3000, fallback: { count: 0 } }
+          ),
+          timeout: 3000,
+          fallback: { count: 0 },
+        },
+        following: {
+          name: 'following',
+          query: () => withQueryTimeout(
+            supabase
+              .from('followers')
+              .select('id', { count: 'exact', head: true })
+              .eq('follower_id', user.id),
+            { timeout: 3000, fallback: { count: 0 } }
+          ),
+          timeout: 3000,
+          fallback: { count: 0 },
+        },
+        tracksCount: {
+          name: 'tracksCount',
+          query: () => withQueryTimeout(
+            supabase
+              .from('audio_tracks')
+              .select('id', { count: 'exact', head: true })
+              .eq('creator_id', user.id),
+            { timeout: 3000, fallback: { count: 0 } }
+          ),
+          timeout: 3000,
+          fallback: { count: 0 },
+        },
+        tracks: {
+          name: 'tracks',
+          query: () => withQueryTimeout(
+            supabase
+              .from('audio_tracks')
+              .select('*')
+              .eq('creator_id', user.id)
+              .order('created_at', { ascending: false })
+              .limit(10),
+            { timeout: 5000, fallback: [] }
+          ),
+          timeout: 5000,
+          fallback: [],
+        },
+      });
+
+      // Process profile data
+      const profileData = results.profile?.data || results.profile;
+      const followersCount = results.followers?.data?.count || results.followers?.count || 0;
+      const followingCount = results.following?.data?.count || results.following?.count || 0;
+      const tracksCount = results.tracksCount?.data?.count || results.tracksCount?.count || 0;
+      const tracksData = results.tracks?.data || results.tracks || [];
+
+      if (profileData && !results.profile?.error) {
+        console.log('✅ Profile loaded:', profileData.username);
         setProfile({
-          id: data.id,
-          username: data.username,
-          display_name: data.display_name,
-          bio: data.bio,
-          avatar_url: data.avatar_url,
-          banner_url: data.banner_url,
+          id: profileData.id,
+          username: profileData.username,
+          display_name: profileData.display_name,
+          bio: profileData.bio,
+          avatar_url: profileData.avatar_url,
+          banner_url: profileData.banner_url,
           followers_count: followersCount,
           following_count: followingCount,
           tracks_count: tracksCount,
-          is_creator: data.is_creator || false,
-          is_verified: data.is_verified || false,
-          created_at: data.created_at,
+          is_creator: profileData.is_creator || false,
+          is_verified: profileData.is_verified || false,
+          created_at: profileData.created_at,
         });
       } else {
-        console.error('Failed to load profile:', error);
+        console.error('Failed to load profile:', results.profile?.error);
         // Fallback to basic user data
         setProfile({
           id: user.id,
@@ -181,30 +256,20 @@ export default function ProfileScreen() {
           bio: null,
           avatar_url: null,
           banner_url: null,
-          followers_count: 0,
-          following_count: 0,
-          tracks_count: 0,
+          followers_count: followersCount,
+          following_count: followingCount,
+          tracks_count: tracksCount,
           is_creator: false,
           is_verified: false,
           created_at: new Date().toISOString(),
         });
       }
 
-      // Load user tracks
-      const { data: tracksData, error: tracksError } = await supabase
-        .from('audio_tracks')
-        .select('*')
-        .eq('creator_id', user.id)
-        .limit(10);
-      
-      console.log('🔍 Raw tracks data:', tracksData);
-      console.log('🔍 Tracks error:', tracksError);
-      
-      if (tracksData && !tracksError) {
+      // Process tracks data
+      if (tracksData && tracksData.length > 0) {
         console.log('✅ User tracks loaded:', tracksData.length);
         
-        // Transform tracks data to match interface
-        const transformedTracks: UserTrack[] = tracksData.map(track => ({
+        const transformedTracks: UserTrack[] = tracksData.map((track: any) => ({
           id: track.id,
           title: track.title || 'Untitled Track',
           play_count: track.play_count || track.plays_count || 0,
@@ -215,9 +280,8 @@ export default function ProfileScreen() {
         
         setUserTracks(transformedTracks);
         
-        // Generate recent activity based on user tracks
+        // Generate recent activity
         const activities: RecentActivity[] = [];
-        
         transformedTracks.forEach((track, index) => {
           if (track.play_count > 100) {
             activities.push({
@@ -229,7 +293,6 @@ export default function ProfileScreen() {
               color: '#4CAF50'
             });
           }
-          
           if (track.likes_count > 10) {
             activities.push({
               id: `like-${track.id}`,
@@ -242,7 +305,6 @@ export default function ProfileScreen() {
           }
         });
         
-        // Add upload activity for recent tracks
         if (transformedTracks.length > 0) {
           activities.push({
             id: `upload-${transformedTracks[0].id}`,
@@ -254,48 +316,64 @@ export default function ProfileScreen() {
           });
         }
         
-        setRecentActivity(activities.slice(0, 5)); // Show max 5 activities
+        setRecentActivity(activities.slice(0, 5));
         
-        // Calculate real stats from user tracks
+        // Calculate stats
         const totalPlays = transformedTracks.reduce((sum, track) => sum + (track.play_count || 0), 0);
         const totalLikes = transformedTracks.reduce((sum, track) => sum + (track.likes_count || 0), 0);
+        const estimatedEarnings = totalPlays * 0.001;
         
-        console.log('📊 Calculated stats - Total plays:', totalPlays, 'Total likes:', totalLikes);
-        
-        const estimatedEarnings = totalPlays * 0.001; // $0.001 per play
-        const realStats: UserStats = {
+        setStats({
           total_plays: totalPlays,
           total_likes: totalLikes,
-          total_tips_received: 0, // TODO: Implement tips system
+          total_tips_received: 0,
           total_earnings: estimatedEarnings,
-          monthly_plays: Math.floor(totalPlays * 0.3), // Estimate 30% as monthly
+          monthly_plays: Math.floor(totalPlays * 0.3),
           monthly_earnings: Math.floor(estimatedEarnings * 0.3),
-        };
-        
-        setStats(realStats);
+        });
       } else {
         console.log('ℹ️ No user tracks found');
         setUserTracks([]);
         setRecentActivity([]);
-        
-        // Default stats when no tracks
-        const defaultStats: UserStats = {
+        setStats({
           total_plays: 0,
           total_likes: 0,
           total_tips_received: 0,
           total_earnings: 0,
           monthly_plays: 0,
           monthly_earnings: 0,
-        };
-        
-        setStats(defaultStats);
+        });
       }
-      
+
+      console.log('✅ ProfileScreen: Profile loaded successfully');
     } catch (error) {
-      console.error('Error loading profile:', error);
+      console.error('❌ ProfileScreen: Error loading profile:', error);
       Alert.alert('Error', 'Failed to load profile data');
+      // Set fallback data
+      setProfile({
+        id: user?.id || 'unknown',
+        username: user?.email?.split('@')[0] || 'user123',
+        display_name: user?.email?.split('@')[0] || 'SoundBridge User',
+        bio: null,
+        avatar_url: null,
+        banner_url: null,
+        followers_count: 0,
+        following_count: 0,
+        tracks_count: 0,
+        is_creator: false,
+        is_verified: false,
+        created_at: new Date().toISOString(),
+      });
+      setStats({
+        total_plays: 0,
+        total_likes: 0,
+        total_tips_received: 0,
+        total_earnings: 0,
+        monthly_plays: 0,
+        monthly_earnings: 0,
+      });
     } finally {
-      setLoading(false);
+      loadingManager.setLoading('profile', false, 0);
       setRefreshing(false);
     }
   };

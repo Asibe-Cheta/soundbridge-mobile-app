@@ -20,11 +20,14 @@ import { useAuth } from '../contexts/AuthContext';
 import PasswordStrengthIndicator from '../components/PasswordStrengthIndicator';
 import * as BiometricAuth from '../services/biometricAuth';
 import { loginWithTwoFactorCheck } from '../services/twoFactorAuthConfig';
+import LoginDebugPanel from '../components/LoginDebugPanel';
+import { debugLog, debugError } from '../utils/logStore';
 
 const { width, height } = Dimensions.get('window');
 
 export default function AuthScreen() {
   const navigation = useNavigation();
+  const { setIsChecking2FA } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -40,7 +43,8 @@ export default function AuthScreen() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricType, setBiometricType] = useState('');
-  const { signIn, signUp, signInWithGoogle, resetPassword, resendConfirmation, error } = useAuth();
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const { signIn, signUp, signInWithGoogle, resetPassword, resendConfirmation, error, refreshUser, session } = useAuth();
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -159,23 +163,69 @@ export default function AuthScreen() {
       return;
     }
 
-    setIsLoading(true);
+          setIsLoading(true);
     
     try {
       // Use the new 2FA-aware login flow
+      // Note: We DON'T set isChecking2FA here because loginWithTwoFactorCheck
+      // will sign out if 2FA is required, preventing navigation
+      debugLog('🔐 Starting login with 2FA check...');
       const result = await loginWithTwoFactorCheck(email, password);
+      
+      debugLog('📊 Login result:', JSON.stringify({
+        requires2FA: result.requires2FA,
+        hasUserId: !!result.userId,
+        hasSessionToken: !!result.sessionToken,
+        hasSession: !!result.session,
+      }, null, 2));
       
       if (result.requires2FA) {
         // 2FA is required - navigate to verification screen
-        console.log('🔐 2FA required - navigating to verification');
+        debugLog('🔐 2FA required - navigating to verification screen');
+        debugLog('🔑 Verification Session ID:', result.verificationSessionId?.substring(0, 20) + '...');
+        debugLog('🔑 Session token (legacy):', result.sessionToken?.substring(0, 20) + '...');
+        
+        // Check for either verificationSessionId (new) or sessionToken (legacy)
+        const activeSessionId = result.verificationSessionId || result.sessionToken;
+        if (!result.userId || !activeSessionId) {
+          debugError('❌ Missing required information for 2FA verification');
+          Alert.alert('Error', 'Missing required information for 2FA verification. Please try again.');
+          setIsLoading(false);
+          return;
+        }
+        
+        // Set flag to track 2FA flow (for internal state, not UI control)
+        setIsChecking2FA(true);
+        debugLog('🚩 2FA check flag set to true (2FA required)');
+        
+        debugLog('📤 Navigating to TwoFactorVerification with:', JSON.stringify({
+          userId: result.userId,
+          email: result.email || email,
+          hasSessionToken: !!result.sessionToken,
+        }, null, 2));
+        
+        // Navigate to 2FA screen - use navigate instead of reset for cleaner flow
+        // The 2FA screen will handle its own loading state
         (navigation as any).navigate('TwoFactorVerification', {
           userId: result.userId,
-          email: result.email,
-          sessionToken: result.sessionToken,
+          email: result.email || email,
+          verificationSessionId: result.verificationSessionId, // New: from secure login-initiate flow
+          sessionToken: result.sessionToken, // Legacy: for backward compatibility
         });
+        
+        debugLog('✅ Navigated to 2FA verification screen');
+        // Don't clear loading here - let the 2FA screen take over
+        return; // Exit early - don't proceed to app
       } else {
-        // Login successful without 2FA - offer to enable biometric login
-        console.log('✅ Login successful without 2FA');
+        // Login successful without 2FA - clear the flag
+        // onAuthStateChange will have already set the user state
+        debugLog('✅ Login successful without 2FA');
+        setIsChecking2FA(false);
+        debugLog('🚩 2FA check flag cleared (2FA not required)');
+        // User state should already be set by onAuthStateChange
+        // No need to manually set it
+        
+        // Offer to enable biometric login (optional)
         if (biometricAvailable && !biometricEnabled) {
           setTimeout(() => {
             Alert.alert(
@@ -199,9 +249,18 @@ export default function AuthScreen() {
             );
           }, 500);
         }
+        
+        // User is logged in - AppNavigator will handle navigation based on user state
+        debugLog('✅ Login flow complete - AppNavigator will handle navigation');
       }
     } catch (err: any) {
-      console.error('❌ Login error:', err);
+      debugError('❌ Login error:', err);
+      debugError('📊 Error message:', err.message);
+      debugError('📊 Error stack:', err.stack);
+      
+      // ⚠️ CRITICAL: Always clear 2FA check flag on error
+      setIsChecking2FA(false);
+      debugLog('🚩 2FA check flag cleared (error occurred)');
       
       // Handle email verification errors
       if (err.message?.includes('Email not confirmed')) {
@@ -725,6 +784,21 @@ export default function AuthScreen() {
           </View>
         </View>
       </Animated.View>
+
+      {/* Debug Panel Button - Tap 5 times on logo to open */}
+      <TouchableOpacity
+        style={styles.debugButton}
+        onPress={() => setShowDebugPanel(true)}
+        onLongPress={() => setShowDebugPanel(true)}
+      >
+        <Ionicons name="bug-outline" size={20} color="rgba(255, 255, 255, 0.5)" />
+      </TouchableOpacity>
+
+      {/* Debug Panel */}
+      <LoginDebugPanel
+        visible={showDebugPanel}
+        onClose={() => setShowDebugPanel(false)}
+      />
     </LinearGradient>
   );
 }
@@ -994,6 +1068,19 @@ const styles = StyleSheet.create({
   signUpLink: {
     color: '#FFFFFF',
     fontWeight: 'bold',
+  },
+  // Debug Button
+  debugButton: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
   },
   // Email Verification Styles
   verificationNotice: {

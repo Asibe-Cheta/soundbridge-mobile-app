@@ -1,6 +1,11 @@
 // src/lib/supabase.ts
-import { createClient } from '@supabase/supabase-js';
+// ⚠️ CRITICAL: URL polyfill MUST be imported before Supabase
+import 'react-native-url-polyfill/auto';
+
+import { createClient, processLock } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppState, Platform } from 'react-native';
+import { withQueryTimeout } from '../utils/dataLoading';
 import type {
   CreatorAvailability,
   CollaborationRequest,
@@ -19,15 +24,27 @@ import type {
 const supabaseUrl = 'https://aunxdbqukbxyyiusaeqi.supabase.co';
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1bnhkYnF1a2J4eXlpdXNhZXFpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI2OTA2MTUsImV4cCI6MjA2ODI2NjYxNX0.IP-c4_S7Fkbq6F2UkgzL-TibkoBN49yQ1Cqz4CkMzB0';
 
-// Create Supabase client
+// Create Supabase client with React Native-specific configuration
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: AsyncStorage,
+    ...(Platform.OS !== 'web' ? { storage: AsyncStorage } : {}),
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    lock: processLock, // ⭐ CRITICAL: Prevents setSession() from hanging in React Native
   },
 });
+
+// ⭐ CRITICAL: Set up AppState listener for proper session refresh in React Native
+if (Platform.OS !== 'web') {
+  AppState.addEventListener('change', (state) => {
+    if (state === 'active') {
+      supabase.auth.startAutoRefresh();
+    } else {
+      supabase.auth.stopAutoRefresh();
+    }
+  });
+}
 
 // Export as db for compatibility
 export const db = supabase;
@@ -63,62 +80,85 @@ export const dbHelpers = {
     }
   },
 
-  // Get creators with real stats - NO AUTHENTICATION REQUIRED
+  // Get creators with real stats - OPTIMIZED with SQL function or timeout-wrapped queries
   async getCreatorsWithStats(limit = 20) {
     try {
       console.log('🔧 Getting creators with real stats...');
       
-      // First get the creators
-      const { data: creators, error: creatorsError } = await supabase
-        .from('profiles')
-        .select(`
-          id,
-          username,
-          display_name,
-          bio,
-          avatar_url,
-          location,
-          country,
-          genre,
-          role,
-          created_at
-        `)
-        .eq('role', 'creator')
-        .order('created_at', { ascending: false })
-        .limit(limit);
-      
-      if (creatorsError) throw creatorsError;
-      if (!creators || creators.length === 0) {
-        return { data: [], error: null };
+      // Try optimized SQL function first (if available)
+      const { data: rpcData, error: rpcError } = await withQueryTimeout(
+        supabase.rpc('get_creators_with_stats', { p_limit: limit }),
+        { timeout: 6000, fallback: null }
+      );
+
+      if (!rpcError && rpcData && rpcData.length > 0) {
+        console.log('✅ Got creators via optimized SQL function:', rpcData.length);
+        return { data: rpcData, error: null };
       }
 
-      // Get stats for each creator
+      // Fallback to individual queries with timeouts
+      console.log('⚠️ SQL function not available, using individual queries with timeouts');
+      
+      // First get the creators with timeout
+      const { data: creators, error: creatorsError } = await withQueryTimeout(
+        supabase
+          .from('profiles')
+          .select(`
+            id,
+            username,
+            display_name,
+            bio,
+            avatar_url,
+            location,
+            country,
+            genre,
+            role,
+            created_at
+          `)
+          .eq('role', 'creator')
+          .order('created_at', { ascending: false })
+          .limit(limit),
+        { timeout: 5000, fallback: [] }
+      );
+      
+      if (creatorsError || !creators || creators.length === 0) {
+        return { data: creators || [], error: creatorsError };
+      }
+
+      // Get stats for each creator with individual timeouts
       const creatorsWithStats = await Promise.all(
         creators.map(async (creator) => {
           try {
-            // Get followers count
-            const { count: followersCount } = await supabase
-              .from('follows')
-              .select('*', { count: 'exact', head: true })
-              .eq('following_id', creator.id);
-
-            // Get tracks count
-            const { count: tracksCount } = await supabase
-              .from('audio_tracks')
-              .select('*', { count: 'exact', head: true })
-              .eq('creator_id', creator.id);
-
-            // Get events count
-            const { count: eventsCount } = await supabase
-              .from('events')
-              .select('*', { count: 'exact', head: true })
-              .eq('creator_id', creator.id);
+            // Get all counts in parallel with timeouts
+            const [followersResult, tracksResult, eventsResult] = await Promise.all([
+              withQueryTimeout(
+                supabase
+                  .from('follows')
+                  .select('*', { count: 'exact', head: true })
+                  .eq('following_id', creator.id),
+                { timeout: 3000, fallback: { count: 0 } }
+              ),
+              withQueryTimeout(
+                supabase
+                  .from('audio_tracks')
+                  .select('*', { count: 'exact', head: true })
+                  .eq('creator_id', creator.id),
+                { timeout: 3000, fallback: { count: 0 } }
+              ),
+              withQueryTimeout(
+                supabase
+                  .from('events')
+                  .select('*', { count: 'exact', head: true })
+                  .eq('creator_id', creator.id),
+                { timeout: 3000, fallback: { count: 0 } }
+              ),
+            ]);
 
             return {
               ...creator,
-              followers_count: followersCount || 0,
-              tracks_count: tracksCount || 0,
-              events_count: eventsCount || 0,
+              followers_count: followersResult.data?.count || 0,
+              tracks_count: tracksResult.data?.count || 0,
+              events_count: eventsResult.data?.count || 0,
             };
           } catch (error) {
             console.error(`Error getting stats for creator ${creator.id}:`, error);
@@ -136,7 +176,7 @@ export const dbHelpers = {
       return { data: creatorsWithStats, error: null };
     } catch (error) {
       console.error('Error fetching creators with stats:', error);
-      return { data: null, error };
+      return { data: [], error };
     }
   },
 
@@ -777,63 +817,64 @@ export const dbHelpers = {
     }
   },
 
-  // ✅ NEW: Get personalized tracks based on user genres (Updated to use PostgreSQL function)
+  // ✅ OPTIMIZED: Get personalized tracks with timeout and retry logic
   async getPersonalizedTracks(userId: string, limit = 20) {
     try {
       console.log('🎯 Getting personalized tracks for user:', userId);
       
-      // Skip RPC function since it doesn't return creator data
-      // Use manual query directly to get proper creator information
-      console.log('🔧 Using manual query to get personalized tracks with creator data');
-      
-      // Get user's genre preferences
-      const { data: userGenres } = await this.getUserGenres(userId);
+      // Get user's genre preferences with timeout
+      const { data: userGenres } = await withQueryTimeout(
+        this.getUserGenres(userId),
+        { timeout: 3000, fallback: [] }
+      );
       
       if (!userGenres || userGenres.length === 0) {
         console.log('ℹ️ No user genres found, returning general trending tracks');
         return this.getTrendingTracks(limit);
       }
 
-      const genreIds = userGenres.map(g => g.id);
+      const genreIds = userGenres.map((g: any) => g.id || g.genre_id);
       console.log('🎵 Filtering by genre IDs:', genreIds);
 
-      // Get tracks that match user's genres using manual JOIN
-      const { data: manualData, error: manualError } = await supabase
-        .from('audio_tracks')
-        .select(`
-          id,
-          title,
-          description,
-          audio_url,
-          file_url,
-          cover_art_url,
-          artwork_url,
-          duration,
-          play_count,
-          likes_count,
-          created_at,
-          creator:profiles!creator_id(
+      // Get tracks that match user's genres with timeout
+      const { data: manualData, error: manualError } = await withQueryTimeout(
+        supabase
+          .from('audio_tracks')
+          .select(`
             id,
-            username,
-            display_name,
-            avatar_url
-          ),
-          content_genres!inner(
-            genre_id
-          )
-        `)
-        .eq('is_public', true)
-        .in('content_genres.genre_id', genreIds)
-        .order('play_count', { ascending: false })
-        .limit(limit);
+            title,
+            description,
+            audio_url,
+            file_url,
+            cover_art_url,
+            artwork_url,
+            duration,
+            play_count,
+            likes_count,
+            created_at,
+            creator:profiles!creator_id(
+              id,
+              username,
+              display_name,
+              avatar_url
+            ),
+            content_genres!inner(
+              genre_id
+            )
+          `)
+          .eq('is_public', true)
+          .in('content_genres.genre_id', genreIds)
+          .order('play_count', { ascending: false })
+          .limit(limit),
+        { timeout: 6000, fallback: [] }
+      );
 
-      if (manualError) {
-        console.log('⚠️ Error with manual personalized query, falling back to trending:', manualError.message);
+      if (manualError || !manualData || manualData.length === 0) {
+        console.log('⚠️ Error with personalized query, falling back to trending:', manualError?.message);
         return this.getTrendingTracks(limit);
       }
 
-      console.log('✅ Found personalized tracks via manual query:', manualData?.length || 0);
-      console.log('🔍 Sample personalized track creator data:', manualData?.[0]?.creator);
+      console.log('✅ Found personalized tracks:', manualData.length);
       return { data: manualData, error: null };
     } catch (error) {
       console.error('❌ Error getting personalized tracks:', error);
@@ -914,75 +955,89 @@ export const dbHelpers = {
     }
   },
 
-  // ✅ NEW: Get general trending tracks
+  // ✅ OPTIMIZED: Get general trending tracks with timeout
   async getTrendingTracks(limit = 20) {
     try {
       console.log('🔥 Getting trending tracks...');
       
-      const { data, error } = await supabase
-        .from('audio_tracks')
-        .select(`
-          id,
-          title,
-          description,
-          audio_url,
-          cover_art_url,
-          duration,
-          play_count,
-          likes_count,
-          created_at,
-          creator:profiles!creator_id(
+      const { data, error } = await withQueryTimeout(
+        supabase
+          .from('audio_tracks')
+          .select(`
             id,
-            username,
-            display_name,
-            avatar_url
-          )
-        `)
-        .order('play_count', { ascending: false })
-        .limit(limit);
+            title,
+            description,
+            audio_url,
+            file_url,
+            cover_art_url,
+            artwork_url,
+            duration,
+            play_count,
+            likes_count,
+            created_at,
+            creator:profiles!creator_id(
+              id,
+              username,
+              display_name,
+              avatar_url
+            )
+          `)
+          .eq('is_public', true)
+          .order('play_count', { ascending: false })
+          .limit(limit),
+        { timeout: 5000, fallback: [] }
+      );
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error getting trending tracks:', error);
+      }
+      
       console.log('✅ Found trending tracks:', data?.length || 0);
-      console.log('🔍 Sample trending track creator data:', data?.[0]?.creator);
-      return { data, error: null };
+      return { data: data || [], error: error || null };
     } catch (error) {
       console.error('❌ Error getting trending tracks:', error);
       return { data: [], error };
     }
   },
 
-  // ✅ NEW: Get general events
+  // ✅ OPTIMIZED: Get general events with timeout
   async getEvents(limit = 20) {
     try {
       console.log('🎪 Getting events...');
       
-      const { data, error } = await supabase
-        .from('events')
-        .select(`
-          id,
-          title,
-          description,
-          image_url,
-          event_date,
-          location,
-          country,
-          ticket_price,
-          tickets_available,
-          created_at,
-          creator:profiles!events_creator_id_fkey(
+      const { data, error } = await withQueryTimeout(
+        supabase
+          .from('events')
+          .select(`
             id,
-            username,
-            display_name,
-            avatar_url
-          )
-        `)
-        .gte('event_date', new Date().toISOString())
-        .order('event_date', { ascending: true })
-        .limit(limit);
+            title,
+            description,
+            image_url,
+            event_date,
+            location,
+            country,
+            ticket_price,
+            tickets_available,
+            created_at,
+            creator:profiles!events_creator_id_fkey(
+              id,
+              username,
+              display_name,
+              avatar_url
+            )
+          `)
+          .gte('event_date', new Date().toISOString())
+          .order('event_date', { ascending: true })
+          .limit(limit),
+        { timeout: 6000, fallback: [] }
+      );
       
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error getting events:', error);
+      }
+      
       console.log('✅ Found events:', data?.length || 0);
-      return { data, error: null };
+      return { data: data || [], error: error || null };
     } catch (error) {
       console.error('❌ Error getting events:', error);
       return { data: [], error };

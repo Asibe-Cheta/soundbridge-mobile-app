@@ -240,9 +240,7 @@ function AppNavigator() {
     });
   }, []);
 
-  if (loading) {
-    return <SplashScreen />;
-  }
+  // No splash screen blocking - navigation works immediately
 
   return (
     <View style={{ flex: 1, backgroundColor: 'transparent' }}>
@@ -261,9 +259,24 @@ function AppNavigator() {
           },
         }}
       >
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Navigator 
+          screenOptions={{ 
+            headerShown: false,
+            animation: 'fade', // Smooth transition
+          }}
+        >
         {!user ? (
-          <Stack.Screen name="Auth" component={AuthScreen} />
+          <>
+            <Stack.Screen name="Auth" component={AuthScreen} />
+            <Stack.Screen 
+              name="TwoFactorVerification" 
+              component={TwoFactorVerificationScreen}
+              options={{
+                // Prevent back navigation to this screen (Claude's solution)
+                gestureEnabled: false,
+              }}
+            />
+          </>
         ) : needsOnboarding ? (
           // Show onboarding for users who haven't completed it
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />

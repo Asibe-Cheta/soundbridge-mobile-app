@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,13 @@ import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { supabase, dbHelpers } from '../lib/supabase';
+import { 
+  loadQueriesInParallel, 
+  waitForValidSession,
+  LoadingStateManager,
+  CancellableQuery,
+  withQueryTimeout
+} from '../utils/dataLoading';
 import AdvancedSearchFilters, { SearchFilters } from '../components/AdvancedSearchFilters';
 import { fetchDiscoverServiceProviders } from '../services/creatorExpansionService';
 import type { PublicProfile } from '../types/database';
@@ -216,42 +223,47 @@ function DiscoverScreen() {
   }>({ tracks: [], artists: [] });
   const [isSearching, setIsSearching] = useState(false);
   
-  // Loading states - start as true, will be set to false when loading completes
+  // Loading state management
+  const loadingManager = useRef(new LoadingStateManager()).current;
+  const cancellableQuery = useRef(new CancellableQuery()).current;
+  const [isLoadingAny, setIsLoadingAny] = useState(true);
+  
+  // Individual loading states for UI (derived from LoadingStateManager)
   const [loadingTracks, setLoadingTracks] = useState(true);
   const [loadingArtists, setLoadingArtists] = useState(true);
   const [loadingEvents, setLoadingEvents] = useState(true);
-  const [loadingPlaylists, setLoadingPlaylists] = useState(false); // Playlists not implemented
+  const [loadingPlaylists, setLoadingPlaylists] = useState(false);
   const [loadingServices, setLoadingServices] = useState(false);
 
   const tabs: TabType[] = ['Music', 'Artists', 'Events', 'Playlists', 'Services', 'Venues'];
 
+  // Subscribe to loading state changes
   useEffect(() => {
-    if (!authLoading) {
-      loadDiscoverContent();
-    }
-  }, [activeTab, authLoading, user?.id]);
+    const unsubscribe = loadingManager.onChange(() => {
+      const anyLoading = loadingManager.isAnyLoading();
+      setIsLoadingAny(anyLoading);
+      // Update individual loading states
+      setLoadingTracks(loadingManager.isLoading('tracks'));
+      setLoadingArtists(loadingManager.isLoading('artists'));
+      setLoadingEvents(loadingManager.isLoading('events'));
+      setLoadingPlaylists(loadingManager.isLoading('playlists'));
+    });
+    return unsubscribe;
+  }, []);
 
+  // Main data loading effect
   useEffect(() => {
     if (authLoading) {
       return;
     }
 
-    const loadInitialContent = async () => {
-      console.log('🚀 DiscoverScreen: Loading initial content...');
-      await Promise.all([
-        loadFeaturedArtists(),
-        loadEvents(),
-        loadTrendingTracks(),
-        loadRecentTracks(),
-        loadPlaylists()
-      ]);
-      console.log('✅ DiscoverScreen: Initial content loading completed');
-    };
+    loadDiscoverContent();
 
-    loadInitialContent();
-    testSearchData();
-    dbHelpers.testPlaylistsTables();
-  }, [authLoading, user?.id]);
+    return () => {
+      cancellableQuery.cancel();
+      loadingManager.reset();
+    };
+  }, [authLoading, activeTab, user?.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -272,79 +284,177 @@ function DiscoverScreen() {
     }, [authLoading, trendingTracks.length, recentTracks.length, featuredArtists.length, events.length, playlists.length, activeTab])
   );
 
-  useEffect(() => {
-    if (authLoading) {
-      return;
-    }
-
-    if (!loadingTracks && !loadingArtists && !loadingEvents && !loadingPlaylists) {
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      if (loadingTracks) {
-        console.warn('DiscoverScreen: Track data timed out, using fallback dataset.');
-        setTrendingTracks(prev => (prev.length > 0 ? prev : DISCOVER_MOCK_TRACKS));
-        setRecentTracks(prev => (prev.length > 0 ? prev : DISCOVER_MOCK_TRACKS));
-        setLoadingTracks(false);
-      }
-
-      if (loadingArtists) {
-        console.warn('DiscoverScreen: Artist data timed out, using fallback dataset.');
-        setFeaturedArtists(prev => (prev.length > 0 ? prev : DISCOVER_MOCK_ARTISTS));
-        setLoadingArtists(false);
-      }
-
-      if (loadingEvents) {
-        console.warn('DiscoverScreen: Event data timed out, using fallback dataset.');
-        setEvents(prev => (prev.length > 0 ? prev : DISCOVER_MOCK_EVENTS));
-        setLoadingEvents(false);
-      }
-
-      if (loadingPlaylists) {
-        console.warn('DiscoverScreen: Playlist data timed out, using fallback dataset.');
-        setPlaylists(prev => (prev.length > 0 ? prev : DISCOVER_MOCK_PLAYLISTS));
-        setLoadingPlaylists(false);
-      }
-    }, 6000);
-
-    return () => clearTimeout(timeout);
-  }, [authLoading, loadingTracks, loadingArtists, loadingEvents, loadingPlaylists]);
-
   const loadDiscoverContent = async () => {
+    console.log('🔍 DiscoverScreen: Loading discover content...');
+    loadingManager.setLoading('discover', true, 12000);
+
     try {
+      // Wait for valid session if user is logged in
+      if (user?.id) {
+        await waitForValidSession(supabase, 3000);
+      }
+
       switch (activeTab) {
         case 'Music':
-          await Promise.all([loadTrendingTracks(), loadRecentTracks()]);
+          loadingManager.setLoading('tracks', true, 8000);
+          const musicResults = await loadQueriesInParallel({
+            trending: {
+              name: 'trending',
+              query: () => user?.id
+                ? dbHelpers.getPersonalizedTracks(user.id, 20)
+                : dbHelpers.getTrendingTracks(20),
+              timeout: 8000,
+              fallback: [],
+            },
+            recent: {
+              name: 'recent',
+              query: () => withQueryTimeout(
+                supabase
+                  .from('audio_tracks')
+                  .select(`
+                    id, title, description, audio_url, file_url,
+                    cover_art_url, artwork_url, duration, play_count,
+                    likes_count, created_at,
+                    creator:profiles!creator_id(id, username, display_name, avatar_url)
+                  `)
+                  .eq('is_public', true)
+                  .order('created_at', { ascending: false })
+                  .limit(10),
+                { timeout: 5000, fallback: [] }
+              ),
+              timeout: 5000,
+              fallback: [],
+            },
+          });
+          setTrendingTracks(musicResults.trending?.data || musicResults.trending || DISCOVER_MOCK_TRACKS);
+          setRecentTracks(musicResults.recent?.data || musicResults.recent || DISCOVER_MOCK_TRACKS);
+          loadingManager.setLoading('tracks', false, 0);
           break;
+
         case 'Artists':
-          await loadFeaturedArtists();
+          loadingManager.setLoading('artists', true, 8000);
+          const artistsResult = await loadQueriesInParallel({
+            artists: {
+              name: 'artists',
+              query: () => dbHelpers.getCreatorsWithStats(10),
+              timeout: 8000,
+              fallback: [],
+            },
+          });
+          setFeaturedArtists(artistsResult.artists?.data || artistsResult.artists || DISCOVER_MOCK_ARTISTS);
+          loadingManager.setLoading('artists', false, 0);
           break;
+
         case 'Events':
-          await loadEvents();
+          loadingManager.setLoading('events', true, 6000);
+          const eventsResult = await loadQueriesInParallel({
+            events: {
+              name: 'events',
+              query: () => user?.id
+                ? dbHelpers.getPersonalizedEvents(user.id, 10)
+                : dbHelpers.getEvents(10),
+              timeout: 6000,
+              fallback: [],
+            },
+          });
+          setEvents(eventsResult.events?.data || eventsResult.events || DISCOVER_MOCK_EVENTS);
+          loadingManager.setLoading('events', false, 0);
           break;
+
         case 'Playlists':
-          await loadPlaylists();
+          loadingManager.setLoading('playlists', true, 5000);
+          const playlistsResult = await loadQueriesInParallel({
+            playlists: {
+              name: 'playlists',
+              query: () => dbHelpers.getPublicPlaylists(10),
+              timeout: 5000,
+              fallback: [],
+            },
+          });
+          setPlaylists(playlistsResult.playlists?.data || playlistsResult.playlists || DISCOVER_MOCK_PLAYLISTS);
+          loadingManager.setLoading('playlists', false, 0);
           break;
+
         case 'Services':
+          loadingManager.setLoading('services', true, 5000);
           await loadServiceProviders();
+          loadingManager.setLoading('services', false, 0);
           break;
+
         case 'Venues':
           // Venues coming soon - no loading needed
           break;
+
         default:
           // Load all content for main discover page
-          await Promise.all([
-            loadTrendingTracks(),
-            loadRecentTracks(),
-            loadFeaturedArtists(),
-            loadEvents(),
-            loadPlaylists()
-          ]);
+          const allResults = await loadQueriesInParallel({
+            trending: {
+              name: 'trending',
+              query: () => user?.id
+                ? dbHelpers.getPersonalizedTracks(user.id, 20)
+                : dbHelpers.getTrendingTracks(20),
+              timeout: 8000,
+              fallback: DISCOVER_MOCK_TRACKS,
+            },
+            recent: {
+              name: 'recent',
+              query: () => withQueryTimeout(
+                supabase
+                  .from('audio_tracks')
+                  .select(`
+                    id, title, description, audio_url, file_url,
+                    cover_art_url, artwork_url, duration, play_count,
+                    likes_count, created_at,
+                    creator:profiles!creator_id(id, username, display_name, avatar_url)
+                  `)
+                  .eq('is_public', true)
+                  .order('created_at', { ascending: false })
+                  .limit(10),
+                { timeout: 5000, fallback: [] }
+              ),
+              timeout: 5000,
+              fallback: DISCOVER_MOCK_TRACKS,
+            },
+            artists: {
+              name: 'artists',
+              query: () => dbHelpers.getCreatorsWithStats(10),
+              timeout: 8000,
+              fallback: DISCOVER_MOCK_ARTISTS,
+            },
+            events: {
+              name: 'events',
+              query: () => user?.id
+                ? dbHelpers.getPersonalizedEvents(user.id, 10)
+                : dbHelpers.getEvents(10),
+              timeout: 6000,
+              fallback: DISCOVER_MOCK_EVENTS,
+            },
+            playlists: {
+              name: 'playlists',
+              query: () => dbHelpers.getPublicPlaylists(10),
+              timeout: 5000,
+              fallback: DISCOVER_MOCK_PLAYLISTS,
+            },
+          });
+          setTrendingTracks(allResults.trending?.data || allResults.trending || DISCOVER_MOCK_TRACKS);
+          setRecentTracks(allResults.recent?.data || allResults.recent || DISCOVER_MOCK_TRACKS);
+          setFeaturedArtists(allResults.artists?.data || allResults.artists || DISCOVER_MOCK_ARTISTS);
+          setEvents(allResults.events?.data || allResults.events || DISCOVER_MOCK_EVENTS);
+          setPlaylists(allResults.playlists?.data || allResults.playlists || DISCOVER_MOCK_PLAYLISTS);
           break;
       }
+
+      console.log('✅ DiscoverScreen: Content loaded');
     } catch (error) {
-      console.error('Error loading discover content:', error);
+      console.error('❌ DiscoverScreen: Error loading content:', error);
+      // Set fallback data
+      setTrendingTracks(DISCOVER_MOCK_TRACKS);
+      setRecentTracks(DISCOVER_MOCK_TRACKS);
+      setFeaturedArtists(DISCOVER_MOCK_ARTISTS);
+      setEvents(DISCOVER_MOCK_EVENTS);
+      setPlaylists(DISCOVER_MOCK_PLAYLISTS);
+    } finally {
+      loadingManager.setLoading('discover', false, 0);
     }
   };
 

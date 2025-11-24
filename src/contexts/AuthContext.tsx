@@ -31,6 +31,8 @@ interface AuthContextType {
   loading: boolean;
   error: string | null;
   needsOnboarding: boolean;
+  isChecking2FA: boolean;
+  setIsChecking2FA: (checking: boolean) => void;
   signIn: (email: string, password: string) => Promise<{ success: boolean; error?: any }>;
   signUp: (email: string, password: string, metadata?: any) => Promise<{ success: boolean; error?: any; needsEmailVerification?: boolean }>;
   signOut: () => Promise<{ success: boolean; error?: any }>;
@@ -57,6 +59,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [isChecking2FA, setIsChecking2FA] = useState(false); // Web team's recommended flag name
+  
+  // ✅ CRITICAL: Use ref to store current value so onAuthStateChange handler can access latest value
+  const isChecking2FARef = React.useRef(false);
+  
+  // Update ref whenever state changes
+  React.useEffect(() => {
+    isChecking2FARef.current = isChecking2FA;
+    console.log('🔄 isChecking2FA ref updated:', isChecking2FA);
+  }, [isChecking2FA]);
 
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
@@ -71,45 +83,74 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (session && !error) {
           setSession(session);
           setUser(session.user);
-          await loadUserProfile(session.user.id);
+          await loadUserProfile(session.user.id, session);
         }
       } catch (err) {
         console.error('Error getting initial session:', err);
         setError('Failed to get initial session');
       } finally {
-        // Always set loading to false after a reasonable timeout
+        // Always set loading to false immediately - don't block navigation
         console.log('Setting loading to false');
         setLoading(false);
       }
     };
 
-    // Set a timeout to ensure loading doesn't stay true forever
+    // Set a timeout to ensure loading doesn't stay true forever (failsafe only)
     timeoutId = setTimeout(() => {
       console.log('Auth loading timeout - forcing loading to false');
       setLoading(false);
-    }, 5000); // 5 second timeout
+    }, 500); // 500ms failsafe - should never be needed
 
     getInitialSession();
 
     // Listen for auth state changes
     const { data: { subscription }} = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('Auth state changed:', event, session?.user?.email);
+        console.log('🔔 Auth state changed:', event, session?.user?.email);
+        console.log('🔔 isChecking2FA ref value:', isChecking2FARef.current);
+        
+        // Handle sign out events (Claude's solution)
+        if (event === 'SIGNED_OUT' || !session) {
+          // Don't clear user if we're in the middle of 2FA verification
+          // This prevents the navigation loop (Claude's solution)
+          if (!isChecking2FARef.current) {
+            console.log('🚪 User signed out');
+            setSession(null);
+            setUser(null);
+            setUserProfile(null);
+            setNeedsOnboarding(false);
+            setIsChecking2FA(false);
+          } else {
+            console.log('⏸️ SIGNED_OUT during 2FA check - keeping user state');
+          }
+          setLoading(false);
+          return;
+        }
+        
+        // Handle sign in (Claude's solution)
+        if (event === 'SIGNED_IN' && session) {
+          console.log('✅ User signed in:', session.user.email);
+          setSession(session);
+          setUser(session.user);
+          await loadUserProfile(session.user.id, session);
+          return;
+        }
+        
+        // Token refresh (Claude's solution)
+        if (event === 'TOKEN_REFRESHED' && session) {
+          console.log('🔄 Token refreshed');
+          setSession(session);
+          if (session.user) {
+            setUser(session.user);
+          }
+          return;
+        }
+        
+        // Fallback (Claude's solution)
         setSession(session);
-        setUser(session?.user ?? null);
-        
         if (session?.user) {
-          await loadUserProfile(session.user.id);
-        } else {
-          setUserProfile(null);
-          setNeedsOnboarding(false);
+          setUser(session.user);
         }
-        
-        // Clear timeout when auth state changes
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-        }
-        setLoading(false);
       }
     );
 
@@ -576,14 +617,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const refreshUser = async () => {
     try {
+        console.log('🔄 refreshUser called');
         const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+        console.log('🔄 Session check:', { hasSession: !!currentSession, error: error?.message });
+        
         if (currentSession && !error) {
+          console.log('✅ Setting user state from refreshUser');
           setSession(currentSession);
           setUser(currentSession.user);
           await loadUserProfile(currentSession.user.id, currentSession);
+          // ⚠️ CRITICAL: Clear loading after user state is set
+          console.log('✅ Clearing loading state');
+          setLoading(false);
+      } else {
+        // No session - clear loading anyway
+        console.log('⚠️ No session found, clearing loading');
+        setLoading(false);
       }
     } catch (err) {
-      console.error('Error refreshing user:', err);
+      console.error('❌ Error refreshing user:', err);
+      // Clear loading even on error
+      setLoading(false);
     }
   };
 
@@ -646,6 +700,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     loading,
     error,
     needsOnboarding,
+    isChecking2FA,
+    setIsChecking2FA,
     signIn,
     signUp,
     signOut,

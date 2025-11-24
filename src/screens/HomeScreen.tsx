@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,13 @@ import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { supabase, dbHelpers } from '../lib/supabase';
+import { 
+  loadQueriesInParallel, 
+  waitForValidSession,
+  LoadingStateManager,
+  CancellableQuery,
+  withQueryTimeout
+} from '../utils/dataLoading';
 import AdBanner from '../components/AdBanner';
 import ValuePropCard from '../components/ValuePropCard';
 import FirstTimeTooltip from '../components/FirstTimeTooltip';
@@ -96,7 +103,7 @@ type CreatorRecord = {
 } | null;
 
 export default function HomeScreen() {
-  const { user, userProfile } = useAuth();
+  const { user, userProfile, loading: authLoading } = useAuth();
   const { play, addToQueue, currentTrack } = useAudioPlayer();
   const { theme } = useTheme();
   const navigation = useNavigation<any>();
@@ -118,7 +125,12 @@ export default function HomeScreen() {
   const [showCollabModal, setShowCollabModal] = useState(false);
   const [collabTargetCreator, setCollabTargetCreator] = useState<Creator | null>(null);
 
-  // Loading states
+  // Loading state management
+  const loadingManager = useRef(new LoadingStateManager()).current;
+  const cancellableQuery = useRef(new CancellableQuery()).current;
+  const [isLoadingAny, setIsLoadingAny] = useState(true);
+  
+  // Individual loading states for UI (derived from LoadingStateManager)
   const [loadingFeatured, setLoadingFeatured] = useState(true);
   const [loadingTrending, setLoadingTrending] = useState(true);
   const [loadingRecent, setLoadingRecent] = useState(true);
@@ -230,9 +242,36 @@ export default function HomeScreen() {
     setCollabTargetCreator(null);
   };
   
+  // Subscribe to loading state changes
   useEffect(() => {
-    loadHomeContent();
+    const unsubscribe = loadingManager.onChange(() => {
+      const anyLoading = loadingManager.isAnyLoading();
+      setIsLoadingAny(anyLoading);
+      // Update individual loading states
+      setLoadingFeatured(loadingManager.isLoading('featured'));
+      setLoadingTrending(loadingManager.isLoading('trending'));
+      setLoadingRecent(loadingManager.isLoading('recent'));
+      setLoadingCreators(loadingManager.isLoading('creators'));
+      setLoadingEvents(loadingManager.isLoading('events'));
+    });
+    return unsubscribe;
   }, []);
+
+  // Main data loading effect
+  useEffect(() => {
+    if (authLoading) {
+      console.log('🏠 HomeScreen: Waiting for auth...');
+      return;
+    }
+
+    loadHomeContent();
+
+    // Cleanup: cancel pending queries on unmount
+    return () => {
+      cancellableQuery.cancel();
+      loadingManager.reset();
+    };
+  }, [authLoading, user?.id]);
 
   useEffect(() => {
     if (!loadingEvents) {
@@ -261,517 +300,145 @@ export default function HomeScreen() {
   };
 
   const loadHomeContent = async () => {
-    try {
-      // Load all content in parallel
-      await Promise.all([
-        loadFeaturedCreator(),
-        loadTrendingTracks(),
-        loadRecentTracks(),
-        loadHotCreators(),
-        loadEvents(),
-      ]);
-    } catch (error) {
-      console.error('Error loading home content:', error);
-    }
-  };
+    console.log('🏠 HomeScreen: Loading home content...');
+    loadingManager.setLoading('home', true, 15000); // 15s max for all content
 
-  const loadFeaturedCreator = async () => {
     try {
-      console.log('🔧 Loading featured creator...');
-      // Mock featured creator for now since we don't have this endpoint
-      setFeaturedCreator({
-        id: '1',
-        username: 'featured_artist',
-        display_name: 'Featured Artist',
-        bio: 'Amazing music creator',
-        avatar_url: null,
-        genre: 'afrobeats',
-        location: 'Lagos',
-        followers_count: 1500,
-        tracks_count: 25,
+      // Step 1: Wait for valid session (if user is logged in)
+      if (user?.id) {
+        const sessionValid = await waitForValidSession(supabase, 3000);
+        if (!sessionValid) {
+          console.warn('⚠️ HomeScreen: Session not valid, proceeding anyway...');
+        }
+      }
+
+      // Step 2: Load all data in parallel with individual timeouts
+      loadingManager.setLoading('featured', true, 5000);
+      loadingManager.setLoading('trending', true, 8000);
+      loadingManager.setLoading('recent', true, 5000);
+      loadingManager.setLoading('creators', true, 8000);
+      loadingManager.setLoading('events', true, 6000);
+
+      const results = await loadQueriesInParallel({
+        featured: {
+          name: 'featured',
+          query: async () => {
+            // Mock featured creator for now
+            return { data: {
+              id: '1',
+              username: 'featured_artist',
+              display_name: 'Featured Artist',
+              bio: 'Amazing music creator',
+              avatar_url: null,
+              genre: 'afrobeats',
+              location: 'Lagos',
+              followers_count: 1500,
+              tracks_count: 25,
+            }, error: null };
+          },
+          timeout: 5000,
+          fallback: null,
+        },
+        trending: {
+          name: 'trending',
+          query: () => user?.id 
+            ? dbHelpers.getPersonalizedTracks(user.id, 10)
+            : dbHelpers.getTrendingTracks(10),
+          timeout: 8000,
+          fallback: [],
+        },
+        recent: {
+          name: 'recent',
+          query: () => withQueryTimeout(
+            supabase
+              .from('audio_tracks')
+              .select(`
+                id, title, description, file_url, cover_art_url, artwork_url,
+                duration, play_count, likes_count, created_at,
+                creator:profiles!creator_id(id, username, display_name, avatar_url)
+              `)
+              .eq('is_public', true)
+              .order('created_at', { ascending: false })
+              .limit(10),
+            { timeout: 5000, fallback: [] }
+          ),
+          timeout: 5000,
+          fallback: [],
+        },
+        creators: {
+          name: 'creators',
+          query: () => dbHelpers.getCreatorsWithStats(10),
+          timeout: 8000,
+          fallback: [],
+        },
+        events: {
+          name: 'events',
+          query: () => user?.id
+            ? dbHelpers.getPersonalizedEvents(user.id, 10)
+            : dbHelpers.getEvents(10),
+          timeout: 6000,
+          fallback: [],
+        },
       });
-      console.log('✅ Featured creator loaded (mock data)');
-    } catch (error) {
-      console.error('Error loading featured creator:', error);
-      setFeaturedCreator(null);
-    } finally {
-      setLoadingFeatured(false);
-    }
-  };
 
-  const loadTrendingTracks = async () => {
-    try {
-      console.log('🔧 HomeScreen: Loading trending tracks...');
+      // Step 3: Update state with results
+      setFeaturedCreator(results.featured);
       
-      // Use personalized tracks if user is logged in, otherwise use general trending
-      const { data, error } = user?.id 
-        ? await dbHelpers.getPersonalizedTracks(user.id, 10)
-        : await dbHelpers.getTrendingTracks(10);
-      
-      if (error || !data || data.length === 0) {
-        console.log('⚠️ HomeScreen: Using fallback mock data. Error:', error?.message);
-        // Enhanced mock trending tracks with artwork (fallback)
+      // Handle trending tracks
+      const trendingData = results.trending?.data || results.trending || [];
+      if (trendingData.length > 0) {
+        setTrendingTracks(trendingData);
+      } else {
+        // Fallback mock data
         const mockTrending: AudioTrack[] = [
           {
             id: 'trending-1',
             title: 'Electric Dreams',
             cover_art_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
             artwork_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-            creator: {
-              id: '1',
-              username: 'artist1',
-              display_name: 'Artist One',
-            },
+            creator: { id: '1', username: 'artist1', display_name: 'Artist One' },
             duration: 180,
             play_count: 5500,
             likes_count: 234,
             created_at: new Date().toISOString(),
           },
-          {
-            id: 'trending-2',
-            title: 'Midnight City',
-            cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-            artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-            creator: {
-              id: '2',
-              username: 'artist2',
-              display_name: 'City Sounds',
-            },
-            duration: 210,
-            play_count: 4200,
-            likes_count: 189,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: 'trending-3',
-            title: 'Ocean Waves',
-            cover_art_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-            artwork_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-            creator: {
-              id: '3',
-              username: 'artist3',
-              display_name: 'Wave Sounds',
-            },
-            duration: 195,
-            play_count: 3800,
-            likes_count: 156,
-            created_at: new Date().toISOString(),
-          },
         ];
         setTrendingTracks(mockTrending);
-        console.log('✅ HomeScreen: Trending tracks loaded (mock data):', mockTrending.length);
-      } else {
-        console.log('✅ HomeScreen: Loaded trending tracks:', data.length, user?.id ? '(personalized)' : '(general)');
-        setTrendingTracks(data);
       }
+
+      // Handle recent tracks
+      const recentData = results.recent?.data || results.recent || [];
+      if (recentData.length > 0) {
+        setRecentTracks(recentData);
+      } else {
+        setRecentTracks([]);
+      }
+
+      setHotCreators(results.creators?.data || results.creators || []);
+      setEvents(results.events?.data || results.events || []);
+
+      console.log('✅ HomeScreen: Content loaded successfully');
     } catch (error) {
-      console.error('❌ HomeScreen: Error loading trending tracks:', error);
+      console.error('❌ HomeScreen: Error loading home content:', error);
+      
+      // Set fallback data
       setTrendingTracks([]);
+      setRecentTracks([]);
+      setHotCreators([]);
+      setEvents([]);
     } finally {
-      setLoadingTrending(false);
+      loadingManager.setLoading('home', false, 0);
+      loadingManager.setLoading('featured', false, 0);
+      loadingManager.setLoading('trending', false, 0);
+      loadingManager.setLoading('recent', false, 0);
+      loadingManager.setLoading('creators', false, 0);
+      loadingManager.setLoading('events', false, 0);
     }
   };
 
-  const loadRecentTracks = async () => {
-    try {
-      console.log('🔧 Loading recent tracks...');
-      // Try to load real tracks from Supabase - let's see what columns exist
-      const { data, error } = await supabase
-        .from('audio_tracks')
-        .select(`
-          *,
-          creator:profiles!creator_id (
-            id,
-            username,
-            display_name,
-            avatar_url
-          )
-        `)
-        .order('created_at', { ascending: false })
-        .limit(10);
+  // Removed individual load functions - now handled in loadHomeContent with loadQueriesInParallel
 
-      if (error) {
-        console.error('❌ Supabase error loading recent tracks:', error);
-        console.log('🔄 Trying alternative query...');
-        
-        // Try even simpler query with just basic fields
-        const { data: simpleData, error: simpleError } = await supabase
-          .from('audio_tracks')
-          .select(`
-            id, 
-            title, 
-            created_at, 
-            creator_id,
-            creator:profiles!creator_id (
-              id,
-              username,
-              display_name,
-              avatar_url
-            )
-          `)
-          .order('created_at', { ascending: false })
-          .limit(10);
-
-        if (simpleError) {
-          throw simpleError;
-        }
-
-        if (simpleData && simpleData.length > 0) {
-          const fallbackImages = [
-            'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
-            'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-            'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-            'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop',
-            'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=center',
-          ];
-          
-          const transformedTracks: AudioTrack[] = simpleData.map((track, index) => {
-            const imageUrl = fallbackImages[index % fallbackImages.length];
-            const rawCreator = Array.isArray(track.creator)
-              ? (track.creator[0] as CreatorRecord)
-              : (track.creator as CreatorRecord);
-            return {
-              id: track.id,
-              title: track.title || 'Untitled Track',
-              description: undefined,
-              audio_url: undefined,
-              file_url: undefined,
-              cover_art_url: imageUrl,
-              artwork_url: imageUrl,
-              duration: 180, // Default duration
-              play_count: 0,
-              likes_count: 0,
-              created_at: track.created_at,
-              creator: {
-                id: rawCreator?.id || track.creator_id || 'unknown',
-                username: rawCreator?.username || 'unknown',
-                display_name: rawCreator?.display_name || 'Unknown Artist',
-                avatar_url: rawCreator?.avatar_url,
-              },
-            };
-          });
-          
-          setRecentTracks(transformedTracks);
-          console.log('✅ Recent tracks loaded (simple query):', transformedTracks.length);
-          console.log('🔍 Fallback track creator data:', transformedTracks[0]?.creator);
-          return;
-        }
-      }
-
-      if (data && data.length > 0) {
-        console.log('🔍 Raw track data from database:', JSON.stringify(data[0], null, 2));
-        
-        const fallbackImages = [
-          'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
-          'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-          'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-          'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop',
-          'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=center',
-        ];
-        
-        const transformedTracks: AudioTrack[] = data.map((track, index) => {
-          // Use the correct field name from schema
-          const imageUrl = track.cover_art_url || fallbackImages[index % fallbackImages.length];
-          const rawCreator = Array.isArray(track.creator)
-            ? (track.creator[0] as CreatorRecord)
-            : (track.creator as CreatorRecord);
-          
-          console.log(`🖼️ Track "${track.title}" artwork check:`, {
-            cover_art_url: track.cover_art_url,
-            final: imageUrl
-          });
-          
-          return {
-            id: track.id,
-            title: track.title || 'Untitled Track',
-            description: track.description,
-            file_url: track.file_url,
-            cover_art_url: imageUrl,
-            duration: track.duration || 180,
-            play_count: track.play_count || 0,
-            likes_count: track.likes_count || 0,
-            created_at: track.created_at,
-            creator: {
-              id: rawCreator?.id || track.creator_id || 'unknown',
-              username: rawCreator?.username || 'unknown',
-              display_name: rawCreator?.display_name || 'Unknown Artist',
-              avatar_url: rawCreator?.avatar_url,
-            },
-          };
-        });
-        
-        setRecentTracks(transformedTracks);
-        console.log('✅ Recent tracks loaded from Supabase:', transformedTracks.length);
-        console.log('🔍 Sample track creator data:', transformedTracks[0]?.creator);
-        transformedTracks.forEach(track => {
-          console.log(`🎵 Track: "${track.title}" - Cover: ${track.cover_art_url || 'none'}`);
-        });
-      } else {
-        console.log('ℹ️ No recent tracks found, using mock data');
-        // Enhanced mock data with sample artwork
-        const mockTracks: AudioTrack[] = [
-          {
-            id: 'mock-1',
-            title: 'Untitled Audio File',
-            cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
-            creator: {
-              id: 'mock-creator-1',
-              username: 'asibe_cheta',
-              display_name: 'Asibe Cheta',
-            },
-            duration: 180,
-            play_count: 45,
-            likes_count: 12,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: 'mock-2',
-            title: 'My Song Hits',
-            cover_art_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-            artwork_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-            creator: {
-              id: 'mock-creator-2',
-              username: 'asibe_cheta',
-              display_name: 'Asibe Cheta',
-            },
-            duration: 210,
-            play_count: 89,
-            likes_count: 23,
-            created_at: new Date().toISOString(),
-          },
-        ];
-        setRecentTracks(mockTracks);
-      }
-    } catch (error) {
-      console.error('❌ Error loading recent tracks:', error);
-      // Enhanced fallback mock data
-      const mockTracks: AudioTrack[] = [
-        {
-          id: 'fallback-1',
-          title: 'Untitled Audio File',
-          cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
-          artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
-          creator: {
-            id: 'fallback-creator-1',
-            username: 'asibe_cheta',
-            display_name: 'Asibe Cheta',
-          },
-          duration: 180,
-          play_count: 0,
-          likes_count: 0,
-          created_at: new Date().toISOString(),
-        },
-      ];
-      setRecentTracks(mockTracks);
-    } finally {
-      setLoadingRecent(false);
-    }
-  };
-
-  const loadHotCreators = async () => {
-    try {
-      console.log('🔧 Loading hot creators with real stats...');
-      const { data, error } = await dbHelpers.getCreatorsWithStats(5);
-      
-      if (error) {
-        console.error('❌ Supabase error:', error);
-        throw error;
-      }
-      
-      if (data && data.length > 0) {
-        const creatorIds = data.map(creator => creator.id).filter(Boolean);
-        const availabilityMap = new Map<string, string | null>();
-
-        if (creatorIds.length > 0) {
-          const { data: availabilityRows, error: availabilityError } = await supabase
-            .from('creator_availability')
-            .select('creator_id,start_date,end_date')
-            .eq('is_available', true)
-            .gte('end_date', new Date().toISOString())
-            .in('creator_id', creatorIds);
-
-          if (!availabilityError && availabilityRows) {
-            availabilityRows.forEach((slot: any) => {
-              const existing = availabilityMap.get(slot.creator_id);
-              if (!existing || new Date(slot.start_date) < new Date(existing)) {
-                availabilityMap.set(slot.creator_id, slot.start_date);
-              }
-            });
-          } else if (availabilityError) {
-            console.log('ℹ️ Could not load availability for creators:', availabilityError.message);
-          }
-        }
-
-        const transformedCreators: Creator[] = data.map(creator => ({
-          id: creator.id,
-          username: creator.username || '',
-          display_name: creator.display_name || creator.username || 'Unknown Creator',
-          bio: creator.bio || undefined,
-          avatar_url: creator.avatar_url || undefined,
-          genre: creator.genre || undefined,
-          location: creator.location || creator.country || undefined,
-          is_collaboration_available: availabilityMap.has(creator.id),
-          next_available_slot: availabilityMap.get(creator.id) || null,
-          followers_count: creator.followers_count || 0, // Real data from database
-          tracks_count: creator.tracks_count || 0, // Real data from database
-          events_count: creator.events_count || 0, // Real data from database
-        }));
-        
-        setHotCreators(transformedCreators);
-        console.log('✅ Hot creators loaded:', transformedCreators.length);
-      } else {
-        console.log('ℹ️ No hot creators found, using fallback');
-        // Fallback mock data
-        const mockCreators: Creator[] = [
-          {
-            id: 'mock-creator-1',
-            username: 'beat_master',
-            display_name: 'Beat Master',
-            bio: 'Producer and beat maker',
-            avatar_url: 'https://images.unsplash.com/photo-1521335629791-ce4aec67dd47?w=300&h=300&fit=crop',
-            genre: 'hip hop',
-            location: 'New York',
-            is_collaboration_available: true,
-            next_available_slot: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-            followers_count: 2400,
-            tracks_count: 120,
-            events_count: 12,
-          },
-        ];
-        setHotCreators(mockCreators);
-      }
-    } catch (error) {
-      console.error('❌ Error loading hot creators:', error);
-      // Fallback mock data
-      const mockCreators: Creator[] = [
-        {
-          id: 'fallback-creator-1',
-        username: 'melody_queen',
-        display_name: 'Melody Queen',
-        bio: 'Singer-songwriter',
-        avatar_url: 'https://images.unsplash.com/photo-1511288591490-9c89d9a86e43?w=300&h=300&fit=crop',
-        genre: 'pop',
-        location: 'London',
-        is_collaboration_available: false,
-        next_available_slot: null,
-        followers_count: 4600,
-        tracks_count: 85,
-        events_count: 18,
-        },
-      ];
-      setHotCreators(mockCreators);
-    } finally {
-      setLoadingCreators(false);
-    }
-  };
-
-  const loadEvents = async () => {
-    try {
-      console.log('🔧 HomeScreen: Loading events...');
-      
-      // Use personalized events if user is logged in, otherwise use general events
-      const { data, error } = user?.id 
-        ? await dbHelpers.getPersonalizedEvents(user.id, 3)
-        : await dbHelpers.getEvents(3);
-      
-      if (error || !data || data.length === 0) {
-        console.log('⚠️ HomeScreen: Using fallback mock data. Error:', error?.message);
-        // Enhanced mock events data
-        const mockEvents: Event[] = [
-          {
-            id: 'mock-event-1',
-            title: 'Virtual Music Showcase',
-            description: 'Join us for an evening of new music from talented creators',
-            event_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-            location: 'Online Event',
-            category: 'indie',
-            genres: ['indie', 'alternative'],
-            distance_miles: 0,
-            image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-            organizer: {
-              id: 'organizer-1',
-              username: 'event_organizer',
-              display_name: 'Music Events',
-              avatar_url: undefined,
-            },
-          },
-          {
-            id: 'mock-event-2',
-            title: 'Beat Making Workshop',
-            description: 'Learn the fundamentals of music production',
-            event_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-            location: 'Community Center',
-            category: 'hip hop',
-            genres: ['hip hop', 'producer'],
-            distance_miles: 12,
-            image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-            organizer: {
-              id: 'organizer-2',
-              username: 'workshop_host',
-              display_name: 'Production Academy',
-              avatar_url: undefined,
-            },
-          },
-        ];
-        setEvents(mockEvents);
-        console.log('✅ HomeScreen: Events loaded (mock data):', mockEvents.length);
-      } else {
-        const transformedEvents: Event[] = data.map(event => {
-          const rawTags = Array.isArray((event as any).genres)
-            ? (event as any).genres
-            : Array.isArray((event as any).tags)
-              ? (event as any).tags
-              : undefined;
-          return {
-          id: event.id,
-          title: event.title,
-          description: event.description,
-          event_date: event.event_date,
-          location: event.location,
-          category: event.category ?? null,
-          genres: rawTags ?? (event.category ? [event.category] : null),
-          tags: rawTags ?? null,
-          distance_miles: typeof (event as any).distance_miles === 'number' ? (event as any).distance_miles : null,
-          image_url: event.image_url,
-          organizer: {
-            id: event.organizer?.id || 'organizer-1',
-            username: event.organizer?.username || 'event_organizer',
-            display_name: event.organizer?.display_name || 'Event Organizer',
-            avatar_url: event.organizer?.avatar_url,
-          },
-          };
-        });
-        
-        setEvents(transformedEvents);
-        console.log('✅ HomeScreen: Events loaded:', transformedEvents.length, user?.id ? '(personalized)' : '(general)');
-      }
-    } catch (error) {
-      console.error('❌ HomeScreen: Error loading events:', error);
-      // Enhanced mock events fallback
-      const mockEvents: Event[] = [
-        {
-          id: 'fallback-event-1',
-          title: 'Music Meetup',
-          description: 'Connect with local musicians and creators',
-          event_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
-          location: 'Local Venue',
-          category: 'live',
-          genres: ['live', 'networking'],
-          distance_miles: 8,
-          image_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
-          organizer: {
-            id: 'fallback-organizer',
-            username: 'music_community',
-            display_name: 'Music Community',
-            avatar_url: undefined,
-          },
-        },
-      ];
-      setEvents(mockEvents);
-    } finally {
-      setLoadingEvents(false);
-    }
-  };
+  // Removed individual load functions - now handled in loadHomeContent with loadQueriesInParallel
 
   const onRefresh = async () => {
     setRefreshing(true);

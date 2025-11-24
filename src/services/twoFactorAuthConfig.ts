@@ -40,14 +40,78 @@ if (USE_MOCK_2FA_SERVICE) {
 // Exported Functions
 // ============================================
 
+// Re-export functions, but for real service, we need to get session from context
+import { supabase } from '../lib/supabase';
+
+// Helper to get current session
+async function getCurrentSession() {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session;
+}
+
 export const loginWithTwoFactorCheck = selectedService.loginWithTwoFactorCheck;
-export const setupTOTP = selectedService.setupTOTP;
-export const verifySetup = selectedService.verifySetup;
-export const verifyCode = selectedService.verifyCode;
-export const verifyBackupCode = selectedService.verifyBackupCode;
-export const getTwoFactorStatus = selectedService.getTwoFactorStatus;
-export const disableTwoFactor = selectedService.disableTwoFactor;
-export const regenerateBackupCodes = selectedService.regenerateBackupCodes;
+
+// Export login-specific verification functions
+export const verifyCodeDuringLogin = selectedService.verifyCodeDuringLogin;
+export const verifyBackupCodeDuringLogin = selectedService.verifyBackupCodeDuringLogin;
+
+// Wrap functions that need session
+export async function setupTOTP(...args: any[]) {
+  if (USE_MOCK_2FA_SERVICE) {
+    return selectedService.setupTOTP(...args);
+  }
+  const session = await getCurrentSession();
+  return selectedService.setupTOTP(session);
+}
+
+export async function verifySetup(code: string, secret: string | null, ...args: any[]) {
+  if (USE_MOCK_2FA_SERVICE) {
+    return selectedService.verifySetup(code, secret, ...args);
+  }
+  const session = await getCurrentSession();
+  return selectedService.verifySetup(code, secret, session);
+}
+
+export async function verifyCode(code: string, ...args: any[]) {
+  if (USE_MOCK_2FA_SERVICE) {
+    return selectedService.verifyCode(code, ...args);
+  }
+  const session = await getCurrentSession();
+  return selectedService.verifyCode(code, session);
+}
+
+export async function verifyBackupCode(code: string, ...args: any[]) {
+  if (USE_MOCK_2FA_SERVICE) {
+    return selectedService.verifyBackupCode(code, ...args);
+  }
+  const session = await getCurrentSession();
+  return selectedService.verifyBackupCode(code, session);
+}
+
+export async function getTwoFactorStatus(...args: any[]) {
+  if (USE_MOCK_2FA_SERVICE) {
+    return selectedService.getTwoFactorStatus(...args);
+  }
+  const session = await getCurrentSession();
+  return selectedService.getTwoFactorStatus(session);
+}
+
+export async function disableTwoFactor(code: string, ...args: any[]) {
+  if (USE_MOCK_2FA_SERVICE) {
+    return selectedService.disableTwoFactor(code, ...args);
+  }
+  const session = await getCurrentSession();
+  return selectedService.disableTwoFactor(code, session);
+}
+
+export async function regenerateBackupCodes(...args: any[]) {
+  if (USE_MOCK_2FA_SERVICE) {
+    return selectedService.regenerateBackupCodes(...args);
+  }
+  const session = await getCurrentSession();
+  return selectedService.regenerateBackupCodes(session);
+}
+
 export const parseTwoFactorError = selectedService.parseTwoFactorError;
 
 // ============================================

@@ -1,194 +1,126 @@
 /**
- * Two-Factor Authentication Types
- * Based on Web Team API Specification
+ * 2FA Types - Matching Web API Response Format
+ * Based on MOBILE_TEAM_2FA_CURRENT_STRUCTURE_UPDATE.md
  */
 
-// ============================================
-// API Response Types
-// ============================================
+export interface TwoFactorStatusResponse {
+  success: boolean;
+  enabled: boolean;
+  method: 'totp' | null;
+  configuredAt: string | null;
+  enabledAt: string | null;
+  backupCodesRemaining: number;
+  backupCodesTotal: number;
+  needsRegenerateBackupCodes: boolean;
+  recentActivity?: Array<{
+    action: string;
+    method: string;
+    success: boolean;
+    created_at: string;
+    ip_address?: string;
+  }>;
+}
 
 export interface TwoFactorSetupResponse {
-  success: true;
-  // Normalized fields (what mobile app expects)
-  secret: string; // Base32 encoded secret for manual entry
-  qrCode: string; // Base64 PNG image: "data:image/png;base64,..."
-  otpauthUrl: string; // OTPAuth URL for deep linking
-  backupCodes: string[]; // Empty array if not available yet (filled after verification)
-  sessionToken: string; // Temporary session for verification
-  expiresAt: string; // ISO timestamp
+  success: boolean;
+  data: {
+    secret: string;
+    qrCode: string;
+    otpauthUrl: string;
+  };
+  error?: string;
+  code?: string;
 }
 
 export interface TwoFactorVerifySetupResponse {
-  success: true;
+  success: boolean;
   data?: {
-    backupCodes: string[]; // Web API returns codes in data object
+    backupCodes: string[];
   };
-  backupCodes?: string[]; // Direct format (mock)
   message?: string;
-  // Legacy fields
-  enabled?: boolean;
-  backupCodesStored?: number;
-}
-
-export interface TwoFactorCheckRequiredResponse {
-  twoFactorRequired: boolean;
-  method?: 'totp';
-  sessionToken?: string;
-}
-
-export interface TwoFactorVerifyCodeResponse {
-  success: true;
-  accessToken: string;
-  refreshToken: string;
-  user: {
-    id: string;
-    email: string;
-  };
-}
-
-export interface TwoFactorVerifyBackupCodeResponse {
-  success: true;
-  accessToken: string;
-  refreshToken: string;
-  backupCodesRemaining: number;
-  warning?: string;
+  error?: string;
+  code?: string;
 }
 
 export interface TwoFactorDisableResponse {
-  success: true;
-  message: string;
+  success: boolean;
+  message?: string;
+  error?: string;
+  code?: string;
 }
 
 export interface TwoFactorRegenerateBackupCodesResponse {
-  success: true;
-  backupCodes: string[];
+  success: boolean;
+  data?: {
+    backupCodes: string[];
+  };
+  error?: string;
+  code?: string;
 }
 
-export interface TwoFactorStatusResponse {
-  enabled: boolean;
+export interface TwoFactorVerifyCodeResponse {
+  success: boolean;
+  message?: string;
+  error?: string;
+  code?: string;
+  accessToken?: string; // Returned after successful login verification
+  refreshToken?: string; // Returned after successful login verification
+  user?: {
+    id: string;
+    email: string;
+    display_name?: string;
+  };
+  attemptsRemaining?: number;
+  lockoutTime?: string;
+}
+
+export interface TwoFactorVerifyBackupCodeResponse {
+  success: boolean;
+  message?: string;
+  data?: {
+    backupCodesRemaining: number;
+  };
+  error?: string;
+  code?: string;
+  accessToken?: string; // Returned after successful login verification
+  refreshToken?: string; // Returned after successful login verification
+  user?: {
+    id: string;
+    email: string;
+    display_name?: string;
+  };
+  warning?: string; // Warning about low backup codes
+  attemptsRemaining?: number;
+  lockoutTime?: string;
+}
+
+export interface TwoFactorCheckRequiredResponse {
+  success: boolean;
+  data?: {
+    twoFactorRequired: boolean;
+    sessionToken?: string;
+    expiresIn?: number;
+    message?: string;
+    method?: 'totp';
+  };
+  error?: string;
+  code?: string;
+  // Legacy format support
+  required?: boolean;
+  sessionToken?: string;
   method?: 'totp';
-  configuredAt?: string;
-  lastUsedAt?: string;
-  backupCodesRemaining?: number;
-  backupCodesExpireAt?: string;
 }
 
-// ============================================
-// Error Response Types
-// ============================================
-
-export type TwoFactorErrorCode =
-  // Authentication
-  | 'AUTH_REQUIRED'
-  | 'INVALID_SESSION'
-  | 'SESSION_EXPIRED'
-  // Setup
-  | '2FA_ALREADY_ENABLED'
-  | 'SETUP_FAILED'
-  // Verification
-  | 'INVALID_CODE'
-  | 'CODE_EXPIRED'
-  // Backup Codes
-  | 'INVALID_BACKUP_CODE'
-  | 'BACKUP_CODE_USED'
-  | 'BACKUP_CODE_EXPIRED'
-  // Rate Limiting
-  | 'RATE_LIMIT_EXCEEDED'
-  | 'ACCOUNT_LOCKED'
-  // Disable
-  | '2FA_NOT_ENABLED'
-  | 'INVALID_PASSWORD'
-  // Generic
-  | 'INTERNAL_ERROR'
-  | 'VALIDATION_ERROR';
-
-export interface TwoFactorErrorResponse {
-  success: false;
-  error: string; // Human-readable error message
-  code?: TwoFactorErrorCode; // Machine-readable error code
-  attemptsRemaining?: number; // Only for rate-limited endpoints
-  lockoutTime?: string; // ISO timestamp when lockout expires
-  metadata?: Record<string, any>; // Optional additional context
-}
-
-// ============================================
-// Request Types
-// ============================================
-
-export interface TwoFactorSetupRequest {
-  userId: string;
-}
-
-export interface TwoFactorVerifySetupRequest {
-  userId: string;
-  sessionToken: string;
-  code: string; // 6-digit TOTP code
-}
-
-export interface TwoFactorCheckRequiredRequest {
-  userId: string;
-}
-
-export interface TwoFactorVerifyCodeRequest {
-  userId: string;
-  sessionToken: string;
-  code: string; // 6-digit TOTP code
-  trustDevice?: boolean;
-}
-
-export interface TwoFactorVerifyBackupCodeRequest {
-  userId: string;
-  sessionToken: string;
-  backupCode: string; // 8-character backup code
-}
-
-export interface TwoFactorDisableRequest {
-  userId: string;
-  password: string;
-  code: string; // Current TOTP code or backup code
-}
-
-export interface TwoFactorRegenerateBackupCodesRequest {
-  userId: string;
-  code: string; // Current TOTP code for verification
-}
-
-// ============================================
-// UI State Types
-// ============================================
-
-export interface TwoFactorState {
-  enabled: boolean;
-  configuredAt?: Date;
-  lastUsedAt?: Date;
-  backupCodesRemaining: number;
-}
-
-export interface TwoFactorSetupData {
-  secret: string;
-  qrCodeUrl: string;
-  otpauthUrl: string;
-  backupCodes: string[];
-  sessionToken: string;
-  expiresAt: Date;
-}
-
-// ============================================
-// Login Flow Types
-// ============================================
-
+// Login result type - Updated for secure login-initiate flow
 export interface LoginResult {
   requires2FA: boolean;
   userId?: string;
   email?: string;
-  sessionToken?: string;
+  verificationSessionId?: string; // New: Temporary session ID for 2FA verification (replaces sessionToken)
+  sessionToken?: string; // Legacy: Keep for backward compatibility during transition
   session?: any;
   user?: any;
 }
-
-// ============================================
-// Error Handling Types
-// ============================================
 
 export interface ParsedError {
   title: string;
@@ -198,3 +130,29 @@ export interface ParsedError {
   attemptsRemaining?: number;
 }
 
+export type TwoFactorErrorCode =
+  | 'AUTH_REQUIRED'
+  | 'INVALID_SESSION'
+  | 'SESSION_EXPIRED'
+  | '2FA_ALREADY_ENABLED'
+  | 'SETUP_FAILED'
+  | 'INVALID_CODE'
+  | 'CODE_EXPIRED'
+  | 'INVALID_BACKUP_CODE'
+  | 'BACKUP_CODE_USED'
+  | 'BACKUP_CODE_EXPIRED'
+  | 'RATE_LIMIT_EXCEEDED'
+  | 'ACCOUNT_LOCKED'
+  | '2FA_NOT_ENABLED'
+  | 'INVALID_PASSWORD'
+  | 'INTERNAL_ERROR'
+  | 'VALIDATION_ERROR';
+
+export interface TwoFactorErrorResponse {
+  success: false;
+  error: string;
+  code?: TwoFactorErrorCode;
+  attemptsRemaining?: number;
+  lockoutTime?: string;
+  metadata?: Record<string, any>;
+}
