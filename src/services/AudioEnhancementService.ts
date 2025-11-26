@@ -1,7 +1,7 @@
 // src/services/AudioEnhancementService.ts
 // Audio enhancement service for tier-based audio processing
 
-import { Audio } from 'expo-av';
+// Note: expo-av removed, using expo-audio if needed in future
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 

@@ -122,9 +122,7 @@
 6. **Learn**: Document lessons and improve processes
 
 ### **Contact Information**
-- **Security Team**: security@soundbridge.com
-- **Legal Team**: legal@soundbridge.com
-- **Data Protection Officer**: dpo@soundbridge.com
+- **Contact**: contact@soundbridge.live
 - **Emergency**: [Emergency Phone Number]
 
 ## 📊 **Security Metrics**

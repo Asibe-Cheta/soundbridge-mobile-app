@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
-import { Audio, AVPlaybackStatus } from 'expo-av';
+import { setAudioModeAsync, AudioPlayer } from 'expo-audio';
+import { Platform } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { backgroundAudioService, BackgroundAudioTrack } from '../services/BackgroundAudioService';
 // import { realAudioProcessor } from '../services/RealAudioProcessor';
@@ -78,7 +79,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
   const positionUpdateRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize audio session - let BackgroundAudioService handle background config
@@ -86,11 +87,11 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     const setupAudio = async () => {
       try {
         // Use basic audio mode, BackgroundAudioService will handle background playback
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
+        await setAudioModeAsync({
+          allowsRecording: false,
+          playsInSilentMode: true,
+          interruptionModeAndroid: 'duckOthers',
+          interruptionMode: 'mixWithOthers',
         });
         console.log('✅ Audio session configured');
       } catch (err) {
@@ -103,8 +104,9 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     
     return () => {
       // Cleanup on unmount
-      if (soundRef.current) {
-        soundRef.current.unloadAsync();
+      if (playerRef.current) {
+        playerRef.current.pause();
+        playerRef.current.remove();
       }
       if (positionUpdateRef.current) {
         clearInterval(positionUpdateRef.current);
@@ -119,11 +121,12 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     }
     
     positionUpdateRef.current = setInterval(async () => {
-      if (soundRef.current && isPlaying) {
+      if (playerRef.current && isPlaying) {
         try {
-          const status = await soundRef.current.getStatusAsync();
-          if (status.isLoaded && status.positionMillis !== undefined) {
-            setPosition(Math.floor(status.positionMillis / 1000)); // Convert milliseconds to seconds
+          // expo-audio uses currentTime property directly (in seconds)
+          const currentTime = playerRef.current.currentTime;
+          if (currentTime !== undefined) {
+            setPosition(Math.floor(currentTime)); // Already in seconds
           }
         } catch (err) {
           console.error('Failed to get position:', err);
@@ -139,17 +142,19 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     }
   };
 
-  // Audio status handler
-  const onPlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-    if (status.isLoaded) {
-      setDuration(Math.floor((status.durationMillis || 0) / 1000)); // Convert milliseconds to seconds
-      setPosition(Math.floor((status.positionMillis || 0) / 1000)); // Convert milliseconds to seconds
+  // Audio status handler (for expo-audio)
+  const onPlaybackStatusUpdate = (status: any) => {
+    if (playerRef.current && playerRef.current.isLoaded) {
+      setDuration(Math.floor(playerRef.current.duration || 0)); // Already in seconds
+      setPosition(Math.floor(playerRef.current.currentTime || 0)); // Already in seconds
       
-      if (status.didJustFinish && !status.isLooping) {
+      // Check if track finished
+      if (playerRef.current.currentTime >= playerRef.current.duration && playerRef.current.duration > 0) {
         // Track finished, handle based on repeat and auto-play settings
         if (isRepeat) {
           // Replay current track
-          soundRef.current?.replayAsync();
+          playerRef.current.seekTo(0);
+          playerRef.current.play();
         } else if (autoPlay && queue.length > 0) {
           // Auto-play next track in queue
           playNext();
@@ -160,7 +165,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
           stopPositionTracking();
         }
       }
-    } else if (status.error) {
+    } else if (status?.error) {
       console.error('Audio playback error:', status.error);
       setError(`Playback error: ${status.error}`);
       setIsPlaying(false);
@@ -216,7 +221,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
         return;
       }
 
-      console.log('⚠️ Real audio processor failed, falling back to Expo AV');
+      console.log('⚠️ Real audio processor failed, falling back to expo-audio');
       
       // Use background audio service for background playback
       const backgroundTrack: BackgroundAudioTrack = {
@@ -241,104 +246,6 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       
       console.log('🎵 Successfully started playing with background audio service');
       return;
-      
-      // Fallback to original implementation (commented out for now)
-      // Test URL accessibility and try different URL approaches
-      let finalAudioUrl = audioUrl;
-      let urlTestFailed = false;
-      
-      try {
-        const session = await supabase.auth.getSession();
-        const headers: Record<string, string> = {
-          'User-Agent': 'SoundBridge-Mobile/1.0',
-        };
-        
-        // Add authorization header if we have a session
-        if (session.data.session?.access_token) {
-          headers['Authorization'] = `Bearer ${session.data.session.access_token}`;
-        }
-        
-        const response = await fetch(audioUrl, { 
-          method: 'HEAD', 
-          headers,
-          timeout: 5000 
-        });
-        
-        console.log(`🔗 URL test for ${audioUrl}: ${response.status}`);
-        
-        if (!response.ok) {
-          console.warn(`Audio file returned status ${response.status}, response: ${response.statusText}`);
-          urlTestFailed = true;
-          
-          // For 400 errors, try signed URL approach
-          if (response.status === 400) {
-            console.log('🔄 Trying signed URL approach for 400 error...');
-            
-            // Extract the path from the public URL
-            const urlParts = audioUrl.split('/storage/v1/object/public/audio-tracks/');
-            if (urlParts.length === 2) {
-              const filePath = urlParts[1];
-              const { data: signedUrlData } = await supabase.storage
-                .from('audio-tracks')
-                .createSignedUrl(filePath, 3600); // 1 hour expiry
-              
-              if (signedUrlData?.signedUrl) {
-                finalAudioUrl = signedUrlData.signedUrl;
-                console.log('🔄 Using signed URL:', finalAudioUrl);
-                urlTestFailed = false; // Reset since we have a new URL to try
-              }
-            }
-          }
-        }
-      } catch (fetchError) {
-        console.error('URL accessibility test failed:', fetchError);
-        urlTestFailed = true;
-      }
-      
-      // If all URL approaches failed, throw an error
-      if (urlTestFailed && finalAudioUrl === audioUrl) {
-        throw new Error(`Audio file is not accessible: ${audioUrl}`);
-      }
-      
-      // Create new sound with more robust settings and timeout
-      const soundPromise = Audio.Sound.createAsync(
-        { 
-          uri: finalAudioUrl,
-          headers: {
-            'User-Agent': 'SoundBridge-Mobile/1.0',
-          }
-        },
-        { 
-          shouldPlay: true,
-          volume: volume,
-          progressUpdateIntervalMillis: 1000,
-          positionMillis: 0,
-        },
-        onPlaybackStatusUpdate
-      );
-
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Audio loading timeout after 10 seconds')), 10000)
-      );
-
-      const { sound } = await Promise.race([soundPromise, timeoutPromise]) as any;
-      
-      soundRef.current = sound;
-      console.log('🔍 Music player track creator data:', track.creator);
-      setCurrentTrack(track);
-      setIsPlaying(true);
-      setIsPaused(false);
-      setPosition(0);
-      setIsLoading(false);
-      
-      // Increment play count in database
-      incrementPlayCount(track.id);
-      
-      // Start tracking position
-      startPositionTracking();
-      
-      console.log('🎵 Successfully started playing:', track.title);
     } catch (err) {
       console.error('Failed to play track:', err);
       setError(`Failed to play track: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -352,9 +259,9 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       // Use background audio service
       await backgroundAudioService.pause();
       
-      // Also pause Expo AV if it's being used
-      if (soundRef.current) {
-        await soundRef.current.pauseAsync();
+      // Also pause expo-audio player if it's being used
+      if (playerRef.current) {
+        playerRef.current.pause();
       }
       
       setIsPlaying(false);
@@ -372,9 +279,9 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       // Use background audio service
       await backgroundAudioService.resume();
       
-      // Also resume Expo AV if it's being used
-      if (soundRef.current) {
-        await soundRef.current.playAsync();
+      // Also resume expo-audio player if it's being used
+      if (playerRef.current) {
+        playerRef.current.play();
       }
       
       setIsPlaying(true);
@@ -392,8 +299,9 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       // Use background audio service
       await backgroundAudioService.stop();
       
-      if (soundRef.current) {
-        await soundRef.current.stopAsync();
+      if (playerRef.current) {
+        playerRef.current.pause();
+        playerRef.current.seekTo(0);
         setIsPlaying(false);
         setIsPaused(false);
         setPosition(0);
@@ -417,13 +325,12 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       // Use background audio service
       await backgroundAudioService.seekTo(newPosition * 1000); // Convert to milliseconds
       
-      if (soundRef.current && isPlaying !== undefined) {
+      if (playerRef.current && isPlaying !== undefined) {
         // Add a small delay to prevent rapid seeking
         await new Promise(resolve => setTimeout(resolve, 50));
         
-        const status = await soundRef.current.getStatusAsync();
-        if (status.isLoaded) {
-          await soundRef.current.setPositionAsync(Math.floor(newPosition * 1000)); // Convert to milliseconds
+        if (playerRef.current.isLoaded) {
+          await playerRef.current.seekTo(newPosition); // expo-audio expects seconds
           setPosition(newPosition);
           console.log('🎵 Successfully seeked to:', newPosition);
         } else {
@@ -444,8 +351,8 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       // Use background audio service
       await backgroundAudioService.setVolume(clampedVolume);
       
-      if (soundRef.current) {
-        await soundRef.current.setVolumeAsync(clampedVolume);
+      if (playerRef.current) {
+        playerRef.current.volume = clampedVolume;
       }
       
       console.log('🎵 Volume set to:', clampedVolume);

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import BackButton from '../components/BackButton';
 import {
   View,
@@ -9,17 +9,55 @@ import {
   Alert,
   Switch,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { useAuth } from '../contexts/AuthContext';
+import { getTwoFactorStatus } from '../services/twoFactorAuthService';
+import type { TwoFactorStatusResponse } from '../types/twoFactor';
 
 export default function PrivacySecurityScreen() {
   const navigation = useNavigation();
+  const { session } = useAuth();
   const [profileVisibility, setProfileVisibility] = useState('public');
   const [allowMessages, setAllowMessages] = useState(true);
   const [showOnlineStatus, setShowOnlineStatus] = useState(true);
   const [allowDataCollection, setAllowDataCollection] = useState(false);
+  const [twoFactorStatus, setTwoFactorStatus] = useState<TwoFactorStatusResponse | null>(null);
+  const [loading2FA, setLoading2FA] = useState(true);
+
+  useEffect(() => {
+    loadTwoFactorStatus();
+  }, []);
+
+  const loadTwoFactorStatus = async () => {
+    if (!session) {
+      setLoading2FA(false);
+      return;
+    }
+
+    try {
+      setLoading2FA(true);
+      const status = await getTwoFactorStatus(session);
+      setTwoFactorStatus(status);
+    } catch (error: any) {
+      console.error('Failed to load 2FA status:', error);
+      // Don't show alert on ProfileScreen - just log the error
+      // The error will be handled gracefully
+    } finally {
+      setLoading2FA(false);
+    }
+  };
+
+  const handleTwoFactorPress = () => {
+    if (twoFactorStatus?.enabled) {
+      (navigation as any).navigate('TwoFactorSettings');
+    } else {
+      (navigation as any).navigate('TwoFactorSetup');
+    }
+  };
 
   const handleAccountVisibility = () => {
     Alert.alert(
@@ -81,6 +119,30 @@ export default function PrivacySecurityScreen() {
               <View style={styles.settingContent}>
                 <Text style={styles.settingText}>Profile Visibility</Text>
                 <Text style={styles.settingSubtext}>Currently: {profileVisibility}</Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#666" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Two-Factor Authentication */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Security</Text>
+          
+          <TouchableOpacity style={styles.settingItem} onPress={handleTwoFactorPress}>
+            <View style={styles.settingInfo}>
+              <Ionicons name="shield-checkmark" size={24} color="#FFFFFF" />
+              <View style={styles.settingContent}>
+                <Text style={styles.settingText}>Two-Factor Authentication</Text>
+                {loading2FA ? (
+                  <ActivityIndicator size="small" color="#666" style={{ marginTop: 4 }} />
+                ) : (
+                  <Text style={styles.settingSubtext}>
+                    {twoFactorStatus?.enabled
+                      ? `Enabled • ${twoFactorStatus.backupCodesRemaining} backup codes remaining`
+                      : 'Add an extra layer of security'}
+                  </Text>
+                )}
               </View>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#666" />

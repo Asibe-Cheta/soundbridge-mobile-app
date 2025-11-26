@@ -29,6 +29,7 @@ import {
   withQueryTimeout
 } from '../utils/dataLoading';
 import AdvancedSearchFilters, { SearchFilters } from '../components/AdvancedSearchFilters';
+import { useSearch } from '../hooks/useSearch';
 import { fetchDiscoverServiceProviders } from '../services/creatorExpansionService';
 import type { PublicProfile } from '../types/database';
 
@@ -193,7 +194,7 @@ function DiscoverScreen() {
   const { theme } = useTheme();
   const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState<TabType>('Music');
-  const [searchQuery, setSearchQuery] = useState('');
+  const { searchQuery, setSearchQuery, searchResults, isSearching } = useSearch();
   const [refreshing, setRefreshing] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [searchFilters, setSearchFilters] = useState<SearchFilters>({
@@ -215,13 +216,6 @@ function DiscoverScreen() {
   const [events, setEvents] = useState<Event[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [serviceProviders, setServiceProviders] = useState<PublicProfile[]>([]);
-  
-  // Search states
-  const [searchResults, setSearchResults] = useState<{
-    tracks: AudioTrack[];
-    artists: Creator[];
-  }>({ tracks: [], artists: [] });
-  const [isSearching, setIsSearching] = useState(false);
   
   // Loading state management
   const loadingManager = useRef(new LoadingStateManager()).current;
@@ -786,43 +780,7 @@ function DiscoverScreen() {
     setRefreshing(false);
   };
 
-  const performSearch = async (query: string) => {
-    if (!query.trim()) {
-      setSearchResults({ tracks: [], artists: [] });
-      setIsSearching(false);
-      return;
-    }
-
-    try {
-      setIsSearching(true);
-      console.log('🔍 Searching for:', query);
-
-      const [tracksResult, artistsResult] = await Promise.all([
-        dbHelpers.searchTracks(query.trim(), 20),
-        dbHelpers.searchProfiles(query.trim(), 10)
-      ]);
-
-      const tracks = tracksResult.success ? tracksResult.data || [] : [];
-      const artists = artistsResult.success ? artistsResult.data || [] : [];
-
-      setSearchResults({ tracks, artists });
-      console.log('✅ Search results:', tracks.length, 'tracks,', artists.length, 'artists');
-    } catch (error) {
-      console.error('Search error:', error);
-      setSearchResults({ tracks: [], artists: [] });
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  // Debounced search effect
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      performSearch(searchQuery);
-    }, 500); // 500ms debounce
-
-    return () => clearTimeout(timeoutId);
-  }, [searchQuery]);
+  // Search is now handled by useSearch hook
 
   const handleTrackPress = async (track: AudioTrack) => {
     (navigation as any).navigate('TrackDetails', { trackId: track.id, track: track });
@@ -934,7 +892,7 @@ function DiscoverScreen() {
         style={styles.mainGradient}
       />
       
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <SafeAreaView style={styles.safeArea} edges={[]}>
         <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
         
         {/* Header */}
@@ -1004,33 +962,6 @@ function DiscoverScreen() {
               </View>
             ) : (
               <>
-                {/* Search Results Tabs */}
-                <ScrollView 
-                  horizontal 
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.searchTabsScrollView}
-                  contentContainerStyle={styles.searchTabsContainer}
-                >
-                  <TouchableOpacity
-                    style={[styles.searchTabButton, styles.activeSearchTabButton]}
-                    onPress={() => {/* Could add search tab switching */}}
-                  >
-                    <Text style={[styles.searchTabText, { color: '#DC2626' }, styles.activeSearchTabText]}>
-                      All ({searchResults.tracks.length + searchResults.artists.length})
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.searchTabButton}>
-                    <Text style={[styles.searchTabText, { color: theme.colors.textSecondary }]}>
-                      Tracks ({searchResults.tracks.length})
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.searchTabButton}>
-                    <Text style={[styles.searchTabText, { color: theme.colors.textSecondary }]}>
-                      Artists ({searchResults.artists.length})
-                    </Text>
-                  </TouchableOpacity>
-                </ScrollView>
-
                 {/* Search Results Content */}
                 {searchResults.tracks.length === 0 && searchResults.artists.length === 0 ? (
                   <View style={styles.noResultsContainer}>
@@ -1741,6 +1672,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    paddingTop: 8,
   },
   menuButton: {
     padding: 8,

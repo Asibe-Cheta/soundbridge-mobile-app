@@ -121,9 +121,8 @@ export default function PrivacyPolicyScreen() {
             If you have any questions about this Privacy Policy or our data practices, please contact us:
           </Text>
           <Text style={styles.contactInfo}>
-            Email: privacy@soundbridge.com{'\n'}
-            Data Protection Officer: dpo@soundbridge.com{'\n'}
-            Address: SoundBridge Inc., 123 Music Street, Audio City, AC 12345
+            Email: contact@soundbridge.live{'\n'}
+            Address: 2 Cedar Grove, Wokingham, England, United Kingdom
           </Text>
         </View>
       </ScrollView>

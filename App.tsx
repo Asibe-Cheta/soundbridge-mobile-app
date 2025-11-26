@@ -1,7 +1,7 @@
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { View, TouchableOpacity, Text, Image } from 'react-native';
+import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,14 +9,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { useTheme } from './src/contexts/ThemeContext';
 import GlassmorphicTabBar from './src/components/GlassmorphicTabBar';
+import { useUnreadMessages } from './src/hooks/useUnreadMessages';
+import GlobalSearchBar from './src/components/GlobalSearchBar';
 
 // Import screens
 import SplashScreen from './src/screens/SplashScreen';
 import AuthScreen from './src/screens/AuthScreen';
 import HomeScreen from './src/screens/HomeScreen';
+import FeedScreen from './src/screens/FeedScreen';
 import DiscoverScreen from './src/screens/DiscoverScreen';
 import UploadScreen from './src/screens/UploadScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
+import NetworkScreen from './src/screens/NetworkScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import LiveSessionsScreen from './src/screens/LiveSessionsScreen';
 import LiveSessionRoomScreen from './src/screens/LiveSessionRoomScreen';
@@ -58,6 +62,7 @@ import AudioEnhancementExpoScreen from './src/screens/AudioEnhancementScreen.exp
 import TwoFactorVerificationScreen from './src/screens/TwoFactorVerificationScreen';
 import TwoFactorSetupScreen from './src/screens/TwoFactorSetupScreen';
 import TwoFactorSettingsScreen from './src/screens/TwoFactorSettingsScreen';
+import SearchScreen from './src/screens/SearchScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -73,6 +78,11 @@ import CreatePlaylistScreen from './src/screens/CreatePlaylistScreen';
 
 // Import services
 import { notificationService } from './src/services/NotificationService';
+import { offlineQueueService } from './src/services/offline/offlineQueueService';
+import { analyticsService } from './src/services/analytics/analyticsService';
+import { errorTrackingService } from './src/services/monitoring/errorTrackingService';
+import { performanceMonitoringService } from './src/services/monitoring/performanceMonitoringService';
+import { config } from './src/config/environment';
 import * as Linking from 'expo-linking';
 
 const Tab = createBottomTabNavigator();
@@ -82,59 +92,153 @@ const Stack = createStackNavigator();
 function MainTabs() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
+  const navigation = useNavigation();
+  const { unreadCount } = useUnreadMessages();
+  const { userProfile } = useAuth();
   
   return (
-    <Tab.Navigator
-      tabBar={(props) => (
-        <View style={{ paddingBottom: insets.bottom }}>
-          <GlassmorphicTabBar {...props} />
+    <>
+      {/* CUSTOM HEADER - Above tabs, visible on all screens */}
+      <View style={{
+        backgroundColor: theme.colors.surface,
+        borderBottomWidth: 1,
+        borderBottomColor: theme.colors.border,
+        paddingTop: insets.top,
+      }}>
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingHorizontal: 16,
+          paddingVertical: 12,
+        }}>
+          {/* Profile Pic / Logo - Left */}
+          <TouchableOpacity onPress={() => navigation.navigate('Profile' as never)}>
+            <View style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: theme.colors.primary,
+              justifyContent: 'center',
+              alignItems: 'center',
+              overflow: 'hidden',
+            }}>
+              {userProfile?.avatar_url ? (
+                <Image
+                  source={{ uri: userProfile.avatar_url }}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                  }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Ionicons name="person" size={20} color="#FFFFFF" />
+              )}
+            </View>
+          </TouchableOpacity>
+
+          {/* Search Bar - Center */}
+          <View style={{ flex: 1, marginHorizontal: 12 }}>
+            <GlobalSearchBar />
+          </View>
+
+          {/* Messages Icon - Right */}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Messages' as never)}
+            style={{ position: 'relative' }}
+          >
+            <Ionicons name="chatbubbles-outline" size={24} color={theme.colors.text} />
+            {/* Unread Badge - Only show if there are unread messages */}
+            {unreadCount > 0 && (
+              <View style={{
+                position: 'absolute',
+                top: -4,
+                right: -4,
+                backgroundColor: theme.colors.error,
+                borderRadius: unreadCount > 9 ? 8 : 10,
+                minWidth: unreadCount > 9 ? 20 : 16,
+                height: 16,
+                justifyContent: 'center',
+                alignItems: 'center',
+                paddingHorizontal: unreadCount > 9 ? 4 : 0,
+              }}>
+                <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: 'bold' }}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
-      )}
-      screenOptions={({ route }) => ({
-        tabBarIcon: ({ focused, color, size }) => {
-          let iconName: keyof typeof Ionicons.glyphMap;
+      </View>
 
-          if (route.name === 'Home') {
-            iconName = focused ? 'home' : 'home-outline';
-          } else if (route.name === 'Discover') {
-            iconName = focused ? 'search' : 'search-outline';
-          } else if (route.name === 'Upload') {
-            iconName = focused ? 'add-circle' : 'add-circle-outline';
-          } else if (route.name === 'Messages') {
-            iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
-          } else if (route.name === 'Profile') {
-            iconName = focused ? 'person' : 'person-outline';
-          } else {
-            iconName = 'ellipse-outline';
-          }
+      {/* TAB NAVIGATOR */}
+      <Tab.Navigator
+        tabBar={(props) => (
+          <View style={{ paddingBottom: insets.bottom }}>
+            <GlassmorphicTabBar {...props} />
+          </View>
+        )}
+        screenOptions={({ route }) => ({
+          tabBarIcon: ({ focused, color, size }) => {
+            let iconName: keyof typeof Ionicons.glyphMap;
 
-          return <Ionicons name={iconName} size={size} color={color} />;
-        },
-        tabBarActiveTintColor: '#DC2626',
-        tabBarInactiveTintColor: 'rgba(255, 255, 255, 0.6)',
-        headerShown: false,
-      })}
-    >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Discover" component={DiscoverScreen} />
-      <Tab.Screen 
-        name="Upload" 
-        component={UploadScreen}
-        options={{
-          tabBarIcon: ({ focused, color, size }) => (
-            <Ionicons 
-              name={focused ? 'add-circle' : 'add-circle-outline'} 
-              size={size} 
-              color={color} 
-            />
-          ),
-        }}
-      />
-      <Tab.Screen name="Messages" component={MessagesScreen} />
+            if (route.name === 'Feed') {
+              iconName = focused ? 'home' : 'home-outline';
+            } else if (route.name === 'Discover') {
+              iconName = focused ? 'search' : 'search-outline';
+            } else if (route.name === 'Upload') {
+              iconName = focused ? 'add-circle' : 'add-circle-outline';
+            } else if (route.name === 'Network') {
+              iconName = focused ? 'people' : 'people-outline';
+            } else if (route.name === 'Profile') {
+              iconName = focused ? 'person' : 'person-outline';
+            } else {
+              iconName = 'ellipse-outline';
+            }
+
+            return <Ionicons name={iconName} size={size} color={color} />;
+          },
+          tabBarActiveTintColor: '#DC2626',
+          tabBarInactiveTintColor: 'rgba(255, 255, 255, 0.6)',
+          headerShown: false,
+        })}
+      >
+        <Tab.Screen name="Feed" component={FeedScreen} />
+        <Tab.Screen name="Discover" component={DiscoverScreen} />
+        <Tab.Screen 
+          name="Upload" 
+          component={UploadScreen}
+          options={{
+            tabBarIcon: ({ focused, color, size }) => (
+              <View style={{
+                width: 56,
+                height: 56,
+                borderRadius: 28,
+                backgroundColor: '#EC4899',
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginTop: -20, // Elevated above tab bar
+                borderWidth: 4,
+                borderColor: theme.colors.background,
+                shadowColor: '#EC4899',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.5,
+                shadowRadius: 8,
+                elevation: 8,
+              }}>
+                <Ionicons name="add" size={32} color="#FFFFFF" />
+              </View>
+            ),
+          }}
+        />
+        <Tab.Screen name="Network" component={NetworkScreen} />
         <Tab.Screen name="Profile" component={ProfileScreen} />
       </Tab.Navigator>
-    );
-  }
+    </>
+  );
+}
 
 // Main App Navigator
 function AppNavigator() {
@@ -145,6 +249,39 @@ function AppNavigator() {
   // Initialize services
   React.useEffect(() => {
     console.log('🔧 Initializing services...');
+    
+    // Initialize offline queue service (works without user)
+    offlineQueueService.initialize().then(() => {
+      console.log('✅ Offline queue service ready');
+    }).catch(error => {
+      console.error('❌ Error initializing offline queue service:', error);
+      errorTrackingService.captureException(error as Error, { service: 'offlineQueue' });
+    });
+
+    // Initialize analytics service (works without user)
+    analyticsService.initialize().then(() => {
+      console.log('✅ Analytics service ready');
+    }).catch(error => {
+      console.error('❌ Error initializing analytics service:', error);
+      errorTrackingService.captureException(error as Error, { service: 'analytics' });
+    });
+
+    // Initialize error tracking service
+    errorTrackingService.initialize(config.sentryDsn, config.debugMode ? 'development' : 'production').then(() => {
+      console.log('✅ Error tracking service ready');
+    }).catch(error => {
+      console.error('❌ Error initializing error tracking service:', error);
+    });
+
+    // Set user context for error tracking if user is available
+    if (user) {
+      errorTrackingService.setUser({
+        id: user.id,
+        email: user.email,
+        username: user.user_metadata?.username,
+      });
+    }
+
     if (user) {
       // Initialize notification service
       notificationService.initialize().then(success => {
@@ -290,7 +427,9 @@ function AppNavigator() {
             <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
             <Stack.Screen name="NotificationPreferences" component={NotificationPreferencesScreen} />
             <Stack.Screen name="NotificationInbox" component={NotificationInboxScreen} />
+            <Stack.Screen name="Messages" component={MessagesScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
+            <Stack.Screen name="Search" component={SearchScreen} />
             <Stack.Screen name="LiveSessions" component={LiveSessionsScreen} />
             <Stack.Screen name="LiveSessionRoom" component={LiveSessionRoomScreen} />
             <Stack.Screen name="CreateLiveSession" component={CreateLiveSessionScreen} />
@@ -338,30 +477,31 @@ function AppNavigator() {
 export default function App() {
   console.log('🚀 SoundBridge Mobile App Loading...');
   
-  // Validate environment variables with fallbacks
-  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aunxdbqukbxyyiusaeqi.supabase.co';
-  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1bnhkYnF1a2J4eXlpdXNhZXFpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI2OTA2MTUsImV4cCI6MjA2ODI2NjYxNX0.IP-c4_S7Fkbq6F2UkgzL-TibkoBN49yQ1Cqz4CkMzB0';
+  // Use environment configuration
+  const supabaseUrl = config.supabaseUrl;
+  const supabaseAnonKey = config.supabaseAnonKey;
   
   // Stripe publishable key - required for event tickets and tips
   const stripePublishableKey = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
   
   // Log environment status safely
-  console.log('🔍 Environment variables:');
-  console.log('EXPO_PUBLIC_SUPABASE_URL:', process.env.EXPO_PUBLIC_SUPABASE_URL ? 'SET' : 'NOT SET (using fallback)');
-  console.log('EXPO_PUBLIC_SUPABASE_ANON_KEY:', process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ? 'SET' : 'NOT SET (using fallback)');
-  console.log('EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY:', process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ? 'SET' : 'NOT SET');
-  
-  if (!process.env.EXPO_PUBLIC_SUPABASE_URL || !process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY) {
-    console.warn('⚠️ Environment variables not set, using fallback values');
-  } else {
-    console.log('✅ Environment variables loaded successfully');
-  }
+  console.log('🔍 Environment:', config.debugMode ? 'development' : 'production');
+  console.log('🔍 API URL:', config.apiUrl);
+  console.log('🔍 Supabase URL:', supabaseUrl ? 'SET' : 'NOT SET');
+  console.log('🔍 Analytics Enabled:', config.analyticsEnabled);
+  console.log('🔍 Debug Mode:', config.debugMode);
   
   if (!stripePublishableKey) {
     console.warn('⚠️ EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY is not set - Stripe features (event tickets, tips) will not work');
   } else {
     console.log('✅ Stripe publishable key loaded - Event tickets and tips are enabled');
   }
+  
+  // Track app launch performance
+  React.useEffect(() => {
+    const trackAppLaunch = performanceMonitoringService.trackScreenRender('AppLaunch');
+    trackAppLaunch();
+  }, []);
   
   // Only render StripeProvider if we have a valid publishable key
   const appContent = (

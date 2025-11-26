@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { dbHelpers } from '../lib/supabase';
+import BackButton from '../components/BackButton';
 
 const { width } = Dimensions.get('window');
 
@@ -140,7 +141,7 @@ export default function MessagesScreen({ navigation }: any) {
     loadConversations();
   };
 
-  const handleConversationPress = (conversation: Conversation, navigation: any) => {
+  const handleConversationPress = (conversation: Conversation) => {
     // Navigate to chat screen with conversation data
     console.log('Navigate to conversation:', conversation.id);
     navigation.navigate('Chat', {
@@ -149,7 +150,7 @@ export default function MessagesScreen({ navigation }: any) {
     });
   };
 
-  const handleUserPress = (selectedUser: any, navigation: any) => {
+  const handleUserPress = (selectedUser: any) => {
     // Start new conversation - create conversation ID
     if (!selectedUser?.id || !user?.id) return;
     const conversationId = [user.id, selectedUser.id].sort().join('_');
@@ -185,7 +186,7 @@ export default function MessagesScreen({ navigation }: any) {
   const renderConversationItem = ({ item }: { item: Conversation }) => (
     <TouchableOpacity
       style={[styles.conversationItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-      onPress={() => handleConversationPress(item, navigation)}
+      onPress={() => handleConversationPress(item)}
     >
       <View style={styles.conversationAvatar}>
         {item.otherUser.avatar_url ? (
@@ -239,7 +240,7 @@ export default function MessagesScreen({ navigation }: any) {
   const renderSearchResult = ({ item }: { item: any }) => (
     <TouchableOpacity
       style={[styles.searchResultItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-      onPress={() => handleUserPress(item, navigation)}
+      onPress={() => handleUserPress(item)}
     >
       <View style={styles.searchResultAvatar}>
         {item.avatar_url ? (
@@ -292,11 +293,12 @@ export default function MessagesScreen({ navigation }: any) {
         
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.colors.surface }]}>
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Messages</Text>
-        <TouchableOpacity style={styles.headerButton}>
-          <Ionicons name="add" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-      </View>
+          <BackButton style={{ marginRight: 12 }} />
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Messages</Text>
+          <TouchableOpacity style={styles.headerButton}>
+            <Ionicons name="add" size={24} color={theme.colors.text} />
+          </TouchableOpacity>
+        </View>
 
       {/* Tabs */}
       <View style={[styles.tabsContainer, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
@@ -436,6 +438,8 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
+    flex: 1,
+    marginLeft: 8,
   },
   headerButton: {
     padding: 8,

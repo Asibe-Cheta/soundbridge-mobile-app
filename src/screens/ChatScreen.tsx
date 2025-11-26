@@ -26,6 +26,7 @@ interface Message {
   content: string;
   message_type: string;
   is_read: boolean;
+  read_at: string | null;
   created_at: string;
   sender: {
     id: string;
@@ -72,17 +73,22 @@ export default function ChatScreen({ navigation, route }: ChatScreenProps) {
   
   const flatListRef = useRef<FlatList>(null);
   const subscriptionRef = useRef<any>(null);
+  const readStatusSubscriptionRef = useRef<any>(null);
 
   useEffect(() => {
     loadMessages();
     subscribeToMessages();
+    subscribeToReadStatus();
     
     return () => {
       if (subscriptionRef.current) {
         supabase.removeChannel(subscriptionRef.current);
       }
+      if (readStatusSubscriptionRef.current) {
+        supabase.removeChannel(readStatusSubscriptionRef.current);
+      }
     };
-  }, [conversationId]);
+  }, [conversationId, user?.id]);
 
   const loadMessages = async () => {
     if (!user) return;
@@ -101,6 +107,7 @@ export default function ChatScreen({ navigation, route }: ChatScreenProps) {
           content,
           message_type,
           is_read,
+          read_at,
           created_at,
           sender:profiles!messages_sender_id_fkey(
             id,
@@ -186,6 +193,7 @@ export default function ChatScreen({ navigation, route }: ChatScreenProps) {
               content,
               message_type,
               is_read,
+              read_at,
               created_at,
               sender:profiles!messages_sender_id_fkey(
                 id,
@@ -234,6 +242,47 @@ export default function ChatScreen({ navigation, route }: ChatScreenProps) {
     subscriptionRef.current = subscription;
   };
 
+  const subscribeToReadStatus = () => {
+    if (!user) return;
+    
+    // Subscribe to UPDATE events for messages where current user is sender
+    // This will notify us when the recipient reads our messages
+    const subscription = supabase
+      .channel(`messages-read:${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `sender_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log('✅ Message read status updated:', payload.new);
+          
+          // Check if the updated message belongs to current conversation
+          const [userId1, userId2] = conversationId.split('_');
+          const updatedMessage = payload.new as any;
+          
+          const belongsToConversation = 
+            (updatedMessage.sender_id === userId1 && updatedMessage.recipient_id === userId2) ||
+            (updatedMessage.sender_id === userId2 && updatedMessage.recipient_id === userId1);
+          
+          if (belongsToConversation) {
+            // Update the message in the local state
+            setMessages(prev => prev.map(msg => 
+              msg.id === updatedMessage.id 
+                ? { ...msg, is_read: updatedMessage.is_read, read_at: updatedMessage.read_at }
+                : msg
+            ));
+          }
+        }
+      )
+      .subscribe();
+    
+    readStatusSubscriptionRef.current = subscription;
+  };
+
   const sendMessage = async () => {
     if (!messageText.trim() || !user) return;
     
@@ -258,6 +307,7 @@ export default function ChatScreen({ navigation, route }: ChatScreenProps) {
           content,
           message_type,
           is_read,
+          read_at,
           created_at,
           sender:profiles!messages_sender_id_fkey(
             id,
@@ -337,14 +387,34 @@ export default function ChatScreen({ navigation, route }: ChatScreenProps) {
           ]}>
             {item.content}
           </Text>
-          <Text style={[
-            styles.messageTime,
-            isOwnMessage 
-              ? { color: 'rgba(255, 255, 255, 0.7)' } 
-              : { color: theme.colors.textSecondary }
-          ]}>
-            {formatTime(item.created_at)}
-          </Text>
+          <View style={styles.messageFooter}>
+            <Text style={[
+              styles.messageTime,
+              isOwnMessage 
+                ? { color: 'rgba(255, 255, 255, 0.7)' } 
+                : { color: theme.colors.textSecondary }
+            ]}>
+              {formatTime(item.created_at)}
+            </Text>
+            {/* Read receipt indicator for sent messages */}
+            {isOwnMessage && (
+              <View style={styles.readReceipt}>
+                {item.is_read ? (
+                  <Ionicons 
+                    name="checkmark-done" 
+                    size={14} 
+                    color="rgba(255, 255, 255, 0.9)" 
+                  />
+                ) : (
+                  <Ionicons 
+                    name="checkmark" 
+                    size={14} 
+                    color="rgba(255, 255, 255, 0.6)" 
+                  />
+                )}
+              </View>
+            )}
+          </View>
         </View>
       </View>
     );
@@ -574,9 +644,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
   },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 4,
+  },
   messageTime: {
     fontSize: 11,
-    marginTop: 4,
+  },
+  readReceipt: {
+    marginLeft: 2,
   },
   inputContainer: {
     paddingHorizontal: 16,

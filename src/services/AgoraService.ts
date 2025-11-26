@@ -3,14 +3,25 @@
  * Handles audio streaming, token management, and session lifecycle
  */
 
-import {
+// Optional import - will be null if module not available (e.g., in Expo Go)
+let agoraModule: any = null;
+let AgoraTypes: any = null;
+
+try {
+  agoraModule = require('react-native-agora');
+  AgoraTypes = agoraModule;
+} catch (error) {
+  console.warn('⚠️ react-native-agora not available. Live audio features will be disabled.');
+}
+
+const {
   createAgoraRtcEngine,
   ChannelProfileType,
   ClientRoleType,
   AudioScenarioType,
   AudioProfileType,
   IRtcEngine,
-} from 'react-native-agora';
+} = AgoraTypes || {};
 
 // Agora App ID from web team
 const AGORA_APP_ID = '7ad7063055ae467f83294e1da8b3be11';
@@ -27,6 +38,11 @@ export class AgoraService {
   async initialize(): Promise<void> {
     if (this.isInitialized) {
       console.log('✅ Agora already initialized');
+      return;
+    }
+
+    if (!agoraModule || !createAgoraRtcEngine) {
+      console.warn('⚠️ react-native-agora not available. Live audio features disabled.');
       return;
     }
 
@@ -71,8 +87,8 @@ export class AgoraService {
     channelName: string,
     uid: number
   ): Promise<void> {
-    if (!this.engine) {
-      throw new Error('Agora engine not initialized');
+    if (!agoraModule || !this.engine) {
+      throw new Error('Agora engine not available. Please use a development build.');
     }
 
     try {
@@ -103,8 +119,8 @@ export class AgoraService {
     channelName: string,
     uid: number
   ): Promise<void> {
-    if (!this.engine) {
-      throw new Error('Agora engine not initialized');
+    if (!agoraModule || !this.engine) {
+      throw new Error('Agora engine not available. Please use a development build.');
     }
 
     try {
@@ -151,8 +167,8 @@ export class AgoraService {
    * Mute/unmute local audio
    */
   async muteLocalAudio(muted: boolean): Promise<void> {
-    if (!this.engine) {
-      throw new Error('Agora engine not initialized');
+    if (!agoraModule || !this.engine) {
+      throw new Error('Agora engine not available. Please use a development build.');
     }
 
     try {
@@ -168,8 +184,8 @@ export class AgoraService {
    * Switch from listener to broadcaster (when promoted to speaker)
    */
   async promoteToSpeaker(): Promise<void> {
-    if (!this.engine) {
-      throw new Error('Agora engine not initialized');
+    if (!agoraModule || !this.engine) {
+      throw new Error('Agora engine not available. Please use a development build.');
     }
 
     try {
@@ -186,8 +202,8 @@ export class AgoraService {
    * Switch from broadcaster to listener (when demoted)
    */
   async demoteToListener(): Promise<void> {
-    if (!this.engine) {
-      throw new Error('Agora engine not initialized');
+    if (!agoraModule || !this.engine) {
+      throw new Error('Agora engine not available. Please use a development build.');
     }
 
     try {
@@ -289,7 +305,14 @@ export class AgoraService {
    * Check if initialized
    */
   getIsInitialized(): boolean {
-    return this.isInitialized;
+    return this.isInitialized && !!agoraModule;
+  }
+
+  /**
+   * Check if Agora module is available
+   */
+  isAvailable(): boolean {
+    return !!agoraModule;
   }
 
   /**

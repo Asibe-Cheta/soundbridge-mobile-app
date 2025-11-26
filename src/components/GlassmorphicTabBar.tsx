@@ -61,14 +61,14 @@ export default function GlassmorphicTabBar({ state, descriptors, navigation }: B
             };
 
             let iconName: keyof typeof Ionicons.glyphMap;
-            if (route.name === 'Home') {
+            if (route.name === 'Feed' || route.name === 'Home') {
               iconName = isFocused ? 'home' : 'home-outline';
             } else if (route.name === 'Discover') {
               iconName = isFocused ? 'search' : 'search-outline';
             } else if (route.name === 'Upload') {
               iconName = isFocused ? 'add-circle' : 'add-circle-outline';
-            } else if (route.name === 'Messages') {
-              iconName = isFocused ? 'chatbubbles' : 'chatbubbles-outline';
+            } else if (route.name === 'Network' || route.name === 'Messages') {
+              iconName = isFocused ? 'people' : 'people-outline';
             } else if (route.name === 'Profile') {
               iconName = isFocused ? 'person' : 'person-outline';
             } else {

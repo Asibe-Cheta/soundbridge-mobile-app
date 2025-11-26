@@ -110,7 +110,17 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
         errorBody = await response.text();
       }
 
-      console.error(`❌ API Error (${response.status}):`, errorBody);
+      // Log 404s as warnings (expected when endpoints don't exist yet)
+      // Log other errors as errors
+      if (response.status === 404) {
+        console.warn(`⚠️ API Endpoint Not Found (404): ${path}`);
+        // Only log error body if it's not HTML (HTML 404 pages are noisy)
+        if (typeof errorBody === 'string' && !errorBody.includes('<!DOCTYPE')) {
+          console.warn(`⚠️ Response:`, errorBody);
+        }
+      } else {
+        console.error(`❌ API Error (${response.status}):`, errorBody);
+      }
 
       // Provide more specific error messages for common status codes
       let errorMessage = 'API request failed';
@@ -138,18 +148,21 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     return response.json() as Promise<T>;
   } catch (error: any) {
     // Enhanced error logging for debugging
-    console.error(`❌ Fetch Error Details:`, {
-      name: error?.name,
-      message: error?.message,
-      stack: error?.stack,
-      code: error?.code,
-      errno: error?.errno,
-      type: error?.type,
-      url,
-      method: rest.method || 'GET',
-      hasToken: !!token,
-      hasSession: !!session,
-    });
+    // Don't log detailed error info for 404s (they're expected when endpoints don't exist)
+    if (error?.status !== 404) {
+      console.error(`❌ Fetch Error Details:`, {
+        name: error?.name,
+        message: error?.message,
+        stack: error?.stack,
+        code: error?.code,
+        errno: error?.errno,
+        type: error?.type,
+        url,
+        method: rest.method || 'GET',
+        hasToken: !!token,
+        hasSession: !!session,
+      });
+    }
 
     // Handle network errors (fetch failures, timeouts, etc.)
     if (

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
-import { Audio } from 'expo-av';
+// Note: expo-av removed, using expo-audio if needed in future
 
 export interface OfflineTrack {
   id: string;

@@ -35,6 +35,9 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { becomeServiceProvider } from '../services/creatorExpansionService';
 import * as BiometricAuth from '../services/biometricAuth';
+import ConnectionsPreview from '../components/ConnectionsPreview';
+import RecentActivity from '../components/RecentActivity';
+import { mockConnections } from '../utils/mockNetworkData';
 
 const { width } = Dimensions.get('window');
 
@@ -173,39 +176,42 @@ export default function ProfileScreen() {
         },
         followers: {
           name: 'followers',
-          query: () => withQueryTimeout(
-            supabase
-              .from('followers')
-              .select('id', { count: 'exact', head: true })
-              .eq('following_id', user.id),
-            { timeout: 3000, fallback: { count: 0 } }
-          ),
+          query: async () => {
+            const response = await supabase
+              .from('follows')
+              .select('*', { count: 'exact', head: true })
+              .eq('following_id', user.id);
+            // Return the full response including count
+            return { data: response.count ?? 0, error: response.error };
+          },
           timeout: 3000,
-          fallback: { count: 0 },
+          fallback: 0,
         },
         following: {
           name: 'following',
-          query: () => withQueryTimeout(
-            supabase
-              .from('followers')
-              .select('id', { count: 'exact', head: true })
-              .eq('follower_id', user.id),
-            { timeout: 3000, fallback: { count: 0 } }
-          ),
+          query: async () => {
+            const response = await supabase
+              .from('follows')
+              .select('*', { count: 'exact', head: true })
+              .eq('follower_id', user.id);
+            // Return the full response including count
+            return { data: response.count ?? 0, error: response.error };
+          },
           timeout: 3000,
-          fallback: { count: 0 },
+          fallback: 0,
         },
         tracksCount: {
           name: 'tracksCount',
-          query: () => withQueryTimeout(
-            supabase
+          query: async () => {
+            const response = await supabase
               .from('audio_tracks')
-              .select('id', { count: 'exact', head: true })
-              .eq('creator_id', user.id),
-            { timeout: 3000, fallback: { count: 0 } }
-          ),
+              .select('*', { count: 'exact', head: true })
+              .eq('creator_id', user.id);
+            // Return the full response including count
+            return { data: response.count ?? 0, error: response.error };
+          },
           timeout: 3000,
-          fallback: { count: 0 },
+          fallback: 0,
         },
         tracks: {
           name: 'tracks',
@@ -225,10 +231,14 @@ export default function ProfileScreen() {
 
       // Process profile data
       const profileData = results.profile?.data || results.profile;
-      const followersCount = results.followers?.data?.count || results.followers?.count || 0;
-      const followingCount = results.following?.data?.count || results.following?.count || 0;
-      const tracksCount = results.tracksCount?.data?.count || results.tracksCount?.count || 0;
+      
+      // Extract counts - now they're directly in the data property
+      const followersCount = results.followers ?? 0;
+      const followingCount = results.following ?? 0;
+      const tracksCount = results.tracksCount ?? 0;
       const tracksData = results.tracks?.data || results.tracks || [];
+      
+      console.log('📊 Profile counts - Followers:', followersCount, 'Following:', followingCount, 'Tracks:', tracksCount);
 
       if (profileData && !results.profile?.error) {
         console.log('✅ Profile loaded:', profileData.username);
@@ -806,19 +816,7 @@ export default function ProfileScreen() {
   };
 
   const renderOverviewTab = () => (
-    <ScrollView 
-      style={styles.tabContent}
-      contentContainerStyle={{ paddingBottom: 300 }} // Extra space for mini player
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor="#DC2626"
-          colors={['#DC2626']}
-        />
-      }
-    >
+    <View style={styles.tabContent}>
       {/* Stats Cards */}
       <View style={styles.statsContainer}>
         <View style={[styles.statCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
@@ -834,6 +832,15 @@ export default function ProfileScreen() {
           <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Tips</Text>
         </View>
       </View>
+
+      {/* Connections Preview */}
+      <ConnectionsPreview
+        connections={mockConnections}
+        totalCount={142}
+      />
+
+      {/* Recent Activity Component */}
+      <RecentActivity />
 
       {/* Recent Activity */}
       <View style={styles.section}>
@@ -927,15 +934,11 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         )}
       </View>
-    </ScrollView>
+    </View>
   );
 
   const renderEarningsTab = () => (
-    <ScrollView 
-      style={styles.tabContent} 
-      contentContainerStyle={{ paddingBottom: 300 }} // Extra space for mini player
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={styles.tabContent}>
       {/* Earnings Overview */}
       <View style={[styles.earningsOverview, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
         <Text style={[styles.earningsTotal, { color: theme.colors.text }]}>${stats?.total_earnings?.toFixed(2) || '0.00'}</Text>
@@ -1004,15 +1007,11 @@ export default function ProfileScreen() {
           <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
       </View>
-    </ScrollView>
+    </View>
   );
 
   const renderSettingsTab = () => (
-    <ScrollView 
-      style={styles.tabContent} 
-      contentContainerStyle={{ paddingBottom: 300 }} // Extra space for mini player
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={styles.tabContent}>
       {/* Account Settings */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Account</Text>
@@ -1048,7 +1047,7 @@ export default function ProfileScreen() {
                 size={20} 
                 color={biometricEnabled ? '#10B981' : theme.colors.textSecondary} 
               />
-              <View style={{ flex: 1 }}>
+              <View style={{ flex: 1, flexShrink: 1 }}>
                 <Text style={[styles.settingText, { color: theme.colors.text }]}>
                   {biometricType} Login
                 </Text>
@@ -1062,6 +1061,7 @@ export default function ProfileScreen() {
               onValueChange={handleBiometricToggle}
               trackColor={{ false: theme.colors.border, true: '#10B981' + '40' }}
               thumbColor={biometricEnabled ? '#10B981' : theme.colors.textSecondary}
+              style={{ marginLeft: 8 }}
             />
           </View>
         )}
@@ -1113,6 +1113,7 @@ export default function ProfileScreen() {
             onValueChange={setNotificationsEnabled}
             trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
             thumbColor={notificationsEnabled ? theme.colors.primary : theme.colors.textSecondary}
+            style={{ marginLeft: 8 }}
           />
         </View>
         <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => navigation.navigate('ThemeSettings' as never)}>
@@ -1135,6 +1136,7 @@ export default function ProfileScreen() {
             onValueChange={toggleAutoPlay}
             trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
             thumbColor={autoPlay ? theme.colors.primary : theme.colors.textSecondary}
+            style={{ marginLeft: 8 }}
           />
         </View>
       </View>
@@ -1168,7 +1170,7 @@ export default function ProfileScreen() {
       <TouchableOpacity style={[styles.signOutButton, { backgroundColor: theme.colors.error + '20', borderColor: theme.colors.error }]} onPress={handleSignOut}>
         <Text style={[styles.signOutText, { color: theme.colors.error }]}>Sign Out</Text>
       </TouchableOpacity>
-    </ScrollView>
+    </View>
   );
 
   if (loading) {
@@ -1190,7 +1192,7 @@ export default function ProfileScreen() {
         style={styles.mainGradient}
       />
       
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <SafeAreaView style={styles.safeArea} edges={[]}>
         <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
         
         {/* Header */}
@@ -1209,140 +1211,171 @@ export default function ProfileScreen() {
           ) : (
             <>
               <TouchableOpacity style={styles.headerButton} onPress={handleEditProfile}>
-                <Ionicons name="create" size={24} color={theme.colors.text} />
+                <Ionicons name="pencil-outline" size={24} color={theme.colors.text} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.headerButton} onPress={handleShareProfile}>
-                <Ionicons name="share" size={24} color={theme.colors.text} />
+                <Ionicons name="share-outline" size={24} color={theme.colors.text} />
               </TouchableOpacity>
             </>
           )}
         </View>
       </View>
 
-      {/* Profile Header */}
-      <View style={styles.profileHeader}>
-        <LinearGradient
-          colors={['#DC2626', '#EC4899']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.profileBanner}
-        >
-          <View style={styles.profileContent}>
-            <TouchableOpacity style={styles.avatarContainer} onPress={handleChangeAvatar} disabled={avatarUploading}>
-              {profile?.avatar_url ? (
-                <Image
-                  source={{ uri: profile.avatar_url }}
-                  style={styles.avatar}
-                />
-              ) : (
-                <View style={[styles.defaultAvatar, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-                  <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
-                </View>
-              )}
-              
-              {avatarUploading && (
-                <View style={styles.avatarOverlay}>
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                </View>
-              )}
-              
-              <View style={styles.avatarEditButton}>
-                <Ionicons name="camera" size={16} color="#FFFFFF" />
-              </View>
-              
-              {profile?.is_verified && (
-                <View style={styles.verifiedBadge}>
-                  <Ionicons name="checkmark" size={12} color="#FFFFFF" />
-                </View>
-              )}
-            </TouchableOpacity>
+      {/* Scrollable Content - Profile Banner, Tabs, and Content all scroll together */}
+      <ScrollView
+        style={styles.scrollContainer}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          activeTab === 'overview' ? (
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#DC2626"
+              colors={['#DC2626']}
+            />
+          ) : undefined
+        }
+      >
+        {/* Profile Header - Scrolls up and out of view */}
+        <View style={styles.profileHeader}>
+          <View style={styles.profileBannerContainer}>
+            {/* Large Profile Picture Background */}
+            {profile?.avatar_url ? (
+              <Image
+                source={{ uri: profile.avatar_url }}
+                style={styles.profileBannerImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <LinearGradient
+                colors={['#DC2626', '#EC4899']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.profileBannerImage}
+              />
+            )}
             
-            <View style={styles.profileInfo}>
-              {isEditing ? (
-                <>
-                  <TextInput
-                    style={styles.editInput}
-                    value={editingProfile.display_name}
-                    onChangeText={(text) => setEditingProfile(prev => ({ ...prev, display_name: text }))}
-                    placeholder="Display Name"
-                    placeholderTextColor="#999"
-                  />
-                  <TextInput
-                    style={[styles.editInput, styles.bioInput]}
-                    value={editingProfile.bio}
-                    onChangeText={(text) => setEditingProfile(prev => ({ ...prev, bio: text }))}
-                    placeholder="Bio"
-                    placeholderTextColor="#999"
-                    multiline
-                    numberOfLines={3}
-                  />
-                </>
-              ) : (
-                <>
-                  <Text style={[styles.displayName, { color: '#FFFFFF' }]}>{profile?.display_name}</Text>
-                  <Text style={[styles.username, { color: 'rgba(255, 255, 255, 0.8)' }]}>@{profile?.username}</Text>
-                  {profile?.bio && (
-                    <Text style={[styles.bio, { color: 'rgba(255, 255, 255, 0.9)' }]}>{profile.bio}</Text>
-                  )}
-                </>
-              )}
-              <Text style={[styles.joinDate, { color: 'rgba(255, 255, 255, 0.7)' }]}>
-                Joined {formatDate(profile?.created_at || new Date().toISOString())}
-              </Text>
-            </View>
-
-            <View style={styles.profileStats}>
-              <View style={styles.statItem}>
-                <Text style={[styles.statNumber, { color: '#FFFFFF' }]}>{profile?.followers_count}</Text>
-                <Text style={[styles.statLabel, { color: 'rgba(255, 255, 255, 0.8)' }]}>Followers</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={[styles.statNumber, { color: '#FFFFFF' }]}>{profile?.following_count}</Text>
-                <Text style={[styles.statLabel, { color: 'rgba(255, 255, 255, 0.8)' }]}>Following</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={[styles.statNumber, { color: '#FFFFFF' }]}>{profile?.tracks_count}</Text>
-                <Text style={[styles.statLabel, { color: 'rgba(255, 255, 255, 0.8)' }]}>Tracks</Text>
+            {/* Dark Overlay for Text Readability */}
+            <LinearGradient
+              colors={['transparent', 'rgba(0, 0, 0, 0.7)', 'rgba(0, 0, 0, 0.9)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={styles.profileOverlay}
+            />
+            
+            {/* Profile Content Overlay */}
+            <View style={styles.profileContentOverlay}>
+              {/* Avatar Edit Button */}
+              <TouchableOpacity 
+                style={styles.avatarEditButtonOverlay} 
+                onPress={handleChangeAvatar} 
+                disabled={avatarUploading}
+              >
+                {avatarUploading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="camera" size={20} color="#FFFFFF" />
+                )}
+              </TouchableOpacity>
+              
+              {/* User Info Overlay */}
+              <View style={styles.profileInfoOverlay}>
+                {isEditing ? (
+                  <>
+                    <TextInput
+                      style={[styles.editInputOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)', color: '#FFFFFF' }]}
+                      value={editingProfile.display_name}
+                      onChangeText={(text) => setEditingProfile(prev => ({ ...prev, display_name: text }))}
+                      placeholder="Display Name"
+                      placeholderTextColor="rgba(255, 255, 255, 0.7)"
+                    />
+                    <TextInput
+                      style={[styles.editInputOverlay, styles.bioInputOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)', color: '#FFFFFF' }]}
+                      value={editingProfile.bio}
+                      onChangeText={(text) => setEditingProfile(prev => ({ ...prev, bio: text }))}
+                      placeholder="Bio"
+                      placeholderTextColor="rgba(255, 255, 255, 0.7)"
+                      multiline
+                      numberOfLines={3}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                      <Text style={styles.displayNameOverlay}>{profile?.display_name}</Text>
+                      {profile?.is_verified && (
+                        <View style={styles.verifiedBadgeOverlay}>
+                          <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.usernameOverlay}>@{profile?.username}</Text>
+                    {profile?.bio && (
+                      <Text style={styles.bioOverlay}>{profile.bio}</Text>
+                    )}
+                  </>
+                )}
+                
+                {/* Stats Overlay */}
+                <View style={styles.profileStatsOverlay}>
+                  <View style={styles.statItemOverlay}>
+                    <Text style={styles.statNumberOverlay}>{profile?.followers_count || 0}</Text>
+                    <Text style={styles.statLabelOverlay}>Followers</Text>
+                  </View>
+                  <View style={styles.statItemOverlay}>
+                    <Text style={styles.statNumberOverlay}>{profile?.following_count || 0}</Text>
+                    <Text style={styles.statLabelOverlay}>Following</Text>
+                  </View>
+                  <View style={styles.statItemOverlay}>
+                    <Text style={styles.statNumberOverlay}>{profile?.tracks_count || 0}</Text>
+                    <Text style={styles.statLabelOverlay}>Tracks</Text>
+                  </View>
+                </View>
+                
+                <Text style={styles.joinDateOverlay}>
+                  Joined {formatDate(profile?.created_at || new Date().toISOString())}
+                </Text>
               </View>
             </View>
           </View>
-        </LinearGradient>
-      </View>
+        </View>
 
-      {/* Tabs */}
-      <View style={[styles.tabsContainer, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'overview' && { backgroundColor: theme.colors.primary + '20' }]}
-          onPress={() => setActiveTab('overview')}
-        >
-          <Text style={[styles.tabText, { color: activeTab === 'overview' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'overview' && styles.activeTabText]}>
-            Overview
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'earnings' && { backgroundColor: theme.colors.primary + '20' }]}
-          onPress={() => setActiveTab('earnings')}
-        >
-          <Text style={[styles.tabText, { color: activeTab === 'earnings' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'earnings' && styles.activeTabText]}>
-            Earnings
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'settings' && { backgroundColor: theme.colors.primary + '20' }]}
-          onPress={() => setActiveTab('settings')}
-        >
-          <Text style={[styles.tabText, { color: activeTab === 'settings' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'settings' && styles.activeTabText]}>
-            Settings
-          </Text>
-        </TouchableOpacity>
-      </View>
+        {/* Tabs - Scroll up with content */}
+        <View style={[styles.tabsContainer, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'overview' && { backgroundColor: theme.colors.primary + '20' }]}
+            onPress={() => setActiveTab('overview')}
+          >
+            <Text style={[styles.tabText, { color: activeTab === 'overview' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'overview' && styles.activeTabText]}>
+              Overview
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'earnings' && { backgroundColor: theme.colors.primary + '20' }]}
+            onPress={() => setActiveTab('earnings')}
+          >
+            <Text style={[styles.tabText, { color: activeTab === 'earnings' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'earnings' && styles.activeTabText]}>
+              Earnings
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'settings' && { backgroundColor: theme.colors.primary + '20' }]}
+            onPress={() => setActiveTab('settings')}
+          >
+            <Text style={[styles.tabText, { color: activeTab === 'settings' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'settings' && styles.activeTabText]}>
+              Settings
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-      {/* Tab Content */}
-      <View style={[styles.content, { backgroundColor: 'transparent' }]}>
-        {activeTab === 'overview' && renderOverviewTab()}
-        {activeTab === 'earnings' && renderEarningsTab()}
-        {activeTab === 'settings' && renderSettingsTab()}
-      </View>
+        {/* Tab Content - Scrolls with the rest */}
+        <View style={[styles.content, { backgroundColor: 'transparent' }]}>
+          {activeTab === 'overview' && renderOverviewTab()}
+          {activeTab === 'earnings' && renderEarningsTab()}
+          {activeTab === 'settings' && renderSettingsTab()}
+        </View>
+      </ScrollView>
 
       {/* Loading Modal for Becoming Service Provider */}
       <Modal
@@ -1396,7 +1429,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 8,
     paddingBottom: 8,
     borderBottomWidth: 1,
   },
@@ -1407,89 +1440,148 @@ const styles = StyleSheet.create({
   headerButton: {
     padding: 8,
   },
+  scrollContainer: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 300, // Extra space for mini player
+  },
   profileHeader: {
-    marginBottom: 16,
+    marginBottom: 0,
   },
-  profileBanner: {
-    paddingHorizontal: 16,
-    paddingVertical: 24,
-  },
-  profileContent: {
-    alignItems: 'center',
-  },
-  avatarContainer: {
+  profileBannerContainer: {
+    width: '100%',
+    height: 400,
     position: 'relative',
-    marginBottom: 16,
+    overflow: 'hidden',
   },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 4,
-    borderColor: '#FFFFFF',
+  profileBannerImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+    top: 0,
+    left: 0,
   },
-  defaultAvatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 4,
-  },
-  verifiedBadge: {
+  profileOverlay: {
     position: 'absolute',
     bottom: 0,
+    left: 0,
     right: 0,
+    height: '60%',
+  },
+  profileContentOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+    paddingTop: 16,
+  },
+  avatarEditButtonOverlay: {
+    position: 'absolute',
+    top: 16,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  profileInfoOverlay: {
+    alignItems: 'flex-start',
+  },
+  displayNameOverlay: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  usernameOverlay: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  bioOverlay: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginBottom: 16,
+    lineHeight: 20,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  profileStatsOverlay: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    width: '100%',
+    marginBottom: 12,
+    gap: 24,
+  },
+  statItemOverlay: {
+    alignItems: 'flex-start',
+  },
+  statNumberOverlay: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 2,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  statLabelOverlay: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.8)',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  joinDateOverlay: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.7)',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  editInputOverlay: {
+    width: '100%',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  bioInputOverlay: {
+    height: 80,
+    textAlignVertical: 'top',
+  },
+  verifiedBadgeOverlay: {
+    marginLeft: 8,
     backgroundColor: '#4CAF50',
     borderRadius: 12,
     width: 24,
     height: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: '#FFFFFF',
-  },
-  profileInfo: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  displayName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  username: {
-    fontSize: 16,
-    marginBottom: 8,
-  },
-  bio: {
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 8,
-    lineHeight: 20,
-  },
-  joinDate: {
-    fontSize: 12,
-  },
-  profileStats: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    width: '100%',
-  },
-  statItem: {
-    alignItems: 'center',
-  },
-  statNumber: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 12,
   },
   tabsContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
+    paddingTop: 8,
     paddingBottom: 8,
     borderBottomWidth: 1,
   },
@@ -1510,10 +1602,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   content: {
-    flex: 1,
+    backgroundColor: 'transparent',
   },
   tabContent: {
-    flex: 1,
     padding: 16,
     backgroundColor: 'transparent',
   },
@@ -1640,7 +1731,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 16,
-    paddingHorizontal: 16,
+    paddingLeft: 16,
+    paddingRight: 16,
     // backgroundColor applied dynamically in JSX
     borderRadius: 8,
     marginBottom: 8,
@@ -1649,6 +1741,9 @@ const styles = StyleSheet.create({
   settingInfo: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    flexShrink: 1,
+    marginRight: 12,
   },
   settingText: {
     // color applied dynamically in JSX

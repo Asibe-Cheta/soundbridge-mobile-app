@@ -1,7 +1,7 @@
 // src/services/DeepLinkingService.ts
 // Deep linking service for handling navigation from notifications
 
-import { Linking } from 'react-native';
+import { Linking, Share } from 'react-native';
 import { NavigationContainerRef } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { notificationService, NotificationData } from './NotificationService';
@@ -127,6 +127,12 @@ class DeepLinkingService {
         case 'event':
           return this.parseEventUrl(rest, urlObj.searchParams);
         
+        case 'post':
+          return this.parsePostUrl(rest, urlObj.searchParams);
+        
+        case 'opportunity':
+          return this.parseOpportunityUrl(rest, urlObj.searchParams);
+        
         default:
           console.log('⚠️ Unknown deep link section:', section);
           return { screen: 'Home' };
@@ -208,6 +214,30 @@ class DeepLinkingService {
     };
   }
 
+  private parsePostUrl(pathSegments: string[], searchParams: URLSearchParams): DeepLinkData {
+    const [postId] = pathSegments;
+    
+    return {
+      screen: 'Feed',
+      params: { 
+        postId,
+        highlightPost: true 
+      }
+    };
+  }
+
+  private parseOpportunityUrl(pathSegments: string[], searchParams: URLSearchParams): DeepLinkData {
+    const [opportunityId] = pathSegments;
+    
+    return {
+      screen: 'Network',
+      params: { 
+        tab: 'opportunities',
+        opportunityId 
+      }
+    };
+  }
+
   // ===== NOTIFICATION DEEP LINKING =====
 
   handleNotificationDeepLink(data: NotificationData) {
@@ -240,9 +270,32 @@ class DeepLinkingService {
           };
           break;
 
+        case 'creator_post':
+          if (data.entityId) {
+            deepLinkData = {
+              screen: 'Feed',
+              params: {
+                postId: data.entityId,
+                highlightPost: true,
+              },
+            };
+          } else {
+            deepLinkData = { screen: 'Feed' };
+          }
+          break;
+
+        case 'connection_request':
+          deepLinkData = {
+            screen: 'Network',
+            params: {
+              tab: 'invitations',
+            },
+          };
+          break;
+
         default:
           console.log('⚠️ Unknown notification type:', data.type);
-          deepLinkData = { screen: 'CollaborationRequests' };
+          deepLinkData = { screen: 'Home' };
       }
 
       this.navigate(deepLinkData);
@@ -328,6 +381,18 @@ class DeepLinkingService {
     return `soundbridge://event/${eventId}`;
   }
 
+  generatePostLink(postId: string): string {
+    return `https://soundbridge.live/post/${postId}`;
+  }
+
+  generateProfileLink(username: string): string {
+    return `https://soundbridge.live/@${username}`;
+  }
+
+  generateOpportunityLink(opportunityId: string): string {
+    return `https://soundbridge.live/opportunity/${opportunityId}`;
+  }
+
   // ===== SHARING =====
 
   async shareCollaborationRequest(requestId: string, subject: string): Promise<void> {
@@ -349,6 +414,78 @@ class DeepLinkingService {
       await Linking.openURL(`https://soundbridge.app/share?url=${encodeURIComponent(url)}&text=${encodeURIComponent(message)}`);
     } catch (error) {
       console.error('❌ Error sharing profile:', error);
+    }
+  }
+
+  /**
+   * Share post externally using React Native Share
+   */
+  async sharePost(postId: string, postTitle?: string): Promise<void> {
+    const link = this.generatePostLink(postId);
+    
+    try {
+      await Share.share({
+        message: postTitle 
+          ? `Check out this post on SoundBridge: ${postTitle}\n${link}`
+          : `Check out this post on SoundBridge:\n${link}`,
+        url: link,
+      });
+    } catch (error) {
+      console.error('Error sharing post:', error);
+    }
+  }
+
+  /**
+   * Handle post deep link
+   */
+  async handlePostLink(postId: string): Promise<void> {
+    try {
+      this.navigate({
+        screen: 'Feed',
+        params: {
+          postId,
+          highlightPost: true,
+        },
+      });
+    } catch (error) {
+      console.error('Error handling post link:', error);
+      this.navigate({ screen: 'Feed' });
+    }
+  }
+
+  /**
+   * Handle profile deep link by username
+   */
+  async handleProfileLink(username: string): Promise<void> {
+    try {
+      this.navigate({
+        screen: 'Profile',
+        params: { username },
+      });
+    } catch (error) {
+      console.error('Error handling profile link:', error);
+      this.navigate({ screen: 'Discover' });
+    }
+  }
+
+  /**
+   * Handle opportunity deep link
+   */
+  async handleOpportunityLink(opportunityId: string): Promise<void> {
+    try {
+      this.navigate({
+        screen: 'Network',
+        params: {
+          tab: 'opportunities',
+          opportunityId,
+        },
+      });
+    } catch (error) {
+      console.error('Error handling opportunity link:', error);
+      this.navigate({
+        screen: 'Network',
+        params: { tab: 'opportunities' },
+      });
     }
   }
 

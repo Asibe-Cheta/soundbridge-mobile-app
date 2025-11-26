@@ -316,6 +316,79 @@ export const dbHelpers = {
     }
   },
 
+  // Search events
+  async searchEvents(query: string, limit = 20) {
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select(`
+          id,
+          title,
+          description,
+          event_date,
+          location,
+          venue,
+          category,
+          price_gbp,
+          price_ngn,
+          image_url,
+          creator_id,
+          created_at,
+          organizer:profiles!events_creator_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url
+          )
+        `)
+        .or(`title.ilike.%${query}%,description.ilike.%${query}%,location.ilike.%${query}%,venue.ilike.%${query}%`)
+        .gte('event_date', new Date().toISOString())
+        .order('event_date', { ascending: true })
+        .limit(limit);
+      
+      if (error) throw error;
+      return { success: true, data, error: null };
+    } catch (error) {
+      console.error('Error searching events:', error);
+      return { success: false, data: null, error };
+    }
+  },
+
+  // Search venues
+  async searchVenues(query: string, limit = 20) {
+    try {
+      // Venues table schema:
+      // - id (uuid), owner_id (uuid), name (text), description (text, nullable)
+      // - address (jsonb, nullable) - contains address details as JSON
+      // - capacity (integer, nullable), amenities (text[], nullable)
+      // - primary_contact (jsonb, nullable), status (text)
+      // - created_at (timestamptz), updated_at (timestamptz)
+      const { data, error } = await supabase
+        .from('venues')
+        .select(`
+          id,
+          name,
+          description,
+          address,
+          capacity,
+          amenities,
+          status,
+          owner_id,
+          created_at
+        `)
+        .or(`name.ilike.%${query}%,description.ilike.%${query}%`)
+        .eq('status', 'active') // Only show active venues
+        .order('name', { ascending: true })
+        .limit(limit);
+      
+      if (error) throw error;
+      return { success: true, data, error: null };
+    } catch (error) {
+      console.error('Error searching venues:', error);
+      return { success: false, data: null, error };
+    }
+  },
+
   // Get conversations for MessagesScreen - EXACT WORKING CODE from web app team
   async getConversations(userId: string) {
     try {

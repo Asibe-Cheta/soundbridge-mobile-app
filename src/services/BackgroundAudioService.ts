@@ -1,5 +1,5 @@
-import { Audio } from 'expo-av';
-import { AppState, AppStateStatus } from 'react-native';
+import { createAudioPlayer, setAudioModeAsync, AudioPlayer } from 'expo-audio';
+import { AppState, AppStateStatus, Platform } from 'react-native';
 
 export interface BackgroundAudioTrack {
   id: string;
@@ -11,27 +11,27 @@ export interface BackgroundAudioTrack {
 }
 
 class BackgroundAudioService {
-  private sound: Audio.Sound | null = null;
+  private player: AudioPlayer | null = null;
   private isInitialized = false;
   private currentTrack: BackgroundAudioTrack | null = null;
   private isPlaying = false;
   private position = 0;
   private duration = 0;
   private appStateSubscription: any = null;
+  private statusListener: (() => void) | null = null;
 
   async initialize() {
     if (this.isInitialized) return;
 
     try {
       // Configure audio mode for background playback
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        staysActiveInBackground: true,
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
+      await setAudioModeAsync({
+        allowsRecording: false,
+        shouldPlayInBackground: true,
+        playsInSilentMode: true,
+        interruptionModeAndroid: 'duckOthers',
+        interruptionMode: 'mixWithOthers',
       });
-
 
       // Set up app state listener
       this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange.bind(this));
@@ -46,10 +46,10 @@ class BackgroundAudioService {
   private handleAppStateChange(nextAppState: AppStateStatus) {
     console.log('🎵 App state changed to:', nextAppState);
     
-    if (nextAppState === 'background' && this.sound && this.isPlaying) {
+    if (nextAppState === 'background' && this.player && this.isPlaying) {
       console.log('🎵 App went to background, maintaining audio playback');
       // Keep the audio playing in background
-    } else if (nextAppState === 'active' && this.sound && this.isPlaying) {
+    } else if (nextAppState === 'active' && this.player && this.isPlaying) {
       console.log('🎵 App became active, audio should still be playing');
     }
   }
@@ -60,25 +60,32 @@ class BackgroundAudioService {
       await this.initialize();
 
       // Stop current track if playing
-      if (this.sound) {
-        await this.sound.unloadAsync();
+      if (this.player) {
+        this.player.pause();
+        if (this.statusListener) {
+          this.player.removeListener('playbackStatusUpdate', this.statusListener);
+        }
+        this.player.remove();
+        this.player = null;
       }
 
       this.currentTrack = track;
       
-      // Create new sound instance with background playback enabled
-      const { sound } = await Audio.Sound.createAsync(
+      // Create new AudioPlayer instance
+      this.player = createAudioPlayer(
         { uri: track.url },
-        { 
-          shouldPlay: true,
-          isLooping: false,
-          volume: 1.0,
-          progressUpdateIntervalMillis: 1000,
-        },
-        this.onPlaybackStatusUpdate.bind(this)
+        {
+          updateInterval: 1000,
+          keepAudioSessionActive: true,
+        }
       );
-
-      this.sound = sound;
+      
+      // Set up status listener
+      this.statusListener = this.onPlaybackStatusUpdate.bind(this);
+      this.player.addListener('playbackStatusUpdate', this.statusListener);
+      
+      // Start playing
+      this.player.play();
       this.isPlaying = true;
 
       console.log('🎵 Started playing track in background:', track.title);
@@ -88,62 +95,66 @@ class BackgroundAudioService {
   }
 
   async pause() {
-    if (this.sound && this.isPlaying) {
-      await this.sound.pauseAsync();
+    if (this.player && this.isPlaying) {
+      this.player.pause();
       this.isPlaying = false;
     }
   }
 
   async resume() {
-    if (this.sound && !this.isPlaying) {
-      await this.sound.playAsync();
+    if (this.player && !this.isPlaying) {
+      this.player.play();
       this.isPlaying = true;
     }
   }
 
   async stop() {
-    if (this.sound) {
-      await this.sound.stopAsync();
-      await this.sound.unloadAsync();
-      this.sound = null;
+    if (this.player) {
+      this.player.pause();
+      if (this.statusListener) {
+        this.player.removeListener('playbackStatusUpdate', this.statusListener);
+      }
+      this.player.remove();
+      this.player = null;
       this.isPlaying = false;
       this.position = 0;
+      this.statusListener = null;
     }
   }
 
   async seekTo(position: number) {
-    if (this.sound) {
-      await this.sound.setPositionAsync(position);
+    if (this.player) {
+      // expo-audio seekTo expects seconds, not milliseconds
+      await this.player.seekTo(position / 1000);
       this.position = position;
     }
   }
 
   async setVolume(volume: number) {
-    if (this.sound) {
-      await this.sound.setVolumeAsync(volume);
+    if (this.player) {
+      this.player.volume = volume;
     }
   }
 
   private onPlaybackStatusUpdate = (status: any) => {
-    if (status.isLoaded) {
-      this.position = status.positionMillis || 0;
-      this.duration = status.durationMillis || 0;
-      this.isPlaying = status.isPlaying;
+    // expo-audio status structure
+    if (this.player) {
+      this.position = Math.floor((this.player.currentTime || 0) * 1000); // Convert seconds to milliseconds
+      this.duration = Math.floor((this.player.duration || 0) * 1000); // Convert seconds to milliseconds
+      this.isPlaying = this.player.playing || false;
 
       // Debug logging
       console.log('🎵 Background playback status:', {
-        isPlaying: status.isPlaying,
+        isPlaying: this.isPlaying,
         position: this.position,
         duration: this.duration,
-        isLoaded: status.isLoaded
+        isLoaded: this.player.isLoaded
       });
 
       // Handle playback completion
-      if (status.didJustFinish) {
+      if (this.player.isLoaded && this.position >= this.duration && this.duration > 0) {
         this.onTrackComplete();
       }
-    } else {
-      console.log('🎵 Background playback status: not loaded', status);
     }
   };
 
@@ -174,6 +185,14 @@ class BackgroundAudioService {
     if (this.appStateSubscription) {
       this.appStateSubscription.remove();
       this.appStateSubscription = null;
+    }
+    if (this.player) {
+      this.player.pause();
+      if (this.statusListener) {
+        this.player.removeListener('playbackStatusUpdate', this.statusListener);
+      }
+      this.player.remove();
+      this.player = null;
     }
   }
 }
