@@ -1,20 +1,23 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Post } from '../types/feed.types';
 import { feedService } from '../services/api/feedService';
 import { realtimeService } from '../services/realtime/realtimeService';
+import { feedCacheService } from '../services/feedCacheService';
 import { useAuth } from '../contexts/AuthContext';
 
 export const useFeed = () => {
   const { user, session, loading: authLoading } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Start with false - show cached data immediately
   const [refreshing, setRefreshing] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const isInitialLoadRef = useRef(true);
+  const backgroundRefreshRef = useRef(false);
 
-  // Load initial posts
-  const loadPosts = useCallback(async (pageNum: number = 1) => {
+  // Load initial posts with instant cache loading
+  const loadPosts = useCallback(async (pageNum: number = 1, forceRefresh: boolean = false) => {
     // Don't make API calls if auth is not ready or user is not authenticated
     if (authLoading || !user || !session) {
       console.log('⏳ Waiting for authentication before loading posts...');
@@ -23,45 +26,99 @@ export const useFeed = () => {
       return;
     }
 
+    const isFirstPage = pageNum === 1;
+    const isInitialLoad = isInitialLoadRef.current && isFirstPage;
+
     try {
-      setLoading(pageNum === 1);
+      // For initial load, try to load from cache first (instant display)
+      if (isInitialLoad && !forceRefresh) {
+        const cached = await feedCacheService.getCachedFeed();
+        
+        if (cached && cached.posts.length > 0) {
+          console.log('⚡ Instant load: Showing cached feed immediately');
+          setPosts(cached.posts);
+          setHasMore(cached.hasMore);
+          setPage(cached.page);
+          setLoading(false);
+          isInitialLoadRef.current = false;
+          
+          // Fetch fresh data in background (silent refresh)
+          backgroundRefreshRef.current = true;
+          setTimeout(() => {
+            loadPosts(1, true).finally(() => {
+              backgroundRefreshRef.current = false;
+            });
+          }, 100); // Small delay to ensure UI is rendered first
+          return;
+        }
+      }
+
+      // No cache or force refresh - fetch from API
+      // Only show loading spinner if it's a manual refresh (pull-to-refresh)
+      if (!isInitialLoad && !backgroundRefreshRef.current) {
+        setLoading(isFirstPage && !refreshing);
+      }
+      
       setError(null);
       const { posts: newPosts, hasMore: more } = await feedService.getFeedPosts(
         pageNum,
         10
       );
 
-      if (pageNum === 1) {
+      if (isFirstPage) {
         setPosts(newPosts);
+        // Cache the fresh data
+        await feedCacheService.saveFeedCache(newPosts, pageNum, more);
       } else {
-        setPosts((prev) => [...prev, ...newPosts]);
+        setPosts((prev) => {
+          const updated = [...prev, ...newPosts];
+          // Update cache with appended posts
+          feedCacheService.appendToCache(newPosts, pageNum, more);
+          return updated;
+        });
       }
 
       setHasMore(more);
       setPage(pageNum);
+      isInitialLoadRef.current = false;
     } catch (err: any) {
       // Handle 404 errors gracefully - API endpoint may not be available yet
       if (err?.status === 404) {
-        console.warn('Feed API endpoint not available (404). Showing empty feed.');
-        if (pageNum === 1) {
-          setPosts([]);
+        console.warn('Feed API endpoint not available (404).');
+        
+        // If we have cached data, keep showing it
+        if (isFirstPage && posts.length === 0) {
+          const cached = await feedCacheService.getCachedFeed();
+          if (cached) {
+            setPosts(cached.posts);
+            setHasMore(cached.hasMore);
+            setPage(cached.page);
+          } else {
+            setPosts([]);
+          }
         }
+        
         setHasMore(false);
         setError(null); // Don't show error for missing endpoint
       } else {
-        setError(err instanceof Error ? err.message : 'Failed to load posts');
+        // Only show error if we don't have cached data to fall back to
+        if (posts.length === 0) {
+          setError(err instanceof Error ? err.message : 'Failed to load posts');
+        }
         console.error('Error loading posts:', err);
       }
     } finally {
       setLoading(false);
       setRefreshing(false);
+      backgroundRefreshRef.current = false;
     }
-  }, [user, session, authLoading]);
+  }, [user, session, authLoading, posts.length, refreshing]);
 
-  // Refresh feed
+  // Refresh feed (pull-to-refresh)
   const refresh = useCallback(async () => {
     setRefreshing(true);
-    await loadPosts(1);
+    // Force refresh - bypass cache
+    await loadPosts(1, true);
   }, [loadPosts]);
 
   // Load more posts
@@ -121,6 +178,15 @@ export const useFeed = () => {
           await feedService.removeReaction(postId);
         } else {
           await feedService.addReaction(postId, reactionType);
+        }
+        
+        // Update cache with new reaction state
+        const updatedPost = posts.find((p) => p.id === postId);
+        if (updatedPost) {
+          await feedCacheService.updatePostInCache(postId, {
+            user_reaction: updatedPost.user_reaction,
+            reactions_count: updatedPost.reactions_count,
+          });
         }
       } catch (err) {
         // Revert on error - reload the post to get correct state
@@ -196,23 +262,74 @@ export const useFeed = () => {
   // Subscribe to real-time updates
   useEffect(() => {
     const unsubscribe = realtimeService.subscribeToFeedPosts((newPost) => {
-      setPosts((prev) => [newPost, ...prev]);
+      // Optimistic update - add to UI immediately
+      setPosts((prev) => {
+        // Check for duplicates
+        if (prev.some(p => p.id === newPost.id)) {
+          return prev;
+        }
+        return [newPost, ...prev];
+      });
+      
+      // Update cache in background
+      feedCacheService.prependPostToCache(newPost);
     });
 
     return unsubscribe;
   }, []);
 
-  // Initial load - wait for auth to be ready
+  // Initial load - show cached data immediately, then refresh when auth is ready
   useEffect(() => {
-    // Only load posts when auth is ready and user is authenticated
+    // Try to load cached data immediately (even before auth is ready)
+    // This provides instant feed display like LinkedIn/Instagram
+    const loadCachedData = async () => {
+      if (isInitialLoadRef.current) {
+        const cached = await feedCacheService.getCachedFeed();
+        if (cached && cached.posts.length > 0) {
+          console.log('⚡ Instant load: Showing cached feed before auth check');
+          setPosts(cached.posts);
+          setHasMore(cached.hasMore);
+          setPage(cached.page);
+          setLoading(false);
+        }
+      }
+    };
+
+    loadCachedData();
+
+    // Once auth is ready, load fresh data
     if (!authLoading && user && session) {
-      loadPosts(1);
+      // Small delay to ensure cached data is displayed first
+      setTimeout(() => {
+        loadPosts(1);
+      }, 50);
     } else if (!authLoading && !user) {
-      // Auth is ready but no user - clear loading state
-      setLoading(false);
+      // Auth is ready but no user - clear posts
       setPosts([]);
+      setLoading(false);
     }
   }, [authLoading, user, session, loadPosts]);
+
+  // Delete post optimistically
+  const deletePost = useCallback(async (postId: string) => {
+    try {
+      // Optimistic update - remove from UI immediately
+      setPosts((prev) => prev.filter((p) => p.id !== postId));
+      
+      // Update cache in background
+      await feedCacheService.removePostFromCache(postId);
+      
+      // Call API to delete
+      await feedService.deletePost(postId);
+      
+      // Success - post is already removed from UI
+    } catch (err) {
+      // Revert on error - reload the feed to restore the post
+      console.error('Failed to delete post:', err);
+      await refresh();
+      throw err;
+    }
+  }, [refresh]);
 
   return {
     posts,
@@ -224,6 +341,7 @@ export const useFeed = () => {
     loadMore,
     addReaction,
     removeReaction,
+    deletePost,
   };
 };
 

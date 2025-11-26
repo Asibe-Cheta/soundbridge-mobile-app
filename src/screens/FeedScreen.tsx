@@ -35,6 +35,7 @@ export default function FeedScreen() {
     refresh,
     loadMore,
     addReaction,
+    deletePost,
   } = useFeed();
   const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
   const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
@@ -116,8 +117,7 @@ export default function FeedScreen() {
 
   const handleDeletePost = async (postId: string) => {
     try {
-      await feedService.deletePost(postId);
-      await refresh(); // Refresh feed to remove deleted post
+      await deletePost(postId);
     } catch (error) {
       console.error('Failed to delete post:', error);
       Alert.alert('Error', 'Failed to delete post. Please try again.');
@@ -245,13 +245,15 @@ export default function FeedScreen() {
                 ) : null
               }
               ListEmptyComponent={
-                loading ? (
+                // Only show loading if we truly have no posts and are loading
+                // With cache, we should have posts immediately, so this should rarely show
+                loading && posts.length === 0 ? (
                   <View style={styles.loadingContainer}>
                     <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>
                       Loading feed...
                     </Text>
                   </View>
-                ) : error ? (
+                ) : error && posts.length === 0 ? (
                   <View style={styles.errorContainer}>
                     <Text style={[styles.errorText, { color: theme.colors.error }]}>
                       {error}
