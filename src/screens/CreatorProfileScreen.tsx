@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,16 +12,21 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
-// import { useCollaboration } from '../contexts/CollaborationContext';
+import { useCollaboration } from '../contexts/CollaborationContext';
 import TipModal from '../components/TipModal';
-// import CollaborationRequestForm from '../components/CollaborationRequestForm';
+import CollaborationRequestForm from '../components/CollaborationRequestForm';
+import BlockUserModal from '../modals/BlockUserModal';
+import { blockService } from '../services/api/blockService';
 import { collaborationUtils } from '../utils/collaborationUtils';
 import type { BookingStatus, CreatorAvailability } from '../types/collaboration';
+import FirstTimeTooltip from '../components/FirstTimeTooltip';
+import BackButton from '../components/BackButton';
 
 interface Creator {
   id: string;
@@ -37,6 +42,8 @@ interface Creator {
   events_count?: number;        // COMPUTED from events table
   total_tips_received?: number; // COMPUTED from creator_tips table
   total_tip_count?: number;     // COMPUTED from creator_tips table
+  tips_this_month_amount?: number;
+  tips_this_month_count?: number;
   created_at: string;
   isFollowing?: boolean;
 }
@@ -60,7 +67,7 @@ export default function CreatorProfileScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
   const { play, addToQueue } = useAudioPlayer();
-  // const { getBookingStatus } = useCollaboration(); // Disabled for Expo compatibility
+  const { getBookingStatus } = useCollaboration();
 
   // Debug route params
   console.log('🔍 Route params:', route.params);
@@ -97,6 +104,18 @@ export default function CreatorProfileScreen() {
   const [availability, setAvailability] = useState<CreatorAvailability[]>([]);
   const [showCollabModal, setShowCollabModal] = useState(false);
   const [selectedAvailabilitySlot, setSelectedAvailabilitySlot] = useState<CreatorAvailability | null>(null);
+  const [showTipTooltip, setShowTipTooltip] = useState(false);
+  const [showCollabTooltip, setShowCollabTooltip] = useState(false);
+  const [showBlockModal, setShowBlockModal] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [isCheckingBlock, setIsCheckingBlock] = useState(false);
+
+  const canRequestCollaboration = useMemo(() => {
+    if (bookingStatus) {
+      return collaborationUtils.isCreatorAvailable(bookingStatus);
+    }
+    return availability.length > 0;
+  }, [bookingStatus, availability.length]);
 
   useEffect(() => {
     loadCreatorProfile();
@@ -104,7 +123,81 @@ export default function CreatorProfileScreen() {
     checkFollowStatus();
     loadBookingStatus();
     loadCreatorAvailability();
+    checkBlockStatus();
   }, [creatorId]);
+
+  const checkBlockStatus = async () => {
+    if (!user?.id || user.id === creatorId) {
+      setIsBlocked(false);
+      return;
+    }
+
+    setIsCheckingBlock(true);
+    try {
+      const status = await blockService.checkBlockStatus(creatorId);
+      setIsBlocked(status.isBlocked || status.isBlockedBy || status.isBlocking);
+    } catch (error) {
+      console.error('Failed to check block status:', error);
+    } finally {
+      setIsCheckingBlock(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!loading) {
+      (async () => {
+        try {
+          const seen = await AsyncStorage.getItem('tooltip_tips_seen');
+          if (!seen) {
+            setShowTipTooltip(true);
+          }
+        } catch (error) {
+          console.warn('CreatorProfileScreen: Failed to read tooltip_tips_seen', error);
+          setShowTipTooltip(true);
+        }
+      })();
+    }
+  }, [loading]);
+
+  useEffect(() => {
+    if (!loading && availability.length > 0 && !showTipTooltip) {
+      (async () => {
+        try {
+          const seen = await AsyncStorage.getItem('tooltip_collaboration_seen');
+          if (!seen) {
+            setShowCollabTooltip(true);
+          }
+        } catch (error) {
+          console.warn('CreatorProfileScreen: Failed to read tooltip_collaboration_seen', error);
+          setShowCollabTooltip(true);
+        }
+      })();
+    }
+  }, [availability, loading, showTipTooltip]);
+
+  const markTooltipSeen = async (key: string) => {
+    try {
+      await AsyncStorage.setItem(key, 'true');
+    } catch (error) {
+      console.warn(`CreatorProfileScreen: Failed to persist ${key}`, error);
+    }
+  };
+
+  const handleTipTooltipShow = async () => {
+    await markTooltipSeen('tooltip_tips_seen');
+    setShowTipTooltip(false);
+    setShowTipModal(true);
+  };
+
+  const handleTipTooltipDismiss = async () => {
+    await markTooltipSeen('tooltip_tips_seen');
+    setShowTipTooltip(false);
+  };
+
+  const handleCollabTooltipDismiss = async () => {
+    await markTooltipSeen('tooltip_collaboration_seen');
+    setShowCollabTooltip(false);
+  };
 
   const loadCreatorProfile = async () => {
     if (initialCreator) return; // Skip if we already have creator data
@@ -156,7 +249,7 @@ export default function CreatorProfileScreen() {
         // Get tip statistics (may not exist yet)
         supabase
           .from('creator_tips')
-          .select('amount')
+          .select('amount, created_at')
           .eq('creator_id', creatorId)
           .eq('status', 'completed')
           .then(result => result)
@@ -177,6 +270,12 @@ export default function CreatorProfileScreen() {
       const tipAmounts = tipsResult.data || [];
       const totalTipsReceived = tipAmounts.reduce((sum, tip) => sum + (tip.amount || 0), 0);
       const totalTipCount = tipAmounts.length;
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+      const tipsThisMonth = tipAmounts.filter(tip => tip.created_at && new Date(tip.created_at) >= startOfMonth);
+      const tipsThisMonthAmount = tipsThisMonth.reduce((sum, tip) => sum + (tip.amount || 0), 0);
+      const tipsThisMonthCount = tipsThisMonth.length;
 
       const creatorWithStats = {
         ...profileData,
@@ -185,6 +284,8 @@ export default function CreatorProfileScreen() {
         events_count: eventsResult.count || 0,
         total_tips_received: totalTipsReceived,
         total_tip_count: totalTipCount,
+        tips_this_month_amount: tipsThisMonthAmount,
+        tips_this_month_count: tipsThisMonthCount,
       };
 
       setCreator(creatorWithStats);
@@ -333,6 +434,8 @@ export default function CreatorProfileScreen() {
       ...prev,
       total_tips_received: (prev.total_tips_received || 0) + amount,
       total_tip_count: (prev.total_tip_count || 0) + 1,
+      tips_this_month_amount: (prev.tips_this_month_amount || 0) + amount,
+      tips_this_month_count: (prev.tips_this_month_count || 0) + 1,
     } : null);
     
     // Optionally refresh the profile to get updated data
@@ -354,8 +457,7 @@ export default function CreatorProfileScreen() {
   const loadBookingStatus = async () => {
     try {
       console.log('📊 Loading booking status for creator:', creatorId);
-      // const status = await getBookingStatus(creatorId); // Disabled for Expo compatibility
-      const status = null; // Mock for Expo compatibility
+      const status = await getBookingStatus(creatorId);
       setBookingStatus(status);
       console.log('✅ Booking status loaded:', status);
     } catch (error) {
@@ -401,6 +503,7 @@ export default function CreatorProfileScreen() {
     }
 
     setSelectedAvailabilitySlot(availabilitySlot || null);
+    handleCollabTooltipDismiss();
     setShowCollabModal(true);
   };
 
@@ -409,6 +512,14 @@ export default function CreatorProfileScreen() {
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
     if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
     return num.toString();
+  };
+
+  const formatCurrency = (amount?: number | null) => {
+    if (!amount || amount === 0) {
+      return '£0.00';
+    }
+    const normalized = amount / 100;
+    return `£${normalized.toFixed(2)}`;
   };
 
   const formatDuration = (seconds?: number) => {
@@ -443,13 +554,25 @@ export default function CreatorProfileScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
-        <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
+        <BackButton style={styles.headerButton} onPress={() => navigation.goBack()} />
         <Text style={[styles.headerTitle, { color: theme.colors.text }]}>{creator.display_name}</Text>
-        <TouchableOpacity style={styles.headerButton}>
-          <Ionicons name="share-outline" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {user?.id !== creatorId && (
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={() => setShowBlockModal(true)}
+            >
+              <Ionicons
+                name={isBlocked ? 'shield' : 'shield-outline'}
+                size={24}
+                color={isBlocked ? theme.colors.error || '#DC2626' : theme.colors.text}
+              />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.headerButton}>
+            <Ionicons name="share-outline" size={24} color={theme.colors.text} />
+          </TouchableOpacity>
+        </View>
       </View>
       
       <ScrollView 
@@ -499,10 +622,30 @@ export default function CreatorProfileScreen() {
 
           {/* Collaboration Status */}
           {bookingStatus && (
-            <View style={[styles.collaborationStatus, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <TouchableOpacity
+              style={[
+                styles.collaborationStatus,
+                {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  opacity: canRequestCollaboration ? 1 : 0.75,
+                },
+              ]}
+              onPress={() => canRequestCollaboration && handleCollaborationRequest()}
+              activeOpacity={canRequestCollaboration ? 0.8 : 1}
+            >
               <View style={styles.statusHeader}>
-                <Ionicons name="calendar" size={16} color={collaborationUtils.getBookingStatusColor(bookingStatus)} />
-                <Text style={[styles.statusText, { color: collaborationUtils.getBookingStatusColor(bookingStatus) }]}>
+                <Ionicons
+                  name="calendar"
+                  size={16}
+                  color={collaborationUtils.getBookingStatusColor(bookingStatus)}
+                />
+                <Text
+                  style={[
+                    styles.statusText,
+                    { color: collaborationUtils.getBookingStatusColor(bookingStatus) },
+                  ]}
+                >
                   {collaborationUtils.getBookingStatusText(bookingStatus)}
                 </Text>
           </View>
@@ -511,7 +654,15 @@ export default function CreatorProfileScreen() {
                   Next available: {collaborationUtils.formatDate(bookingStatus.next_available_slot)}
                 </Text>
               )}
-          </View>
+              <Text
+                style={[
+                  styles.statusActionText,
+                  { color: canRequestCollaboration ? theme.colors.primary : theme.colors.textSecondary },
+                ]}
+              >
+                {canRequestCollaboration ? 'Tap to request collaboration' : 'Not accepting collaboration requests'}
+              </Text>
+            </TouchableOpacity>
           )}
 
           {/* Available Time Slots */}
@@ -570,63 +721,23 @@ export default function CreatorProfileScreen() {
                 style={[
                   styles.collabButton,
                   {
-                    backgroundColor: collaborationUtils.isCreatorAvailable(bookingStatus || { 
-                      creator_id: creatorId, 
-                      collaboration_enabled: true, 
-                      is_accepting_requests: true, 
-                      available_slots: availability.length,
-                      pending_requests: 0,
-                      total_availability_slots: availability.length,
-                      min_notice_days: 1
-                    }) ? theme.colors.primary : theme.colors.surface,
+                    backgroundColor: canRequestCollaboration ? theme.colors.primary : theme.colors.surface,
                     borderColor: theme.colors.primary,
-                    opacity: collaborationUtils.isCreatorAvailable(bookingStatus || { 
-                      creator_id: creatorId, 
-                      collaboration_enabled: true, 
-                      is_accepting_requests: true, 
-                      available_slots: availability.length,
-                      pending_requests: 0,
-                      total_availability_slots: availability.length,
-                      min_notice_days: 1
-                    }) ? 1 : 0.6
+                    opacity: canRequestCollaboration ? 1 : 0.6,
                   }
                 ]}
                 onPress={() => handleCollaborationRequest()}
-                disabled={!collaborationUtils.isCreatorAvailable(bookingStatus || { 
-                  creator_id: creatorId, 
-                  collaboration_enabled: true, 
-                  is_accepting_requests: true, 
-                  available_slots: availability.length,
-                  pending_requests: 0,
-                  total_availability_slots: availability.length,
-                  min_notice_days: 1
-                })}
+                disabled={!canRequestCollaboration}
           >
             <Ionicons 
                   name="people" 
                   size={16} 
-                  color={collaborationUtils.isCreatorAvailable(bookingStatus || { 
-                    creator_id: creatorId, 
-                    collaboration_enabled: true, 
-                    is_accepting_requests: true, 
-                    available_slots: availability.length,
-                    pending_requests: 0,
-                    total_availability_slots: availability.length,
-                    min_notice_days: 1
-                  }) ? '#FFFFFF' : theme.colors.primary} 
+                  color={canRequestCollaboration ? '#FFFFFF' : theme.colors.primary} 
                 />
                 <Text
                   style={[
                     styles.collabButtonText,
-                    { color: collaborationUtils.isCreatorAvailable(bookingStatus || { 
-                      creator_id: creatorId, 
-                      collaboration_enabled: true, 
-                      is_accepting_requests: true, 
-                      available_slots: availability.length,
-                      pending_requests: 0,
-                      total_availability_slots: availability.length,
-                      min_notice_days: 1
-                    }) ? '#FFFFFF' : theme.colors.primary }
+                    { color: canRequestCollaboration ? '#FFFFFF' : theme.colors.primary }
                   ]}
                 >
                   Collaborate
@@ -677,6 +788,20 @@ export default function CreatorProfileScreen() {
               <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>
                 Tips ({creator.total_tip_count || 0})
               </Text>
+            </View>
+          </View>
+
+        <View style={[styles.tipsSummaryCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+          <Ionicons name="gift-outline" size={18} color={theme.colors.primary} style={styles.tipsSummaryIcon} />
+          <View style={styles.tipsSummaryContent}>
+            <Text style={[styles.tipsSummaryTitle, { color: theme.colors.text }]}>
+              💰 Received {creator.tips_this_month_count || 0} tips this month
+            </Text>
+            {typeof creator.tips_this_month_amount === 'number' && creator.tips_this_month_amount > 0 ? (
+              <Text style={[styles.tipsSummarySubtitle, { color: theme.colors.textSecondary }]}>
+                Total {formatCurrency(creator.tips_this_month_amount)}
+              </Text>
+            ) : null}
             </View>
           </View>
         </View>
@@ -747,14 +872,65 @@ export default function CreatorProfileScreen() {
         onTipSuccess={handleTipSuccess}
       />
 
-      {/* Collaboration Request Modal - Disabled for Expo compatibility */}
-      {/* <CollaborationRequestForm
+      <CollaborationRequestForm
         visible={showCollabModal}
         onClose={() => setShowCollabModal(false)}
         creatorId={creatorId}
         creatorName={creator?.display_name || 'Creator'}
         availabilitySlot={selectedAvailabilitySlot || undefined}
-      /> */}
+      />
+
+      <FirstTimeTooltip
+        visible={showTipTooltip}
+        title="Support artists directly"
+        description="Tip artists directly. 100% goes to the creator."
+        actions={[
+          {
+            label: 'Show me',
+            onPress: handleTipTooltipShow,
+            variant: 'primary',
+          },
+          {
+            label: 'Maybe later',
+            onPress: handleTipTooltipDismiss,
+          },
+        ]}
+        style={{ alignSelf: 'stretch', marginHorizontal: 16 }}
+      />
+
+      <FirstTimeTooltip
+        visible={showCollabTooltip}
+        title="Collaborate without the guesswork"
+        description="Connect with artists professionally. No more lost DMs — guaranteed visibility."
+        actions={[
+          {
+            label: 'Got it',
+            onPress: handleCollabTooltipDismiss,
+            variant: 'primary',
+          },
+        ]}
+        style={{ alignSelf: 'stretch', marginHorizontal: 16 }}
+      />
+
+      {/* Block User Modal */}
+      {user?.id !== creatorId && (
+        <BlockUserModal
+          visible={showBlockModal}
+          onClose={() => setShowBlockModal(false)}
+          userId={creatorId}
+          userName={creator.display_name}
+          userAvatar={creator.avatar_url}
+          isCurrentlyBlocked={isBlocked}
+          onBlocked={() => {
+            setIsBlocked(true);
+            checkBlockStatus();
+          }}
+          onUnblocked={() => {
+            setIsBlocked(false);
+            checkBlockStatus();
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -804,6 +980,10 @@ const styles = StyleSheet.create({
   },
   headerButton: {
     padding: 8,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   headerTitle: {
     fontSize: 18,
@@ -910,6 +1090,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginLeft: 24,
   },
+  statusActionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 8,
+  },
   availabilitySection: {
     marginBottom: 16,
   },
@@ -999,6 +1184,34 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: 12,
+  },
+  tipsSummaryCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginHorizontal: 16,
+    marginBottom: 20,
+    gap: 12,
+  },
+  tipsSummaryIcon: {
+    padding: 10,
+    borderRadius: 999,
+    backgroundColor: 'rgba(220, 38, 38, 0.08)',
+  },
+  tipsSummaryContent: {
+    flex: 1,
+  },
+  tipsSummaryTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  tipsSummarySubtitle: {
+    fontSize: 13,
+    fontWeight: '500',
   },
   tracksSection: {
     paddingHorizontal: 16,
