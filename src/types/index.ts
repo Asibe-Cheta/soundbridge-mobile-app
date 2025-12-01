@@ -15,6 +15,22 @@ import type {
 
 export type { BookingStatus, CreatorType, ServiceCategory, ProviderBadgeTier };
 
+// Export block and report types
+export type {
+  BlockResponse,
+  UnblockResponse,
+  BlockStatus,
+  BlockedUser,
+  BlockedUsersListResponse,
+} from './block.types';
+
+export type {
+  ReportType,
+  ContentType,
+  ReportContentDto,
+  ReportResponse,
+} from './report.types';
+
 export interface CreatorSummary {
   id: string;
   username: string;

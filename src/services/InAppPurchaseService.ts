@@ -17,7 +17,7 @@ export interface SoundBridgeProduct {
   id: string;
   platform: 'apple' | 'google';
   productId: string;
-  tier: 'pro' | 'enterprise';
+  tier: 'pro';
   billingCycle: 'monthly' | 'yearly';
   priceUsd: number;
   currency: string;
@@ -42,14 +42,10 @@ class InAppPurchaseService {
     ios: [
       'com.soundbridge.pro.monthly',
       'com.soundbridge.pro.yearly',
-      'com.soundbridge.enterprise.monthly',
-      'com.soundbridge.enterprise.yearly',
     ],
     android: [
       'soundbridge_pro_monthly',
       'soundbridge_pro_yearly',
-      'soundbridge_enterprise_monthly',
-      'soundbridge_enterprise_yearly',
     ],
   }) || [];
 

@@ -18,7 +18,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService, WalletBalance } from '../services/WalletService';
 import { currencyService } from '../services/CurrencyService';
-import { subscriptionService, SubscriptionStatus, UsageStatistics, BillingHistoryItem, RevenueData } from '../services/SubscriptionService';
+import { subscriptionService, SubscriptionStatus, UsageStatistics, BillingHistoryItem, RevenueData, TrackSelection } from '../services/SubscriptionService';
+import TrackSelectionModal from '../components/TrackSelectionModal';
 
 // Interfaces moved to SubscriptionService
 
@@ -207,33 +208,143 @@ export default function BillingScreen() {
   };
 
   const handleCancelSubscription = async () => {
-    if (!session) return;
+    if (!session || !subscription) return;
 
-    Alert.alert(
-      'Cancel Subscription',
-      'Are you sure you want to cancel your subscription? You\'ll lose access to Pro features at the end of your billing period.',
-      [
-        { text: 'Keep Subscription', style: 'cancel' },
-        { 
-          text: 'Cancel Subscription', 
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const result = await subscriptionService.cancelSubscription(session);
-              if (result.success) {
-                Alert.alert('Success', result.message || 'Your subscription has been cancelled.');
-                loadBillingData(); // Refresh data
-              } else {
-                Alert.alert('Error', result.message || 'Failed to cancel subscription.');
-              }
-            } catch (error) {
-              console.error('Error cancelling subscription:', error);
-              Alert.alert('Error', 'Failed to cancel subscription. Please try again.');
+    // Check if within 7-day money-back guarantee window
+    const isWithinGuaranteeWindow = subscription.subscription_start_date 
+      ? (Date.now() - new Date(subscription.subscription_start_date).getTime()) <= 7 * 24 * 60 * 60 * 1000
+      : false;
+
+    const isEligibleForRefund = subscription.money_back_guarantee_eligible && isWithinGuaranteeWindow;
+
+    if (isEligibleForRefund) {
+      // Show refund option
+      Alert.alert(
+        'Cancel Subscription',
+        `You're within your 7-day money-back guarantee period. Would you like to request a full refund?`,
+        [
+          { text: 'Keep Subscription', style: 'cancel' },
+          { 
+            text: 'Request Refund & Cancel', 
+            style: 'destructive',
+            onPress: async () => {
+              await handleRequestRefund();
+            }
+          },
+          {
+            text: 'Cancel Without Refund',
+            style: 'default',
+            onPress: async () => {
+              await handleCancelWithoutRefund();
             }
           }
-        }
-      ]
-    );
+        ]
+      );
+    } else {
+      // Standard cancellation
+      Alert.alert(
+        'Cancel Subscription',
+        isWithinGuaranteeWindow 
+          ? 'Your 7-day money-back guarantee window has expired. You\'ll lose access to Pro features at the end of your billing period.'
+          : 'Are you sure you want to cancel your subscription? You\'ll lose access to Pro features at the end of your billing period.',
+        [
+          { text: 'Keep Subscription', style: 'cancel' },
+          { 
+            text: 'Cancel Subscription', 
+            style: 'destructive',
+            onPress: async () => {
+              await handleCancelWithoutRefund();
+            }
+          }
+        ]
+      );
+    }
+  };
+
+  const handleRequestRefund = async () => {
+    if (!session) return;
+
+    try {
+      // First check if track selection is needed
+      const cancelResult = await subscriptionService.cancelSubscriptionWithRefund(session, true);
+      
+      if (cancelResult.requiresTrackSelection && cancelResult.tracks) {
+        // Navigate to track selection screen (we'll create this)
+        navigation.navigate('TrackSelection' as never, {
+          tracks: cancelResult.tracks,
+          onSelect: async (selectedTrackIds: string[]) => {
+            await processRefundWithTracks(selectedTrackIds);
+          }
+        });
+      } else {
+        // Process refund without track selection
+        await processRefund();
+      }
+    } catch (error) {
+      console.error('Error requesting refund:', error);
+      Alert.alert('Error', 'Failed to process refund request. Please try again.');
+    }
+  };
+
+  const processRefund = async () => {
+    if (!session) return;
+
+    try {
+      const result = await subscriptionService.requestRefund(session);
+      if (result.success) {
+        Alert.alert(
+          'Refund Requested',
+          `Your refund of £${result.refund?.amount || subscription?.amount || 0} will be processed within 3-5 business days. Your account has been downgraded to Free tier.`,
+          [{ text: 'OK', onPress: () => loadBillingData() }]
+        );
+      } else {
+        Alert.alert('Error', result.message || 'Failed to process refund.');
+      }
+    } catch (error: any) {
+      console.error('Error processing refund:', error);
+      if (error.message?.includes('window has expired')) {
+        Alert.alert('Refund Window Expired', 'Refunds are only available within 7 days of subscription start.');
+      } else {
+        Alert.alert('Error', 'Failed to process refund. Please try again.');
+      }
+    }
+  };
+
+  const processRefundWithTracks = async (selectedTrackIds: string[]) => {
+    if (!session) return;
+
+    try {
+      const result = await subscriptionService.requestRefund(session, selectedTrackIds);
+      if (result.success) {
+        Alert.alert(
+          'Refund Requested',
+          `Your refund of £${result.refund?.amount || subscription?.amount || 0} will be processed within 3-5 business days. Your account has been downgraded to Free tier. ${result.tracks?.private || 0} tracks have been set to private.`,
+          [{ text: 'OK', onPress: () => loadBillingData() }]
+        );
+      } else {
+        Alert.alert('Error', result.message || 'Failed to process refund.');
+      }
+    } catch (error: any) {
+      console.error('Error processing refund with tracks:', error);
+      Alert.alert('Error', 'Failed to process refund. Please try again.');
+    }
+  };
+
+  const handleCancelWithoutRefund = async () => {
+    if (!session) return;
+
+    try {
+      const result = await subscriptionService.cancelSubscription(session);
+      if (result.success) {
+        Alert.alert('Success', result.message || 'Your subscription has been cancelled. Pro features will remain active until the end of your billing period.');
+        loadBillingData(); // Refresh data
+      } else {
+        Alert.alert('Error', result.message || 'Failed to cancel subscription.');
+      }
+    } catch (error) {
+      console.error('Error cancelling subscription:', error);
+      Alert.alert('Error', 'Failed to cancel subscription. Please try again.');
+    }
   };
 
   const handleRequestPayout = async () => {

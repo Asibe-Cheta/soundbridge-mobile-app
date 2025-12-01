@@ -2,7 +2,7 @@
 
 ## Problem Summary
 
-After entering email/password on the login screen, the app **briefly shows the main app (MainTabs)** before navigating to the 2FA screen. This is a poor user experience - users shouldn't see the app content before completing 2FA verification.
+After entering email/password on the login screen, the app **briefly shows the main app (MainTabs)** before navigating to the 2FA screen. This is a poor user experience - users shouldn't see the app content before completing 2FA verification, although the 2FA navigation now works perfectly.
 
 ## Current Flow (The Problem)
 

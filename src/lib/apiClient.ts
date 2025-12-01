@@ -120,6 +120,12 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
         }
       } else {
         console.error(`❌ API Error (${response.status}):`, errorBody);
+        // Log detailed error information for debugging
+        if (typeof errorBody === 'object' && errorBody !== null) {
+          console.error(`❌ Error Object Details:`, JSON.stringify(errorBody, null, 2));
+        } else if (typeof errorBody === 'string') {
+          console.error(`❌ Error String:`, errorBody);
+        }
       }
 
       // Provide more specific error messages for common status codes
@@ -131,6 +137,17 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
         errorMessage = 'Access forbidden. You may not have permission to perform this action.';
       } else if (response.status === 404) {
         errorMessage = 'Resource not found.';
+      } else if (response.status === 429) {
+        // Rate limit / Usage limit exceeded
+        errorMessage = 'Limit exceeded';
+        // Check if error body has limit information
+        if (typeof errorBody === 'object' && errorBody !== null) {
+          const errorObj = errorBody as any;
+          if (errorObj.limit || errorObj.error?.limit) {
+            const limitInfo = errorObj.limit || errorObj.error?.limit;
+            errorMessage = limitInfo.message || errorObj.error?.message || errorObj.message || 'Limit exceeded';
+          }
+        }
       } else if (response.status >= 500) {
         errorMessage = 'Server error. Please try again later.';
       }
@@ -138,6 +155,13 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
       const error = new Error(errorMessage);
       (error as any).status = response.status;
       (error as any).body = errorBody;
+      // Add limit information for 429 errors
+      if (response.status === 429 && typeof errorBody === 'object' && errorBody !== null) {
+        const errorObj = errorBody as any;
+        (error as any).limit = errorObj.limit || errorObj.error?.limit;
+        (error as any).upgradeRequired = errorObj.upgrade_required || errorObj.error?.upgrade_required || 
+                                         (errorObj.limit?.upgrade_required) || (errorObj.error?.limit?.upgrade_required);
+      }
       throw error;
     }
 

@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { dbHelpers } from '../lib/supabase';
+import { subscriptionService, UsageLimits } from '../services/SubscriptionService';
 import BackButton from '../components/BackButton';
 
 const { width } = Dimensions.get('window');

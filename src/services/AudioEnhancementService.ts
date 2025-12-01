@@ -9,7 +9,7 @@ export interface AudioEnhancementProfile {
   id: string;
   user_id: string;
   name: string;
-  tier_level: 'free' | 'pro' | 'enterprise';
+  tier_level: 'free' | 'pro';
   enhancement_settings: {
     eq?: {
       bands: number[];
@@ -85,7 +85,7 @@ class AudioEnhancementService {
 
   // ===== TIER MANAGEMENT =====
 
-  getTierFeatures(tier: 'free' | 'pro' | 'enterprise'): TierFeatures {
+  getTierFeatures(tier: 'free' | 'pro'): TierFeatures {
     const features: Record<string, TierFeatures> = {
       free: {
         maxQuality: 'standard',
@@ -119,7 +119,7 @@ class AudioEnhancementService {
     return features[tier];
   }
 
-  async validateTierAccess(tier: 'free' | 'pro' | 'enterprise', feature: keyof TierFeatures): Promise<boolean> {
+  async validateTierAccess(tier: 'free' | 'pro', feature: keyof TierFeatures): Promise<boolean> {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return false;
@@ -709,3 +709,714 @@ class AudioEnhancementService {
 
 // Export singleton instance
 export const audioEnhancementService = new AudioEnhancementService();
+
+
+      return true;
+
+    } catch (error) {
+
+      console.error('❌ Error applying enhancement profile:', error);
+
+      return false;
+
+    }
+
+  }
+
+
+
+  private async setupAudioProcessing(settings: AudioEnhancementProfile['enhancement_settings']): Promise<void> {
+
+    if (!this.audioContext) {
+
+      await this.initializeAudioContext();
+
+    }
+
+
+
+    // Clear existing processing nodes
+
+    this.processingNodes.clear();
+
+
+
+    // Setup EQ
+
+    if (settings.eq && settings.eq.bands) {
+
+      const eqNode = this.createEQNode(settings.eq.bands);
+
+      this.processingNodes.set('eq', eqNode);
+
+    }
+
+
+
+    // Setup enhancement
+
+    if (settings.enhancement?.enabled) {
+
+      const enhancementNode = this.createEnhancementNode(settings.enhancement);
+
+      this.processingNodes.set('enhancement', enhancementNode);
+
+    }
+
+
+
+    // Setup noise reduction
+
+    if (settings.noise_reduction?.enabled) {
+
+      const noiseReductionNode = this.createNoiseReductionNode(settings.noise_reduction);
+
+      this.processingNodes.set('noise_reduction', noiseReductionNode);
+
+    }
+
+
+
+    // Setup spatial audio
+
+    if (settings.spatial?.enabled) {
+
+      const spatialNode = this.createSpatialAudioNode({ 
+
+        type: settings.spatial.type || 'virtual_surround' 
+
+      });
+
+      this.processingNodes.set('spatial_audio', spatialNode);
+
+    }
+
+  }
+
+
+
+  private createEQNode(bands: number[]): any {
+
+    // Mock EQ node creation
+
+    // In real implementation, this would create native audio filter nodes
+
+    return {
+
+      type: 'eq',
+
+      bands: bands.map((gain, index) => ({
+
+        frequency: this.getEQFrequency(index, bands.length),
+
+        gain,
+
+        Q: 1.0,
+
+      })),
+
+    };
+
+  }
+
+
+
+  private createEnhancementNode(settings: { strength: number; type: 'ai' | 'dsp' }): any {
+
+    // Mock enhancement node creation
+
+    return {
+
+      type: 'enhancement',
+
+      algorithm: settings.type,
+
+      strength: settings.strength,
+
+    };
+
+  }
+
+
+
+  private createNoiseReductionNode(settings: { level: number }): any {
+
+    // Mock noise reduction node creation
+
+    return {
+
+      type: 'noise_reduction',
+
+      level: settings.level,
+
+    };
+
+  }
+
+
+
+  private createSpatialAudioNode(settings: { type: 'virtual_surround' | 'dolby_atmos' }): any {
+
+    // Mock spatial audio node creation
+
+    return {
+
+      type: 'spatial_audio',
+
+      algorithm: settings.type,
+
+    };
+
+  }
+
+
+
+  private getEQFrequency(bandIndex: number, totalBands: number): number {
+
+    // Calculate frequency for EQ band
+
+    const minFreq = 20;
+
+    const maxFreq = 20000;
+
+    const logMin = Math.log10(minFreq);
+
+    const logMax = Math.log10(maxFreq);
+
+    const logStep = (logMax - logMin) / (totalBands - 1);
+
+    
+
+    return Math.pow(10, logMin + (bandIndex * logStep));
+
+  }
+
+
+
+  // ===== CLOUD PROCESSING =====
+
+
+
+  async submitProcessingJob(
+
+    trackId: string,
+
+    jobType: 'enhancement' | 'noise_reduction' | 'mastering' | 'format_conversion',
+
+    settings: object,
+
+    inputUrl: string,
+
+    priority: 'low' | 'normal' | 'high' = 'normal'
+
+  ): Promise<string | null> {
+
+    try {
+
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) throw new Error('User not authenticated');
+
+
+
+      // Check rate limits based on subscription tier
+
+      const rateLimitCheck = await this.checkProcessingRateLimit(user.id);
+
+      if (!rateLimitCheck.allowed) {
+
+        throw new Error(`Rate limit exceeded. ${rateLimitCheck.message}`);
+
+      }
+
+
+
+      const { data, error } = await supabase
+
+        .from('audio_processing_jobs')
+
+        .insert({
+
+          user_id: user.id,
+
+          track_id: trackId,
+
+          job_type: jobType,
+
+          settings: { ...settings, priority },
+
+          input_url: inputUrl,
+
+          status: 'pending',
+
+          progress: 0,
+
+          retry_count: 0,
+
+        })
+
+        .select()
+
+        .single();
+
+
+
+      if (error) throw error;
+
+
+
+      // Trigger cloud processing with priority
+
+      await this.triggerCloudProcessing(data.id, priority);
+
+
+
+      console.log('✅ Processing job submitted:', data.id);
+
+      return data.id;
+
+    } catch (error) {
+
+      console.error('❌ Error submitting processing job:', error);
+
+      return null;
+
+    }
+
+  }
+
+
+
+  private async triggerCloudProcessing(jobId: string, priority: string = 'normal'): Promise<void> {
+
+    try {
+
+      // Call backend API to start processing
+
+      const { error } = await supabase.functions.invoke('process-audio', {
+
+        body: { jobId, priority },
+
+      });
+
+
+
+      if (error) throw error;
+
+    } catch (error) {
+
+      console.error('❌ Error triggering cloud processing:', error);
+
+    }
+
+  }
+
+
+
+  private async checkProcessingRateLimit(userId: string): Promise<{ allowed: boolean; message: string }> {
+
+    try {
+
+      // Get user's subscription tier
+
+      const { data: profile } = await supabase
+
+        .from('profiles')
+
+        .select('subscription_tier')
+
+        .eq('id', userId)
+
+        .single();
+
+
+
+      const tier = profile?.subscription_tier || 'free';
+
+      
+
+      // Get today's job count
+
+      const today = new Date().toISOString().split('T')[0];
+
+      const { count } = await supabase
+
+        .from('audio_processing_jobs')
+
+        .select('*', { count: 'exact', head: true })
+
+        .eq('user_id', userId)
+
+        .gte('created_at', `${today}T00:00:00.000Z`)
+
+        .lt('created_at', `${today}T23:59:59.999Z`);
+
+
+
+      const limits = {
+
+        free: 5,
+
+        pro: 100,
+
+        enterprise: Infinity,
+
+      };
+
+
+
+      const dailyLimit = limits[tier as keyof typeof limits];
+
+      const currentCount = count || 0;
+
+
+
+      if (currentCount >= dailyLimit) {
+
+        return {
+
+          allowed: false,
+
+          message: `Daily limit of ${dailyLimit} processing jobs reached. Upgrade to increase limit.`,
+
+        };
+
+      }
+
+
+
+      return { allowed: true, message: 'Rate limit OK' };
+
+    } catch (error) {
+
+      console.error('❌ Error checking rate limit:', error);
+
+      return { allowed: true, message: 'Rate limit check failed, allowing request' };
+
+    }
+
+  }
+
+
+
+  async getProcessingJobStatus(jobId: string): Promise<AudioProcessingJob | null> {
+
+    try {
+
+      const { data, error } = await supabase
+
+        .from('audio_processing_jobs')
+
+        .select('*')
+
+        .eq('id', jobId)
+
+        .single();
+
+
+
+      if (error) throw error;
+
+
+
+      return data;
+
+    } catch (error) {
+
+      console.error('❌ Error getting job status:', error);
+
+      return null;
+
+    }
+
+  }
+
+
+
+  async getUserProcessingJobs(): Promise<AudioProcessingJob[]> {
+
+    try {
+
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) return [];
+
+
+
+      const { data, error } = await supabase
+
+        .from('audio_processing_jobs')
+
+        .select('*')
+
+        .eq('user_id', user.id)
+
+        .order('created_at', { ascending: false })
+
+        .limit(50);
+
+
+
+      if (error) throw error;
+
+
+
+      return data || [];
+
+    } catch (error) {
+
+      console.error('❌ Error getting user processing jobs:', error);
+
+      return [];
+
+    }
+
+  }
+
+
+
+  // ===== PRESETS =====
+
+
+
+  getDefaultPresets(tier: 'free' | 'pro' | 'enterprise'): AudioEnhancementProfile[] {
+
+    const frequencies = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
+
+    
+
+    const basePresets = [
+
+      {
+
+        name: 'Flat',
+
+        settings: {
+
+          eq: { 
+
+            bands: new Array(10).fill(0), 
+
+            frequencies,
+
+            gains: new Array(10).fill(0),
+
+            preset: 'flat' 
+
+          },
+
+          compression: { threshold: -12, ratio: 2, attack: 10, release: 100 },
+
+          enhancement: { enabled: false, strength: 0, type: 'ai' as const },
+
+        },
+
+      },
+
+    ];
+
+
+
+    if (tier === 'free') {
+
+      return basePresets.map(preset => ({
+
+        ...preset,
+
+        id: `preset_${preset.name.toLowerCase()}`,
+
+        user_id: '',
+
+        tier_level: 'free' as const,
+
+        enhancement_settings: preset.settings,
+
+        is_default: preset.name === 'Flat',
+
+        is_public: true,
+
+        usage_count: 0,
+
+        created_at: new Date().toISOString(),
+
+        updated_at: new Date().toISOString(),
+
+      }));
+
+    }
+
+
+
+    const proPresets = [
+
+      ...basePresets,
+
+      {
+
+        name: 'Rock',
+
+        settings: {
+
+          eq: { 
+
+            bands: [0, 0, 2, 3, 1, -1, -2, 0, 2, 3], 
+
+            frequencies,
+
+            gains: [0, 0, 2, 3, 1, -1, -2, 0, 2, 3],
+
+            preset: 'rock' 
+
+          },
+
+          compression: { threshold: -8, ratio: 3, attack: 5, release: 50 },
+
+          enhancement: { enabled: true, strength: 0.3, type: 'ai' as const },
+
+        },
+
+      },
+
+      {
+
+        name: 'Pop',
+
+        settings: {
+
+          eq: { bands: [1, 2, 1, 0, -1, -1, 0, 1, 2, 2], frequencies, gains: [1, 2, 1, 0, -1, -1, 0, 1, 2, 2], preset: 'pop' },
+
+          enhancement: { enabled: true, strength: 0.4, type: 'ai' as const },
+
+        },
+
+      },
+
+      {
+
+        name: 'Vocal',
+
+        settings: {
+
+          eq: { bands: [-2, -1, 0, 2, 3, 2, 1, 0, -1, -2], frequencies, gains: [-2, -1, 0, 2, 3, 2, 1, 0, -1, -2], preset: 'vocal' },
+
+          enhancement: { enabled: true, strength: 0.5, type: 'ai' as const },
+
+          noise_reduction: { enabled: true, level: 0.3 },
+
+        },
+
+      },
+
+    ];
+
+
+
+    if (tier === 'enterprise') {
+
+      proPresets.push(
+
+        {
+
+          name: 'Mastered',
+
+          settings: {
+
+            eq: { bands: [0, 0, 1, 1, 0, 0, 1, 2, 1, 0], frequencies, gains: [0, 0, 1, 1, 0, 0, 1, 2, 1, 0], preset: 'mastered' },
+
+            enhancement: { enabled: true, strength: 0.7, type: 'ai' as const },
+
+            noise_reduction: { enabled: true, level: 0.5 },
+
+          },
+
+        }
+
+      );
+
+    }
+
+
+
+    return proPresets.map(preset => ({
+
+      ...preset,
+
+        id: `preset_${preset.name.toLowerCase()}`,
+
+        user_id: '',
+
+        tier_level: tier,
+
+        enhancement_settings: preset.settings,
+
+        is_default: preset.name === 'Flat',
+
+        is_public: true,
+
+        usage_count: 0,
+
+        created_at: new Date().toISOString(),
+
+        updated_at: new Date().toISOString(),
+
+    }));
+
+  }
+
+
+
+  // ===== UTILITY METHODS =====
+
+
+
+  getCurrentProfile(): AudioEnhancementProfile | null {
+
+    return this.currentProfile;
+
+  }
+
+
+
+  isProcessingActive(): boolean {
+
+    return this.processingNodes.size > 0;
+
+  }
+
+
+
+  getProcessingNodes(): Map<string, any> {
+
+    return this.processingNodes;
+
+  }
+
+
+
+  async cleanup(): Promise<void> {
+
+    this.processingNodes.clear();
+
+    this.currentProfile = null;
+
+    
+
+    if (this.audioContext) {
+
+      // In real implementation, close audio context
+
+      this.audioContext = null;
+
+    }
+
+  }
+
+}
+
+
+
+// Export singleton instance
+
+export const audioEnhancementService = new AudioEnhancementService();
+
+

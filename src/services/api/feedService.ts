@@ -339,17 +339,51 @@ export class FeedService {
       }
 
       const data = await response.json();
+      
+      // Log response for debugging
+      console.log('UploadImage response:', JSON.stringify(data, null, 2));
+      
       // Response format: { success: true, data: { file_url: "...", ... } }
       if (data.success && data.data) {
-        return data.data.file_url;
+        const fileUrl = data.data.file_url || data.data.url;
+        if (fileUrl) {
+          console.log('✅ Image uploaded successfully, URL:', fileUrl);
+          return fileUrl;
+        }
       }
-      // Fallback for old format
-      return data.url || data.image_url || data.imageUrl || data.data?.file_url;
+      
+      // Fallback for various response formats
+      const fileUrl = data.url || data.image_url || data.imageUrl || data.data?.file_url || data.data?.url;
+      if (fileUrl) {
+        console.log('✅ Image uploaded successfully (fallback format), URL:', fileUrl);
+        return fileUrl;
+      }
+      
+      // If success is true but no URL found, the upload likely succeeded
+      // The attachment is linked via post_id, so we can return a success indicator
+      if (data.success === true) {
+        console.log('✅ Image upload succeeded (attachment linked via post_id)');
+        // Return a success indicator - the attachment is already linked to the post
+        return 'uploaded';
+      }
+      
+      // If success is false or missing, extract error message
+      const errorMessage = data.error || data.message || data.details || 'Failed to upload image';
+      console.error('❌ Image upload failed:', errorMessage);
+      throw new Error(errorMessage);
     } catch (error: any) {
       console.error('FeedService.uploadImage:', error);
+      
+      // Don't re-throw if it's already a proper Error with message
       if (error.message === 'No file provided') {
         throw error;
       }
+      
+      // If error has a message, use it; otherwise create a generic one
+      if (error.message && error.message !== 'Failed to upload image') {
+        throw error;
+      }
+      
       throw new Error(error.message || 'Failed to upload image');
     }
   }
@@ -410,17 +444,51 @@ export class FeedService {
       }
 
       const data = await response.json();
+      
+      // Log response for debugging
+      console.log('UploadAudio response:', JSON.stringify(data, null, 2));
+      
       // Response format: { success: true, data: { file_url: "...", ... } }
       if (data.success && data.data) {
-        return data.data.file_url;
+        const fileUrl = data.data.file_url || data.data.url;
+        if (fileUrl) {
+          console.log('✅ Audio uploaded successfully, URL:', fileUrl);
+          return fileUrl;
+        }
       }
-      // Fallback for old format
-      return data.url || data.audio_url || data.audioUrl || data.data?.file_url;
+      
+      // Fallback for various response formats
+      const fileUrl = data.url || data.audio_url || data.audioUrl || data.data?.file_url || data.data?.url;
+      if (fileUrl) {
+        console.log('✅ Audio uploaded successfully (fallback format), URL:', fileUrl);
+        return fileUrl;
+      }
+      
+      // If success is true but no URL found, the upload likely succeeded
+      // The attachment is linked via post_id, so we can return a success indicator
+      if (data.success === true) {
+        console.log('✅ Audio upload succeeded (attachment linked via post_id)');
+        // Return a success indicator - the attachment is already linked to the post
+        return 'uploaded';
+      }
+      
+      // If success is false or missing, extract error message
+      const errorMessage = data.error || data.message || data.details || 'Failed to upload audio';
+      console.error('❌ Audio upload failed:', errorMessage);
+      throw new Error(errorMessage);
     } catch (error: any) {
       console.error('FeedService.uploadAudio:', error);
+      
+      // Don't re-throw if it's already a proper Error with message
       if (error.message === 'No file provided') {
         throw error;
       }
+      
+      // If error has a message, use it; otherwise create a generic one
+      if (error.message && error.message !== 'Failed to upload audio') {
+        throw error;
+      }
+      
       throw new Error(error.message || 'Failed to upload audio');
     }
   }

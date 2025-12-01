@@ -6,6 +6,10 @@ import { useAuth } from '../contexts/AuthContext';
 import type { Post } from '../types/feed.types';
 import * as Haptics from 'expo-haptics';
 import PostActionsModal from '../modals/PostActionsModal';
+import FullScreenImageModal from '../modals/FullScreenImageModal';
+import BlockUserModal from '../modals/BlockUserModal';
+import ReportContentModal from '../modals/ReportContentModal';
+import PostAudioPlayer from './PostAudioPlayer';
 
 interface PostCardProps {
   post: Post;
@@ -17,6 +21,9 @@ interface PostCardProps {
   onShare?: (post: Post) => void;
   onSave?: (postId: string) => void;
   onUnsave?: (postId: string) => void;
+  onSaveImage?: (imageUrl: string) => void;
+  onBlocked?: () => void;
+  onReported?: () => void;
   isSaved?: boolean;
 }
 
@@ -44,10 +51,16 @@ const PostCard = memo(function PostCard({
   onShare,
   onSave,
   onUnsave,
+  onSaveImage,
+  onBlocked,
+  onReported,
   isSaved = false,
 }: PostCardProps) {
   const { theme } = useTheme();
   const [showActionsModal, setShowActionsModal] = useState(false);
+  const [showFullScreenImage, setShowFullScreenImage] = useState(false);
+  const [showBlockModal, setShowBlockModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   const handleReactionPress = (reactionType: 'support' | 'love' | 'fire' | 'congrats') => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -143,37 +156,27 @@ const PostCard = memo(function PostCard({
       {/* Media Section */}
       {post.image_url && (
         <View style={styles.mediaSection}>
-          <Image
-            source={{ uri: post.image_url }}
-            style={styles.imagePreview}
-            resizeMode="cover"
-          />
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowFullScreenImage(true);
+            }}
+          >
+            <Image
+              source={{ uri: post.image_url }}
+              style={styles.imagePreview}
+              resizeMode="cover"
+            />
+          </TouchableOpacity>
         </View>
       )}
 
       {post.audio_url && (
-        <View
-          style={[
-            styles.audioPreview,
-            {
-              backgroundColor: 'rgba(124, 58, 237, 0.1)',
-              borderColor: 'rgba(124, 58, 237, 0.2)',
-            },
-          ]}
-        >
-          <Ionicons name="musical-notes" size={24} color="#7C3AED" />
-          <View style={styles.audioInfo}>
-            <Text style={[styles.audioTitle, { color: theme.colors.text }]}>
-              Audio Preview
-            </Text>
-            <Text style={[styles.audioDuration, { color: theme.colors.textSecondary }]}>
-              0:30
-            </Text>
-          </View>
-          <TouchableOpacity>
-            <Ionicons name="play-circle" size={32} color={theme.colors.primary} />
-          </TouchableOpacity>
-        </View>
+        <PostAudioPlayer
+          audioUrl={post.audio_url}
+          title="Audio Preview"
+        />
       )}
 
       {/* Engagement Section */}
@@ -195,7 +198,9 @@ const PostCard = memo(function PostCard({
                 style={[
                   styles.reactionButton,
                   isActive && {
-                    backgroundColor: 'rgba(236, 72, 153, 0.1)',
+                    backgroundColor: theme.isDark 
+                      ? 'rgba(236, 72, 153, 0.2)' 
+                      : 'rgba(236, 72, 153, 0.1)',
                   },
                 ]}
                 onPress={() => handleReactionPress(reactionType)}
@@ -241,6 +246,54 @@ const PostCard = memo(function PostCard({
         onShare={() => onShare?.(post)}
         onSave={() => onSave?.(post.id)}
         onUnsave={() => onUnsave?.(post.id)}
+        onSaveImage={post.image_url && onSaveImage ? () => {
+          console.log('📸 PostCard: Calling onSaveImage with URL:', post.image_url);
+          onSaveImage(post.image_url!);
+        } : undefined}
+        onReport={() => {
+          setShowActionsModal(false);
+          setShowReportModal(true);
+        }}
+        onBlocked={() => {
+          setShowActionsModal(false);
+          setShowBlockModal(true);
+        }}
+      />
+
+      {/* Full Screen Image Modal */}
+      {post.image_url && (
+        <FullScreenImageModal
+          visible={showFullScreenImage}
+          imageUrl={post.image_url}
+          onClose={() => setShowFullScreenImage(false)}
+        />
+      )}
+
+      {/* Block User Modal */}
+      <BlockUserModal
+        visible={showBlockModal}
+        onClose={() => setShowBlockModal(false)}
+        userId={post.author.id}
+        userName={post.author.display_name || post.author.username || 'User'}
+        userAvatar={post.author.avatar_url}
+        isCurrentlyBlocked={false}
+        onBlocked={() => {
+          onBlocked?.();
+          setShowBlockModal(false);
+        }}
+      />
+
+      {/* Report Content Modal */}
+      <ReportContentModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        contentType="post"
+        contentId={post.id}
+        contentTitle={post.content || 'Post'}
+        onReported={() => {
+          onReported?.();
+          setShowReportModal(false);
+        }}
       />
     </TouchableOpacity>
   );
@@ -334,28 +387,6 @@ const styles = StyleSheet.create({
   imagePreview: {
     width: '100%',
     aspectRatio: 16 / 9,
-    backgroundColor: '#CCCCCC',
-  },
-  audioPreview: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 14,
-  },
-  audioInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  audioTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  audioDuration: {
-    fontSize: 12,
-    fontWeight: '400',
   },
   engagementSection: {
     borderTopWidth: 1,

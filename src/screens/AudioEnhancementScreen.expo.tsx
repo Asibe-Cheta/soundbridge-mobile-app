@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 
 export default function AudioEnhancementScreen() {
   const { theme } = useTheme();
@@ -28,54 +29,55 @@ export default function AudioEnhancementScreen() {
 
   // State
   const [loading, setLoading] = useState(false);
+  // Updated per TIER_CORRECTIONS.md - Enterprise not available Year 1
   const [userTier, setUserTier] = useState<'free' | 'pro' | 'enterprise'>('free');
-  const [currentPreset, setCurrentPreset] = useState('Flat');
-
-  // EQ State (10-band for Pro, 31-band for Enterprise)
-  const [eqBands, setEqBands] = useState<number[]>(new Array(10).fill(0));
-  const [eqFrequencies] = useState([60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000]);
-
-  // Enhancement Controls
-  const [aiEnhancementEnabled, setAiEnhancementEnabled] = useState(false);
-  const [aiEnhancementStrength, setAiEnhancementStrength] = useState(0.5);
+  const [eqBands, setEqBands] = useState([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const [aiEnhancementEnabled, setAIEnhancementEnabled] = useState(false);
   const [spatialAudioEnabled, setSpatialAudioEnabled] = useState(false);
-  const [spatialWidth, setSpatialWidth] = useState(1.0);
 
+  // Load user tier on mount
   useEffect(() => {
-    loadUserData();
-  }, []);
-
-  const loadUserData = async () => {
-    try {
-      setLoading(true);
-
-      // Simulate loading user's subscription tier
-      // In real implementation, this would check user's actual subscription
-      const tier = user?.user_metadata?.subscription_tier || 'free';
-      setUserTier(tier);
-
-      console.log('✅ User data loaded, tier:', tier);
-    } catch (error) {
-      console.error('❌ Error loading user data:', error);
-      Alert.alert('Error', 'Failed to load audio enhancement settings');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEQBandChange = async (bandIndex: number, value: number) => {
-    try {
-      const newBands = [...eqBands];
-      newBands[bandIndex] = value;
-      setEqBands(newBands);
-
-      const frequency = eqFrequencies[bandIndex];
-      console.log(`🎚️ EQ band ${frequency}Hz adjusted to ${value}dB`);
+    const loadUserTier = async () => {
+      if (!user) return;
       
-      // Show user feedback
+      try {
+        // Get user's subscription tier from API (subscription data in user_subscriptions table, not profiles)
+        let tier: 'free' | 'pro' | 'enterprise' = 'free';
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const response = await fetch('https://www.soundbridge.live/api/user/subscription-status', {
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            tier = data.subscription?.tier || 'free';
+          }
+        }
+        setUserTier(tier);
+      } catch (error) {
+        console.error('Error fetching subscription:', error);
+      }
+    };
+
+    loadUserTier();
+  }, [user]);
+
+  const handleEQBandChange = async (index: number, value: number) => {
+    const newBands = [...eqBands];
+    newBands[index] = value;
+    setEqBands(newBands);
+
+    // In Expo mode, show alert instead of actual processing
+    try {
+      const frequencies = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+      const frequency = frequencies[index];
       Alert.alert(
-        'EQ Adjustment',
-        `${frequency}Hz: ${value > 0 ? '+' : ''}${value}dB\n\n` +
+        'EQ Adjustment (Expo Mode)',
+        `Adjusting ${frequency}Hz band to ${value > 0 ? '+' : ''}${value}dB\n\n` +
         'Note: Real audio processing will be active when deployed to device with native modules.',
         [{ text: 'Got it!', style: 'default' }]
       );
@@ -84,45 +86,12 @@ export default function AudioEnhancementScreen() {
     }
   };
 
-  const handlePresetSelect = async (presetName: string) => {
+  const handleAIEnhancementToggle = async (value: boolean) => {
+    setAIEnhancementEnabled(value);
     try {
-      let newBands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-      
-      switch (presetName) {
-        case 'Rock':
-          newBands = [0, 0, 2, 3, 1, -1, -2, 0, 2, 3];
-          break;
-        case 'Pop':
-          newBands = [1, 2, 1, 0, -1, -1, 0, 1, 2, 2];
-          break;
-        case 'Jazz':
-          newBands = [2, 1, 0, 1, 2, 1, 0, 1, 2, 1];
-          break;
-        case 'Vocal':
-          newBands = [-2, -1, 0, 2, 3, 2, 1, 0, -1, -2];
-          break;
-        case 'Flat':
-          newBands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-          break;
-      }
-      
-      setEqBands(newBands);
-      setCurrentPreset(presetName);
-      Alert.alert('Preset Applied', `${presetName} preset has been applied!`);
-    } catch (error) {
-      console.error('❌ Error applying preset:', error);
-      Alert.alert('Error', 'Failed to apply preset');
-    }
-  };
-
-  const handleAIEnhancementToggle = async (enabled: boolean) => {
-    try {
-      setAiEnhancementEnabled(enabled);
-      console.log(`🤖 AI Enhancement ${enabled ? 'enabled' : 'disabled'}`);
-      
       Alert.alert(
-        'AI Enhancement',
-        enabled 
+        'AI Enhancement (Expo Mode)',
+        value
           ? 'AI Enhancement enabled! Audio quality will be improved with dynamic compression and intelligent EQ.'
           : 'AI Enhancement disabled.',
         [{ text: 'Excellent!', style: 'default' }]
@@ -132,14 +101,12 @@ export default function AudioEnhancementScreen() {
     }
   };
 
-  const handleSpatialAudioToggle = async (enabled: boolean) => {
+  const handleSpatialAudioToggle = async (value: boolean) => {
+    setSpatialAudioEnabled(value);
     try {
-      setSpatialAudioEnabled(enabled);
-      console.log(`🔊 Spatial Audio ${enabled ? 'enabled' : 'disabled'}`);
-      
       Alert.alert(
-        'Spatial Audio',
-        enabled 
+        'Spatial Audio (Expo Mode)',
+        value
           ? 'Spatial Audio enabled! Experience immersive 3D surround sound.'
           : 'Spatial Audio disabled.',
         [{ text: 'Amazing!', style: 'default' }]
@@ -151,15 +118,7 @@ export default function AudioEnhancementScreen() {
 
   const showImplementationStatus = () => {
     Alert.alert(
-      '🎵 Audio Enhancement Status',
-      '✅ Implementation Complete!\n\n' +
-      '• Native iOS Module: Ready ✓\n' +
-      '• Native Android Module: Ready ✓\n' +
-      '• React Native Bridge: Ready ✓\n' +
-      '• 10-Band EQ Processing: Ready ✓\n' +
-      '• AI Enhancement: Ready ✓\n' +
-      '• 3D Spatial Audio: Ready ✓\n' +
-      '• Subscription Integration: Ready ✓\n\n' +
+      'Implementation Status',
       'Status: Ready for native deployment!\n\n' +
       'Currently running in Expo mode with UI simulation. Real audio processing will be active when deployed to device.',
       [{ text: 'Fantastic!', style: 'default' }]
@@ -167,85 +126,81 @@ export default function AudioEnhancementScreen() {
   };
 
   const renderTierUpgrade = () => (
-    <View style={[styles.upgradeCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-      <Ionicons name="star" size={24} color="#FFD700" />
-      <Text style={[styles.upgradeTitle, { color: theme.colors.text }]}>
-        Upgrade for Audio Enhancement
-      </Text>
-      <Text style={[styles.upgradeText, { color: theme.colors.textSecondary }]}>
-        {userTier === 'free' 
-          ? 'Upgrade to Pro for AI enhancement, EQ controls, and spatial audio'
-          : 'Upgrade to Enterprise for professional-grade audio processing'
-        }
-      </Text>
-      <TouchableOpacity
-        style={[styles.upgradeButton, { backgroundColor: theme.colors.primary }]}
-        onPress={() => Alert.alert('Upgrade', 'Subscription upgrade coming soon!')}
-      >
-        <Text style={styles.upgradeButtonText}>
-          Upgrade to {userTier === 'free' ? 'Pro' : 'Enterprise'}
+    <View style={[styles.section, { backgroundColor: theme.colors.surface }]}>
+      <View style={[styles.upgradeCard, { borderColor: theme.colors.border }]}>
+        <Ionicons name="star" size={48} color={theme.colors.primary} />
+        <Text style={[styles.upgradeTitle, { color: theme.colors.text }]}>
+          Unlock Professional Audio Enhancement
         </Text>
-      </TouchableOpacity>
+        <Text style={[styles.upgradeText, { color: theme.colors.textSecondary }]}>
+          Upgrade to Pro to access real-time EQ, AI enhancement, spatial audio, and advanced audio processing features.
+        </Text>
+        <TouchableOpacity
+          style={[styles.upgradeButton, { backgroundColor: theme.colors.primary }]}
+          onPress={() => navigation.navigate('Upgrade' as never)}
+        >
+          <Text style={styles.upgradeButtonText}>Upgrade to Pro</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
   const renderEqualizer = () => (
     <View style={[styles.section, { backgroundColor: theme.colors.surface }]}>
-      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-        Equalizer ({userTier === 'enterprise' ? '31' : '10'}-Band)
-      </Text>
+      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>10-Band Equalizer</Text>
       <View style={styles.eqContainer}>
-        {eqFrequencies.slice(0, userTier === 'enterprise' ? 31 : 10).map((freq, index) => (
-          <View style={styles.eqBand} key={freq}>
-            <Text style={[styles.eqGain, { color: theme.colors.textSecondary }]}>
-              {eqBands[index] > 0 ? '+' : ''}{eqBands[index].toFixed(1)}
-            </Text>
-            <View style={styles.eqControls}>
-              <TouchableOpacity 
-                style={styles.eqButton}
-                onPress={() => handleEQBandChange(index, Math.min(12, eqBands[index] + 3))}
-              >
-                <Text style={styles.eqButtonText}>+</Text>
-              </TouchableOpacity>
-              <View style={[styles.eqBar, { height: Math.abs(eqBands[index]) * 4 + 20, backgroundColor: theme.colors.primary }]} />
-              <TouchableOpacity 
-                style={styles.eqButton}
-                onPress={() => handleEQBandChange(index, Math.max(-12, eqBands[index] - 3))}
-              >
-                <Text style={styles.eqButtonText}>-</Text>
-              </TouchableOpacity>
+        {eqBands.map((value, index) => {
+          const frequencies = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+          const frequency = frequencies[index];
+          const height = Math.abs(value) * 2 + 20;
+          return (
+            <View key={index} style={styles.eqBand}>
+              <Text style={[styles.eqGain, { color: theme.colors.textSecondary }]}>
+                {value > 0 ? '+' : ''}{value}dB
+              </Text>
+              <View style={styles.eqControls}>
+                <TouchableOpacity
+                  style={styles.eqButton}
+                  onPress={() => handleEQBandChange(index, Math.min(value + 1, 12))}
+                >
+                  <Text style={styles.eqButtonText}>+</Text>
+                </TouchableOpacity>
+                <View
+                  style={[
+                    styles.eqBar,
+                    {
+                      height: `${height}%`,
+                      backgroundColor: value > 0 ? '#10B981' : value < 0 ? '#EF4444' : theme.colors.border,
+                    },
+                  ]}
+                />
+                <TouchableOpacity
+                  style={styles.eqButton}
+                  onPress={() => handleEQBandChange(index, Math.max(value - 1, -12))}
+                >
+                  <Text style={styles.eqButtonText}>-</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={[styles.eqFreq, { color: theme.colors.textSecondary }]}>
+                {frequency}Hz
+              </Text>
             </View>
-            <Text style={[styles.eqFreq, { color: theme.colors.textSecondary }]}>
-              {freq < 1000 ? `${freq}` : `${(freq / 1000).toFixed(1)}k`}
-            </Text>
-          </View>
-        ))}
+          );
+        })}
       </View>
     </View>
   );
 
   const renderPresets = () => (
     <View style={[styles.section, { backgroundColor: theme.colors.surface }]}>
-      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Presets</Text>
+      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>EQ Presets</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetsScroll}>
-        {['Flat', 'Rock', 'Pop', 'Jazz', 'Vocal'].map((preset) => (
+        {['Flat', 'Bass Boost', 'Vocal', 'Treble', 'Rock', 'Jazz', 'Classical'].map((preset) => (
           <TouchableOpacity
             key={preset}
-            style={[
-              styles.presetButton,
-              { 
-                backgroundColor: currentPreset === preset ? theme.colors.primary : theme.colors.card,
-                borderColor: theme.colors.border 
-              }
-            ]}
-            onPress={() => handlePresetSelect(preset)}
+            style={[styles.presetButton, { borderColor: theme.colors.border }]}
           >
-            <Text style={[
-              styles.presetText,
-              { color: currentPreset === preset ? '#FFFFFF' : theme.colors.text }
-            ]}>
-              {preset}
-            </Text>
+            <Text style={[styles.presetText, { color: theme.colors.text }]}>{preset}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -254,20 +209,20 @@ export default function AudioEnhancementScreen() {
 
   const renderEnhancementControls = () => (
     <View style={[styles.section, { backgroundColor: theme.colors.surface }]}>
-      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Enhancement</Text>
+      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Enhancement Controls</Text>
       
       {/* AI Enhancement */}
       <View style={styles.controlRow}>
         <View style={styles.controlInfo}>
           <Text style={[styles.controlLabel, { color: theme.colors.text }]}>AI Enhancement</Text>
           <Text style={[styles.controlDescription, { color: theme.colors.textSecondary }]}>
-            Automatically improve audio quality
+            Intelligent audio processing for optimal quality
           </Text>
         </View>
         <Switch
           value={aiEnhancementEnabled}
           onValueChange={handleAIEnhancementToggle}
-          trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+          trackColor={{ false: theme.colors.border, true: `${theme.colors.primary}40` }}
           thumbColor={aiEnhancementEnabled ? theme.colors.primary : theme.colors.textSecondary}
         />
       </View>
@@ -283,7 +238,7 @@ export default function AudioEnhancementScreen() {
         <Switch
           value={spatialAudioEnabled}
           onValueChange={handleSpatialAudioToggle}
-          trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+          trackColor={{ false: theme.colors.border, true: `${theme.colors.primary}40` }}
           thumbColor={spatialAudioEnabled ? theme.colors.primary : theme.colors.textSecondary}
         />
       </View>
@@ -339,7 +294,7 @@ export default function AudioEnhancementScreen() {
         </View>
 
         {/* Status Indicator */}
-        <View style={[styles.statusBar, { backgroundColor: theme.colors.primary + '20' }]}>
+        <View style={[styles.statusBar, { backgroundColor: `${theme.colors.primary}20` }]}>
           <Ionicons name="checkmark-circle" size={16} color={theme.colors.primary} />
           <Text style={[styles.statusText, { color: theme.colors.primary }]}>
             Enhancement Ready (Expo Mode)

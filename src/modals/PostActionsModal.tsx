@@ -23,7 +23,9 @@ interface PostActionsModalProps {
   onShare?: () => void;
   onSave?: () => void;
   onUnsave?: () => void;
+  onSaveImage?: () => void;
   onReport?: () => void;
+  onBlocked?: () => void;
 }
 
 export default function PostActionsModal({
@@ -36,7 +38,9 @@ export default function PostActionsModal({
   onShare,
   onSave,
   onUnsave,
+  onSaveImage,
   onReport,
+  onBlocked,
 }: PostActionsModalProps) {
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -44,6 +48,14 @@ export default function PostActionsModal({
   if (!post) return null;
 
   const isOwnPost = post.author.id === user?.id;
+
+  console.log('📋 PostActionsModal opened:', {
+    isOwnPost,
+    userId: user?.id,
+    postAuthorId: post.author.id,
+    shouldShowReport: !isOwnPost,
+    shouldShowBlock: !isOwnPost,
+  });
 
   const handleDelete = () => {
     Alert.alert(
@@ -105,6 +117,21 @@ export default function PostActionsModal({
                 <Text style={[styles.actionText, { color: theme.colors.text }]}>Share</Text>
               </TouchableOpacity>
 
+              {/* Save Image (only if post has an image) */}
+              {post.image_url && onSaveImage && (
+                <TouchableOpacity
+                  style={[styles.actionItem, { borderBottomColor: theme.colors.border }]}
+                  onPress={() => {
+                    console.log('📸 PostActionsModal: Save Image pressed, URL:', post.image_url);
+                    onSaveImage();
+                    onClose();
+                  }}
+                >
+                  <Ionicons name="download-outline" size={24} color={theme.colors.text} />
+                  <Text style={[styles.actionText, { color: theme.colors.text }]}>Save Image</Text>
+                </TouchableOpacity>
+              )}
+
               {/* Save/Unsave */}
               {isSaved ? (
                 <TouchableOpacity
@@ -155,23 +182,42 @@ export default function PostActionsModal({
                 </TouchableOpacity>
               )}
 
-              {/* Report (only for others' posts) */}
-              {!isOwnPost && onReport && (
+              {/* Block User (only for others' posts) */}
+              {!isOwnPost && (
                 <TouchableOpacity
-                  style={[styles.actionItem]}
+                  style={[styles.actionItem, styles.destructiveAction]}
                   onPress={() => {
-                    onReport();
+                    onBlocked?.();
                     onClose();
                   }}
                 >
-                  <Ionicons name="flag-outline" size={24} color={theme.colors.error} />
-                  <Text style={[styles.actionText, { color: theme.colors.error }]}>Report</Text>
+                  <Ionicons name="shield-outline" size={24} color={theme.colors.error || '#DC2626'} />
+                  <Text style={[styles.actionText, { color: theme.colors.error || '#DC2626' }]}>
+                    Block User
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Report (only for others' posts) */}
+              {!isOwnPost && (
+                <TouchableOpacity
+                  style={[styles.actionItem, styles.destructiveAction]}
+                  onPress={() => {
+                    onReport?.();
+                    onClose();
+                  }}
+                >
+                  <Ionicons name="flag-outline" size={24} color={theme.colors.error || '#DC2626'} />
+                  <Text style={[styles.actionText, { color: theme.colors.error || '#DC2626' }]}>
+                    Report
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
           </View>
         </SafeAreaView>
       </TouchableOpacity>
+
     </Modal>
   );
 }
@@ -216,6 +262,9 @@ const styles = StyleSheet.create({
   actionText: {
     fontSize: 16,
     fontWeight: '400',
+  },
+  destructiveAction: {
+    // Additional styling for destructive actions if needed
   },
 });
 

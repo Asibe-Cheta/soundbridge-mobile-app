@@ -21,6 +21,7 @@ import CommentsModal from '../modals/CommentsModal';
 import { feedService } from '../services/api/feedService';
 import { deepLinkingService } from '../services/DeepLinkingService';
 import { socialService } from '../services/api/socialService';
+import { imageSaveService } from '../services/ImageSaveService';
 import { Alert } from 'react-native';
 
 export default function FeedScreen() {
@@ -165,6 +166,21 @@ export default function FeedScreen() {
     await handleSavePost(postId);
   };
 
+  const handleSaveImage = async (imageUrl: string) => {
+    console.log('📸 FeedScreen.handleSaveImage: Called with URL:', imageUrl);
+    try {
+      if (!imageUrl) {
+        console.error('❌ FeedScreen.handleSaveImage: No image URL provided');
+        Alert.alert('Error', 'No image URL provided.');
+        return;
+      }
+      await imageSaveService.saveImageWithFeedback(imageUrl);
+    } catch (error) {
+      console.error('❌ FeedScreen.handleSaveImage: Failed to save image:', error);
+      Alert.alert('Error', 'Failed to save image. Please try again.');
+    }
+  };
+
   return (
     <View style={styles.container}>
       {/* Main Background Gradient */}
@@ -201,6 +217,15 @@ export default function FeedScreen() {
                   onShare={handleSharePost}
                   onSave={handleSavePost}
                   onUnsave={handleUnsavePost}
+                  onSaveImage={handleSaveImage}
+                  onBlocked={async () => {
+                    // Refresh feed to remove blocked user's posts
+                    await refresh();
+                  }}
+                  onReported={async () => {
+                    // Optionally refresh feed or show success message
+                    console.log('Report submitted successfully');
+                  }}
                   isSaved={savedPosts.has(item.id)}
                 />
               )}

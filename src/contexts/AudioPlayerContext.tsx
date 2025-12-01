@@ -178,9 +178,14 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       setIsLoading(true);
       setError(null);
       
-      // Stop current track if playing
-      if (soundRef.current) {
-        await soundRef.current.unloadAsync();
+      // Stop current track if playing (using playerRef for expo-audio)
+      if (playerRef.current) {
+        try {
+          playerRef.current.pause();
+          playerRef.current.remove();
+        } catch (error) {
+          console.warn('Error stopping current track:', error);
+        }
       }
       
       // Check if track has a valid audio URL (support both field names)

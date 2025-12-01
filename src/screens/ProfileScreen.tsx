@@ -29,7 +29,9 @@ import {
   CancellableQuery,
   withQueryTimeout
 } from '../utils/dataLoading';
+import { contentCacheService } from '../services/contentCacheService';
 import * as ImagePicker from 'expo-image-picker';
+// Removed FileSystem import - using FormData for Cloudinary upload
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
@@ -38,6 +40,7 @@ import * as BiometricAuth from '../services/biometricAuth';
 import ConnectionsPreview from '../components/ConnectionsPreview';
 import RecentActivity from '../components/RecentActivity';
 import { mockConnections } from '../utils/mockNetworkData';
+import { uploadImage } from '../services/UploadService';
 
 const { width } = Dimensions.get('window');
 
@@ -94,7 +97,8 @@ export default function ProfileScreen() {
   const [userTracks, setUserTracks] = useState<UserTrack[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'settings' | 'earnings'>('overview');
   const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Start as false for instant cache display
+  const initialCacheLoadRef = useRef(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [editingProfile, setEditingProfile] = useState<Partial<UserProfile>>({});
@@ -146,16 +150,38 @@ export default function ProfileScreen() {
     }
   };
 
-  const loadProfileData = async () => {
-    console.log('👤 ProfileScreen: Loading profile data...');
-    loadingManager.setLoading('profile', true, 10000);
+  const loadProfileData = async (forceRefresh = false) => {
+    if (!user?.id) {
+      console.log('No user ID available');
+      return;
+    }
 
-    try {
-      if (!user?.id) {
-        console.log('No user ID available');
+    const cacheKey = `profile_${user.id}`;
+    
+    // Try cache first (unless force refresh)
+    if (!forceRefresh && !initialCacheLoadRef.current) {
+      const cached = await contentCacheService.getCached('PROFILE', cacheKey);
+      if (cached) {
+        console.log('⚡ Instant load: Showing cached profile data');
+        setProfile(cached.profile);
+        setStats(cached.stats);
+        setUserTracks(cached.tracks || []);
+        initialCacheLoadRef.current = true;
+        
+        // Fetch fresh data in background
+        setTimeout(() => loadProfileData(true), 100);
         return;
       }
+    }
+    
+    // Only show loading if we don't have cached data
+    if (!profile || forceRefresh) {
+      console.log('👤 ProfileScreen: Loading profile data...');
+      loadingManager.setLoading('profile', true, 10000);
+      setLoading(true);
+    }
 
+    try {
       // Wait for valid session
       await waitForValidSession(supabase, 3000);
 
@@ -237,12 +263,14 @@ export default function ProfileScreen() {
       const followingCount = results.following ?? 0;
       const tracksCount = results.tracksCount ?? 0;
       const tracksData = results.tracks?.data || results.tracks || [];
-      
+
       console.log('📊 Profile counts - Followers:', followersCount, 'Following:', followingCount, 'Tracks:', tracksCount);
+
+      let profileObj: UserProfile | null = null;
 
       if (profileData && !results.profile?.error) {
         console.log('✅ Profile loaded:', profileData.username);
-        setProfile({
+        profileObj = {
           id: profileData.id,
           username: profileData.username,
           display_name: profileData.display_name,
@@ -255,11 +283,12 @@ export default function ProfileScreen() {
           is_creator: profileData.is_creator || false,
           is_verified: profileData.is_verified || false,
           created_at: profileData.created_at,
-        });
+        };
+        setProfile(profileObj);
       } else {
         console.error('Failed to load profile:', results.profile?.error);
         // Fallback to basic user data
-        setProfile({
+        profileObj = {
           id: user.id,
           username: user.email?.split('@')[0] || 'user123',
           display_name: user.email?.split('@')[0] || 'SoundBridge User',
@@ -272,7 +301,8 @@ export default function ProfileScreen() {
           is_creator: false,
           is_verified: false,
           created_at: new Date().toISOString(),
-        });
+        };
+        setProfile(profileObj);
       }
 
       // Process tracks data
@@ -355,12 +385,29 @@ export default function ProfileScreen() {
         });
       }
 
+      // Save to cache
+      if (profileObj) {
+        await contentCacheService.saveCache('PROFILE', cacheKey, {
+          profile: profileObj,
+          stats: stats || {
+            total_plays: 0,
+            total_likes: 0,
+            total_tips_received: 0,
+            total_earnings: 0,
+            monthly_plays: 0,
+            monthly_earnings: 0,
+          },
+          tracks: userTracks,
+        });
+      }
+
       console.log('✅ ProfileScreen: Profile loaded successfully');
+      initialCacheLoadRef.current = true;
     } catch (error) {
       console.error('❌ ProfileScreen: Error loading profile:', error);
       Alert.alert('Error', 'Failed to load profile data');
       // Set fallback data
-      setProfile({
+      const fallbackProfile = {
         id: user?.id || 'unknown',
         username: user?.email?.split('@')[0] || 'user123',
         display_name: user?.email?.split('@')[0] || 'SoundBridge User',
@@ -373,24 +420,36 @@ export default function ProfileScreen() {
         is_creator: false,
         is_verified: false,
         created_at: new Date().toISOString(),
-      });
-      setStats({
+      };
+      setProfile(fallbackProfile);
+      const fallbackStats = {
         total_plays: 0,
         total_likes: 0,
         total_tips_received: 0,
         total_earnings: 0,
         monthly_plays: 0,
         monthly_earnings: 0,
-      });
+      };
+      setStats(fallbackStats);
+      
+      // Save fallback to cache if we don't have cached data
+      if (!profile) {
+        await contentCacheService.saveCache('PROFILE', cacheKey, {
+          profile: fallbackProfile,
+          stats: fallbackStats,
+          tracks: [],
+        });
+      }
     } finally {
       loadingManager.setLoading('profile', false, 0);
+      setLoading(false);
       setRefreshing(false);
     }
   };
 
   const onRefresh = () => {
     setRefreshing(true);
-    loadProfileData();
+    loadProfileData(true); // Force refresh
   };
 
   const handleEditProfile = () => {
@@ -468,14 +527,14 @@ export default function ProfileScreen() {
           return;
         }
         result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          mediaTypes: ImagePicker.MediaTypeOptions.Images, // Keep deprecated API for now - works in v17.0.8
           allowsEditing: true,
           aspect: [1, 1],
           quality: 0.8,
         });
       } else {
         result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          mediaTypes: ImagePicker.MediaTypeOptions.Images, // Keep deprecated API for now - works in v17.0.8
           allowsEditing: true,
           aspect: [1, 1],
           quality: 0.8,
@@ -506,11 +565,120 @@ export default function ProfileScreen() {
           type: mimeType
         };
 
-        // Upload to Supabase
-        // TODO: Implement image upload with Supabase Storage
-        console.log('Image upload not implemented yet');
-        Alert.alert('Info', 'Image upload feature coming soon!');
-        return;
+        // Upload to /api/upload/avatar endpoint (as documented by web app team in ONBOARDING_FLOW_ANALYSIS.md)
+        console.log('📤 Uploading profile picture...');
+        
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          Alert.alert('Error', 'Not authenticated');
+          setAvatarUploading(false);
+          return;
+        }
+
+        // Verify user ID is available
+        const userId = user?.id || session.user?.id;
+        if (!userId) {
+          console.error('❌ User ID not available:', { user, session });
+          Alert.alert('Error', 'User information not available. Please try again.');
+          return;
+        }
+
+        // Create FormData for avatar upload
+        // ⚠️ CRITICAL: Field name must be 'userId' (camelCase), not 'user_id' (as per web app team response)
+        const formData = new FormData();
+        const filename = file.name;
+        
+        // React Native FormData format for file uploads
+        // Field name must be 'file', not 'image'
+        formData.append('file', {
+          uri: Platform.OS === 'ios' ? asset.uri.replace('file://', '') : asset.uri,
+          name: filename,
+          type: mimeType,
+        } as any);
+
+        // ✅ CORRECT: Use camelCase 'userId' (not 'user_id')
+        formData.append('userId', userId);
+
+        // Upload to avatar endpoint (documented in ONBOARDING_FLOW_ANALYSIS.md)
+        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://www.soundbridge.live';
+        const response = await fetch(`${API_BASE_URL}/api/upload/avatar`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            // Don't set Content-Type - let fetch set it with boundary for FormData
+          },
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('❌ Upload error response:', errorText);
+          let error;
+          try {
+            error = JSON.parse(errorText);
+          } catch {
+            error = { error: errorText || 'Failed to upload profile picture' };
+          }
+          const errorMessage = error.error || error.message || error.details || 'Failed to upload profile picture';
+          console.error('❌ Error uploading avatar:', {
+            status: response.status,
+            statusText: response.statusText,
+            error: errorMessage,
+            fullError: error,
+          });
+          Alert.alert('Upload Failed', errorMessage);
+          return;
+        }
+
+        const data = await response.json();
+        console.log('✅ Avatar upload response:', JSON.stringify(data, null, 2));
+
+        // Check for errors first
+        if (!data.success) {
+          const errorMessage = data.error || 'Failed to upload profile picture';
+          console.error('❌ Avatar upload failed:', errorMessage);
+          Alert.alert('Upload Failed', errorMessage);
+          return;
+        }
+
+        // Extract URL from response (per web app team: { success: true, url: "..." })
+        const imageUrl = data.url;
+        if (!imageUrl) {
+          console.error('❌ No URL in avatar upload response:', data);
+          Alert.alert('Upload Failed', 'Upload succeeded but no URL returned. Please try again.');
+          return;
+        }
+
+        console.log('✅ Profile picture uploaded successfully:', imageUrl);
+
+        // Update profile with new avatar URL
+        console.log('📝 Updating profile with new avatar URL:', imageUrl);
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({ avatar_url: imageUrl })
+          .eq('id', user.id);
+
+        if (updateError) {
+          console.error('❌ Error updating profile:', updateError);
+          Alert.alert('Error', 'Profile picture uploaded but failed to update profile. Please try again.');
+          return;
+        }
+
+        // Update local profile state immediately so UI updates instantly
+        if (profile) {
+          setProfile({
+            ...profile,
+            avatar_url: imageUrl,
+          });
+        }
+
+        // Refresh user profile in context and reload profile data
+        await refreshUser();
+        // Force refresh profile data to ensure everything is in sync
+        await loadProfileData(true);
+        
+        Alert.alert('Success', 'Profile picture updated successfully!');
+        console.log('✅ Profile picture updated successfully');
       }
     } catch (error) {
       console.error('Error updating avatar:', error);
@@ -1141,6 +1309,19 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {/* TEST BUTTON - Temporary */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Testing</Text>
+        <TouchableOpacity 
+          style={[styles.testButton, { backgroundColor: '#7C3AED', borderColor: '#7C3AED' }]} 
+          onPress={() => (navigation as any).navigate('OnboardingTest')}
+        >
+          <Ionicons name="flask" size={20} color="#FFFFFF" />
+          <Text style={[styles.testButtonText, { color: '#FFFFFF' }]}>Test Onboarding Flow</Text>
+          <Ionicons name="chevron-forward" size={16} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
+
       {/* Support & About */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Support & About</Text>
@@ -1767,6 +1948,23 @@ const styles = StyleSheet.create({
     // color applied dynamically in JSX
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  // Test button styles
+  testButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  testButtonText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 12,
   },
   headerButtons: {
     flexDirection: 'row',

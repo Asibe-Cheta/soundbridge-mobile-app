@@ -123,7 +123,7 @@ export default function CommentsModal({
         <KeyboardAvoidingView
           style={styles.keyboardView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 20}
         >
           {/* Header */}
           <View
@@ -185,19 +185,24 @@ export default function CommentsModal({
 
           {/* Comments List */}
           <FlatList
-            data={comments}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <CommentCard
-                comment={item}
-                onLike={handleLike}
-                onReply={handleReply}
-                onViewReplies={handleViewReplies}
-                showReplies={expandedReplies.has(item.id)}
-                replies={getRepliesForComment(item.id)}
-              />
-            )}
+            data={comments.filter((item) => item && item.id)}
+            keyExtractor={(item, index) => item?.id || `comment-${index}`}
+            renderItem={({ item }) => {
+              if (!item || !item.id) return null;
+              return (
+                <CommentCard
+                  comment={item}
+                  onLike={handleLike}
+                  onReply={handleReply}
+                  onViewReplies={handleViewReplies}
+                  showReplies={expandedReplies.has(item.id)}
+                  replies={getRepliesForComment(item.id)}
+                />
+              );
+            }}
             contentContainerStyle={styles.commentsList}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
             ListEmptyComponent={
               loading ? (
                 <View style={styles.emptyState}>
@@ -276,7 +281,7 @@ export default function CommentsModal({
                 <Ionicons
                   name="send"
                   size={18}
-                  color={canSend ? '#FFFFFF' : theme.colors.textSecondary}
+                  color={canSend ? (theme.isDark ? '#FFFFFF' : '#FFFFFF') : theme.colors.textSecondary}
                 />
               </TouchableOpacity>
             </View>
@@ -293,6 +298,10 @@ const styles = StyleSheet.create({
   },
   keyboardView: {
     flex: 1,
+  },
+  commentsList: {
+    padding: 16,
+    flexGrow: 1,
   },
   header: {
     height: 56,
@@ -347,9 +356,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     marginTop: 6,
-  },
-  commentsList: {
-    padding: 16,
   },
   emptyState: {
     alignItems: 'center',

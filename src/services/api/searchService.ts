@@ -53,9 +53,28 @@ export class SearchService {
       );
 
       return response.results || [];
-    } catch (error) {
+    } catch (error: any) {
       console.error('SearchService.search:', error);
-      // Fallback to Supabase search if API fails
+      
+      // Handle 429 errors (search limit exceeded) for professional searches
+      if (error?.status === 429 && (type === 'people' || type === 'all')) {
+        const limitInfo = error?.limit || error?.body?.limit;
+        const errorMessage = limitInfo?.message || error?.message || 'Search limit reached';
+        
+        // Re-throw with upgrade information
+        const limitError = new Error(errorMessage);
+        (limitError as any).status = 429;
+        (limitError as any).limit = limitInfo;
+        (limitError as any).upgradeRequired = error?.upgradeRequired || limitInfo?.upgrade_required;
+        throw limitError;
+      }
+      
+      // Fallback to Supabase search if API fails (only for non-professional searches)
+      // Professional searches should use API to track limits
+      if (type === 'people' || type === 'all') {
+        throw error; // Don't fallback for professional searches
+      }
+      
       return this.fallbackSearch(query, type);
     }
   }

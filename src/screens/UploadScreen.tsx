@@ -20,9 +20,10 @@ import * as DocumentPicker from 'expo-document-picker';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { db } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import UploadLimitCard from '../components/UploadLimitCard';
 import { getUploadQuota, UploadQuota } from '../services/UploadQuotaService';
+import { uploadAudioFile, uploadImage, createAudioTrack } from '../services/UploadService';
 
 const { width } = Dimensions.get('window');
 
@@ -91,8 +92,8 @@ export default function UploadScreen() {
     'audio/aac', 'audio/ogg', 'audio/flac'
   ];
 
-  const maxFileSize = 100 * 1024 * 1024; // 100MB limit
-  const supabaseFunctions = db as any;
+  const maxFileSize = 100 * 1024 * 1024; // 100MB limit for audio
+  const maxImageSize = 5 * 1024 * 1024; // 5MB limit for images
 
   useEffect(() => {
     let isMounted = true;
@@ -248,13 +249,24 @@ export default function UploadScreen() {
 
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
+        
+        // Validate image size (5MB limit as per web team response)
+        if (asset.fileSize && asset.fileSize > maxImageSize) {
+          Alert.alert(
+            'File Too Large',
+            `Cover image must be less than ${maxImageSize / (1024 * 1024)}MB. Please select a smaller image.`
+          );
+          return;
+        }
+        
         // Ensure proper MIME type and file extension
         const fileExtension = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
         const mimeType = {
           'jpg': 'image/jpeg',
           'jpeg': 'image/jpeg',
           'png': 'image/png',
-          'webp': 'image/webp'
+          'webp': 'image/webp',
+          'avif': 'image/avif'
         }[fileExtension] || 'image/jpeg';
         
         setFormData(prev => ({ 
@@ -347,7 +359,7 @@ export default function UploadScreen() {
 
       // Step 1: Upload audio file (70% of progress)
       setUploadProgress(10);
-      const audioUploadResult = await supabaseFunctions.uploadAudioFile(user.id, formData.audioFile!);
+      const audioUploadResult = await uploadAudioFile(user.id, formData.audioFile!);
       
       if (!audioUploadResult.success) {
         throw new Error('Failed to upload audio file: ' + audioUploadResult.error?.message);
@@ -360,7 +372,7 @@ export default function UploadScreen() {
       let artworkUrl = null;
       if (formData.coverImage) {
         setUploadProgress(60);
-        const imageUploadResult = await supabaseFunctions.uploadImage(user.id, formData.coverImage, 'cover-art');
+        const imageUploadResult = await uploadImage(user.id, formData.coverImage, 'cover-art');
         
         if (imageUploadResult.success) {
           artworkUrl = imageUploadResult.data?.url;
@@ -401,7 +413,7 @@ export default function UploadScreen() {
         has_lyrics: formData.lyrics.trim().length > 0
       };
       
-      const trackResult = await supabaseFunctions.createAudioTrack(user.id, trackData);
+      const trackResult = await createAudioTrack(user.id, trackData);
       
       if (!trackResult.success) {
         throw new Error('Failed to create track record: ' + trackResult.error?.message);

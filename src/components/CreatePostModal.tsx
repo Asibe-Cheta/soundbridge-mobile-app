@@ -101,16 +101,26 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
 
     setUploadingPost(true);
     try {
-      let imageUrl: string | undefined;
-      let audioUrl: string | undefined;
+      // Step 1: Create post first (without attachments)
+      // Note: image_url and audio_url are NOT accepted in post creation
+      const newPost = await feedService.createPost({
+        content: content.trim(),
+        post_type: postType,
+        visibility,
+        // Don't include image_url or audio_url - they're uploaded separately
+      });
 
-      // Upload image if selected
-      if (imageUri) {
+      // Step 2: Upload image if selected (with post_id to create attachment record)
+      if (imageUri && imageUri.trim() !== '') {
         setUploadingImage(true);
         try {
-          imageUrl = await feedService.uploadImage(imageUri);
-        } catch (err) {
-          Alert.alert('Upload Error', 'Failed to upload image. Please try again.');
+          await feedService.uploadImage(imageUri, newPost.id);
+        } catch (err: any) {
+          console.error('Image upload error:', err);
+          Alert.alert(
+            'Upload Error',
+            err.message || 'Failed to upload image. Please try again.'
+          );
           setUploadingImage(false);
           setUploadingPost(false);
           return;
@@ -118,13 +128,17 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
         setUploadingImage(false);
       }
 
-      // Upload audio if selected
-      if (audioUri) {
+      // Step 3: Upload audio if selected (with post_id to create attachment record)
+      if (audioUri && audioUri.trim() !== '') {
         setUploadingAudio(true);
         try {
-          audioUrl = await feedService.uploadAudio(audioUri);
-        } catch (err) {
-          Alert.alert('Upload Error', 'Failed to upload audio. Please try again.');
+          await feedService.uploadAudio(audioUri, newPost.id);
+        } catch (err: any) {
+          console.error('Audio upload error:', err);
+          Alert.alert(
+            'Upload Error',
+            err.message || 'Failed to upload audio. Please try again.'
+          );
           setUploadingAudio(false);
           setUploadingPost(false);
           return;
@@ -132,22 +146,12 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
         setUploadingAudio(false);
       }
 
-      // Create post via API
-      const newPost = await feedService.createPost({
-        content: content.trim(),
-        post_type: postType,
-        visibility,
-        image_url: imageUrl,
-        audio_url: audioUrl,
-      });
-
       // Call onSubmit callback
       onSubmit({
         content: content.trim(),
         post_type: postType,
         visibility,
-        image_url: imageUrl,
-        audio_url: audioUrl,
+        // Attachments are now handled separately via upload endpoints
       });
 
       // Reset form
@@ -181,9 +185,9 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
 
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
-        // Validate file size (3MB limit)
-        if (asset.fileSize && asset.fileSize > 3 * 1024 * 1024) {
-          Alert.alert('File Too Large', 'Images must be under 3MB');
+        // Validate file size (2MB limit per API spec)
+        if (asset.fileSize && asset.fileSize > 2 * 1024 * 1024) {
+          Alert.alert('File Too Large', 'Images must be under 2MB');
           return;
         }
         setImageUri(asset.uri);

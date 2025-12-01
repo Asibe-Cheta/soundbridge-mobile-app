@@ -222,12 +222,16 @@ function DiscoverScreen() {
   const cancellableQuery = useRef(new CancellableQuery()).current;
   const [isLoadingAny, setIsLoadingAny] = useState(true);
   
-  // Individual loading states for UI (derived from LoadingStateManager)
-  const [loadingTracks, setLoadingTracks] = useState(true);
-  const [loadingArtists, setLoadingArtists] = useState(true);
-  const [loadingEvents, setLoadingEvents] = useState(true);
+  // Individual loading states for UI - start as false for instant cache display
+  const [loadingTracks, setLoadingTracks] = useState(false);
+  const [loadingArtists, setLoadingArtists] = useState(false);
+  const [loadingEvents, setLoadingEvents] = useState(false);
   const [loadingPlaylists, setLoadingPlaylists] = useState(false);
   const [loadingServices, setLoadingServices] = useState(false);
+  const [loadingVenues, setLoadingVenues] = useState(false);
+  
+  // Track if initial cache load has happened
+  const initialCacheLoadRef = useRef(false);
 
   const tabs: TabType[] = ['Music', 'Artists', 'Events', 'Playlists', 'Services', 'Venues'];
 
@@ -245,12 +249,52 @@ function DiscoverScreen() {
     return unsubscribe;
   }, []);
 
-  // Main data loading effect
+  // Initial cache load - show cached data immediately
   useEffect(() => {
     if (authLoading) {
       return;
     }
 
+    // Load cached data immediately for instant display
+    const loadCachedData = async () => {
+      if (!initialCacheLoadRef.current) {
+        const cacheKey = user?.id ? `trending_${user.id}` : 'trending_anonymous';
+        const cachedTracks = await contentCacheService.getCached('TRACKS', cacheKey);
+        if (cachedTracks && Array.isArray(cachedTracks) && cachedTracks.length > 0) {
+          console.log('⚡ Instant load: Showing cached tracks');
+          setTrendingTracks(cachedTracks);
+        }
+
+        const cachedArtists = await contentCacheService.getCached('ARTISTS', 'featured_artists');
+        if (cachedArtists && Array.isArray(cachedArtists) && cachedArtists.length > 0) {
+          console.log('⚡ Instant load: Showing cached artists');
+          setFeaturedArtists(cachedArtists);
+        }
+
+        const eventsCacheKey = user?.id ? `events_${user.id}` : 'events_anonymous';
+        const cachedEvents = await contentCacheService.getCached('EVENTS', eventsCacheKey);
+        if (cachedEvents && Array.isArray(cachedEvents) && cachedEvents.length > 0) {
+          console.log('⚡ Instant load: Showing cached events');
+          setEvents(cachedEvents);
+        }
+
+        const cachedPlaylists = await contentCacheService.getCached('PLAYLISTS', 'public_playlists');
+        if (cachedPlaylists && Array.isArray(cachedPlaylists) && cachedPlaylists.length > 0) {
+          console.log('⚡ Instant load: Showing cached playlists');
+          setPlaylists(cachedPlaylists);
+        }
+
+        const cachedServices = await contentCacheService.getCached('SERVICES', 'service_providers');
+        if (cachedServices && Array.isArray(cachedServices) && cachedServices.length > 0) {
+          console.log('⚡ Instant load: Showing cached services');
+          setServiceProviders(cachedServices);
+        }
+      }
+    };
+
+    loadCachedData();
+
+    // Then load fresh data
     loadDiscoverContent();
 
     return () => {
@@ -452,8 +496,28 @@ function DiscoverScreen() {
     }
   };
 
-  const loadTrendingTracks = async () => {
-    setLoadingTracks(true);
+  const loadTrendingTracks = async (forceRefresh = false) => {
+    const cacheKey = user?.id ? `trending_${user.id}` : 'trending_anonymous';
+    
+    // Try cache first (unless force refresh)
+    if (!forceRefresh && !initialCacheLoadRef.current) {
+      const cached = await contentCacheService.getCached('TRACKS', cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        console.log('⚡ Instant load: Showing cached trending tracks');
+        setTrendingTracks(cached);
+        initialCacheLoadRef.current = true;
+        
+        // Fetch fresh data in background
+        setTimeout(() => loadTrendingTracks(true), 100);
+        return;
+      }
+    }
+    
+    // Only show loading if we don't have cached data
+    if (trendingTracks.length === 0 || forceRefresh) {
+      setLoadingTracks(true);
+    }
+    
     try {
       console.log('🔥 DiscoverScreen: Loading tracks...');
       
@@ -464,22 +528,45 @@ function DiscoverScreen() {
       
       if (error || !data || data.length === 0) {
         console.log('⚠️ Using fallback mock data. Error:', error?.message);
-        setTrendingTracks(DISCOVER_MOCK_TRACKS);
-        console.log('✅ DiscoverScreen: Trending tracks loaded (mock data):', DISCOVER_MOCK_TRACKS.length);
+        const fallback = DISCOVER_MOCK_TRACKS;
+        setTrendingTracks(fallback);
+        await contentCacheService.saveCache('TRACKS', cacheKey, fallback);
+        console.log('✅ DiscoverScreen: Trending tracks loaded (mock data):', fallback.length);
       } else {
         console.log('✅ DiscoverScreen: Loaded tracks:', data.length, user?.id ? '(personalized)' : '(general)');
         console.log('🔍 DiscoverScreen trending track creator data:', data[0]?.creator);
         setTrendingTracks(data);
+        await contentCacheService.saveCache('TRACKS', cacheKey, data);
       }
     } catch (error) {
       console.error('❌ DiscoverScreen: Error loading trending tracks:', error);
-      setTrendingTracks(DISCOVER_MOCK_TRACKS);
+      const fallback = DISCOVER_MOCK_TRACKS;
+      setTrendingTracks(fallback);
+      // Only update cache if we don't have data
+      if (trendingTracks.length === 0) {
+        await contentCacheService.saveCache('TRACKS', cacheKey, fallback);
+      }
     } finally {
       setLoadingTracks(false);
+      initialCacheLoadRef.current = true;
     }
   };
 
-  const loadRecentTracks = async () => {
+  const loadRecentTracks = async (forceRefresh = false) => {
+    const cacheKey = 'recent_tracks';
+    
+    // Try cache first (unless force refresh)
+    if (!forceRefresh && !initialCacheLoadRef.current) {
+      const cached = await contentCacheService.getCached('TRACKS', cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        console.log('⚡ Instant load: Showing cached recent tracks');
+        setRecentTracks(cached);
+        // Fetch fresh data in background
+        setTimeout(() => loadRecentTracks(true), 100);
+        return;
+      }
+    }
+    
     try {
       console.log('🔧 DiscoverScreen: Loading recent tracks...');
       // Try to load real tracks from Supabase - get all columns to find artwork
@@ -551,6 +638,7 @@ function DiscoverScreen() {
         });
         
         setRecentTracks(transformedTracks);
+        await contentCacheService.saveCache('TRACKS', cacheKey, transformedTracks);
         console.log('✅ DiscoverScreen: Recent tracks loaded from Supabase:', transformedTracks.length);
         console.log('🔍 DiscoverScreen sample track creator data:', transformedTracks[0]?.creator);
       } else {
@@ -575,16 +663,40 @@ function DiscoverScreen() {
           },
         ];
         setRecentTracks(mockTracks);
+        if (recentTracks.length === 0) {
+          await contentCacheService.saveCache('TRACKS', cacheKey, mockTracks);
+        }
       }
     } catch (error) {
       console.error('❌ DiscoverScreen: Error loading recent tracks:', error);
-      setRecentTracks(DISCOVER_MOCK_TRACKS);
-    } finally {
-      setLoadingTracks(false);
+      const fallback = DISCOVER_MOCK_TRACKS;
+      setRecentTracks(fallback);
+      if (recentTracks.length === 0) {
+        await contentCacheService.saveCache('TRACKS', cacheKey, fallback);
+      }
     }
   };
 
-  const loadFeaturedArtists = async () => {
+  const loadFeaturedArtists = async (forceRefresh = false) => {
+    const cacheKey = 'featured_artists';
+    
+    // Try cache first (unless force refresh)
+    if (!forceRefresh && !initialCacheLoadRef.current) {
+      const cached = await contentCacheService.getCached('ARTISTS', cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        console.log('⚡ Instant load: Showing cached featured artists');
+        setFeaturedArtists(cached);
+        // Fetch fresh data in background
+        setTimeout(() => loadFeaturedArtists(true), 100);
+        return;
+      }
+    }
+    
+    // Only show loading if we don't have cached data
+    if (featuredArtists.length === 0 || forceRefresh) {
+      setLoadingArtists(true);
+    }
+    
     try {
       console.log('🔧 DiscoverScreen: Loading featured artists with real stats...');
       
@@ -610,16 +722,25 @@ function DiscoverScreen() {
         }));
         
         setFeaturedArtists(transformedArtists);
+        await contentCacheService.saveCache('ARTISTS', cacheKey, transformedArtists);
         console.log('✅ DiscoverScreen: Successfully set featured artists with real stats:', transformedArtists.length);
       } else if (error) {
         console.log('❌ DiscoverScreen: Database error, using mock data:', error.message);
         // Use mock data on error
-        setFeaturedArtists(DISCOVER_MOCK_ARTISTS);
+        const fallback = DISCOVER_MOCK_ARTISTS;
+        setFeaturedArtists(fallback);
+        if (featuredArtists.length === 0) {
+          await contentCacheService.saveCache('ARTISTS', cacheKey, fallback);
+        }
         console.log('✅ DiscoverScreen: Using mock artists data');
       } else {
         console.log('ℹ️ DiscoverScreen: No creators found, using mock data');
         // Use mock data if no creators found
-        setFeaturedArtists(DISCOVER_MOCK_ARTISTS);
+        const fallback = DISCOVER_MOCK_ARTISTS;
+        setFeaturedArtists(fallback);
+        if (featuredArtists.length === 0) {
+          await contentCacheService.saveCache('ARTISTS', cacheKey, fallback);
+        }
         console.log('✅ DiscoverScreen: Using fallback mock data');
       }
     } catch (error) {
@@ -644,8 +765,26 @@ function DiscoverScreen() {
     }
   };
 
-  const loadEvents = async () => {
-    setLoadingEvents(true);
+  const loadEvents = async (forceRefresh = false) => {
+    const cacheKey = user?.id ? `events_${user.id}` : 'events_anonymous';
+    
+    // Try cache first (unless force refresh)
+    if (!forceRefresh && !initialCacheLoadRef.current) {
+      const cached = await contentCacheService.getCached('EVENTS', cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        console.log('⚡ Instant load: Showing cached events');
+        setEvents(cached);
+        // Fetch fresh data in background
+        setTimeout(() => loadEvents(true), 100);
+        return;
+      }
+    }
+    
+    // Only show loading if we don't have cached data
+    if (events.length === 0 || forceRefresh) {
+      setLoadingEvents(true);
+    }
+    
     try {
       console.log('🎪 DiscoverScreen: Loading events...');
       
@@ -677,16 +816,25 @@ function DiscoverScreen() {
         }));
         
         setEvents(transformedEvents);
+        await contentCacheService.saveCache('EVENTS', cacheKey, transformedEvents);
         console.log('✅ DiscoverScreen: Successfully set events:', transformedEvents.length);
       } else if (error) {
         console.log('❌ DiscoverScreen: Database error, using mock events:', error.message);
         // Use mock data on error
-        setEvents(DISCOVER_MOCK_EVENTS);
+        const fallback = DISCOVER_MOCK_EVENTS;
+        setEvents(fallback);
+        if (events.length === 0) {
+          await contentCacheService.saveCache('EVENTS', cacheKey, fallback);
+        }
         console.log('✅ DiscoverScreen: Using mock events data');
       } else {
         console.log('ℹ️ DiscoverScreen: No events found, using mock data');
         // Use mock data if no events found
-        setEvents(DISCOVER_MOCK_EVENTS);
+        const fallback = DISCOVER_MOCK_EVENTS;
+        setEvents(fallback);
+        if (events.length === 0) {
+          await contentCacheService.saveCache('EVENTS', cacheKey, fallback);
+        }
         console.log('✅ DiscoverScreen: Using fallback mock events');
       }
     } catch (error) {
@@ -709,6 +857,9 @@ function DiscoverScreen() {
         },
       ];
       setEvents(fallbackEvents);
+      if (events.length === 0) {
+        await contentCacheService.saveCache('EVENTS', cacheKey, fallbackEvents);
+      }
       console.log('✅ DiscoverScreen: Using fallback events due to error');
     } finally {
       setLoadingEvents(false);
@@ -716,9 +867,27 @@ function DiscoverScreen() {
     }
   };
 
-  const loadPlaylists = async () => {
-    try {
+  const loadPlaylists = async (forceRefresh = false) => {
+    const cacheKey = 'public_playlists';
+    
+    // Try cache first (unless force refresh)
+    if (!forceRefresh && !initialCacheLoadRef.current) {
+      const cached = await contentCacheService.getCached('PLAYLISTS', cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        console.log('⚡ Instant load: Showing cached playlists');
+        setPlaylists(cached);
+        // Fetch fresh data in background
+        setTimeout(() => loadPlaylists(true), 100);
+        return;
+      }
+    }
+    
+    // Only show loading if we don't have cached data
+    if (playlists.length === 0 || forceRefresh) {
       setLoadingPlaylists(true);
+    }
+    
+    try {
       console.log('🔧 DiscoverScreen: Loading playlists...');
       
       const { data, error } = await dbHelpers.getPublicPlaylists(20);
@@ -734,17 +903,40 @@ function DiscoverScreen() {
       })) || [];
       
       setPlaylists(transformedPlaylists);
+      await contentCacheService.saveCache('PLAYLISTS', cacheKey, transformedPlaylists);
     } catch (error) {
       console.error('❌ DiscoverScreen: Error loading playlists:', error);
-      setPlaylists(DISCOVER_MOCK_PLAYLISTS);
+      const fallback = DISCOVER_MOCK_PLAYLISTS;
+      setPlaylists(fallback);
+      if (playlists.length === 0) {
+        await contentCacheService.saveCache('PLAYLISTS', cacheKey, fallback);
+      }
     } finally {
       setLoadingPlaylists(false);
       console.log('🏁 DiscoverScreen: Playlists loading completed');
     }
   };
 
-  const loadServiceProviders = async () => {
-    setLoadingServices(true);
+  const loadServiceProviders = async (forceRefresh = false) => {
+    const cacheKey = 'service_providers';
+    
+    // Try cache first (unless force refresh)
+    if (!forceRefresh && !initialCacheLoadRef.current) {
+      const cached = await contentCacheService.getCached('SERVICES', cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        console.log('⚡ Instant load: Showing cached service providers');
+        setServiceProviders(cached);
+        // Fetch fresh data in background
+        setTimeout(() => loadServiceProviders(true), 100);
+        return;
+      }
+    }
+    
+    // Only show loading if we don't have cached data
+    if (serviceProviders.length === 0 || forceRefresh) {
+      setLoadingServices(true);
+    }
+    
     try {
       console.log('💼 DiscoverScreen: Loading service providers...');
       
@@ -753,6 +945,7 @@ function DiscoverScreen() {
       if (providers && providers.length > 0) {
         console.log('✅ DiscoverScreen: Service providers loaded:', providers.length);
         setServiceProviders(providers);
+        await contentCacheService.saveCache('SERVICES', cacheKey, providers);
       } else {
         console.log('ℹ️ DiscoverScreen: No service providers found');
         setServiceProviders([]);
@@ -768,14 +961,14 @@ function DiscoverScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    // Load all main content on refresh, regardless of active tab
+    // Load all main content on refresh, regardless of active tab (force refresh)
     await Promise.all([
-      loadFeaturedArtists(),
-      loadEvents(),
-      loadTrendingTracks(),
-      loadRecentTracks(),
-      loadPlaylists(),
-      loadServiceProviders()
+      loadFeaturedArtists(true),
+      loadEvents(true),
+      loadTrendingTracks(true),
+      loadRecentTracks(true),
+      loadPlaylists(true),
+      loadServiceProviders(true)
     ]);
     setRefreshing(false);
   };

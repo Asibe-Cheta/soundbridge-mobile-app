@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { dbHelpers, supabase } from '../lib/supabase';
+import { useNavigation } from '@react-navigation/native';
 
 interface Message {
   id: string;

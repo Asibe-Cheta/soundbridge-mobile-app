@@ -155,7 +155,7 @@ class AdService {
 
   // ===== AD DISPLAY LOGIC =====
   
-  async onTrackPlay(userTier: 'free' | 'pro' | 'enterprise'): Promise<boolean> {
+  async onTrackPlay(userTier: 'free' | 'pro'): Promise<boolean> {
     // Only show ads to free users
     if (userTier !== 'free') {
       return false;
@@ -244,7 +244,7 @@ class AdService {
     this.saveTrackCount();
   }
 
-  isAdEnabled(userTier: 'free' | 'pro' | 'enterprise'): boolean {
+  isAdEnabled(userTier: 'free' | 'pro'): boolean {
     return this.config.enabled && userTier === 'free';
   }
 
@@ -312,3 +312,5 @@ class AdService {
 
 // Export singleton instance
 export const adService = new AdService();
+
+

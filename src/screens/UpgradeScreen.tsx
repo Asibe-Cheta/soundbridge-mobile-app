@@ -22,7 +22,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import InAppPurchaseService, { SoundBridgeProduct } from '../services/InAppPurchaseService';
 
 interface Plan {
-  id: 'free' | 'pro' | 'enterprise';
+  id: 'free' | 'pro';
   name: string;
   description: string;
   icon: string;
@@ -45,7 +45,7 @@ export default function UpgradeScreen() {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [currentPlan, setCurrentPlan] = useState<'free' | 'pro' | 'enterprise'>('free');
+  const [currentPlan, setCurrentPlan] = useState<'free' | 'pro'>('free');
   const [appStoreProducts, setAppStoreProducts] = useState<any[]>([]);
   const [soundBridgeProducts, setSoundBridgeProducts] = useState<SoundBridgeProduct[]>([]);
   const [isDevelopmentMode, setIsDevelopmentMode] = useState(false); // Hide dev banner in all builds
@@ -60,11 +60,12 @@ export default function UpgradeScreen() {
       price: { monthly: 0, yearly: 0 },
       color: '#3B82F6',
       features: [
-        '3 uploads total',
-        '10MB file size limit',
-        'Basic audio quality',
+        '3 lifetime uploads',
+        '5 professional searches/month',
+        '3 direct messages/month',
+        '150MB storage',
+        'Basic profile & portfolio',
         'Community support',
-        'Standard streaming',
       ],
       popular: false,
       productIds: { monthly: '', yearly: '' },
@@ -72,21 +73,23 @@ export default function UpgradeScreen() {
     {
       id: 'pro',
       name: 'Pro',
-      description: 'For serious creators',
+      description: 'Everything you need to grow your career',
       icon: 'diamond',
-      price: { monthly: 9.99, yearly: 99.99 },
+      price: { monthly: 9.99, yearly: 99 },
       color: '#10B981',
       features: [
-        'Unlimited uploads',
-        '100MB file size limit',
-        'High-quality audio',
+        '10 total uploads',
+        'Unlimited searches & messages',
+        '500MB storage',
+        'Advanced filters',
+        'Verified badge eligibility',
+        'Payment protection & escrow',
+        'Detailed analytics',
+        'Availability calendar',
         'Priority support',
-        'Advanced analytics',
-        'Custom branding',
-        'Monetization tools',
       ],
       popular: true,
-      savings: 'Save 17%',
+      savings: 'Save £20',
       productIds: Platform.select({
         ios: {
           monthly: 'com.soundbridge.pro.monthly',
@@ -95,36 +98,6 @@ export default function UpgradeScreen() {
         android: {
           monthly: 'soundbridge_pro_monthly',
           yearly: 'soundbridge_pro_yearly',
-        },
-      }) || { monthly: '', yearly: '' },
-    },
-    {
-      id: 'enterprise',
-      name: 'Enterprise',
-      description: 'For teams and businesses',
-      icon: 'trophy',
-      price: { monthly: 29.99, yearly: 299.99 },
-      color: '#8B5CF6',
-      features: [
-        'Everything in Pro',
-        '500MB file size limit',
-        'Team collaboration',
-        'White-label solution',
-        'API access',
-        'Dedicated support',
-        'Custom integrations',
-        'Advanced security',
-      ],
-      popular: false,
-      savings: 'Save 17%',
-      productIds: Platform.select({
-        ios: {
-          monthly: 'com.soundbridge.enterprise.monthly',
-          yearly: 'com.soundbridge.enterprise.yearly',
-        },
-        android: {
-          monthly: 'soundbridge_enterprise_monthly',
-          yearly: 'soundbridge_enterprise_yearly',
         },
       }) || { monthly: '', yearly: '' },
     },
@@ -137,7 +110,7 @@ export default function UpgradeScreen() {
   useEffect(() => {
     // Update current plan from user data
     if ((user as any)?.subscription_tier) {
-      setCurrentPlan((user as any).subscription_tier as 'free' | 'pro' | 'enterprise');
+      setCurrentPlan((user as any).subscription_tier as 'free' | 'pro');
     }
   }, [user]);
 

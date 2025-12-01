@@ -3,8 +3,8 @@ import { Session } from '@supabase/supabase-js';
 const API_BASE_URL = __DEV__ ? 'http://192.168.1.122:3000' : 'https://soundbridge.live';
 
 export interface SubscriptionStatus {
-  tier: 'free' | 'pro' | 'enterprise';
-  status: 'active' | 'cancelled' | 'past_due' | 'trialing' | 'incomplete';
+  tier: 'free' | 'pro';
+  status: 'active' | 'cancelled' | 'past_due' | 'expired' | 'incomplete';
   current_period_start: string;
   current_period_end: string;
   cancel_at_period_end: boolean;
@@ -12,7 +12,10 @@ export interface SubscriptionStatus {
   currency: string;
   billing_cycle: 'monthly' | 'yearly';
   stripe_subscription_id?: string;
-  trial_end?: string;
+  subscription_start_date?: string; // For 7-day guarantee calculation
+  subscription_renewal_date?: string;
+  money_back_guarantee_eligible?: boolean;
+  refund_count?: number;
 }
 
 export interface UsageStatistics {
@@ -338,8 +341,6 @@ class SubscriptionService {
     switch (plan.toLowerCase()) {
       case 'pro':
         return billingCycle === 'yearly' ? '$99.99/year' : '$9.99/month';
-      case 'enterprise':
-        return billingCycle === 'yearly' ? '$499.99/year' : '$49.99/month';
       default:
         return '$0.00';
     }

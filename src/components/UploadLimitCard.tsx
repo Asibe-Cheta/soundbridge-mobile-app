@@ -18,8 +18,6 @@ const formatTierLabel = (tierValue: string | undefined) => {
       return 'Free';
     case 'pro':
       return 'Pro';
-    case 'enterprise':
-      return 'Enterprise';
     default:
       return tier.charAt(0).toUpperCase() + tier.slice(1);
   }
@@ -78,11 +76,12 @@ export default function UploadLimitCard({ quota, loading, onUpgrade }: UploadLim
         <Text style={[styles.description, { color: theme.colors.textSecondary }]}>Unlimited uploads available.</Text>
       ) : (
         <Text style={[styles.description, { color: theme.colors.textSecondary }]}>
-          {quota.upload_limit ?? 'N/A'} uploads / month · {remaining ?? 0} remaining
+          {quota.upload_limit ?? 'N/A'} {quota.tier?.toLowerCase() === 'free' ? 'lifetime' : 'total'} uploads · {remaining ?? 0} remaining
         </Text>
       )}
 
-      {resetDate && !quota.is_unlimited && (
+      {/* Only show reset date for searches/messages, not uploads (which are lifetime/total) */}
+      {resetDate && !quota.is_unlimited && quota.tier?.toLowerCase() !== 'free' && (
         <Text style={[styles.resetText, { color: theme.colors.textSecondary }]}>Resets {resetDate.toLocaleDateString()}</Text>
       )}
 

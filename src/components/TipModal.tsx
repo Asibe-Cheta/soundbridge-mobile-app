@@ -45,11 +45,11 @@ export default function TipModal({ visible, creatorId, creatorName, onClose, onT
     return Boolean(process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY);
   }, []);
 
-  const userTier = useMemo<'free' | 'pro' | 'enterprise'>(() => {
+  const userTier = useMemo<'free' | 'pro'>(() => {
     const tierFromMetadata = (user?.user_metadata as any)?.subscription_tier;
     const tierFromProfile = (userProfile as any)?.subscription_tier;
     const tier = tierFromMetadata || tierFromProfile;
-    if (tier === 'pro' || tier === 'enterprise') {
+    if (tier === 'pro') {
       return tier;
     }
     return 'free';
@@ -198,7 +198,7 @@ Platform fee: $${platformFee.toFixed(2)}`,
 
   const getPlatformFee = (amountOverride?: number) => {
     const amount = typeof amountOverride === 'number' ? amountOverride : getFinalAmount();
-    const feeRate = userTier === 'enterprise' ? 0.05 : userTier === 'pro' ? 0.08 : 0.10;
+    const feeRate = userTier === 'pro' ? 0.08 : 0.10;
     return amount * feeRate;
   };
 

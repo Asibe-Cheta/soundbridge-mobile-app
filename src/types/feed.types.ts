@@ -46,8 +46,8 @@ export interface CreatePostDto {
   content: string;
   post_type: PostType;
   visibility: PostVisibility;
-  image_url?: string;
-  audio_url?: string;
+  // Note: image_url and audio_url are NOT accepted in post creation
+  // Attachments are uploaded separately using /api/posts/upload-image or /api/posts/upload-audio
   event_id?: string;
 }
 

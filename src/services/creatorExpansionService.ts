@@ -12,6 +12,7 @@
 
 import { Session } from '@supabase/supabase-js';
 import { apiFetch, getApiBaseUrl } from '../lib/apiClient';
+import { supabase } from '../lib/supabase';
 import type {
   CreatorType,
   ServiceProviderCard,
@@ -330,28 +331,114 @@ export interface DiscoverServiceResponse {
 
 /**
  * Fetch service providers for discovery feed
+ * Falls back to Supabase query if API endpoint is not available
  */
 export async function fetchDiscoverServiceProviders(
   options?: AuthOptions
 ): Promise<ServiceProviderCard[]> {
-  const raw = await apiFetch<DiscoverServiceResponse | ServiceProviderCard[]>(
-    '/api/discover?tab=services',
-    buildOptions(options)
-  );
+  try {
+    // Try API endpoint first
+    const raw = await apiFetch<DiscoverServiceResponse | ServiceProviderCard[]>(
+      '/api/discover?tab=services',
+      buildOptions(options)
+    );
 
-  if (Array.isArray(raw)) {
-    return raw;
+    if (Array.isArray(raw)) {
+      return raw;
+    }
+
+    if (raw && Array.isArray(raw.services)) {
+      return raw.services;
+    }
+
+    if (raw && Array.isArray(raw.items)) {
+      return raw.items;
+    }
+  } catch (error: any) {
+    // If API endpoint returns 404 or fails, fall back to Supabase query
+    if (error?.message?.includes('not found') || error?.message?.includes('404')) {
+      console.log('ℹ️ API endpoint not available, querying Supabase directly');
+    } else {
+      console.warn('⚠️ Error fetching from API, falling back to Supabase:', error);
+    }
   }
 
-  if (raw && Array.isArray(raw.services)) {
-    return raw.services;
-  }
+  // Fallback: Query Supabase directly
+  try {
+    // First, get service provider profiles
+    const { data: providers, error: providersError } = await supabase
+      .from('service_provider_profiles')
+      .select(`
+        user_id,
+        display_name,
+        headline,
+        badge_tier,
+        average_rating,
+        review_count,
+        categories,
+        default_rate,
+        rate_currency,
+        show_payment_protection,
+        first_booking_discount_enabled,
+        first_booking_discount_percent,
+        is_verified
+      `)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(20);
 
-  if (raw && Array.isArray(raw.items)) {
-    return raw.items;
-  }
+    if (providersError) {
+      console.error('Error querying service providers from Supabase:', providersError);
+      return [];
+    }
 
-  return [];
+    if (!providers || providers.length === 0) {
+      return [];
+    }
+
+    // Get profile data for each provider
+    const userIds = providers.map(p => p.user_id);
+    const { data: profiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id, avatar_url, username')
+      .in('id', userIds);
+
+    if (profilesError) {
+      console.warn('Warning: Could not fetch profile data:', profilesError);
+    }
+
+    // Create a map of user_id to profile data
+    const profileMap = new Map(
+      (profiles || []).map(p => [p.id, p])
+    );
+
+    // Map to ServiceProviderCard format
+    const serviceProviders: ServiceProviderCard[] = providers.map((provider: any) => {
+      const profile = profileMap.get(provider.user_id);
+      return {
+        provider_id: provider.user_id,
+        display_name: provider.display_name || '',
+        headline: provider.headline,
+        badge_tier: provider.badge_tier,
+        average_rating: provider.average_rating,
+        review_count: provider.review_count,
+        categories: provider.categories,
+        default_rate: provider.default_rate,
+        rate_currency: provider.rate_currency,
+        show_payment_protection: provider.show_payment_protection,
+        first_booking_discount_enabled: provider.first_booking_discount_enabled,
+        first_booking_discount_percent: provider.first_booking_discount_percent,
+        image_url: profile?.avatar_url || null,
+        cover_image_url: null, // Not available in service_provider_profiles table
+        is_verified: provider.is_verified || false,
+      };
+    });
+
+    return serviceProviders;
+  } catch (error) {
+    console.error('Error in Supabase fallback query:', error);
+    return [];
+  }
 }
 
 /**
@@ -361,34 +448,39 @@ export async function searchServiceProviders(
   query: string,
   options?: AuthOptions
 ): Promise<ServiceProviderCard[]> {
-  const response = await apiFetch<{ results: Array<{ type: string; [key: string]: any }> }>(
-    `/api/search?query=${encodeURIComponent(query)}`,
-    buildOptions(options)
-  );
+  try {
+    const response = await apiFetch<{ results: Array<{ type: string; [key: string]: any }> }>(
+      `/api/search?q=${encodeURIComponent(query)}&type=professionals`,
+      buildOptions(options)
+    );
 
-  // Filter for service type results
-  const serviceResults = response.results
-    ?.filter((item) => item.type === 'service')
-    .map((item) => ({
-      provider_id: item.id || item.user_id,
-      display_name: item.display_name || '',
-      headline: item.headline,
-      badge_tier: item.badge_tier,
-      average_rating: item.average_rating,
-      review_count: item.review_count,
-      categories: item.categories,
-      price_band: item.price_band,
-      default_rate: item.default_rate,
-      rate_currency: item.rate_currency,
-      show_payment_protection: item.show_payment_protection,
-      first_booking_discount_enabled: item.first_booking_discount_enabled,
-      first_booking_discount_percent: item.first_booking_discount_percent,
-      image_url: item.image_url,
-      cover_image_url: item.cover_image_url,
-      is_verified: item.is_verified,
-    })) || [];
+    // Filter for service type results
+    const serviceResults = response.results
+      ?.filter((item) => item.type === 'service')
+      .map((item) => ({
+        provider_id: item.id || item.user_id,
+        display_name: item.display_name || '',
+        headline: item.headline,
+        badge_tier: item.badge_tier,
+        average_rating: item.average_rating,
+        review_count: item.review_count,
+        categories: item.categories,
+        price_band: item.price_band,
+        default_rate: item.default_rate,
+        rate_currency: item.rate_currency,
+        show_payment_protection: item.show_payment_protection,
+        first_booking_discount_enabled: item.first_booking_discount_enabled,
+        first_booking_discount_percent: item.first_booking_discount_percent,
+        image_url: item.image_url,
+        cover_image_url: item.cover_image_url,
+        is_verified: item.is_verified,
+      })) || [];
 
-  return serviceResults;
+    return serviceResults;
+  } catch (error) {
+    console.error('❌ Error searching service providers:', error);
+    return [];
+  }
 }
 
 // ============================================================================

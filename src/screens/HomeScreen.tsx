@@ -36,6 +36,7 @@ import EventMatchIndicator from '../components/EventMatchIndicator';
 import { getRelativeTime } from '../utils/collaborationUtils';
 import TipModal from '../components/TipModal';
 import CollaborationRequestForm from '../components/CollaborationRequestForm';
+import { contentCacheService } from '../services/contentCacheService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -131,11 +132,14 @@ export default function HomeScreen() {
   const [isLoadingAny, setIsLoadingAny] = useState(true);
   
   // Individual loading states for UI (derived from LoadingStateManager)
-  const [loadingFeatured, setLoadingFeatured] = useState(true);
-  const [loadingTrending, setLoadingTrending] = useState(true);
-  const [loadingRecent, setLoadingRecent] = useState(true);
-  const [loadingCreators, setLoadingCreators] = useState(true);
-  const [loadingEvents, setLoadingEvents] = useState(true);
+  // Loading states - start as false for instant cache display
+  const [loadingFeatured, setLoadingFeatured] = useState(false);
+  const [loadingTrending, setLoadingTrending] = useState(false);
+  const [loadingRecent, setLoadingRecent] = useState(false);
+  const [loadingCreators, setLoadingCreators] = useState(false);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+  
+  const initialCacheLoadRef = useRef(false);
 
   const userGenres = useMemo(() => {
     const genres = preferences?.preferred_genres ?? [];
@@ -257,13 +261,47 @@ export default function HomeScreen() {
     return unsubscribe;
   }, []);
 
-  // Main data loading effect
+  // Initial cache load - show cached data immediately
   useEffect(() => {
     if (authLoading) {
       console.log('🏠 HomeScreen: Waiting for auth...');
       return;
     }
 
+    // Load cached data immediately for instant display
+    const loadCachedData = async () => {
+      if (!initialCacheLoadRef.current) {
+        const cacheKey = user?.id ? `trending_${user.id}` : 'trending_anonymous';
+        const cachedTracks = await contentCacheService.getCached('TRACKS', cacheKey);
+        if (cachedTracks && Array.isArray(cachedTracks) && cachedTracks.length > 0) {
+          console.log('⚡ Instant load: Showing cached trending tracks on Home');
+          setTrendingTracks(cachedTracks);
+        }
+
+        const cachedRecent = await contentCacheService.getCached('TRACKS', 'recent_tracks');
+        if (cachedRecent && Array.isArray(cachedRecent) && cachedRecent.length > 0) {
+          console.log('⚡ Instant load: Showing cached recent tracks on Home');
+          setRecentTracks(cachedRecent);
+        }
+
+        const cachedArtists = await contentCacheService.getCached('ARTISTS', 'featured_artists');
+        if (cachedArtists && Array.isArray(cachedArtists) && cachedArtists.length > 0) {
+          console.log('⚡ Instant load: Showing cached artists on Home');
+          setHotCreators(cachedArtists);
+        }
+
+        const eventsCacheKey = user?.id ? `events_${user.id}` : 'events_anonymous';
+        const cachedEvents = await contentCacheService.getCached('EVENTS', eventsCacheKey);
+        if (cachedEvents && Array.isArray(cachedEvents) && cachedEvents.length > 0) {
+          console.log('⚡ Instant load: Showing cached events on Home');
+          setEvents(cachedEvents);
+        }
+      }
+    };
+
+    loadCachedData();
+
+    // Then load fresh data
     loadHomeContent();
 
     // Cleanup: cancel pending queries on unmount
@@ -388,6 +426,9 @@ export default function HomeScreen() {
       const trendingData = results.trending?.data || results.trending || [];
       if (trendingData.length > 0) {
         setTrendingTracks(trendingData);
+        // Cache trending tracks
+        const cacheKey = user?.id ? `trending_${user.id}` : 'trending_anonymous';
+        await contentCacheService.saveCache('TRACKS', cacheKey, trendingData);
       } else {
         // Fallback mock data
         const mockTrending: AudioTrack[] = [
@@ -404,19 +445,35 @@ export default function HomeScreen() {
           },
         ];
         setTrendingTracks(mockTrending);
+        if (trendingTracks.length === 0) {
+          const cacheKey = user?.id ? `trending_${user.id}` : 'trending_anonymous';
+          await contentCacheService.saveCache('TRACKS', cacheKey, mockTrending);
+        }
       }
 
       // Handle recent tracks
       const recentData = results.recent?.data || results.recent || [];
       if (recentData.length > 0) {
         setRecentTracks(recentData);
+        await contentCacheService.saveCache('TRACKS', 'recent_tracks', recentData);
       } else {
         setRecentTracks([]);
       }
 
-      setHotCreators(results.creators?.data || results.creators || []);
-      setEvents(results.events?.data || results.events || []);
+      const creatorsData = results.creators?.data || results.creators || [];
+      setHotCreators(creatorsData);
+      if (creatorsData.length > 0) {
+        await contentCacheService.saveCache('ARTISTS', 'featured_artists', creatorsData);
+      }
 
+      const eventsData = results.events?.data || results.events || [];
+      setEvents(eventsData);
+      if (eventsData.length > 0) {
+        const eventsCacheKey = user?.id ? `events_${user.id}` : 'events_anonymous';
+        await contentCacheService.saveCache('EVENTS', eventsCacheKey, eventsData);
+      }
+
+      initialCacheLoadRef.current = true;
       console.log('✅ HomeScreen: Content loaded successfully');
     } catch (error) {
       console.error('❌ HomeScreen: Error loading home content:', error);
