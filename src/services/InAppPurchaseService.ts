@@ -185,6 +185,17 @@ class InAppPurchaseService {
       if (verificationResult.success) {
         console.log('✅ Purchase verified and subscription activated!');
         
+        // Poll subscription status to confirm activation
+        console.log('🔄 Polling subscription status to confirm activation...');
+        const activationConfirmed = await this.pollSubscriptionStatus(userToken);
+        
+        if (activationConfirmed) {
+          console.log('✅ Subscription activation confirmed!');
+        } else {
+          console.warn('⚠️ Subscription activation not confirmed after polling timeout');
+          // Still return success, but log warning
+        }
+        
         // Finish the transaction
         await ExpoIAP.finishTransactionAsync(purchase, false);
         console.log('✅ Transaction finished');
@@ -255,6 +266,52 @@ class InAppPurchaseService {
         error: error instanceof Error ? error.message : 'Verification failed',
       };
     }
+  }
+
+  /**
+   * Poll subscription status after IAP purchase to confirm activation
+   * Polls every 2 seconds, max 15 attempts (30 seconds total)
+   */
+  private async pollSubscriptionStatus(userToken: string, maxAttempts = 15): Promise<boolean> {
+    console.log('🔄 Starting subscription status polling...');
+    
+    for (let i = 0; i < maxAttempts; i++) {
+      try {
+        // Wait 2 seconds before first check (give backend time to process)
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+        
+        const response = await fetch('https://soundbridge.live/api/subscription/status', {
+          headers: {
+            'Authorization': `Bearer ${userToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          
+          // Defensive: Use optional chaining - subscription might be null for free users
+          const tier = data?.data?.subscription?.tier;
+          const status = data?.data?.subscription?.status;
+          
+          if (tier === 'pro' && status === 'active') {
+            console.log(`✅ Subscription confirmed as Pro (attempt ${i + 1}/${maxAttempts})`);
+            return true; // Success!
+          }
+          
+          console.log(`⏳ Subscription not yet active (attempt ${i + 1}/${maxAttempts}), tier: ${tier}, status: ${status}`);
+        } else {
+          console.warn(`⚠️ Polling attempt ${i + 1} failed with status: ${response.status}`);
+        }
+      } catch (error) {
+        console.warn(`⚠️ Polling attempt ${i + 1} error:`, error);
+      }
+    }
+    
+    console.warn('⚠️ Subscription activation polling timeout after 30 seconds');
+    return false; // Timeout
   }
 
   async restorePurchases(): Promise<any[]> {

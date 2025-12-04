@@ -54,17 +54,20 @@ import type {
   ServiceReview,
 } from '../types';
 
+import { SERVICE_CATEGORY_LABELS, getServiceCategoryLabel, formatServiceCategories } from '../utils/serviceCategoryLabels';
+
+// Valid categories as per web app team confirmation (WEB_TEAM_SERVICE_CATEGORIES_RESPONSE.md)
+// Complete list of 9 categories - API will reject any other category
 const SERVICE_CATEGORIES: ServiceCategory[] = [
   'sound_engineering',
+  'music_lessons',
   'mixing_mastering',
-  'music_production',
-  'audio_editing',
-  'vocal_tuning',
-  'sound_design',
-  'audio_restoration',
-  'podcast_production',
-  'live_sound',
-  'consulting',
+  'session_musician',
+  'photography',
+  'videography',
+  'lighting',
+  'event_management',
+  'other',
 ];
 
 // Get all supported currencies from CurrencyService
@@ -594,7 +597,7 @@ export default function ServiceProviderDashboardScreen() {
               {profile.categories.map((cat) => (
                 <View key={cat} style={[styles.categoryChip, { backgroundColor: theme.colors.primary + '20' }]}>
                   <Text style={[styles.categoryText, { color: theme.colors.primary }]}>
-                    {cat.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                    {getServiceCategoryLabel(cat)}
                   </Text>
                 </View>
               ))}
@@ -868,7 +871,7 @@ export default function ServiceProviderDashboardScreen() {
                 <Text style={[styles.label, { color: theme.colors.text }]}>Category</Text>
                 <View style={[styles.pickerContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
                   <Text style={[styles.pickerText, { color: theme.colors.text }]}>
-                    {offeringForm.category.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                    {getServiceCategoryLabel(offeringForm.category)}
                   </Text>
                 </View>
               </View>
@@ -969,7 +972,7 @@ export default function ServiceProviderDashboardScreen() {
               </View>
 
               <Text style={[styles.offeringCategory, { color: theme.colors.textSecondary }]}>
-                {offering.category.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                {getServiceCategoryLabel(offering.category)}
               </Text>
 
               <Text style={[styles.offeringRate, { color: theme.colors.text }]}>

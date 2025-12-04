@@ -39,7 +39,7 @@ export default function AudioEnhancementScreen() {
   const [currentProfile, setCurrentProfile] = useState<AudioEnhancementProfile | null>(null);
   const [isEnhancementActive, setIsEnhancementActive] = useState(false);
 
-  // EQ State (10-band for Pro, 31-band for Enterprise)
+  // EQ State (10-band for Pro)
   const [eqBands, setEqBands] = useState<number[]>(new Array(10).fill(0));
   const [eqFrequencies] = useState([60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000]);
 
@@ -236,7 +236,7 @@ export default function AudioEnhancementScreen() {
         onPress={() => (navigation as any).navigate('Upgrade')}
       >
         <Text style={styles.upgradeButtonText}>
-          Upgrade to {userTier === 'free' ? 'Pro' : 'Enterprise'}
+          Upgrade to Pro
         </Text>
       </TouchableOpacity>
     </View>
@@ -245,10 +245,10 @@ export default function AudioEnhancementScreen() {
   const renderEqualizer = () => (
     <View style={[styles.section, { backgroundColor: theme.colors.surface }]}>
       <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-        Equalizer ({userTier === 'enterprise' ? '31' : '10'}-Band)
+        Equalizer (10-Band)
       </Text>
       <View style={styles.eqContainer}>
-        {eqFrequencies.slice(0, userTier === 'enterprise' ? 31 : 10).map((freq, index) => (
+        {eqFrequencies.slice(0, 10).map((freq, index) => (
           <View style={styles.eqBand} key={freq}>
             <Text style={[styles.eqGain, { color: theme.colors.textSecondary }]}>
               {eqBands[index] > 0 ? '+' : ''}{eqBands[index].toFixed(1)}
@@ -351,7 +351,7 @@ export default function AudioEnhancementScreen() {
         <View style={styles.controlInfo}>
           <Text style={[styles.controlLabel, { color: theme.colors.text }]}>Spatial Audio</Text>
           <Text style={[styles.controlDescription, { color: theme.colors.textSecondary }]}>
-            {userTier === 'enterprise' ? 'Dolby Atmos surround sound' : 'Virtual surround sound'}
+            Virtual surround sound
           </Text>
         </View>
         <Switch
@@ -703,7 +703,7 @@ const styles = StyleSheet.create({
 
           <Text style={[styles.controlDescription, { color: theme.colors.textSecondary }]}>
 
-            {userTier === 'enterprise' ? 'Dolby Atmos surround sound' : 'Virtual surround sound'}
+            Virtual surround sound
 
           </Text>
 
@@ -1338,7 +1338,7 @@ const styles = StyleSheet.create({
 
           <Text style={[styles.controlDescription, { color: theme.colors.textSecondary }]}>
 
-            {userTier === 'enterprise' ? 'Dolby Atmos surround sound' : 'Virtual surround sound'}
+            Virtual surround sound
 
           </Text>
 

@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { useSearch } from '../hooks/useSearch';
+import { formatServiceCategories } from '../utils/serviceCategoryLabels';
 
 export default function GlobalSearchBar() {
   const { theme } = useTheme();
@@ -157,7 +158,7 @@ export default function GlobalSearchBar() {
               {item.display_name || item.headline || 'Service Provider'}
             </Text>
             <Text style={[styles.resultSubtitle, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-              {item.categories?.join(', ') || 'Service'}
+              {formatServiceCategories(item.categories)}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />

@@ -21,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import PostCard from '../components/PostCard';
 import { Post } from '../types/feed.types';
 import BackButton from '../components/BackButton';
+import { formatServiceCategories } from '../utils/serviceCategoryLabels';
 
 type SearchTab = 'all' | 'posts' | 'people' | 'opportunities';
 
@@ -443,7 +444,7 @@ export default function SearchScreen() {
                         {service.display_name || service.headline || 'Service Provider'}
                       </Text>
                       <Text style={[styles.resultSubtitle, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                        {service.categories?.join(', ') || 'Service'}
+                        {formatServiceCategories(service.categories)}
                       </Text>
                     </View>
                     <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />

@@ -25,6 +25,7 @@ import type {
   BookingStatus,
   VerificationStatusResponse,
   BadgeInsights,
+  ServiceCategory,
 } from '../types';
 
 export interface AuthOptions {
@@ -37,6 +38,41 @@ function buildOptions(options?: AuthOptions): { session?: Session | null; access
     session: options?.session,
     accessToken: options?.accessToken,
   };
+}
+
+// ============================================================================
+// SERVICE CATEGORY VALIDATION
+// ============================================================================
+
+/**
+ * Valid service categories as per web app team confirmation
+ * Complete list of 9 categories - API will reject any other category
+ */
+const VALID_SERVICE_CATEGORIES: readonly ServiceCategory[] = [
+  'sound_engineering',
+  'music_lessons',
+  'mixing_mastering',
+  'session_musician',
+  'photography',
+  'videography',
+  'lighting',
+  'event_management',
+  'other',
+] as const;
+
+/**
+ * Validate if a category is a valid service category
+ */
+export function isValidServiceCategory(category: string): category is ServiceCategory {
+  return VALID_SERVICE_CATEGORIES.includes(category as ServiceCategory);
+}
+
+/**
+ * Filter and validate service categories, removing any invalid ones
+ * Returns only valid categories that the API will accept
+ */
+export function validateServiceCategories(categories: string[]): ServiceCategory[] {
+  return categories.filter(isValidServiceCategory);
 }
 
 // ============================================================================
@@ -164,9 +200,15 @@ export async function upsertServiceProviderProfile(
   profile: ServiceProviderProfileInput,
   options?: AuthOptions
 ): Promise<ServiceProviderProfileResponse> {
+  // Validate categories before sending to API
+  const validatedProfile = {
+    ...profile,
+    categories: profile.categories ? validateServiceCategories(profile.categories) : undefined,
+  };
+
   return apiFetch(`/api/service-providers`, {
     method: 'POST',
-    body: JSON.stringify(profile),
+    body: JSON.stringify(validatedProfile),
     ...buildOptions(options),
   });
 }
@@ -203,6 +245,11 @@ export async function createServiceOffering(
   offering: ServiceOfferingInput,
   options?: AuthOptions
 ): Promise<ServiceOffering> {
+  // Validate category before sending to API
+  if (!isValidServiceCategory(offering.category)) {
+    throw new Error(`Invalid service category: ${offering.category}. Valid categories: ${VALID_SERVICE_CATEGORIES.join(', ')}`);
+  }
+
   return apiFetch(`/api/service-providers/${userId}/offerings`, {
     method: 'POST',
     body: JSON.stringify(offering),
@@ -219,6 +266,11 @@ export async function updateServiceOffering(
   updates: Partial<ServiceOfferingInput>,
   options?: AuthOptions
 ): Promise<ServiceOffering> {
+  // Validate category if it's being updated
+  if (updates.category && !isValidServiceCategory(updates.category)) {
+    throw new Error(`Invalid service category: ${updates.category}. Valid categories: ${VALID_SERVICE_CATEGORIES.join(', ')}`);
+  }
+
   return apiFetch(`/api/service-providers/${userId}/offerings/${offeringId}`, {
     method: 'PATCH',
     body: JSON.stringify(updates),

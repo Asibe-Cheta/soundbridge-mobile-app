@@ -31,6 +31,8 @@ import {
 import AdvancedSearchFilters, { SearchFilters } from '../components/AdvancedSearchFilters';
 import { useSearch } from '../hooks/useSearch';
 import { fetchDiscoverServiceProviders } from '../services/creatorExpansionService';
+import { contentCacheService } from '../services/contentCacheService';
+import { getServiceCategoryLabel } from '../utils/serviceCategoryLabels';
 import type { PublicProfile } from '../types/database';
 
 const { width } = Dimensions.get('window');
@@ -1766,7 +1768,7 @@ function DiscoverScreen() {
                           {provider.categories.slice(0, 3).map((cat, idx) => (
                             <View key={idx} style={[styles.categoryChip, { backgroundColor: theme.colors.surface }]}>
                               <Text style={[styles.categoryText, { color: theme.colors.textSecondary }]}>
-                                {cat.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                {getServiceCategoryLabel(cat)}
                               </Text>
                             </View>
                           ))}

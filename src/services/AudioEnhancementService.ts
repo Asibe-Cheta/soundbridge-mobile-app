@@ -105,15 +105,6 @@ class AudioEnhancementService {
         realTimeProcessing: true,
         exportFormats: ['mp3_128', 'mp3_320', 'wav'],
       },
-      enterprise: {
-        maxQuality: 'lossless',
-        enhancement: true,
-        advancedEQ: true,
-        noiseReduction: true,
-        spatialAudio: true,
-        realTimeProcessing: true,
-        exportFormats: ['mp3_128', 'mp3_320', 'wav', 'flac', 'aiff'],
-      },
     };
 
     return features[tier];
@@ -121,41 +112,68 @@ class AudioEnhancementService {
 
   async validateTierAccess(tier: 'free' | 'pro', feature: keyof TierFeatures): Promise<boolean> {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return false;
+      const { data: { user, session } } = await supabase.auth.getUser();
+      if (!user || !session) return false;
 
-      // Get user's subscription tier from profile
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('subscription_tier')
-        .eq('id', user.id)
-        .single();
+      // Get user's subscription tier from API (subscription data in user_subscriptions table, not profiles)
+      // Updated to use new endpoint: /api/subscription/status
+      const response = await fetch('https://www.soundbridge.live/api/subscription/status', {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
 
-      if (!profile) return false;
+      if (!response.ok) {
+        console.warn('⚠️ Failed to fetch subscription status, defaulting to free');
+        const tierFeatures = this.getTierFeatures('free');
+        return tierFeatures[feature] === true;
+      }
 
-      const userTier = profile.subscription_tier || 'free';
-      const tierFeatures = this.getTierFeatures(userTier);
+      const responseData = await response.json();
+      // Defensive: Use optional chaining - subscription might be null for free users
+      const subscription = responseData?.data?.subscription || null;
+      
+      if (!subscription) {
+        // No subscription, default to free
+        const tierFeatures = this.getTierFeatures('free');
+        return tierFeatures[feature] === true;
+      }
+      
+      // IMPORTANT: Pro access requires both tier === 'pro' AND status === 'active'
+      const userTier = subscription.tier || 'free';
+      const userStatus = subscription.status || 'active';
+      const hasProAccess = userTier === 'pro' && userStatus === 'active';
+      
+      // If user doesn't have active Pro access, treat as free
+      const effectiveTier = hasProAccess ? 'pro' : 'free';
+      const tierFeatures = this.getTierFeatures(effectiveTier);
       
       return tierFeatures[feature] === true || (
         feature === 'maxQuality' && this.compareQualityTiers(tierFeatures.maxQuality, tier)
       );
     } catch (error) {
       console.error('❌ Error validating tier access:', error);
-      return false;
+      // Default to free tier on error
+      const tierFeatures = this.getTierFeatures('free');
+      return tierFeatures[feature] === true;
     }
   }
 
   private compareQualityTiers(userQuality: string, requiredTier: string): boolean {
     const qualityLevels = { standard: 1, high: 2, lossless: 3 };
-    const tierLevels = { free: 1, pro: 2, enterprise: 3 };
+    const tierLevels = { free: 1, pro: 2 };
+    
+    // Defensive: if tier is 'enterprise', treat as 'pro'
+    const normalizedTier = requiredTier === 'enterprise' ? 'pro' : requiredTier;
     
     return qualityLevels[userQuality as keyof typeof qualityLevels] >= 
-           tierLevels[requiredTier as keyof typeof tierLevels];
+           (tierLevels[normalizedTier as keyof typeof tierLevels] || 2);
   }
 
   // ===== PROFILE MANAGEMENT =====
 
-  async getUserProfiles(type: 'user' | 'public' | 'all' = 'user', tier?: 'free' | 'pro' | 'enterprise'): Promise<AudioEnhancementProfile[]> {
+  async getUserProfiles(type: 'user' | 'public' | 'all' = 'user', tier?: 'free' | 'pro'): Promise<AudioEnhancementProfile[]> {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user && type !== 'public') return [];
@@ -196,7 +214,7 @@ class AudioEnhancementService {
   async createProfile(
     name: string, 
     settings: AudioEnhancementProfile['enhancement_settings'],
-    tierLevel: 'free' | 'pro' | 'enterprise',
+      tierLevel: 'free' | 'pro',
     isDefault = false,
     isPublic = false
   ): Promise<AudioEnhancementProfile | null> {
@@ -529,10 +547,12 @@ class AudioEnhancementService {
       const limits = {
         free: 5,
         pro: 100,
-        enterprise: Infinity,
       };
+      
+      // Defensive: if tier is 'enterprise', treat as 'pro'
+      const normalizedTier = tier === 'enterprise' ? 'pro' : tier;
 
-      const dailyLimit = limits[tier as keyof typeof limits];
+      const dailyLimit = limits[normalizedTier as keyof typeof limits] || limits.pro;
       const currentCount = count || 0;
 
       if (currentCount >= dailyLimit) {
@@ -589,7 +609,9 @@ class AudioEnhancementService {
 
   // ===== PRESETS =====
 
-  getDefaultPresets(tier: 'free' | 'pro' | 'enterprise'): AudioEnhancementProfile[] {
+  getDefaultPresets(tier: 'free' | 'pro'): AudioEnhancementProfile[] {
+    // Defensive: if tier is 'enterprise', treat as 'pro'
+    const normalizedTier = tier === 'enterprise' ? 'pro' : tier;
     const frequencies = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
     
     const basePresets = [
@@ -608,7 +630,7 @@ class AudioEnhancementService {
       },
     ];
 
-    if (tier === 'free') {
+    if (normalizedTier === 'free') {
       return basePresets.map(preset => ({
         ...preset,
         id: `preset_${preset.name.toLowerCase()}`,
@@ -655,24 +677,13 @@ class AudioEnhancementService {
       },
     ];
 
-    if (tier === 'enterprise') {
-      proPresets.push(
-        {
-          name: 'Mastered',
-          settings: {
-            eq: { bands: [0, 0, 1, 1, 0, 0, 1, 2, 1, 0], frequencies, gains: [0, 0, 1, 1, 0, 0, 1, 2, 1, 0], preset: 'mastered' },
-            enhancement: { enabled: true, strength: 0.7, type: 'ai' as const },
-            noise_reduction: { enabled: true, level: 0.5 },
-          },
-        }
-      );
-    }
+    // Enterprise tier removed - all presets available to Pro users
 
     return proPresets.map(preset => ({
       ...preset,
         id: `preset_${preset.name.toLowerCase()}`,
         user_id: '',
-        tier_level: tier,
+        tier_level: normalizedTier,
         enhancement_settings: preset.settings,
         is_default: preset.name === 'Flat',
         is_public: true,
@@ -1059,13 +1070,11 @@ export const audioEnhancementService = new AudioEnhancementService();
 
         pro: 100,
 
-        enterprise: Infinity,
-
       };
 
-
-
-      const dailyLimit = limits[tier as keyof typeof limits];
+      // Defensive: if tier is 'enterprise', treat as 'pro'
+      const normalizedTier = tier === 'enterprise' ? 'pro' : tier;
+      const dailyLimit = limits[normalizedTier as keyof typeof limits] || limits.pro;
 
       const currentCount = count || 0;
 
@@ -1179,8 +1188,9 @@ export const audioEnhancementService = new AudioEnhancementService();
 
 
 
-  getDefaultPresets(tier: 'free' | 'pro' | 'enterprise'): AudioEnhancementProfile[] {
-
+  getDefaultPresets(tier: 'free' | 'pro'): AudioEnhancementProfile[] {
+    // Defensive: if tier is 'enterprise', treat as 'pro'
+    const normalizedTier = tier === 'enterprise' ? 'pro' : tier;
     const frequencies = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
 
     
@@ -1311,16 +1321,13 @@ export const audioEnhancementService = new AudioEnhancementService();
 
 
 
-    if (tier === 'enterprise') {
-
+    // Enterprise tier removed - all presets available to Pro users
+    // (Keeping the Mastered preset for Pro users)
+    if (normalizedTier === 'pro') {
       proPresets.push(
-
         {
-
           name: 'Mastered',
-
           settings: {
-
             eq: { bands: [0, 0, 1, 1, 0, 0, 1, 2, 1, 0], frequencies, gains: [0, 0, 1, 1, 0, 0, 1, 2, 1, 0], preset: 'mastered' },
 
             enhancement: { enabled: true, strength: 0.7, type: 'ai' as const },
@@ -1345,7 +1352,7 @@ export const audioEnhancementService = new AudioEnhancementService();
 
         user_id: '',
 
-        tier_level: tier,
+        tier_level: normalizedTier,
 
         enhancement_settings: preset.settings,
 

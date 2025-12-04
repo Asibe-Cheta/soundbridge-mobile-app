@@ -20,21 +20,24 @@ import BackButton from '../components/BackButton';
 import {
   upsertServiceProviderProfile,
   fetchServiceProviderProfile,
+  validateServiceCategories,
   type ServiceProviderProfileInput,
 } from '../services/creatorExpansionService';
 import type { ServiceCategory } from '../types';
+import { SERVICE_CATEGORY_LABELS } from '../utils/serviceCategoryLabels';
 
+// Valid categories as per web app team confirmation (WEB_TEAM_SERVICE_CATEGORIES_RESPONSE.md)
+// Complete list of 9 categories - API will reject any other category
 const SERVICE_CATEGORIES: ServiceCategory[] = [
   'sound_engineering',
+  'music_lessons',
   'mixing_mastering',
-  'music_production',
-  'audio_editing',
-  'vocal_tuning',
-  'sound_design',
-  'audio_restoration',
-  'podcast_production',
-  'live_sound',
-  'consulting',
+  'session_musician',
+  'photography',
+  'videography',
+  'lighting',
+  'event_management',
+  'other',
 ];
 
 export default function ServiceProviderOnboardingScreen() {
@@ -98,7 +101,21 @@ export default function ServiceProviderOnboardingScreen() {
 
     setLoading(true);
     try {
-      await upsertServiceProviderProfile(user.id, formData, { session });
+      // Validate and filter categories before sending to API
+      const validCategories = validateServiceCategories(formData.categories || []);
+      if (validCategories.length !== (formData.categories?.length || 0)) {
+        console.warn('⚠️ Some invalid categories were filtered out:', {
+          original: formData.categories,
+          valid: validCategories,
+        });
+      }
+
+      const profileData: ServiceProviderProfileInput = {
+        ...formData,
+        categories: validCategories,
+      };
+
+      await upsertServiceProviderProfile(user.id, profileData, { session });
       Alert.alert('Success!', 'Your service provider profile has been saved.', [
         {
           text: 'Continue',
@@ -199,7 +216,7 @@ export default function ServiceProviderOnboardingScreen() {
                   onPress={() => toggleCategory(category)}
                 >
                   <Text style={[styles.categoryText, { color: isSelected ? theme.colors.primary : theme.colors.text }]}>
-                    {category.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                    {SERVICE_CATEGORY_LABELS[category]}
                   </Text>
                 </TouchableOpacity>
               );

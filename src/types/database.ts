@@ -826,18 +826,17 @@ export type CreatorType =
   | 'service_provider'
   | 'venue_owner'
 
+// Valid categories as per web app team confirmation (WEB_TEAM_SERVICE_CATEGORIES_RESPONSE.md)
+// Complete list of 9 categories - API will reject any other category
 export type ServiceCategory =
   | 'sound_engineering'
   | 'music_lessons'
   | 'mixing_mastering'
   | 'session_musician'
-  | 'songwriting'
-  | 'live_performance'
   | 'photography'
   | 'videography'
-  | 'event_production'
-  | 'marketing_promo'
-  | 'consulting'
+  | 'lighting'
+  | 'event_management'
   | 'other'
 
 export type ProviderBadgeTier = 'new_provider' | 'rising_star' | 'established' | 'top_rated'

@@ -30,7 +30,7 @@ export default function AudioEnhancementScreen() {
   // State
   const [loading, setLoading] = useState(false);
   // Updated per TIER_CORRECTIONS.md - Enterprise not available Year 1
-  const [userTier, setUserTier] = useState<'free' | 'pro' | 'enterprise'>('free');
+  const [userTier, setUserTier] = useState<'free' | 'pro'>('free');
   const [eqBands, setEqBands] = useState([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
   const [aiEnhancementEnabled, setAIEnhancementEnabled] = useState(false);
   const [spatialAudioEnabled, setSpatialAudioEnabled] = useState(false);
@@ -42,10 +42,10 @@ export default function AudioEnhancementScreen() {
       
       try {
         // Get user's subscription tier from API (subscription data in user_subscriptions table, not profiles)
-        let tier: 'free' | 'pro' | 'enterprise' = 'free';
+        let tier: 'free' | 'pro' = 'free';
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
-          const response = await fetch('https://www.soundbridge.live/api/user/subscription-status', {
+          const response = await fetch('https://www.soundbridge.live/api/subscription/status', {
             headers: {
               'Authorization': `Bearer ${session.access_token}`,
               'Content-Type': 'application/json',
@@ -53,8 +53,11 @@ export default function AudioEnhancementScreen() {
           });
           
           if (response.ok) {
-            const data = await response.json();
-            tier = data.subscription?.tier || 'free';
+            const responseData = await response.json();
+            // Defensive: Use optional chaining - subscription might be null for free users
+            const rawTier = responseData?.data?.subscription?.tier || 'free';
+            // Defensive: if tier is 'enterprise', treat as 'pro'
+            tier = rawTier === 'enterprise' ? 'pro' : (rawTier === 'pro' ? 'pro' : 'free');
           }
         }
         setUserTier(tier);
@@ -232,7 +235,7 @@ export default function AudioEnhancementScreen() {
         <View style={styles.controlInfo}>
           <Text style={[styles.controlLabel, { color: theme.colors.text }]}>Spatial Audio</Text>
           <Text style={[styles.controlDescription, { color: theme.colors.textSecondary }]}>
-            {userTier === 'enterprise' ? 'Dolby Atmos surround sound' : 'Virtual surround sound'}
+            Virtual surround sound
           </Text>
         </View>
         <Switch

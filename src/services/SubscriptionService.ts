@@ -14,8 +14,46 @@ export interface SubscriptionStatus {
   stripe_subscription_id?: string;
   subscription_start_date?: string; // For 7-day guarantee calculation
   subscription_renewal_date?: string;
+  subscription_ends_at?: string;
   money_back_guarantee_eligible?: boolean;
+  money_back_guarantee_end_date?: string;
   refund_count?: number;
+  features?: {
+    unlimitedUploads: boolean;
+    unlimitedSearches: boolean;
+    unlimitedMessages: boolean;
+    advancedAnalytics: boolean;
+    customBranding: boolean;
+    prioritySupport: boolean;
+    revenueSharing: boolean;
+    whiteLabel: boolean;
+  };
+  limits?: {
+    uploads: {
+      used: number;
+      limit: number;
+      remaining: number;
+      is_unlimited: boolean;
+      period: 'monthly' | 'lifetime';
+    };
+    searches: {
+      used: number;
+      limit: number;
+      remaining: number;
+      is_unlimited: boolean;
+    };
+    messages: {
+      used: number;
+      limit: number;
+      remaining: number;
+      is_unlimited: boolean;
+    };
+  };
+  moneyBackGuarantee?: {
+    eligible: boolean;
+    withinWindow: boolean;
+    daysRemaining: number;
+  };
 }
 
 export interface UsageStatistics {
@@ -27,6 +65,16 @@ export interface UsageStatistics {
   bandwidth_limit: number; // in MB
   period_start: string;
   period_end: string;
+  music_uploads?: number;
+  podcast_uploads?: number;
+  event_uploads?: number;
+  total_storage_used?: number; // in bytes
+  total_plays?: number;
+  total_followers?: number;
+  last_upload_at?: string;
+  formatted_storage?: string;
+  formatted_plays?: string;
+  formatted_followers?: string;
 }
 
 export interface BillingHistoryItem {
@@ -104,25 +152,54 @@ class SubscriptionService {
 
   /**
    * Get user's current subscription status
+   * Updated to use new endpoint: /api/subscription/status
+   * Response structure: { success: true, data: { subscription: {...}, usage: {...}, limits: {...}, features: {...} } }
    */
   async getSubscriptionStatus(session: Session): Promise<SubscriptionStatus> {
     try {
       console.log('📊 Fetching subscription status...');
-      const data = await this.makeRequest('/api/user/subscription-status', session);
-      console.log('✅ Subscription status loaded:', data);
+      const response = await this.makeRequest('/api/subscription/status', session);
+      console.log('✅ Subscription status response:', response);
+      
+      // Defensive: Use optional chaining - subscription might be null for free users
+      const data = response?.data || {};
+      const subscription = data?.subscription || null;
+      
+      // If no subscription, return free tier default
+      if (!subscription) {
+        console.log('ℹ️ No subscription found, returning free tier');
+        return {
+          tier: 'free',
+          status: 'active',
+          current_period_start: new Date().toISOString(),
+          current_period_end: new Date().toISOString(),
+          cancel_at_period_end: false,
+          amount: 0,
+          currency: 'GBP',
+          billing_cycle: 'monthly',
+        };
+      }
       
       // Transform API response to match our interface
       return {
-        tier: data.subscription.plan.toLowerCase(), // "Pro" -> "pro"
-        status: data.subscription.status,
-        current_period_start: data.subscription.currentPeriod.start,
-        current_period_end: data.subscription.currentPeriod.end,
-        cancel_at_period_end: data.subscription.cancelAtPeriodEnd || false,
-        amount: this.extractPriceAmount(data.subscription.price),
-        currency: this.extractPriceCurrency(data.subscription.price),
-        billing_cycle: data.subscription.billingCycle,
-        stripe_subscription_id: data.subscription.stripeSubscriptionId,
-        trial_end: data.subscription.trialEnd,
+        tier: subscription.tier || 'free',
+        status: subscription.status || 'active',
+        current_period_start: subscription.subscription_start_date || subscription.current_period_start || new Date().toISOString(),
+        current_period_end: subscription.subscription_renewal_date || subscription.subscription_ends_at || subscription.current_period_end || new Date().toISOString(),
+        subscription_ends_at: subscription.subscription_ends_at,
+        cancel_at_period_end: subscription.cancel_at_period_end || false,
+        amount: subscription.amount || 0,
+        currency: subscription.currency || 'GBP',
+        billing_cycle: subscription.billing_cycle || 'monthly',
+        stripe_subscription_id: subscription.stripe_subscription_id,
+        subscription_start_date: subscription.subscription_start_date,
+        subscription_renewal_date: subscription.subscription_renewal_date,
+        money_back_guarantee_eligible: subscription.money_back_guarantee_eligible,
+        money_back_guarantee_end_date: subscription.money_back_guarantee_end_date,
+        refund_count: subscription.refund_count,
+        features: data.features,
+        limits: data.limits,
+        moneyBackGuarantee: data.moneyBackGuarantee,
       };
     } catch (error) {
       console.error('❌ Error fetching subscription status:', error);
@@ -132,22 +209,61 @@ class SubscriptionService {
 
   /**
    * Get user's usage statistics
+   * Updated to handle new response structure from /api/subscription/status
+   * Usage data is now included in subscription status response
    */
   async getUsageStatistics(session: Session): Promise<UsageStatistics> {
     try {
       console.log('📈 Fetching usage statistics...');
+      
+      // Try to get usage from subscription status first (new structure)
+      try {
+        const subscriptionStatus = await this.getSubscriptionStatus(session);
+        if (subscriptionStatus.limits) {
+          const limits = subscriptionStatus.limits;
+          const usage = subscriptionStatus.limits.uploads;
+          
+          return {
+            uploads_used: usage.used || 0,
+            uploads_limit: usage.limit || 0,
+            storage_used: 0, // Will be populated from usage endpoint if needed
+            storage_limit: 0,
+            bandwidth_used: 0,
+            bandwidth_limit: 0,
+            period_start: new Date().toISOString(),
+            period_end: subscriptionStatus.current_period_end || new Date().toISOString(),
+          };
+        }
+      } catch (e) {
+        console.log('⚠️ Could not get usage from subscription status, trying dedicated endpoint');
+      }
+      
+      // Fallback to dedicated usage endpoint
       const data = await this.makeRequest('/api/user/usage-statistics', session);
       console.log('✅ Usage statistics loaded:', data);
       
+      // Handle both old and new response structures
+      const usage = data?.usage || data;
+      
       return {
-        uploads_used: data.usage.uploads.used,
-        uploads_limit: data.usage.uploads.limit, // -1 for unlimited
-        storage_used: data.usage.storage.used,
-        storage_limit: data.usage.storage.limit,
-        bandwidth_used: data.usage.bandwidth.used,
-        bandwidth_limit: data.usage.bandwidth.limit,
-        period_start: data.lastUpdated,
-        period_end: data.lastUpdated, // Will be calculated based on billing cycle
+        uploads_used: usage?.uploads?.used || usage?.uploads_used || 0,
+        uploads_limit: usage?.uploads?.limit || usage?.uploads_limit || 0, // -1 for unlimited
+        storage_used: usage?.storage?.used || usage?.storage_used || 0,
+        storage_limit: usage?.storage?.limit || usage?.storage_limit || 0,
+        bandwidth_used: usage?.bandwidth?.used || usage?.bandwidth_used || 0,
+        bandwidth_limit: usage?.bandwidth?.limit || usage?.bandwidth_limit || 0,
+        period_start: usage?.period_start || data?.lastUpdated || new Date().toISOString(),
+        period_end: usage?.period_end || data?.lastUpdated || new Date().toISOString(),
+        music_uploads: usage?.music_uploads,
+        podcast_uploads: usage?.podcast_uploads,
+        event_uploads: usage?.event_uploads,
+        total_storage_used: usage?.total_storage_used,
+        total_plays: usage?.total_plays,
+        total_followers: usage?.total_followers,
+        last_upload_at: usage?.last_upload_at,
+        formatted_storage: usage?.formatted_storage,
+        formatted_plays: usage?.formatted_plays,
+        formatted_followers: usage?.formatted_followers,
       };
     } catch (error) {
       console.error('❌ Error fetching usage statistics:', error);
@@ -274,7 +390,8 @@ class SubscriptionService {
     switch (tier.toLowerCase()) {
       case 'free': return 'Free Plan';
       case 'pro': return 'Pro Plan';
-      case 'enterprise': return 'Enterprise Plan';
+      // Enterprise tier removed - defensive handling
+      case 'enterprise': return 'Pro Plan'; // Treat Enterprise as Pro
       default: return 'Unknown Plan';
     }
   }
@@ -286,11 +403,21 @@ class SubscriptionService {
     switch (status.toLowerCase()) {
       case 'active': return 'Active';
       case 'cancelled': return 'Cancelled';
+      case 'expired': return 'Expired';
       case 'past_due': return 'Past Due';
       case 'trialing': return 'Trial';
       case 'incomplete': return 'Incomplete';
       default: return 'Unknown';
     }
+  }
+
+  /**
+   * Check if user has Pro access
+   * IMPORTANT: Pro access requires both tier === 'pro' AND status === 'active'
+   */
+  hasProAccess(subscription: SubscriptionStatus | null): boolean {
+    if (!subscription) return false;
+    return subscription.tier === 'pro' && subscription.status === 'active';
   }
 
   /**
@@ -301,7 +428,8 @@ class SubscriptionService {
       case 'active': return '#10B981'; // Green
       case 'trialing': return '#3B82F6'; // Blue
       case 'cancelled': return '#6B7280'; // Gray
-      case 'past_due': return '#F59E0B'; // Yellow
+      case 'expired': return '#6B7280'; // Gray
+      case 'past_due': return '#F59E0B'; // Yellow/Orange
       case 'incomplete': return '#EF4444'; // Red
       default: return '#6B7280';
     }
@@ -353,20 +481,24 @@ class SubscriptionService {
     switch (plan.toLowerCase()) {
       case 'pro':
         return [
-          '10 uploads per month',
-          '2GB storage',
-          'Priority processing (1-2 min)',
-          'Advanced analytics',
-          'Revenue sharing (95%)',
-          'HD audio quality',
-          'Direct fan messaging'
+          '10 uploads per month (resets on 1st)',
+          '500MB storage',
+          'Unlimited searches & messages',
+          'Advanced filters',
+          'Verified badge eligibility',
+          'Payment protection & escrow',
+          'Detailed analytics',
+          'Availability calendar',
+          'Priority support'
         ];
+      // Enterprise tier removed - defensive handling
       case 'enterprise':
+        // Treat Enterprise as Pro
         return [
-          'Unlimited uploads',
-          '10GB storage',
-          'Instant processing (< 1 min)',
-          'AI-powered protection',
+          '10 uploads per month',
+          '500MB storage',
+          'Priority processing',
+          'Advanced analytics',
           'White-label platform',
           'Advanced analytics',
           'Revenue sharing (95%)',

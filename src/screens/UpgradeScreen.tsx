@@ -78,7 +78,7 @@ export default function UpgradeScreen() {
       price: { monthly: 9.99, yearly: 99 },
       color: '#10B981',
       features: [
-        '10 total uploads',
+        '10 uploads per month (resets on 1st)',
         'Unlimited searches & messages',
         '500MB storage',
         'Advanced filters',

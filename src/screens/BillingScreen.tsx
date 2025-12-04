@@ -392,6 +392,8 @@ export default function BillingScreen() {
       case 'active':
       case 'paid':
         return '#10B981';
+      case 'expired':
+        return '#6B7280';
       case 'trialing':
       case 'pending':
         return '#F59E0B';
@@ -409,6 +411,8 @@ export default function BillingScreen() {
       case 'active':
       case 'paid':
         return 'checkmark-circle';
+      case 'expired':
+        return 'close-circle';
       case 'trialing':
       case 'pending':
         return 'time';
@@ -514,6 +518,24 @@ export default function BillingScreen() {
                   </Text>
                 </View>
               )}
+
+              {subscription.status === 'past_due' && (
+                <View style={[styles.cancellationNotice, { backgroundColor: '#F59E0B20' }]}>
+                  <Ionicons name="alert-circle" size={16} color="#F59E0B" />
+                  <Text style={[styles.cancellationText, { color: '#F59E0B' }]}>
+                    Payment failed. Please update your payment method to avoid downgrade.
+                  </Text>
+                </View>
+              )}
+
+              {subscription.moneyBackGuarantee?.eligible && subscription.moneyBackGuarantee.withinWindow && (
+                <View style={[styles.guaranteeBadge, { backgroundColor: '#10B98120' }]}>
+                  <Ionicons name="shield-checkmark" size={16} color="#10B981" />
+                  <Text style={[styles.guaranteeText, { color: '#10B981' }]}>
+                    🛡️ 7-day money-back guarantee - {subscription.moneyBackGuarantee.daysRemaining} days remaining
+                  </Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.planActions}>
@@ -546,16 +568,32 @@ export default function BillingScreen() {
               <View style={styles.usageHeader}>
                 <Text style={[styles.usageLabel, { color: theme.colors.text }]}>Uploads</Text>
                 <Text style={[styles.usageValue, { color: theme.colors.textSecondary }]}>
-                  {usage.uploads_used} / {subscriptionService.formatUsageLimit(usage.uploads_limit)}
+                  {subscription?.limits?.uploads?.used ?? usage.uploads_used} / {subscription?.limits?.uploads?.limit ?? subscriptionService.formatUsageLimit(usage.uploads_limit)}
                 </Text>
               </View>
+              {subscription?.limits?.uploads?.period === 'monthly' && (
+                <Text style={[styles.usageHint, { color: theme.colors.textSecondary }]}>
+                  Resets on the 1st of each month
+                </Text>
+              )}
+              {subscription?.limits?.uploads?.period === 'lifetime' && (
+                <Text style={[styles.usageHint, { color: theme.colors.textSecondary }]}>
+                  Lifetime limit (does not reset)
+                </Text>
+              )}
               <View style={[styles.progressBar, { backgroundColor: theme.colors.card }]}>
                 <View 
                   style={[
                     styles.progressFill, 
                     { 
-                      width: `${subscriptionService.calculateUsagePercentage(usage.uploads_used, usage.uploads_limit)}%`,
-                      backgroundColor: subscriptionService.calculateUsagePercentage(usage.uploads_used, usage.uploads_limit) > 80 ? '#EF4444' : '#DC2626'
+                      width: `${subscriptionService.calculateUsagePercentage(
+                        subscription?.limits?.uploads?.used ?? usage.uploads_used, 
+                        subscription?.limits?.uploads?.limit ?? usage.uploads_limit
+                      )}%`,
+                      backgroundColor: subscriptionService.calculateUsagePercentage(
+                        subscription?.limits?.uploads?.used ?? usage.uploads_used, 
+                        subscription?.limits?.uploads?.limit ?? usage.uploads_limit
+                      ) > 80 ? '#EF4444' : '#DC2626'
                     }
                   ]} 
                 />
@@ -890,6 +928,23 @@ const styles = StyleSheet.create({
   cancellationText: {
     fontSize: 12,
     marginLeft: 8,
+  },
+  guaranteeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  guaranteeText: {
+    fontSize: 12,
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  usageHint: {
+    fontSize: 11,
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   planActions: {
     flexDirection: 'row',
