@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { dbHelpers, supabase } from '../lib/supabase';
 import { searchServiceProviders } from '../services/creatorExpansionService';
 import { useAuth } from '../contexts/AuthContext';
+import { Alert } from 'react-native';
 
 export interface SearchResult {
   tracks: any[];
@@ -11,6 +12,11 @@ export interface SearchResult {
   venues?: any[];
   posts?: any[];
   opportunities?: any[];
+}
+
+export interface SearchError {
+  isLimitExceeded: boolean;
+  message?: string;
 }
 
 export function useSearch() {
@@ -26,16 +32,19 @@ export function useSearch() {
     opportunities: [],
   });
   const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<SearchError | null>(null);
 
   const performSearch = useCallback(async (query: string, includePosts = false, includeOpportunities = false) => {
     if (!query.trim()) {
       setSearchResults({ tracks: [], artists: [], events: [], services: [], venues: [], posts: [], opportunities: [] });
       setIsSearching(false);
+      setSearchError(null);
       return;
     }
 
     try {
       setIsSearching(true);
+      setSearchError(null);
       console.log('🔍 Searching for:', query);
 
       // Get current session for services search
@@ -48,13 +57,22 @@ export function useSearch() {
         dbHelpers.searchVenues(query.trim(), 10).catch(() => ({ success: false, data: [], error: null })),
       ]);
 
-      // Search services using API
+      // Search services using API (this may throw 429 if limit exceeded)
       let servicesResult: any[] = [];
       try {
         servicesResult = await searchServiceProviders(query.trim(), {
           session: currentSession,
         });
-      } catch (e) {
+      } catch (e: any) {
+        // Check if this is a 429 (rate limit) error
+        if (e?.response?.status === 429 || e?.message?.includes('429') || e?.message?.includes('limit')) {
+          console.log('❌ Search limit exceeded');
+          setSearchError({
+            isLimitExceeded: true,
+            message: 'You have reached your monthly search limit. Upgrade to Pro for unlimited searches.',
+          });
+          throw e; // Re-throw to be caught by outer catch
+        }
         console.log('Services search not available:', e);
       }
 
@@ -70,8 +88,17 @@ export function useSearch() {
 
       setSearchResults({ tracks, artists, events, services, venues, posts, opportunities });
       console.log('✅ Search results:', tracks.length, 'tracks,', artists.length, 'artists,', events.length, 'events,', services.length, 'services,', venues.length, 'venues');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Search error:', error);
+
+      // Check if it's a 429 error (rate limit exceeded)
+      if (error?.response?.status === 429 || error?.message?.includes('429') || error?.message?.includes('limit')) {
+        setSearchError({
+          isLimitExceeded: true,
+          message: error?.message || 'You have reached your monthly search limit. Upgrade to Pro for unlimited searches.',
+        });
+      }
+
       setSearchResults({ tracks: [], artists: [], events: [], services: [], venues: [], posts: [], opportunities: [] });
     } finally {
       setIsSearching(false);
@@ -93,6 +120,7 @@ export function useSearch() {
     searchResults,
     isSearching,
     performSearch,
+    searchError,
   };
 }
 

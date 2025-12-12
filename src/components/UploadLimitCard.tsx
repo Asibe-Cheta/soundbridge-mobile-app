@@ -16,8 +16,15 @@ const formatTierLabel = (tierValue: string | undefined) => {
   switch (tier) {
     case 'free':
       return 'Free';
+    case 'premium':
+      return 'Premium';
+    case 'unlimited':
+      return 'Unlimited';
+    // Legacy support
     case 'pro':
-      return 'Pro';
+      return 'Premium';
+    case 'enterprise':
+      return 'Unlimited';
     default:
       return tier.charAt(0).toUpperCase() + tier.slice(1);
   }
@@ -63,7 +70,8 @@ export default function UploadLimitCard({ quota, loading, onUpgrade }: UploadLim
   const remaining = quota.remaining ?? (quota.upload_limit != null ? quota.upload_limit - quota.uploads_this_month : null);
   const tierLabel = formatTierLabel(quota.tier);
   const resetDate = quota.reset_date ? new Date(quota.reset_date) : null;
-  const showUpgrade = onUpgrade && (quota.tier ?? 'free').toLowerCase() === 'free';
+  const tier = (quota.tier ?? 'free').toLowerCase();
+  const showUpgrade = onUpgrade && (tier === 'free' || (tier === 'premium' && !quota.can_upload));
 
   return (
     <GlassContainer>
@@ -76,12 +84,12 @@ export default function UploadLimitCard({ quota, loading, onUpgrade }: UploadLim
         <Text style={[styles.description, { color: theme.colors.textSecondary }]}>Unlimited uploads available.</Text>
       ) : (
         <Text style={[styles.description, { color: theme.colors.textSecondary }]}>
-          {quota.upload_limit ?? 'N/A'} {quota.tier?.toLowerCase() === 'free' ? 'lifetime' : 'total'} uploads · {remaining ?? 0} remaining
+          {quota.upload_limit ?? 'N/A'} {quota.tier?.toLowerCase() === 'free' ? 'lifetime' : quota.tier?.toLowerCase() === 'premium' ? 'uploads per month' : 'uploads'} · {remaining ?? 0} remaining
         </Text>
       )}
 
-      {/* Only show reset date for searches/messages, not uploads (which are lifetime/total) */}
-      {resetDate && !quota.is_unlimited && quota.tier?.toLowerCase() !== 'free' && (
+      {/* Show reset date for Premium tier (monthly reset) */}
+      {resetDate && !quota.is_unlimited && tier === 'premium' && (
         <Text style={[styles.resetText, { color: theme.colors.textSecondary }]}>Resets {resetDate.toLocaleDateString()}</Text>
       )}
 

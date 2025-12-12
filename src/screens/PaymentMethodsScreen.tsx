@@ -272,7 +272,7 @@ export default function PaymentMethodsScreen() {
   const handleSetupStripeConnect = async () => {
     try {
       setSaving(true);
-      
+
       if (!user || !session) {
         Alert.alert('Error', 'You must be logged in to set up payments');
         return;
@@ -285,14 +285,14 @@ export default function PaymentMethodsScreen() {
         return;
       }
 
-      console.log('=== COUNTRY-AWARE STRIPE CONNECT ===');
+      console.log('=== STRIPE CONNECT DEFERRED ONBOARDING ===');
       console.log('User ID:', user?.id);
       console.log('User email:', session?.user?.email);
-      
+
       // Step 1: Detect user's country for Stripe Connect
       console.log('🌍 Detecting user country...');
       let userCountry = 'US'; // Default fallback
-      
+
       try {
         const countryResult = await walletService.detectCountryForStripe(session);
         if (countryResult.supported_by_stripe) {
@@ -305,36 +305,49 @@ export default function PaymentMethodsScreen() {
         console.log('❌ Country detection failed, using fallback:', userCountry);
       }
 
-      // Step 2: Create country-aware Stripe Connect account
-      console.log(`🏦 Creating Stripe Connect account for ${userCountry}...`);
-      console.log('Access token exists:', !!session?.access_token);
-      console.log('Access token length:', session?.access_token?.length);
-      console.log('Access token preview:', session?.access_token?.substring(0, 50) + '...');
-      console.log('Token type:', typeof session?.access_token);
-      
-      const result = await walletService.createStripeConnectAccount(session, userCountry);
+      // Step 2: Create Stripe Connect account with DEFERRED onboarding
+      console.log(`🏦 Creating Stripe Connect account for ${userCountry} (deferred onboarding)...`);
+
+      const result = await walletService.createStripeConnectAccount(session, userCountry, 'deferred');
       console.log('Stripe Connect API response:', result);
 
-      if (result.success && result.onboardingUrl) {
-        // Open the Stripe onboarding URL directly
-        const supported = await Linking.canOpenURL(result.onboardingUrl);
-        
-        if (supported) {
-          await Linking.openURL(result.onboardingUrl);
-          
+      if (result.success) {
+        if (result.skipOnboarding) {
+          // DEFERRED MODE: Account created instantly, no onboarding needed now
           Alert.alert(
-            'Complete Stripe Setup',
-            `You've been redirected to Stripe to set up your ${result.country} payout account (${result.currency} ${currencyService.getCurrencySymbol(result.currency)}). Once completed, return to the app to see your connected account.`,
+            'Account Created!',
+            result.message || 'Your Stripe Connect account has been created! You can start earning immediately. Complete verification when you want to withdraw funds.',
             [
-              { text: 'OK' },
-              { 
-                text: 'Refresh', 
-                onPress: () => loadBankAccount()
+              {
+                text: 'OK',
+                onPress: () => {
+                  loadBankAccount();
+                  checkAccountStatus();
+                }
               }
             ]
           );
-        } else {
-          Alert.alert('Error', 'Unable to open Stripe setup page');
+        } else if (result.onboardingUrl) {
+          // IMMEDIATE MODE: Redirect to Stripe onboarding
+          const supported = await Linking.canOpenURL(result.onboardingUrl);
+
+          if (supported) {
+            await Linking.openURL(result.onboardingUrl);
+
+            Alert.alert(
+              'Complete Stripe Setup',
+              `You've been redirected to Stripe to set up your ${result.country || userCountry} payout account. Once completed, return to the app to see your connected account.`,
+              [
+                { text: 'OK' },
+                {
+                  text: 'Refresh',
+                  onPress: () => loadBankAccount()
+                }
+              ]
+            );
+          } else {
+            Alert.alert('Error', 'Unable to open Stripe setup page');
+          }
         }
       } else {
         // Handle specific error cases
@@ -344,8 +357,8 @@ export default function PaymentMethodsScreen() {
             result.details || 'Additional setup is required on Stripe\'s end.',
             [
               { text: 'Cancel', style: 'cancel' },
-              { 
-                text: 'Open Setup', 
+              {
+                text: 'Open Setup',
                 onPress: () => Linking.openURL(result.url)
               }
             ]
@@ -364,14 +377,76 @@ export default function PaymentMethodsScreen() {
       }
     } catch (error: any) {
       console.error('Error setting up Stripe Connect:', error);
-      
+
       if (error.name === 'AbortError') {
         Alert.alert('Request Timeout', 'The request took too long to complete. Please try again.');
       } else if (error instanceof TypeError && error.message.includes('fetch')) {
-        Alert.alert('Connection Error', `Unable to connect to the payment server at ${baseUrl}. Please check your internet connection.`);
+        Alert.alert('Connection Error', 'Unable to connect to the payment server. Please check your internet connection.');
       } else {
         Alert.alert('Error', 'Failed to connect to payment service. Please check your internet connection and try again.');
       }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCompleteVerification = async () => {
+    try {
+      setSaving(true);
+
+      if (!user || !session) {
+        Alert.alert('Error', 'You must be logged in to complete verification');
+        return;
+      }
+
+      console.log('🛡️ Starting verification process...');
+
+      // Detect user's country
+      let userCountry = 'US';
+      try {
+        const countryResult = await walletService.detectCountryForStripe(session);
+        if (countryResult.supported_by_stripe) {
+          userCountry = countryResult.country_code;
+        }
+      } catch (error) {
+        console.log('❌ Country detection failed, using fallback:', userCountry);
+      }
+
+      // Create Stripe Connect account with IMMEDIATE onboarding
+      const result = await walletService.createStripeConnectAccount(session, userCountry, 'immediate');
+      console.log('Stripe Connect verification response:', result);
+
+      if (result.success && result.onboardingUrl) {
+        const supported = await Linking.canOpenURL(result.onboardingUrl);
+
+        if (supported) {
+          await Linking.openURL(result.onboardingUrl);
+
+          Alert.alert(
+            'Complete Verification',
+            'You\'ve been redirected to Stripe to complete verification. Once finished, return to the app.',
+            [
+              { text: 'OK' },
+              {
+                text: 'Refresh',
+                onPress: () => {
+                  loadBankAccount();
+                  checkAccountStatus();
+                }
+              }
+            ]
+          );
+        } else {
+          Alert.alert('Error', 'Unable to open Stripe verification page');
+        }
+      } else {
+        const errorMsg = result.error || 'Failed to start verification process';
+        console.error('Verification failed:', errorMsg);
+        Alert.alert('Verification Failed', errorMsg);
+      }
+    } catch (error: any) {
+      console.error('Error completing verification:', error);
+      Alert.alert('Error', 'Failed to start verification process. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -782,6 +857,33 @@ export default function PaymentMethodsScreen() {
           </View>
         )}
 
+        {/* Complete Verification Section */}
+        {bankAccount && bankAccount.verification_status === 'pending' && (
+          <View style={[styles.verificationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.primary }]}>
+            <View style={styles.verificationHeader}>
+              <Ionicons name="shield-checkmark" size={24} color={theme.colors.primary} />
+              <Text style={[styles.verificationTitle, { color: theme.colors.text }]}>Complete Verification to Withdraw</Text>
+            </View>
+            <Text style={[styles.verificationDescription, { color: theme.colors.textSecondary }]}>
+              You can start earning immediately! Complete verification now to withdraw funds anytime.
+            </Text>
+            <TouchableOpacity
+              style={[styles.verificationButton, { backgroundColor: theme.colors.primary }]}
+              onPress={() => handleCompleteVerification()}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Ionicons name="shield-checkmark" size={20} color="#FFFFFF" />
+                  <Text style={styles.verificationButtonText}>Complete Verification Now</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Bank Account Reset Section */}
         {bankAccount && bankAccount.verification_status === 'pending' && (
           <View style={[styles.resetSection, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
@@ -790,10 +892,10 @@ export default function PaymentMethodsScreen() {
               <Text style={[styles.resetTitle, { color: theme.colors.text }]}>Having Issues?</Text>
             </View>
             <Text style={[styles.resetDescription, { color: theme.colors.textSecondary }]}>
-              If your Stripe Connect setup is stuck or you're experiencing verification issues, 
+              If your Stripe Connect setup is stuck or you're experiencing verification issues,
               you can reset your bank account and start fresh.
             </Text>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.resetButton, { borderColor: '#EF4444' }]}
               onPress={showResetConfirmation}
               disabled={saving}
@@ -1143,6 +1245,42 @@ const styles = StyleSheet.create({
   securityText: {
     fontSize: 12,
     lineHeight: 18,
+  },
+  verificationSection: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 2,
+  },
+  verificationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  verificationTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+    flex: 1,
+  },
+  verificationDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  verificationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  verificationButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   resetSection: {
     borderRadius: 8,

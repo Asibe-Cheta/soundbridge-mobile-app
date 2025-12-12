@@ -33,6 +33,8 @@ import { useSearch } from '../hooks/useSearch';
 import { fetchDiscoverServiceProviders } from '../services/creatorExpansionService';
 import { contentCacheService } from '../services/contentCacheService';
 import { getServiceCategoryLabel } from '../utils/serviceCategoryLabels';
+import subscriptionService from '../services/SubscriptionService';
+import RevenueCatService from '../services/RevenueCatService';
 import type { PublicProfile } from '../types/database';
 
 const { width } = Dimensions.get('window');
@@ -165,15 +167,209 @@ const DISCOVER_MOCK_ARTISTS: Creator[] = [
 const DISCOVER_MOCK_EVENTS: Event[] = [
   {
     id: 'discover-mock-event-1',
-    title: 'Virtual Music Showcase',
-    description: 'Discover fresh sounds from upcoming creators.',
-    event_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    location: 'Online',
-    category: 'indie',
-    image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-    organizer: { id: 'discover-organizer-1', username: 'event_team', display_name: 'SoundBridge Events', avatar_url: undefined },
-    genres: ['indie', 'alternative'],
-    distance_miles: 0,
+    title: 'Summer Music Festival 2025',
+    description: 'Three days of incredible live music featuring top artists and emerging talents.',
+    event_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    location: 'Hyde Park, London',
+    category: 'festival',
+    image_url: 'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=800&h=400&fit=crop',
+    organizer: { id: 'discover-organizer-1', username: 'festivalorg', display_name: 'Summer Sounds Ltd', avatar_url: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=100&h=100&fit=crop' },
+    genres: ['rock', 'indie', 'electronic'],
+    distance_miles: 2.5,
+  },
+  {
+    id: 'discover-mock-event-2',
+    title: 'Jazz Night at The Blue Note',
+    description: 'An intimate evening of smooth jazz with award-winning musicians.',
+    event_date: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+    location: 'Blue Note Club, Soho',
+    category: 'concert',
+    image_url: 'https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=800&h=400&fit=crop',
+    organizer: { id: 'discover-organizer-2', username: 'bluenote', display_name: 'Blue Note Events', avatar_url: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100&h=100&fit=crop' },
+    genres: ['jazz', 'blues'],
+    distance_miles: 5.2,
+  },
+  {
+    id: 'discover-mock-event-3',
+    title: 'Electronic Underground Showcase',
+    description: 'Underground techno and house music featuring local DJs.',
+    event_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+    location: 'Fabric, Farringdon',
+    category: 'club night',
+    image_url: 'https://images.unsplash.com/photo-1571266028243-d220c6e2e71f?w=800&h=400&fit=crop',
+    organizer: { id: 'discover-organizer-3', username: 'fabricevents', display_name: 'Fabric London', avatar_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=100&h=100&fit=crop' },
+    genres: ['electronic', 'techno', 'house'],
+    distance_miles: 8.1,
+  },
+  {
+    id: 'discover-mock-event-4',
+    title: 'Open Mic Night',
+    description: 'Share your talent! Open to all musicians, poets, and performers.',
+    event_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+    location: 'The George Tavern, Wapping',
+    category: 'open mic',
+    image_url: 'https://images.unsplash.com/photo-1598387993441-a364f854c3e1?w=800&h=400&fit=crop',
+    organizer: { id: 'discover-organizer-4', username: 'georgetavern', display_name: 'The George Tavern', avatar_url: 'https://images.unsplash.com/photo-1471478331149-c72f17e33c73?w=100&h=100&fit=crop' },
+    genres: ['acoustic', 'folk', 'spoken word'],
+    distance_miles: 3.7,
+  },
+  {
+    id: 'discover-mock-event-5',
+    title: 'Hip Hop Block Party',
+    description: 'Celebrating UK hip hop culture with live performances, DJs, and street art.',
+    event_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
+    location: 'Boxpark, Shoreditch',
+    category: 'festival',
+    image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&h=400&fit=crop',
+    organizer: { id: 'discover-organizer-5', username: 'hiphopuk', display_name: 'UK Hip Hop Collective', avatar_url: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=100&h=100&fit=crop' },
+    genres: ['hip hop', 'rap', 'grime'],
+    distance_miles: 6.3,
+  },
+  {
+    id: 'discover-mock-event-6',
+    title: 'Classical Evening at Royal Albert Hall',
+    description: 'London Philharmonic Orchestra performs Beethoven & Mozart.',
+    event_date: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
+    location: 'Royal Albert Hall, Kensington',
+    category: 'concert',
+    image_url: 'https://images.unsplash.com/photo-1465847899084-d164df4dedc6?w=800&h=400&fit=crop',
+    organizer: { id: 'discover-organizer-6', username: 'royalalberthall', display_name: 'Royal Albert Hall', avatar_url: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop' },
+    genres: ['classical', 'orchestral'],
+    distance_miles: 4.8,
+  },
+];
+
+const DISCOVER_MOCK_SERVICES: PublicProfile[] = [
+  {
+    user_id: 'service-provider-1',
+    username: 'studiomix_pro',
+    display_name: 'Studio Mix Pro',
+    bio: 'Professional mixing & mastering services. Over 10 years experience working with major labels.',
+    avatar_url: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop',
+    location: 'London, UK',
+    is_verified: true,
+    services_offered: ['Mixing', 'Mastering', 'Audio Engineering'],
+    service_category: 'audio-engineering',
+    portfolio_tracks_count: 47,
+    avg_rating: 4.9,
+  },
+  {
+    user_id: 'service-provider-2',
+    username: 'beatmaker_studios',
+    display_name: 'Beatmaker Studios',
+    bio: 'Custom beat production for hip hop, R&B, and pop artists. Fast turnaround guaranteed.',
+    avatar_url: 'https://images.unsplash.com/photo-1571902943202-507ec2618e8f?w=200&h=200&fit=crop',
+    location: 'Manchester, UK',
+    is_verified: true,
+    services_offered: ['Beat Production', 'Music Production'],
+    service_category: 'production',
+    portfolio_tracks_count: 89,
+    avg_rating: 4.8,
+  },
+  {
+    user_id: 'service-provider-3',
+    username: 'vocalcoach_emma',
+    display_name: 'Emma Clarke - Vocal Coach',
+    bio: 'Certified vocal coach specializing in pop, soul, and R&B. One-on-one and group sessions available.',
+    avatar_url: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200&h=200&fit=crop',
+    location: 'Birmingham, UK',
+    is_verified: false,
+    services_offered: ['Vocal Coaching', 'Recording Sessions'],
+    service_category: 'coaching',
+    portfolio_tracks_count: 23,
+    avg_rating: 5.0,
+  },
+  {
+    user_id: 'service-provider-4',
+    username: 'session_guitar',
+    display_name: 'Session Guitarist Pro',
+    bio: 'Professional session guitarist for hire. Rock, blues, jazz, and acoustic styles.',
+    avatar_url: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200&h=200&fit=crop',
+    location: 'Leeds, UK',
+    is_verified: true,
+    services_offered: ['Session Musician', 'Guitar Lessons'],
+    service_category: 'session-musician',
+    portfolio_tracks_count: 62,
+    avg_rating: 4.7,
+  },
+  {
+    user_id: 'service-provider-5',
+    username: 'graphics_soundwave',
+    display_name: 'Soundwave Graphics',
+    bio: 'Album artwork, music video design, and branding for artists. Let\'s bring your vision to life!',
+    avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop',
+    location: 'Bristol, UK',
+    is_verified: true,
+    services_offered: ['Graphic Design', 'Album Artwork', 'Branding'],
+    service_category: 'design',
+    portfolio_tracks_count: 112,
+    avg_rating: 4.9,
+  },
+  {
+    user_id: 'service-provider-6',
+    username: 'promo_music_uk',
+    display_name: 'Music Promo UK',
+    bio: 'Social media marketing and PR for independent musicians. Grow your fanbase organically.',
+    avatar_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop',
+    location: 'London, UK',
+    is_verified: true,
+    services_offered: ['Marketing', 'Social Media Management', 'PR'],
+    service_category: 'marketing',
+    portfolio_tracks_count: 34,
+    avg_rating: 4.6,
+  },
+];
+
+const DISCOVER_MOCK_VENUES: any[] = [
+  {
+    id: 'venue-1',
+    name: 'The Roundhouse',
+    description: 'Iconic London venue hosting live music, theatre, and arts events.',
+    location: 'Camden, London',
+    capacity: 3300,
+    image_url: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800&h=400&fit=crop',
+    types: ['Concert Hall', 'Theatre'],
+    upcoming_events: 8,
+  },
+  {
+    id: 'venue-2',
+    name: 'O2 Academy Brixton',
+    description: 'Historic music venue in the heart of Brixton, featuring top international and local acts.',
+    location: 'Brixton, London',
+    capacity: 4921,
+    image_url: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&h=400&fit=crop',
+    types: ['Concert Hall', 'Live Music'],
+    upcoming_events: 12,
+  },
+  {
+    id: 'venue-3',
+    name: 'Jazz Cafe',
+    description: 'Intimate venue specializing in jazz, soul, and R&B performances.',
+    location: 'Camden Town, London',
+    capacity: 450,
+    image_url: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=800&h=400&fit=crop',
+    types: ['Jazz Club', 'Live Music'],
+    upcoming_events: 15,
+  },
+  {
+    id: 'venue-4',
+    name: 'Fabric',
+    description: 'World-renowned nightclub known for cutting-edge electronic music and DJ sets.',
+    location: 'Farringdon, London',
+    capacity: 1600,
+    image_url: 'https://images.unsplash.com/photo-1571266028243-d220c6e2e71f?w=800&h=400&fit=crop',
+    types: ['Nightclub', 'Electronic Music'],
+    upcoming_events: 6,
+  },
+  {
+    id: 'venue-5',
+    name: 'The Garage',
+    description: 'Alternative and indie music venue showcasing emerging and established artists.',
+    location: 'Highbury, London',
+    capacity: 600,
+    image_url: 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&h=400&fit=crop',
+    types: ['Live Music', 'Indie Venue'],
+    upcoming_events: 9,
   },
 ];
 
@@ -191,14 +387,16 @@ const DISCOVER_MOCK_PLAYLISTS: Playlist[] = [
 ];
 
 function DiscoverScreen() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, session } = useAuth();
   const { play, addToQueue } = useAudioPlayer();
   const { theme } = useTheme();
   const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState<TabType>('Music');
-  const { searchQuery, setSearchQuery, searchResults, isSearching } = useSearch();
+  const { searchQuery, setSearchQuery, searchResults, isSearching, searchError } = useSearch();
   const [refreshing, setRefreshing] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [isPremium, setIsPremium] = useState(false);
+  const [isUnlimited, setIsUnlimited] = useState(false);
   const [searchFilters, setSearchFilters] = useState<SearchFilters>({
     contentType: 'all',
     genre: [],
@@ -218,6 +416,7 @@ function DiscoverScreen() {
   const [events, setEvents] = useState<Event[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [serviceProviders, setServiceProviders] = useState<PublicProfile[]>([]);
+  const [venues, setVenues] = useState<any[]>([]);
   
   // Loading state management
   const loadingManager = useRef(new LoadingStateManager()).current;
@@ -237,6 +436,123 @@ function DiscoverScreen() {
 
   const tabs: TabType[] = ['Music', 'Artists', 'Events', 'Playlists', 'Services', 'Venues'];
 
+  // Track tier check attempts to prevent repeated failed requests
+  const tierCheckAttemptedRef = useRef(false);
+  const tierCheckCooldownRef = useRef<number>(0);
+  const TIER_CHECK_COOLDOWN = 60000; // 1 minute cooldown after failed request
+
+  // Check Premium/Unlimited subscription status using RevenueCat (source of truth)
+  useEffect(() => {
+    const checkTierStatus = async () => {
+      if (!session) {
+        return;
+      }
+
+      // Check cooldown period
+      const now = Date.now();
+      if (tierCheckCooldownRef.current > now) {
+        console.log('⏳ Tier check in cooldown, skipping...');
+        return;
+      }
+
+      // Prevent multiple simultaneous checks
+      if (tierCheckAttemptedRef.current) {
+        return;
+      }
+
+      tierCheckAttemptedRef.current = true;
+
+      try {
+        console.log('🔍 Discover Screen - Checking tier status via RevenueCat...');
+
+        // Wait for RevenueCat to be ready
+        let attempts = 0;
+        while (!RevenueCatService.isReady() && attempts < 10) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          attempts++;
+        }
+
+        if (!RevenueCatService.isReady()) {
+          console.warn('⚠️ RevenueCat not ready, falling back to backend check');
+          // Fallback to backend subscription check with timeout handling
+          try {
+            const subscription = await subscriptionService.getSubscriptionStatus(session);
+            const hasPremiumAccess = subscriptionService.hasPremiumAccess(subscription);
+            const hasUnlimitedAccess = subscriptionService.hasUnlimitedAccess(subscription);
+            setIsPremium(hasPremiumAccess);
+            setIsUnlimited(hasUnlimitedAccess);
+            console.log('🔍 Discover Screen - Tier access (backend):', { premium: hasPremiumAccess, unlimited: hasUnlimitedAccess });
+            // Reset cooldown on success
+            tierCheckCooldownRef.current = 0;
+          } catch (backendError) {
+            // Handle timeout or network errors gracefully
+            const errorMessage = backendError instanceof Error ? backendError.message : String(backendError);
+            if (errorMessage.includes('timeout') || errorMessage.includes('connection')) {
+              console.warn('⚠️ Backend subscription check timed out, defaulting to FREE tier');
+              // Set cooldown to prevent repeated failed requests
+              tierCheckCooldownRef.current = now + TIER_CHECK_COOLDOWN;
+            } else {
+              console.error('❌ Error checking subscription status:', backendError);
+            }
+            // Default to free tier on any error
+            setIsPremium(false);
+            setIsUnlimited(false);
+          }
+          return;
+        }
+
+        // Use RevenueCat as source of truth
+        const customerInfo = await RevenueCatService.getCustomerInfo();
+        if (customerInfo) {
+          const tier = RevenueCatService.getUserTier(customerInfo);
+          setIsPremium(tier === 'premium' || tier === 'unlimited');
+          setIsUnlimited(tier === 'unlimited');
+          console.log('🔍 Discover Screen - Tier access (RevenueCat):', { tier, premium: tier === 'premium' || tier === 'unlimited', unlimited: tier === 'unlimited' });
+          // Reset cooldown on success
+          tierCheckCooldownRef.current = 0;
+        } else {
+          console.warn('⚠️ No customer info from RevenueCat, defaulting to FREE');
+          setIsPremium(false);
+          setIsUnlimited(false);
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes('timeout') || errorMessage.includes('connection')) {
+          console.warn('⚠️ Tier check timed out, defaulting to FREE tier');
+          // Set cooldown to prevent repeated failed requests
+          tierCheckCooldownRef.current = Date.now() + TIER_CHECK_COOLDOWN;
+        } else {
+          console.error('❌ Error checking tier status:', error);
+        }
+        setIsPremium(false);
+        setIsUnlimited(false);
+      } finally {
+        // Reset attempt flag after a delay to allow retry on session change
+        setTimeout(() => {
+          tierCheckAttemptedRef.current = false;
+        }, 1000);
+      }
+    };
+    checkTierStatus();
+  }, [session]);
+
+  // Handle search limit exceeded error
+  useEffect(() => {
+    if (searchError?.isLimitExceeded) {
+      Alert.alert(
+        'Search Limit Reached',
+        searchError.message || 'You have reached your monthly search limit. Upgrade to Premium for unlimited searches.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Upgrade to Premium',
+            onPress: () => navigation.navigate('Upgrade' as never),
+          },
+        ]
+      );
+    }
+  }, [searchError]);
+
   // Subscribe to loading state changes
   useEffect(() => {
     const unsubscribe = loadingManager.onChange(() => {
@@ -253,10 +569,7 @@ function DiscoverScreen() {
 
   // Initial cache load - show cached data immediately
   useEffect(() => {
-    if (authLoading) {
-      return;
-    }
-
+    // Don't wait for authLoading - start loading immediately
     // Load cached data immediately for instant display
     const loadCachedData = async () => {
       if (!initialCacheLoadRef.current) {
@@ -303,14 +616,11 @@ function DiscoverScreen() {
       cancellableQuery.cancel();
       loadingManager.reset();
     };
-  }, [authLoading, activeTab, user?.id]);
+  }, [activeTab, user?.id]);
 
   useFocusEffect(
     useCallback(() => {
-      if (authLoading) {
-        return;
-      }
-
+      // Don't wait for authLoading - load immediately when screen focuses
       const missingContent =
         trendingTracks.length === 0 ||
         recentTracks.length === 0 ||
@@ -321,7 +631,7 @@ function DiscoverScreen() {
       if (missingContent) {
         loadDiscoverContent();
       }
-    }, [authLoading, trendingTracks.length, recentTracks.length, featuredArtists.length, events.length, playlists.length, activeTab])
+    }, [trendingTracks.length, recentTracks.length, featuredArtists.length, events.length, playlists.length, activeTab])
   );
 
   const loadDiscoverContent = async () => {
@@ -417,12 +727,14 @@ function DiscoverScreen() {
 
         case 'Services':
           loadingManager.setLoading('services', true, 5000);
-          await loadServiceProviders();
+          // Services tab - using mock data until API is ready
+          setServiceProviders(DISCOVER_MOCK_SERVICES);
           loadingManager.setLoading('services', false, 0);
           break;
 
         case 'Venues':
-          // Venues coming soon - no loading needed
+          // Venues tab - using mock data until API is ready
+          setVenues(DISCOVER_MOCK_VENUES);
           break;
 
         default:
@@ -1116,11 +1428,29 @@ function DiscoverScreen() {
             autoCorrect={false}
             autoCapitalize="none"
           />
-          <TouchableOpacity 
-            onPress={() => setShowAdvancedFilters(true)} 
+          <TouchableOpacity
+            onPress={() => {
+              if (!isPremium && !isUnlimited) {
+                Alert.alert(
+                  'Premium Feature',
+                  'Advanced filters are available for Premium and Unlimited users. Upgrade to unlock advanced search capabilities.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Upgrade', onPress: () => navigation.navigate('Upgrade' as never) },
+                  ]
+                );
+                return;
+              }
+              setShowAdvancedFilters(true);
+            }}
             style={styles.filterButton}
           >
             <Ionicons name="options-outline" size={20} color={theme.colors.textSecondary} />
+            {!isPremium && !isUnlimited && (
+              <View style={styles.proIndicator}>
+                <Ionicons name="diamond" size={10} color="#10B981" />
+              </View>
+            )}
           </TouchableOpacity>
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
@@ -1799,15 +2129,53 @@ function DiscoverScreen() {
           <>
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Venues</Text>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Popular Venues</Text>
               </View>
-              <View style={styles.emptyState}>
-                <Ionicons name="location-outline" size={48} color={theme.colors.textSecondary} />
-                <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>Coming Soon</Text>
-                <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
-                  Venue discovery will be available in a future update!
-                </Text>
-              </View>
+              {venues.length > 0 ? (
+                <View style={styles.venuesContainer}>
+                  {venues.map((venue) => (
+                    <TouchableOpacity
+                      key={venue.id}
+                      style={[styles.venueCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                      activeOpacity={0.7}
+                    >
+                      <Image
+                        source={{ uri: venue.image_url }}
+                        style={styles.venueImage}
+                        resizeMode="cover"
+                      />
+                      <View style={styles.venueInfo}>
+                        <Text style={[styles.venueName, { color: theme.colors.text }]} numberOfLines={1}>
+                          {venue.name}
+                        </Text>
+                        <View style={styles.venueMetaRow}>
+                          <Ionicons name="location" size={14} color={theme.colors.textSecondary} />
+                          <Text style={[styles.venueLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            {venue.location}
+                          </Text>
+                        </View>
+                        <View style={styles.venueMetaRow}>
+                          <Ionicons name="people" size={14} color={theme.colors.textSecondary} />
+                          <Text style={[styles.venueCapacity, { color: theme.colors.textSecondary }]}>
+                            Capacity: {venue.capacity.toLocaleString()}
+                          </Text>
+                        </View>
+                        <View style={styles.venueMetaRow}>
+                          <Ionicons name="calendar" size={14} color={theme.colors.primary} />
+                          <Text style={[styles.venueEvents, { color: theme.colors.primary }]}>
+                            {venue.upcoming_events} upcoming events
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="location-outline" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No Venues Found</Text>
+                </View>
+              )}
             </View>
           </>
         )}
@@ -1907,6 +2275,18 @@ const styles = StyleSheet.create({
   filterButton: {
     padding: 8,
     marginLeft: 8,
+    position: 'relative',
+  },
+  proIndicator: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#10B981',
+    borderRadius: 8,
+    width: 14,
+    height: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   clearButton: {
     marginLeft: 8,
@@ -2675,6 +3055,44 @@ const styles = StyleSheet.create({
   servicePrice: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  venuesContainer: {
+    gap: 16,
+    paddingHorizontal: 16,
+  },
+  venueCard: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+  },
+  venueImage: {
+    width: '100%',
+    height: 160,
+  },
+  venueInfo: {
+    padding: 12,
+  },
+  venueName: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  venueMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  venueLocation: {
+    fontSize: 14,
+    flex: 1,
+  },
+  venueCapacity: {
+    fontSize: 14,
+  },
+  venueEvents: {
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
 

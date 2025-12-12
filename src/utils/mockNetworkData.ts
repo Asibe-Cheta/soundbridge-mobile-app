@@ -94,6 +94,36 @@ export const mockConnectionRequests: ConnectionRequest[] = [
       headline: 'Bass Player | Session Musician',
     },
   },
+  {
+    id: 'request-4',
+    from_user_id: 'user-studio-owner',
+    to_user_id: 'current-user',
+    message: 'We\'re looking for talented artists to feature in our upcoming studio showcase. Let\'s connect!',
+    status: 'pending',
+    created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+    from_user: {
+      id: 'user-studio-owner',
+      username: 'studio_master',
+      display_name: 'Studio Master Records',
+      avatar_url: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop',
+      headline: 'Recording Studio | London',
+    },
+  },
+  {
+    id: 'request-5',
+    from_user_id: 'user-festival-organizer',
+    to_user_id: 'current-user',
+    message: 'Loved your latest tracks! We\'d love to have you perform at our summer festival. Would you be interested?',
+    status: 'pending',
+    created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    from_user: {
+      id: 'user-festival-organizer',
+      username: 'summer_vibes_fest',
+      display_name: 'Summer Vibes Festival',
+      avatar_url: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=200&h=200&fit=crop',
+      headline: 'Festival Organizer | UK',
+    },
+  },
 ];
 
 export const mockConnections: Connection[] = [
@@ -160,6 +190,45 @@ export const mockConnections: Connection[] = [
       display_name: 'Elena Martinez',
       avatar_url: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200&h=200&fit=crop',
       headline: 'Jazz Vocalist & Songwriter',
+    },
+  },
+  {
+    id: 'connection-6',
+    user_id: 'current-user',
+    connected_user_id: 'user-david',
+    connected_at: new Date(Date.now() - 100 * 24 * 60 * 60 * 1000).toISOString(),
+    user: {
+      id: 'user-david',
+      username: 'david_drummer',
+      display_name: 'David Rodriguez',
+      avatar_url: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=200&h=200&fit=crop',
+      headline: 'Session Drummer | Rock & Pop',
+    },
+  },
+  {
+    id: 'connection-7',
+    user_id: 'current-user',
+    connected_user_id: 'user-lisa',
+    connected_at: new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString(),
+    user: {
+      id: 'user-lisa',
+      username: 'lisa_keys',
+      display_name: 'Lisa Anderson',
+      avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop',
+      headline: 'Pianist & Music Teacher',
+    },
+  },
+  {
+    id: 'connection-8',
+    user_id: 'current-user',
+    connected_user_id: 'user-michael',
+    connected_at: new Date(Date.now() - 150 * 24 * 60 * 60 * 1000).toISOString(),
+    user: {
+      id: 'user-michael',
+      username: 'michael_strings',
+      display_name: 'Michael Brown',
+      avatar_url: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&h=200&fit=crop',
+      headline: 'Violinist | Classical & Contemporary',
     },
   },
 ];

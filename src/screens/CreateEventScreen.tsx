@@ -20,6 +20,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 
 interface EventFormData {
   title: string;
@@ -33,6 +34,9 @@ interface EventFormData {
   price_ngn: string;
   max_attendees: string;
   image_url: string;
+  latitude: number | null;
+  longitude: number | null;
+  country: string;
 }
 
 const EVENT_CATEGORIES = [
@@ -58,6 +62,7 @@ export default function CreateEventScreen() {
 
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [geocoding, setGeocoding] = useState(false);
   const [formData, setFormData] = useState<EventFormData>({
     title: '',
     description: '',
@@ -70,10 +75,92 @@ export default function CreateEventScreen() {
     price_ngn: '',
     max_attendees: '',
     image_url: '',
+    latitude: null,
+    longitude: null,
+    country: '',
   });
 
   const handleInputChange = (field: keyof EventFormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const geocodeLocation = async (locationText: string) => {
+    if (!locationText.trim()) return;
+
+    try {
+      setGeocoding(true);
+      console.log('🌍 Geocoding location:', locationText);
+
+      // Geocode the location string to get coordinates
+      const results = await Location.geocodeAsync(locationText);
+
+      if (results && results.length > 0) {
+        const { latitude, longitude } = results[0];
+        console.log('✅ Geocoded coordinates:', { latitude, longitude });
+
+        // Reverse geocode to get country
+        const reverseGeocode = await Location.reverseGeocodeAsync({ latitude, longitude });
+        const country = reverseGeocode[0]?.country || '';
+        console.log('🌍 Detected country:', country);
+
+        setFormData(prev => ({
+          ...prev,
+          latitude,
+          longitude,
+          country,
+        }));
+
+        // Show confirmation to user
+        Alert.alert(
+          'Location Found',
+          `Coordinates: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}\nCountry: ${country}`,
+          [{ text: 'OK' }]
+        );
+      } else {
+        console.warn('⚠️ No geocoding results found for:', locationText);
+        Alert.alert(
+          'Location Not Found',
+          'Could not find coordinates for this location. Please check the location name and try again, or tap "Use Anyway" to continue without coordinates.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Use Anyway',
+              onPress: () => {
+                // Clear coordinates but keep location text
+                setFormData(prev => ({
+                  ...prev,
+                  latitude: null,
+                  longitude: null,
+                  country: '',
+                }));
+              },
+            },
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('❌ Error geocoding location:', error);
+      Alert.alert(
+        'Geocoding Error',
+        'Failed to get coordinates for this location. You can still create the event without precise coordinates.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Continue',
+            onPress: () => {
+              setFormData(prev => ({
+                ...prev,
+                latitude: null,
+                longitude: null,
+                country: '',
+              }));
+            },
+          },
+        ]
+      );
+    } finally {
+      setGeocoding(false);
+    }
   };
 
   const pickImage = async () => {
@@ -191,6 +278,20 @@ export default function CreateEventScreen() {
       }
       if (formData.image_url) {
         eventData.image_url = formData.image_url;
+      }
+
+      // Add geocoded coordinates if available
+      if (formData.latitude !== null && formData.longitude !== null) {
+        eventData.latitude = formData.latitude;
+        eventData.longitude = formData.longitude;
+        console.log('📍 Including coordinates:', { lat: formData.latitude, lng: formData.longitude });
+      } else {
+        console.warn('⚠️ Creating event without coordinates - proximity features will not work');
+      }
+
+      // Add country if available
+      if (formData.country) {
+        eventData.country = formData.country;
       }
 
       // Call API endpoint
@@ -334,13 +435,37 @@ export default function CreateEventScreen() {
           {/* Location */}
           <View style={styles.inputSection}>
             <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Location *</Text>
-            <TextInput
-              style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-              placeholder="City, Country"
-              placeholderTextColor={theme.colors.textSecondary}
-              value={formData.location}
-              onChangeText={(value) => handleInputChange('location', value)}
-            />
+            <View style={styles.locationInputContainer}>
+              <TextInput
+                style={[styles.locationInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                placeholder="City, Country (e.g., Luton, UK)"
+                placeholderTextColor={theme.colors.textSecondary}
+                value={formData.location}
+                onChangeText={(value) => handleInputChange('location', value)}
+              />
+              <TouchableOpacity
+                style={[styles.geocodeButton, { backgroundColor: theme.colors.primary}]}
+                onPress={() => geocodeLocation(formData.location)}
+                disabled={!formData.location.trim() || geocoding}
+              >
+                {geocoding ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="location" size={20} color="#FFFFFF" />
+                )}
+              </TouchableOpacity>
+            </View>
+            {formData.latitude !== null && formData.longitude !== null && (
+              <View style={[styles.coordinatesDisplay, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border}]}>
+                <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                <Text style={[styles.coordinatesText, { color: theme.colors.textSecondary}]}>
+                  Coordinates: {formData.latitude.toFixed(4)}, {formData.longitude.toFixed(4)}
+                </Text>
+              </View>
+            )}
+            <Text style={[styles.helperText, { color: theme.colors.textSecondary}]}>
+              Tap the location icon to get precise coordinates for proximity features
+            </Text>
           </View>
 
           {/* Venue */}
@@ -574,5 +699,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
+  },
+  locationInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  locationInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+  },
+  geocodeButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  coordinatesDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  coordinatesText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  helperText: {
+    fontSize: 12,
+    marginTop: 6,
+    fontStyle: 'italic',
   },
 });

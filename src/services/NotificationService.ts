@@ -114,12 +114,26 @@ class NotificationService {
   // ===== INITIALIZATION =====
 
   async initialize(): Promise<boolean> {
+    // Prevent multiple simultaneous initializations
+    if (this.isInitializing) {
+      console.log('⏸️ Notification service initialization already in progress');
+      return false;
+    }
+
+    // Prevent re-initialization if already initialized
+    if (this.hasInitialized) {
+      console.log('✅ Notification service already initialized');
+      return true;
+    }
+
     try {
+      this.isInitializing = true;
       console.log('🔔 Initializing notification service...');
 
       // Check if device supports notifications
       if (!Device.isDevice) {
         console.log('⚠️ Push notifications only work on physical devices');
+        this.isInitializing = false;
         return false;
       }
 
@@ -162,9 +176,12 @@ class NotificationService {
       await this.registerPushToken();
 
       console.log('✅ Notification service initialized successfully');
+      this.hasInitialized = true;
+      this.isInitializing = false;
       return true;
     } catch (error) {
       console.error('❌ Error initializing notification service:', error);
+      this.isInitializing = false;
       return false;
     }
   }
@@ -274,8 +291,25 @@ class NotificationService {
     }
   }
 
+  // Rate limiting for geocoding
+  private lastGeocodeAttempt: number = 0;
+  private geocodeRateLimitMs: number = 60000; // 1 minute between attempts
+  private geocodeRateLimited: boolean = false;
+
   async requestLocationPermission(): Promise<UserLocation | null> {
     try {
+      // Check rate limit
+      const now = Date.now();
+      if (this.geocodeRateLimited) {
+        const timeSinceLastAttempt = now - this.lastGeocodeAttempt;
+        if (timeSinceLastAttempt < this.geocodeRateLimitMs) {
+          console.log('⏸️ Geocoding rate limited, skipping request');
+          return null;
+        }
+        // Reset rate limit flag after cooldown period
+        this.geocodeRateLimited = false;
+      }
+
       const { status } = await Location.requestForegroundPermissionsAsync();
       
       if (status !== 'granted') {
@@ -283,17 +317,19 @@ class NotificationService {
         return null;
       }
 
-      const location = await Location.getCurrentPositionAsync({});
-      const reverseGeocode = await Location.reverseGeocodeAsync({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      });
+      this.lastGeocodeAttempt = now;
 
-      if (reverseGeocode.length > 0) {
-        const place = reverseGeocode[0];
+      const location = await Location.getCurrentPositionAsync({});
+      
+      // Check if we have cached location data to avoid geocoding
+      const cachedLocationKey = `location_${location.coords.latitude.toFixed(2)}_${location.coords.longitude.toFixed(2)}`;
+      const cachedLocation = await AsyncStorage.getItem(cachedLocationKey);
+      
+      if (cachedLocation) {
+        const parsed = JSON.parse(cachedLocation);
         return {
-          state: place.region || place.city || 'Unknown',
-          country: place.country || 'Unknown',
+          state: parsed.state || 'Unknown',
+          country: parsed.country || 'Unknown',
           source: 'gps',
           coordinates: {
             latitude: location.coords.latitude,
@@ -302,9 +338,56 @@ class NotificationService {
         };
       }
 
+      // Only attempt geocoding if not rate limited
+      try {
+        const reverseGeocode = await Location.reverseGeocodeAsync({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+
+        if (reverseGeocode.length > 0) {
+          const place = reverseGeocode[0];
+          const result = {
+            state: place.region || place.city || 'Unknown',
+            country: place.country || 'Unknown',
+            source: 'gps',
+            coordinates: {
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+            },
+          };
+
+          // Cache the result
+          await AsyncStorage.setItem(cachedLocationKey, JSON.stringify({
+            state: result.state,
+            country: result.country,
+          }));
+
+          return result;
+        }
+      } catch (geocodeError: any) {
+        // Check if it's a rate limit error
+        if (geocodeError?.message?.includes('rate limit') || geocodeError?.message?.includes('too many requests')) {
+          console.warn('⚠️ Geocoding rate limit exceeded, will retry after cooldown');
+          this.geocodeRateLimited = true;
+          this.lastGeocodeAttempt = now;
+          // Don't log as error, just return null
+          return null;
+        }
+        // For other errors, log but don't set rate limit
+        console.warn('⚠️ Geocoding failed (non-rate-limit error):', geocodeError?.message);
+      }
+
       return null;
-    } catch (error) {
-      console.error('❌ Error getting GPS location:', error);
+    } catch (error: any) {
+      // Only log non-rate-limit errors
+      if (!error?.message?.includes('rate limit') && !error?.message?.includes('too many requests')) {
+        console.error('❌ Error getting GPS location:', error);
+      } else {
+        console.warn('⚠️ Geocoding rate limited, skipping');
+        this.geocodeRateLimited = true;
+        this.lastGeocodeAttempt = Date.now();
+      }
       return null;
     }
   }

@@ -4296,7 +4296,7 @@ export default function OnboardingScreen() {
               <View style={styles.tierFeatures}>
                 <View style={styles.tierFeatureItem}>
                   <Ionicons name="checkmark" size={16} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>10 uploads per month</Text>
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>7 uploads per month</Text>
                 </View>
                 <View style={styles.tierFeatureItem}>
                   <Ionicons name="checkmark" size={16} color="#10B981" />

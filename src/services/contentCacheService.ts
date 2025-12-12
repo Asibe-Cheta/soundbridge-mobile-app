@@ -15,6 +15,7 @@ const CACHE_DURATIONS = {
   PROFILE: 5 * 60 * 1000,       // 5 minutes - profile data
   ARTISTS: 10 * 60 * 1000,      // 10 minutes - artist data
   PLAYLISTS: 10 * 60 * 1000,    // 10 minutes - playlists
+  ANALYTICS: 5 * 60 * 1000,     // 5 minutes - analytics data
 } as const;
 
 type CacheType = keyof typeof CACHE_DURATIONS;
@@ -26,6 +27,8 @@ interface CacheEntry<T> {
 }
 
 class ContentCacheService {
+  private savingKeys = new Set<string>();
+
   /**
    * Get cached content
    */
@@ -61,8 +64,17 @@ class ContentCacheService {
    * Save content to cache
    */
   async saveCache<T>(type: CacheType, key: string, data: T): Promise<void> {
+    const cacheKey = `cache_${type}_${key}`;
+    
+    // Prevent concurrent saves of the same key
+    if (this.savingKeys.has(cacheKey)) {
+      console.warn(`⚠️ Already saving ${type} cache (key: ${key}), skipping duplicate save`);
+      return;
+    }
+
+    this.savingKeys.add(cacheKey);
+
     try {
-      const cacheKey = `cache_${type}_${key}`;
       const duration = CACHE_DURATIONS[type];
       const timestamp = Date.now();
 
@@ -72,10 +84,35 @@ class ContentCacheService {
         expiresAt: timestamp + duration,
       };
 
-      await AsyncStorage.setItem(cacheKey, JSON.stringify(entry));
-      console.log(`💾 Cached ${type} (key: ${key})`);
+      // Safely stringify with circular reference detection
+      let serialized: string;
+      try {
+        serialized = JSON.stringify(entry);
+      } catch (stringifyError) {
+        // If stringify fails (circular reference or too large), log and skip caching
+        console.warn(`⚠️ Cannot cache ${type} (key: ${key}):`, stringifyError instanceof Error ? stringifyError.message : 'Serialization failed');
+        return;
+      } finally {
+        this.savingKeys.delete(cacheKey);
+      }
+
+      // Check size limit (AsyncStorage has ~6MB limit, we'll use 2MB as safe limit)
+      // Use UTF-16 encoding size (2 bytes per character for most characters)
+      const sizeInBytes = serialized.length * 2;
+      const maxSize = 2 * 1024 * 1024; // 2MB
+      
+      if (sizeInBytes > maxSize) {
+        console.warn(`⚠️ Cache data too large (${Math.round(sizeInBytes / 1024)}KB), skipping cache for ${type} (key: ${key})`);
+        return;
+      }
+
+      await AsyncStorage.setItem(cacheKey, serialized);
+      console.log(`💾 Cached ${type} (key: ${key}, size: ${Math.round(sizeInBytes / 1024)}KB)`);
     } catch (error) {
-      console.error(`❌ Error saving ${type} cache:`, error);
+      // Prevent infinite recursion by not calling saveCache again
+      console.error(`❌ Error saving ${type} cache (key: ${key}):`, error instanceof Error ? error.message : String(error));
+    } finally {
+      this.savingKeys.delete(cacheKey);
     }
   }
 
@@ -115,6 +152,40 @@ class ContentCacheService {
     const cached = await this.getCached(type, key);
     return cached !== null;
   }
+
+  /**
+   * Generic getCache method for backward compatibility with AnalyticsDashboardScreen
+   * Uses ANALYTICS type by default
+   */
+  async getCache<T>(key: string): Promise<{ data: T; timestamp: number } | null> {
+    try {
+      const cacheKey = `cache_ANALYTICS_${key}`;
+      const cachedJson = await AsyncStorage.getItem(cacheKey);
+      
+      if (!cachedJson) {
+        return null;
+      }
+      
+      const entry: CacheEntry<T> = JSON.parse(cachedJson);
+      const now = Date.now();
+      
+      // Check if cache is expired
+      if (now > entry.expiresAt) {
+        console.log(`📦 ANALYTICS cache expired for key: ${key}`);
+        await AsyncStorage.removeItem(cacheKey);
+        return null;
+      }
+      
+      return {
+        data: entry.data,
+        timestamp: entry.timestamp,
+      };
+    } catch (error) {
+      console.error(`❌ Error loading ANALYTICS cache:`, error);
+      return null;
+    }
+  }
+
 }
 
 export const contentCacheService = new ContentCacheService();

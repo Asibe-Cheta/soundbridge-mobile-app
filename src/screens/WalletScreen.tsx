@@ -19,6 +19,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService, WalletBalance, WalletTransaction } from '../services/WalletService';
 import { currencyService } from '../services/CurrencyService';
+import { payoutService, CreatorRevenue } from '../services/PayoutService';
 
 export default function WalletScreen() {
   const navigation = useNavigation();
@@ -27,6 +28,7 @@ export default function WalletScreen() {
   
   const [walletData, setWalletData] = useState<WalletBalance | null>(null);
   const [recentTransactions, setRecentTransactions] = useState<WalletTransaction[]>([]);
+  const [creatorRevenue, setCreatorRevenue] = useState<CreatorRevenue | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -44,17 +46,20 @@ export default function WalletScreen() {
       setLoading(true);
       console.log('📱 Loading wallet data...');
 
-      // Load wallet balance and recent transactions in parallel
-      const [balanceResult, transactionsResult] = await Promise.all([
+      // Load wallet balance, recent transactions, and creator revenue in parallel
+      const [balanceResult, transactionsResult, revenueResult] = await Promise.all([
         walletService.getWalletBalanceSafe(session),
-        walletService.getWalletTransactionsSafe(session, 5, 0)
+        walletService.getWalletTransactionsSafe(session, 5, 0),
+        payoutService.getCreatorRevenue(session).catch(() => null), // Graceful fallback if no revenue yet
       ]);
 
       setWalletData(balanceResult);
       setRecentTransactions(transactionsResult.transactions);
+      setCreatorRevenue(revenueResult);
 
       console.log('💰 Wallet balance:', balanceResult);
       console.log('📊 Recent transactions:', transactionsResult.transactions.length);
+      console.log('💵 Creator revenue:', revenueResult);
     } catch (error) {
       console.error('Error loading wallet data:', error);
       Alert.alert('Error', 'Failed to load wallet data. Please try again.');
@@ -168,14 +173,14 @@ export default function WalletScreen() {
             <Ionicons name="wallet" size={28} color="#8B5CF6" />
             <Text style={[styles.walletTitle, { color: theme.colors.text }]}>Digital Wallet</Text>
           </View>
-          
+
           <View style={styles.balanceContainer}>
             <Text style={[styles.balanceLabel, { color: theme.colors.textSecondary }]}>Available Balance</Text>
             <Text style={[styles.balanceAmount, { color: theme.colors.text }]}>
               {walletData ? currencyService.formatAmount(walletData.balance, walletData.currency) : '$0.00'}
             </Text>
           </View>
-          
+
           <View style={styles.statusContainer}>
             <Text style={[styles.statusLabel, { color: theme.colors.textSecondary }]}>Status</Text>
             <View style={styles.statusBadge}>
@@ -188,7 +193,7 @@ export default function WalletScreen() {
 
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.actionButton, { backgroundColor: theme.colors.primary }]}
               onPress={navigateToWithdrawal}
               disabled={!walletData || walletData.balance <= 0}
@@ -196,8 +201,8 @@ export default function WalletScreen() {
               <Ionicons name="arrow-up-circle" size={20} color="#FFFFFF" />
               <Text style={styles.actionButtonText}>Withdraw</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={[styles.actionButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderWidth: 1 }]}
               onPress={navigateToTransactionHistory}
             >
@@ -206,6 +211,56 @@ export default function WalletScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Creator Revenue Card */}
+        {creatorRevenue && (
+          <View style={[styles.revenueCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.primary }]}>
+            <View style={styles.revenueHeader}>
+              <Ionicons name="trending-up" size={24} color={theme.colors.primary} />
+              <Text style={[styles.revenueTitle, { color: theme.colors.text }]}>Creator Earnings</Text>
+            </View>
+
+            <View style={styles.revenueStats}>
+              <View style={styles.revenueStat}>
+                <Text style={[styles.revenueStatLabel, { color: theme.colors.textSecondary }]}>Total Earned</Text>
+                <Text style={[styles.revenueStatAmount, { color: theme.colors.success }]}>
+                  {currencyService.formatAmount(creatorRevenue.total_earned, creatorRevenue.currency)}
+                </Text>
+              </View>
+
+              <View style={styles.revenueStat}>
+                <Text style={[styles.revenueStatLabel, { color: theme.colors.textSecondary }]}>Available Balance</Text>
+                <Text style={[styles.revenueStatAmount, { color: theme.colors.primary }]}>
+                  {currencyService.formatAmount(creatorRevenue.pending_balance, creatorRevenue.currency)}
+                </Text>
+              </View>
+
+              <View style={styles.revenueStat}>
+                <Text style={[styles.revenueStatLabel, { color: theme.colors.textSecondary }]}>Lifetime Payouts</Text>
+                <Text style={[styles.revenueStatAmount, { color: theme.colors.text }]}>
+                  {currencyService.formatAmount(creatorRevenue.lifetime_payout, creatorRevenue.currency)}
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.requestPayoutButton, { backgroundColor: theme.colors.primary }]}
+              onPress={navigateToWithdrawal}
+              disabled={creatorRevenue.pending_balance < 25}
+            >
+              <Ionicons name="cash" size={20} color="#FFFFFF" />
+              <Text style={styles.requestPayoutButtonText}>
+                {creatorRevenue.pending_balance >= 25 ? 'Request Payout' : 'Minimum $25 Required'}
+              </Text>
+            </TouchableOpacity>
+
+            {creatorRevenue.pending_balance < 25 && (
+              <Text style={[styles.minPayoutText, { color: theme.colors.textSecondary }]}>
+                Minimum payout amount is $25.00 USD. Keep earning!
+              </Text>
+            )}
+          </View>
+        )}
 
         {/* Recent Transactions */}
         <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
@@ -533,5 +588,66 @@ const styles = StyleSheet.create({
   featureItem: {
     fontSize: 12,
     lineHeight: 18,
+  },
+  revenueCard: {
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+    borderWidth: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  revenueHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  revenueTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginLeft: 12,
+  },
+  revenueStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  revenueStat: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  revenueStatLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  revenueStatAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  requestPayoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    gap: 8,
+    marginTop: 8,
+  },
+  requestPayoutButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  minPayoutText: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 8,
   },
 });

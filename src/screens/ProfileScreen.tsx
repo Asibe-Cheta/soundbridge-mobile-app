@@ -41,6 +41,9 @@ import ConnectionsPreview from '../components/ConnectionsPreview';
 import RecentActivity from '../components/RecentActivity';
 import { mockConnections } from '../utils/mockNetworkData';
 import { uploadImage } from '../services/UploadService';
+import { profileService } from '../services/ProfileService';
+import { walletService } from '../services/WalletService';
+import { payoutService } from '../services/PayoutService';
 
 const { width } = Dimensions.get('window');
 
@@ -51,6 +54,12 @@ interface UserProfile {
   bio?: string;
   avatar_url?: string;
   banner_url?: string;
+  professional_headline?: string;
+  location?: string;
+  website?: string;
+  phone?: string;
+  genres?: string[];
+  experience_level?: string;
   followers_count: number;
   following_count: number;
   tracks_count: number;
@@ -121,10 +130,8 @@ export default function ProfileScreen() {
   }, []);
 
   useEffect(() => {
-    if (authLoading) {
-      return;
-    }
-
+    // Start loading data as soon as user is available
+    // Don't wait for authLoading to finish
     if (user?.id) {
       loadProfileData();
     }
@@ -134,7 +141,7 @@ export default function ProfileScreen() {
       cancellableQuery.cancel();
       loadingManager.reset();
     };
-  }, [authLoading, user?.id]);
+  }, [user?.id]);
 
   const checkBiometricAvailability = async () => {
     const capability = await BiometricAuth.checkBiometricAvailability();
@@ -253,6 +260,57 @@ export default function ProfileScreen() {
           timeout: 5000,
           fallback: [],
         },
+        tips: {
+          name: 'tips',
+          query: async () => {
+            // Use wallet service to get tip transactions (same source as WalletScreen)
+            if (!session) {
+              return { data: 0, error: null };
+            }
+
+            try {
+              // Get all transactions and filter for tip_received
+              const transactionsResult = await walletService.getWalletTransactionsSafe(session, 100, 0);
+              const tipTransactions = transactionsResult.transactions.filter(
+                (t) => t.transaction_type === 'tip_received' && t.status === 'completed'
+              );
+
+              // Sum up all tip amounts
+              const totalTips = tipTransactions.reduce((sum: number, transaction) => {
+                return sum + (transaction.amount || 0);
+              }, 0);
+
+              console.log(`💰 Total tips from wallet: $${totalTips.toFixed(2)} (${tipTransactions.length} transactions)`);
+              return { data: totalTips, error: null };
+            } catch (error) {
+              console.warn('Error fetching tips from wallet:', error);
+              return { data: 0, error: error instanceof Error ? error : new Error(String(error)) };
+            }
+          },
+          timeout: 5000,
+          fallback: 0,
+        },
+        creatorRevenue: {
+          name: 'creatorRevenue',
+          query: async () => {
+            // Use payout service to get creator revenue (same source as WalletScreen)
+            if (!session) {
+              return { data: null, error: null };
+            }
+
+            try {
+              const revenue = await payoutService.getCreatorRevenue(session);
+              console.log(`💰 Creator revenue: $${revenue?.total_earned?.toFixed(2) || '0.00'}`);
+              return { data: revenue, error: null };
+            } catch (error) {
+              // Graceful fallback - revenue might not exist yet
+              console.warn('Error fetching creator revenue (may not exist yet):', error);
+              return { data: null, error: error instanceof Error ? error : new Error(String(error)) };
+            }
+          },
+          timeout: 5000,
+          fallback: null,
+        },
       });
 
       // Process profile data
@@ -263,6 +321,12 @@ export default function ProfileScreen() {
       const followingCount = results.following ?? 0;
       const tracksCount = results.tracksCount ?? 0;
       const tracksData = results.tracks?.data || results.tracks || [];
+      const totalTipsReceived = results.tips?.data ?? results.tips ?? 0;
+      const creatorRevenue = results.creatorRevenue?.data ?? null;
+      
+      // Use creator revenue for total earnings (same as WalletScreen)
+      // Falls back to tips if creator revenue not available
+      const totalEarnings = creatorRevenue?.total_earned ?? totalTipsReceived ?? 0;
 
       console.log('📊 Profile counts - Followers:', followersCount, 'Following:', followingCount, 'Tracks:', tracksCount);
 
@@ -277,6 +341,12 @@ export default function ProfileScreen() {
           bio: profileData.bio,
           avatar_url: profileData.avatar_url,
           banner_url: profileData.banner_url,
+          professional_headline: profileData.professional_headline,
+          location: profileData.location,
+          website: profileData.website,
+          phone: profileData.phone,
+          genres: profileData.genres,
+          experience_level: profileData.experience_level,
           followers_count: followersCount,
           following_count: followingCount,
           tracks_count: tracksCount,
@@ -361,15 +431,14 @@ export default function ProfileScreen() {
         // Calculate stats
         const totalPlays = transformedTracks.reduce((sum, track) => sum + (track.play_count || 0), 0);
         const totalLikes = transformedTracks.reduce((sum, track) => sum + (track.likes_count || 0), 0);
-        const estimatedEarnings = totalPlays * 0.001;
-        
+
         setStats({
           total_plays: totalPlays,
           total_likes: totalLikes,
-          total_tips_received: 0,
-          total_earnings: estimatedEarnings,
+          total_tips_received: totalTipsReceived,
+          total_earnings: totalEarnings, // Use creator revenue total_earned (includes tips + other earnings)
           monthly_plays: Math.floor(totalPlays * 0.3),
-          monthly_earnings: Math.floor(estimatedEarnings * 0.3),
+          monthly_earnings: Math.floor(totalEarnings * 0.3),
         });
       } else {
         console.log('ℹ️ No user tracks found');
@@ -378,10 +447,10 @@ export default function ProfileScreen() {
         setStats({
           total_plays: 0,
           total_likes: 0,
-          total_tips_received: 0,
-          total_earnings: 0,
+          total_tips_received: totalTipsReceived,
+          total_earnings: totalEarnings, // Use creator revenue total_earned (includes tips + other earnings)
           monthly_plays: 0,
-          monthly_earnings: 0,
+          monthly_earnings: Math.floor(totalEarnings * 0.3),
         });
       }
 
@@ -392,10 +461,10 @@ export default function ProfileScreen() {
           stats: stats || {
             total_plays: 0,
             total_likes: 0,
-            total_tips_received: 0,
-            total_earnings: 0,
+            total_tips_received: totalTipsReceived,
+            total_earnings: totalEarnings, // Use creator revenue total_earned (includes tips + other earnings)
             monthly_plays: 0,
-            monthly_earnings: 0,
+            monthly_earnings: Math.floor(totalEarnings * 0.3),
           },
           tracks: userTracks,
         });
@@ -458,20 +527,23 @@ export default function ProfileScreen() {
       display_name: profile?.display_name || '',
       bio: profile?.bio || '',
       username: profile?.username || '',
+      professional_headline: profile?.professional_headline || '',
+      location: profile?.location || '',
+      website: profile?.website || '',
+      phone: profile?.phone || '',
     });
   };
 
   const handleSaveProfile = async () => {
-    if (!user?.id || !editingProfile) return;
+    if (!user?.id || !editingProfile || !session) return;
     
     try {
       console.log('🔧 Saving profile changes...');
-      const { data, error } = await supabase
-        .from('profiles')
-        .update(editingProfile)
-        .eq('id', user.id);
       
-      if (!error) {
+      // Use ProfileService to update profile via API
+      const result = await profileService.updateProfile(user.id, editingProfile, session);
+      
+      if (result.success) {
         console.log('✅ Profile updated successfully');
         // Update local state
         setProfile(prev => prev ? { ...prev, ...editingProfile } : null);
@@ -480,8 +552,8 @@ export default function ProfileScreen() {
         setIsEditing(false);
         Alert.alert('Success', 'Profile updated successfully!');
       } else {
-        console.error('Failed to update profile:', error);
-        Alert.alert('Error', 'Failed to update profile. Please try again.');
+        console.error('Failed to update profile:', result.error);
+        Alert.alert('Error', result.error || 'Failed to update profile. Please try again.');
       }
     } catch (error) {
       console.error('Error updating profile:', error);
@@ -565,10 +637,9 @@ export default function ProfileScreen() {
           type: mimeType
         };
 
-        // Upload to /api/upload/avatar endpoint (as documented by web app team in ONBOARDING_FLOW_ANALYSIS.md)
+        // Upload to /api/upload/avatar endpoint using ProfileService
         console.log('📤 Uploading profile picture...');
         
-        const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
           Alert.alert('Error', 'Not authenticated');
           setAvatarUploading(false);
@@ -576,109 +647,30 @@ export default function ProfileScreen() {
         }
 
         // Verify user ID is available
-        const userId = user?.id || session.user?.id;
+        const userId = user?.id;
         if (!userId) {
-          console.error('❌ User ID not available:', { user, session });
+          console.error('❌ User ID not available');
           Alert.alert('Error', 'User information not available. Please try again.');
           return;
         }
 
-        // Create FormData for avatar upload
-        // ⚠️ CRITICAL: Field name must be 'userId' (camelCase), not 'user_id' (as per web app team response)
-        const formData = new FormData();
-        const filename = file.name;
+        // Use ProfileService to upload avatar
+        const uploadResult = await profileService.uploadAvatar(userId, asset.uri, session);
         
-        // React Native FormData format for file uploads
-        // Field name must be 'file', not 'image'
-        formData.append('file', {
-          uri: Platform.OS === 'ios' ? asset.uri.replace('file://', '') : asset.uri,
-          name: filename,
-          type: mimeType,
-        } as any);
-
-        // ✅ CORRECT: Use camelCase 'userId' (not 'user_id')
-        formData.append('userId', userId);
-
-        // Upload to avatar endpoint (documented in ONBOARDING_FLOW_ANALYSIS.md)
-        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://www.soundbridge.live';
-        const response = await fetch(`${API_BASE_URL}/api/upload/avatar`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session.access_token}`,
-            // Don't set Content-Type - let fetch set it with boundary for FormData
-          },
-          body: formData,
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('❌ Upload error response:', errorText);
-          let error;
-          try {
-            error = JSON.parse(errorText);
-          } catch {
-            error = { error: errorText || 'Failed to upload profile picture' };
-          }
-          const errorMessage = error.error || error.message || error.details || 'Failed to upload profile picture';
-          console.error('❌ Error uploading avatar:', {
-            status: response.status,
-            statusText: response.statusText,
-            error: errorMessage,
-            fullError: error,
-          });
-          Alert.alert('Upload Failed', errorMessage);
-          return;
+        if (uploadResult.success && uploadResult.avatarUrl) {
+          console.log('✅ Avatar uploaded successfully:', uploadResult.avatarUrl);
+          
+          // Update local profile state
+          setProfile(prev => prev ? { ...prev, avatar_url: uploadResult.avatarUrl } : null);
+          
+          // Refresh user data across the app
+          await refreshUser();
+          
+          Alert.alert('Success', 'Profile picture updated successfully!');
+        } else {
+          console.error('❌ Avatar upload failed:', uploadResult.error);
+          Alert.alert('Error', uploadResult.error || 'Failed to upload profile picture');
         }
-
-        const data = await response.json();
-        console.log('✅ Avatar upload response:', JSON.stringify(data, null, 2));
-
-        // Check for errors first
-        if (!data.success) {
-          const errorMessage = data.error || 'Failed to upload profile picture';
-          console.error('❌ Avatar upload failed:', errorMessage);
-          Alert.alert('Upload Failed', errorMessage);
-          return;
-        }
-
-        // Extract URL from response (per web app team: { success: true, url: "..." })
-        const imageUrl = data.url;
-        if (!imageUrl) {
-          console.error('❌ No URL in avatar upload response:', data);
-          Alert.alert('Upload Failed', 'Upload succeeded but no URL returned. Please try again.');
-          return;
-        }
-
-        console.log('✅ Profile picture uploaded successfully:', imageUrl);
-
-        // Update profile with new avatar URL
-        console.log('📝 Updating profile with new avatar URL:', imageUrl);
-        const { error: updateError } = await supabase
-          .from('profiles')
-          .update({ avatar_url: imageUrl })
-          .eq('id', user.id);
-
-        if (updateError) {
-          console.error('❌ Error updating profile:', updateError);
-          Alert.alert('Error', 'Profile picture uploaded but failed to update profile. Please try again.');
-          return;
-        }
-
-        // Update local profile state immediately so UI updates instantly
-        if (profile) {
-          setProfile({
-            ...profile,
-            avatar_url: imageUrl,
-          });
-        }
-
-        // Refresh user profile in context and reload profile data
-        await refreshUser();
-        // Force refresh profile data to ensure everything is in sync
-        await loadProfileData(true);
-        
-        Alert.alert('Success', 'Profile picture updated successfully!');
-        console.log('✅ Profile picture updated successfully');
       }
     } catch (error) {
       console.error('Error updating avatar:', error);
@@ -1096,7 +1088,10 @@ export default function ProfileScreen() {
         )}
         
         {userTracks.length > 5 && (
-          <TouchableOpacity style={[styles.viewAllButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <TouchableOpacity
+            style={[styles.viewAllButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+            onPress={() => navigation.navigate('TracksList' as never, { userId: profile?.id } as never)}
+          >
             <Text style={[styles.viewAllText, { color: theme.colors.primary }]}>View All Tracks</Text>
             <Ionicons name="arrow-forward" size={16} color={theme.colors.primary} />
           </TouchableOpacity>
@@ -1132,14 +1127,7 @@ export default function ProfileScreen() {
           <Ionicons name="heart" size={20} color={theme.colors.primary} />
           <View style={styles.earningsItemContent}>
             <Text style={[styles.earningsItemTitle, { color: theme.colors.text }]}>Tips Received</Text>
-            <Text style={[styles.earningsItemAmount, { color: theme.colors.text }]}>${stats?.total_tips_received || 0}</Text>
-          </View>
-        </View>
-        <View style={[styles.earningsItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-          <Ionicons name="play" size={20} color={theme.colors.success} />
-          <View style={styles.earningsItemContent}>
-            <Text style={[styles.earningsItemTitle, { color: theme.colors.text }]}>Play Rewards</Text>
-            <Text style={[styles.earningsItemAmount, { color: theme.colors.text }]}>${((stats?.total_plays || 0) * 0.001).toFixed(2)}</Text>
+            <Text style={[styles.earningsItemAmount, { color: theme.colors.text }]}>${(stats?.total_tips_received || 0).toFixed(2)}</Text>
           </View>
         </View>
         <View style={[styles.earningsItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
@@ -1180,6 +1168,51 @@ export default function ProfileScreen() {
 
   const renderSettingsTab = () => (
     <View style={styles.tabContent}>
+      {/* Professional Sections */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Professional Profile</Text>
+        <TouchableOpacity 
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
+          onPress={() => navigation.navigate('ExperienceManagement' as never)}
+        >
+          <Ionicons name="briefcase-outline" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Experience</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
+          onPress={() => navigation.navigate('SkillsManagement' as never)}
+        >
+          <Ionicons name="star-outline" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Skills</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
+          onPress={() => navigation.navigate('InstrumentsManagement' as never)}
+        >
+          <Ionicons name="musical-notes-outline" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Instruments</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
+          onPress={() => navigation.navigate('AnalyticsDashboard' as never)}
+        >
+          <Ionicons name="bar-chart-outline" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Analytics</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
+          onPress={() => navigation.navigate('BrandingCustomization' as never)}
+        >
+          <Ionicons name="color-palette-outline" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Branding</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
       {/* Account Settings */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Account</Text>
@@ -1472,6 +1505,14 @@ export default function ProfileScreen() {
                       placeholderTextColor="rgba(255, 255, 255, 0.7)"
                     />
                     <TextInput
+                      style={[styles.editInputOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)', color: '#FFFFFF' }]}
+                      value={editingProfile.professional_headline}
+                      onChangeText={(text) => setEditingProfile(prev => ({ ...prev, professional_headline: text }))}
+                      placeholder="Professional Headline (e.g., Music Producer)"
+                      placeholderTextColor="rgba(255, 255, 255, 0.7)"
+                      maxLength={120}
+                    />
+                    <TextInput
                       style={[styles.editInputOverlay, styles.bioInputOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)', color: '#FFFFFF' }]}
                       value={editingProfile.bio}
                       onChangeText={(text) => setEditingProfile(prev => ({ ...prev, bio: text }))}
@@ -1492,26 +1533,38 @@ export default function ProfileScreen() {
                       )}
                     </View>
                     <Text style={styles.usernameOverlay}>@{profile?.username}</Text>
+                    {profile?.professional_headline && (
+                      <Text style={styles.headlineOverlay}>{profile.professional_headline}</Text>
+                    )}
                     {profile?.bio && (
                       <Text style={styles.bioOverlay}>{profile.bio}</Text>
                     )}
                   </>
                 )}
                 
-                {/* Stats Overlay */}
+                {/* Stats Overlay - Clickable */}
                 <View style={styles.profileStatsOverlay}>
-                  <View style={styles.statItemOverlay}>
+                  <TouchableOpacity
+                    style={styles.statItemOverlay}
+                    onPress={() => navigation.navigate('FollowersList' as never, { userId: profile?.id } as never)}
+                  >
                     <Text style={styles.statNumberOverlay}>{profile?.followers_count || 0}</Text>
                     <Text style={styles.statLabelOverlay}>Followers</Text>
-                  </View>
-                  <View style={styles.statItemOverlay}>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.statItemOverlay}
+                    onPress={() => navigation.navigate('FollowingList' as never, { userId: profile?.id } as never)}
+                  >
                     <Text style={styles.statNumberOverlay}>{profile?.following_count || 0}</Text>
                     <Text style={styles.statLabelOverlay}>Following</Text>
-                  </View>
-                  <View style={styles.statItemOverlay}>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.statItemOverlay}
+                    onPress={() => navigation.navigate('TracksList' as never, { userId: profile?.id } as never)}
+                  >
                     <Text style={styles.statNumberOverlay}>{profile?.tracks_count || 0}</Text>
                     <Text style={styles.statLabelOverlay}>Tracks</Text>
-                  </View>
+                  </TouchableOpacity>
                 </View>
                 
                 <Text style={styles.joinDateOverlay}>
@@ -1687,7 +1740,16 @@ const styles = StyleSheet.create({
   usernameOverlay: {
     fontSize: 16,
     color: 'rgba(255, 255, 255, 0.9)',
+    marginBottom: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  headlineOverlay: {
+    fontSize: 15,
+    color: 'rgba(255, 255, 255, 0.85)',
     marginBottom: 8,
+    fontStyle: 'italic',
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,

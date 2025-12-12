@@ -64,7 +64,7 @@ interface Conversation {
 }
 
 export default function MessagesScreen({ navigation }: any) {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const { theme } = useTheme();
   const [activeTab, setActiveTab] = useState<'conversations' | 'search'>('conversations');
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -72,10 +72,25 @@ export default function MessagesScreen({ navigation }: any) {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [usageLimits, setUsageLimits] = useState<UsageLimits | null>(null);
 
   useEffect(() => {
     loadConversations();
+    loadUsageLimits();
   }, []);
+
+  const loadUsageLimits = async () => {
+    if (!session) return;
+
+    try {
+      console.log('📊 Loading message usage limits...');
+      const limits = await subscriptionService.getUsageLimits(session);
+      setUsageLimits(limits);
+      console.log('✅ Message limits loaded:', limits.messages);
+    } catch (error) {
+      console.error('Error loading usage limits:', error);
+    }
+  };
 
   const loadConversations = async () => {
     setLoading(true);
@@ -295,7 +310,17 @@ export default function MessagesScreen({ navigation }: any) {
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.colors.surface }]}>
           <BackButton style={{ marginRight: 12 }} />
-          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Messages</Text>
+          <View style={styles.headerTitleContainer}>
+            <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Messages</Text>
+            {usageLimits && !usageLimits.messages.is_unlimited && (
+              <View style={[styles.usageLimitBadge, { backgroundColor: theme.colors.surface }]}>
+                <Ionicons name="mail-outline" size={12} color={theme.colors.textSecondary} />
+                <Text style={[styles.usageLimitText, { color: theme.colors.textSecondary }]}>
+                  {usageLimits.messages.remaining}/{usageLimits.messages.limit}
+                </Text>
+              </View>
+            )}
+          </View>
           <TouchableOpacity style={styles.headerButton}>
             <Ionicons name="add" size={24} color={theme.colors.text} />
           </TouchableOpacity>
@@ -436,11 +461,27 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
+  headerTitleContainer: {
+    flex: 1,
+    marginLeft: 8,
+  },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    flex: 1,
-    marginLeft: 8,
+  },
+  usageLimitBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    marginTop: 4,
+    alignSelf: 'flex-start',
+    gap: 4,
+  },
+  usageLimitText: {
+    fontSize: 11,
+    fontWeight: '500',
   },
   headerButton: {
     padding: 8,

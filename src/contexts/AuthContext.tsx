@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { Linking } from 'react-native';
+import { Linking, AppState, AppStateStatus } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import type { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import type { CreatorType } from '../types';
 import { fetchCreatorTypes } from '../services/creatorExpansionService';
+import RevenueCatService from '../services/RevenueCatService';
+import { config } from '../config/environment';
 
 // CRITICAL: Complete the auth session after OAuth redirect
 WebBrowser.maybeCompleteAuthSession();
@@ -83,7 +85,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (session && !error) {
           setSession(session);
           setUser(session.user);
-          await loadUserProfile(session.user.id, session);
+          // Set loading to false IMMEDIATELY so screens can start loading
+          setLoading(false);
+          // Load profile in background (non-blocking)
+          loadUserProfile(session.user.id, session);
         }
       } catch (err) {
         console.error('Error getting initial session:', err);
@@ -132,7 +137,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
           console.log('✅ User signed in:', session.user.email);
           setSession(session);
           setUser(session.user);
-          await loadUserProfile(session.user.id, session);
+          // Set loading to false IMMEDIATELY so screens can start loading
+          setLoading(false);
+          // Load profile in background (non-blocking)
+          loadUserProfile(session.user.id, session);
           return;
         }
         
@@ -201,14 +209,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     });
 
+    // Listen for app state changes to restore subscription on app resume
+    // This ensures subscription is maintained if user updates the app while it's closed
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active' && user && RevenueCatService.isReady()) {
+        // App came to foreground - restore subscription status
+        console.log('🔄 App resumed - checking subscription status...');
+        RevenueCatService.restoreSubscriptionStatus().then(result => {
+          if (result.tier !== 'free') {
+            console.log(`✅ Subscription status verified: ${result.tier}`);
+          }
+        }).catch(error => {
+          console.warn('⚠️ Failed to restore subscription on app resume (non-critical):', error);
+        });
+      }
+    };
+
+    const appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
+
     return () => {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
       subscription.unsubscribe();
       linkingListener?.remove();
+      appStateSubscription?.remove();
     };
-  }, []);
+  }, [user]);
 
   // Helper function to map error messages to user-friendly text
   const mapAuthError = (errorMessage: string): string => {
@@ -376,20 +403,31 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const signOut = async () => {
     setLoading(true);
-    
+
     try {
       const { error } = await supabase.auth.signOut();
-      
+
       if (error) {
         setError(error.message || 'Sign out failed');
         setLoading(false);
         return { success: false, error };
       }
-      
+
+      // Logout from RevenueCat
+      try {
+        if (RevenueCatService.isReady()) {
+          await RevenueCatService.logoutUser();
+          console.log('✅ Logged out from RevenueCat');
+        }
+      } catch (revenueCatError) {
+        console.warn('⚠️ RevenueCat logout failed (non-critical):', revenueCatError);
+        // Don't throw - RevenueCat failure shouldn't block logout
+      }
+
       setUser(null);
       setSession(null);
       setLoading(false);
-      
+
       return { success: true };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Sign out failed';
@@ -584,30 +622,88 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       
       if (data) {
-        let creatorTypes: CreatorType[] = [];
-        try {
-          if (activeSession) {
-            creatorTypes = await fetchCreatorTypes(userId, { session: activeSession });
-          } else {
-            const { data: { session: latestSession } } = await supabase.auth.getSession();
-            if (latestSession) {
-              creatorTypes = await fetchCreatorTypes(userId, { session: latestSession });
-            }
-          }
-        } catch (creatorTypeError) {
-          console.warn('⚠️ Unable to load creator types:', creatorTypeError);
-        }
-
+        // Set user profile immediately with basic data
         console.log('✅ User profile loaded:', data);
         setUserProfile({
           ...data,
-          creator_types: creatorTypes,
-          primary_creator_type: creatorTypes[0] ?? null,
+          creator_types: [],
+          primary_creator_type: null,
         });
+
+        // Load creator types in background (non-blocking)
+        (async () => {
+          let creatorTypes: CreatorType[] = [];
+          try {
+            if (activeSession) {
+              creatorTypes = await fetchCreatorTypes(userId, { session: activeSession });
+            } else {
+              const { data: { session: latestSession } } = await supabase.auth.getSession();
+              if (latestSession) {
+                creatorTypes = await fetchCreatorTypes(userId, { session: latestSession });
+              }
+            }
+
+            // Update profile with creator types
+            if (creatorTypes.length > 0) {
+              setUserProfile(prev => prev ? {
+                ...prev,
+                creator_types: creatorTypes,
+                primary_creator_type: creatorTypes[0] ?? null,
+              } : null);
+            }
+          } catch (creatorTypeError) {
+            console.warn('⚠️ Unable to load creator types:', creatorTypeError);
+          }
+        })();
         // Check if user needs onboarding
         const needsOnboarding = !data.onboarding_completed;
         setNeedsOnboarding(needsOnboarding);
         console.log('🎯 User needs onboarding:', needsOnboarding);
+
+        // Initialize RevenueCat and restore subscription status (non-blocking)
+        // CRITICAL: This ensures subscription tier is maintained across app updates
+        // Only attempt if not already attempted (prevents loops)
+        if (!RevenueCatService.hasAttemptedInitialization()) {
+          Promise.resolve().then(async () => {
+            try {
+              console.log('💰 Initializing RevenueCat for user:', userId);
+              if (!RevenueCatService.isReady()) {
+                const initialized = await RevenueCatService.initialize(config.revenueCatApiKey, userId);
+                if (initialized) {
+                  console.log('✅ RevenueCat initialized successfully');
+                } else {
+                  console.log('⚠️ RevenueCat initialization skipped (Expo Go or previous failure)');
+                  return; // Don't proceed with restore if initialization failed
+                }
+              } else {
+                // Already initialized, just login the user
+                await RevenueCatService.loginUser(userId);
+                console.log('✅ RevenueCat user logged in');
+              }
+
+              // CRITICAL: Restore subscription status on app launch/update
+              // This automatically restores purchases from App Store/Play Store
+              // and ensures subscription tier is maintained across app updates
+              const restoreResult = await RevenueCatService.restoreSubscriptionStatus();
+              if (restoreResult.tier !== 'free') {
+                console.log(`✅ Subscription tier maintained: ${restoreResult.tier}`);
+                if (restoreResult.synced) {
+                  console.log('✅ Subscription status synced with backend');
+                } else {
+                  console.warn('⚠️ Subscription restored but backend sync failed (webhooks will handle)');
+                }
+              } else {
+                console.log('ℹ️ No active subscription found - user is on Free tier');
+              }
+            } catch (revenueCatError) {
+              console.warn('⚠️ RevenueCat initialization/restore failed (non-critical):', revenueCatError);
+              // Don't throw - RevenueCat failure shouldn't block login
+              // User can manually restore via Upgrade screen if needed
+            }
+          });
+        } else {
+          console.log('ℹ️ RevenueCat initialization already attempted, skipping to prevent loop');
+        }
       }
     } catch (err) {
       console.error('❌ Error loading user profile:', err);

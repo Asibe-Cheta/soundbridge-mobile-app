@@ -20,6 +20,8 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { useStripe } from '@stripe/stripe-react-native';
+import EventTicketService, { EventTicket } from '../services/EventTicketService';
 
 interface Event {
   id: string;
@@ -57,10 +59,14 @@ export default function EventDetailsScreen() {
   const [loading, setLoading] = useState(!initialEvent);
   const [refreshing, setRefreshing] = useState(false);
   const [isAttending, setIsAttending] = useState(false);
+  const [purchasingTicket, setPurchasingTicket] = useState(false);
+  const [userTickets, setUserTickets] = useState<EventTicket[]>([]);
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
   useEffect(() => {
     loadEventDetails();
     checkAttendanceStatus();
+    loadUserTickets();
   }, [eventId]);
 
   const loadEventDetails = async () => {
@@ -114,6 +120,18 @@ export default function EventDetailsScreen() {
     }
   };
 
+  const loadUserTickets = async () => {
+    if (!user?.id) return;
+
+    try {
+      const tickets = await EventTicketService.getUserEventTickets(eventId);
+      setUserTickets(tickets);
+      console.log('🎟️ User tickets loaded:', tickets.length);
+    } catch (error) {
+      console.error('❌ Error loading user tickets:', error);
+    }
+  };
+
   const handleAttendance = async () => {
     if (!user?.id) {
       Alert.alert('Login Required', 'Please log in to attend events');
@@ -160,6 +178,87 @@ export default function EventDetailsScreen() {
     }
   };
 
+  const handleBuyTicket = async () => {
+    if (!user?.id) {
+      Alert.alert('Login Required', 'Please log in to purchase tickets');
+      return;
+    }
+
+    if (!event) return;
+
+    // Determine currency and price
+    const currency = event.price_gbp ? 'GBP' : 'NGN';
+    const amount = event.price_gbp || event.price_ngn || 0;
+
+    if (amount === 0) {
+      Alert.alert('Free Event', 'This event is free. Just tap "Attend Event" to register.');
+      return;
+    }
+
+    try {
+      setPurchasingTicket(true);
+      console.log('🎟️ Starting ticket purchase:', { eventId: event.id, amount, currency });
+
+      // Create payment intent
+      const { clientSecret, paymentIntentId } = await EventTicketService.createTicketPaymentIntent({
+        eventId: event.id,
+        quantity: 1,
+        priceGbp: event.price_gbp,
+        priceNgn: event.price_ngn,
+        currency,
+      });
+
+      console.log('✅ Payment intent created:', paymentIntentId);
+
+      // Initialize Stripe payment sheet
+      const { error: initError } = await initPaymentSheet({
+        paymentIntentClientSecret: clientSecret,
+        merchantDisplayName: 'SoundBridge',
+      });
+
+      if (initError) {
+        console.error('❌ Error initializing payment sheet:', initError);
+        throw new Error(initError.message);
+      }
+
+      // Present payment sheet
+      const { error: presentError } = await presentPaymentSheet();
+
+      if (presentError) {
+        if (presentError.code !== 'Canceled') {
+          console.error('❌ Error presenting payment sheet:', presentError);
+          throw new Error(presentError.message);
+        }
+        console.log('⚠️ Payment canceled by user');
+        return;
+      }
+
+      console.log('✅ Payment confirmed, confirming purchase...');
+
+      // Confirm purchase
+      const ticket = await EventTicketService.confirmTicketPurchase(
+        paymentIntentId,
+        event.id,
+        1,
+        amount,
+        currency
+      );
+
+      console.log('🎟️ Ticket purchased:', ticket.ticket_code);
+
+      Alert.alert(
+        'Ticket Purchased!',
+        `Your ticket has been confirmed.\n\nTicket Code: ${ticket.ticket_code}\n\nYou can view your ticket in your profile.`,
+        [{ text: 'OK', onPress: () => loadUserTickets() }]
+      );
+    } catch (error: any) {
+      console.error('❌ Error purchasing ticket:', error);
+      Alert.alert('Purchase Failed', error.message || 'Failed to purchase ticket. Please try again.');
+    } finally {
+      setPurchasingTicket(false);
+    }
+  };
+
   const handleShare = () => {
     Alert.alert('Share Event', 'Share this event with your friends!');
   };
@@ -173,7 +272,7 @@ export default function EventDetailsScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([loadEventDetails(), checkAttendanceStatus()]);
+    await Promise.all([loadEventDetails(), checkAttendanceStatus(), loadUserTickets()]);
     setRefreshing(false);
   };
 
@@ -399,30 +498,59 @@ export default function EventDetailsScreen() {
 
           {/* Action Buttons */}
           <View style={styles.actionSection}>
-            <TouchableOpacity
-              style={[
-                styles.attendButton,
-                {
-                  backgroundColor: isAttending ? theme.colors.surface : theme.colors.primary,
-                  borderColor: theme.colors.primary,
-                }
-              ]}
-              onPress={handleAttendance}
-            >
-              <Ionicons 
-                name={isAttending ? "checkmark-circle" : "add-circle-outline"} 
-                size={20} 
-                color={isAttending ? theme.colors.primary : '#FFFFFF'} 
-              />
-              <Text
-                style={[
-                  styles.attendButtonText,
-                  { color: isAttending ? theme.colors.primary : '#FFFFFF' }
-                ]}
+            {userTickets.length > 0 ? (
+              // User has purchased tickets
+              <View style={[styles.ticketPurchasedContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.primary }]}>
+                <Ionicons name="ticket" size={20} color={theme.colors.primary} />
+                <Text style={[styles.ticketPurchasedText, { color: theme.colors.primary }]}>
+                  Ticket Purchased ({userTickets.length})
+                </Text>
+              </View>
+            ) : (event.price_gbp || event.price_ngn) ? (
+              // Paid event - show buy ticket button
+              <TouchableOpacity
+                style={[styles.buyTicketButton, { backgroundColor: theme.colors.primary }]}
+                onPress={handleBuyTicket}
+                disabled={purchasingTicket}
               >
-                {isAttending ? 'Attending' : 'Attend Event'}
-              </Text>
-            </TouchableOpacity>
+                {purchasingTicket ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="ticket" size={20} color="#FFFFFF" />
+                    <Text style={styles.buyTicketButtonText}>
+                      Buy Ticket - {formatPrice(event.price_gbp, event.price_ngn)}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            ) : (
+              // Free event - show attend button
+              <TouchableOpacity
+                style={[
+                  styles.attendButton,
+                  {
+                    backgroundColor: isAttending ? theme.colors.surface : theme.colors.primary,
+                    borderColor: theme.colors.primary,
+                  }
+                ]}
+                onPress={handleAttendance}
+              >
+                <Ionicons
+                  name={isAttending ? "checkmark-circle" : "add-circle-outline"}
+                  size={20}
+                  color={isAttending ? theme.colors.primary : '#FFFFFF'}
+                />
+                <Text
+                  style={[
+                    styles.attendButtonText,
+                    { color: isAttending ? theme.colors.primary : '#FFFFFF' }
+                  ]}
+                >
+                  {isAttending ? 'Attending' : 'Attend Event'}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               style={[styles.shareButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
@@ -623,6 +751,34 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   shareButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  ticketPurchasedContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 2,
+    gap: 8,
+  },
+  ticketPurchasedText: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  buyTicketButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 8,
+  },
+  buyTicketButtonText: {
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
   },

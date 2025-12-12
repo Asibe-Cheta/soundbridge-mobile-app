@@ -278,8 +278,16 @@ export const useFeed = () => {
     return unsubscribe;
   }, []);
 
+  // Track if initial load has been attempted
+  const initialLoadAttemptedRef = useRef(false);
+
   // Initial load - show cached data immediately, then refresh when auth is ready
   useEffect(() => {
+    // Prevent multiple initial loads
+    if (initialLoadAttemptedRef.current) {
+      return;
+    }
+
     // Try to load cached data immediately (even before auth is ready)
     // This provides instant feed display like LinkedIn/Instagram
     const loadCachedData = async () => {
@@ -299,16 +307,20 @@ export const useFeed = () => {
 
     // Once auth is ready, load fresh data
     if (!authLoading && user && session) {
+      initialLoadAttemptedRef.current = true;
       // Small delay to ensure cached data is displayed first
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         loadPosts(1);
       }, 50);
+      
+      return () => clearTimeout(timeoutId);
     } else if (!authLoading && !user) {
       // Auth is ready but no user - clear posts
+      initialLoadAttemptedRef.current = true;
       setPosts([]);
       setLoading(false);
     }
-  }, [authLoading, user, session, loadPosts]);
+  }, [authLoading, user?.id, session?.access_token]); // Use stable identifiers instead of objects
 
   // Delete post optimistically
   const deletePost = useCallback(async (postId: string) => {

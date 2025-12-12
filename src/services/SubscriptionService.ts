@@ -3,7 +3,7 @@ import { Session } from '@supabase/supabase-js';
 const API_BASE_URL = __DEV__ ? 'http://192.168.1.122:3000' : 'https://soundbridge.live';
 
 export interface SubscriptionStatus {
-  tier: 'free' | 'pro';
+  tier: 'free' | 'premium' | 'unlimited';
   status: 'active' | 'cancelled' | 'past_due' | 'expired' | 'incomplete';
   current_period_start: string;
   current_period_end: string;
@@ -86,6 +86,34 @@ export interface BillingHistoryItem {
   description: string;
   invoice_url?: string;
   payment_method?: string;
+}
+
+export interface UsageLimits {
+  uploads: {
+    used: number;
+    limit: number;
+    remaining: number;
+    is_unlimited: boolean;
+    period: 'monthly' | 'lifetime';
+  };
+  messages: {
+    used: number;
+    limit: number;
+    remaining: number;
+    is_unlimited: boolean;
+  };
+  searches: {
+    used: number;
+    limit: number;
+    remaining: number;
+    is_unlimited: boolean;
+  };
+  storage: {
+    used: number; // in bytes
+    limit: number; // in bytes
+    remaining: number; // in bytes
+    is_unlimited: boolean;
+  };
 }
 
 export interface RevenueData {
@@ -204,6 +232,113 @@ class SubscriptionService {
     } catch (error) {
       console.error('❌ Error fetching subscription status:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get user's usage limits (uploads, messages, searches, storage)
+   * Endpoint: GET /api/user/usage-limits
+   * Response structure: { success: true, data: { uploads: {...}, messages: {...}, searches: {...}, storage: {...} } }
+   */
+  async getUsageLimits(session: Session): Promise<UsageLimits> {
+    try {
+      console.log('📊 Fetching usage limits...');
+      const response = await this.makeRequest('/api/user/usage-limits', session);
+      console.log('✅ Usage limits response:', response);
+
+      const data = response?.data || {};
+
+      return {
+        uploads: {
+          used: data.uploads?.used || 0,
+          limit: data.uploads?.limit || 0,
+          remaining: data.uploads?.remaining || 0,
+          is_unlimited: data.uploads?.is_unlimited || false,
+          period: data.uploads?.period || 'monthly',
+        },
+        messages: {
+          used: data.messages?.used || 0,
+          limit: data.messages?.limit || 0,
+          remaining: data.messages?.remaining || 0,
+          is_unlimited: data.messages?.is_unlimited || false,
+        },
+        searches: {
+          used: data.searches?.used || 0,
+          limit: data.searches?.limit || 0,
+          remaining: data.searches?.remaining || 0,
+          is_unlimited: data.searches?.is_unlimited || false,
+        },
+        storage: {
+          used: data.storage?.used || 0,
+          limit: data.storage?.limit || 0,
+          remaining: data.storage?.remaining || 0,
+          is_unlimited: data.storage?.is_unlimited || false,
+        },
+      };
+    } catch (error) {
+      console.error('❌ Error fetching usage limits:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if user can send a message (based on tier limits)
+   * Returns { canSend: boolean, reason?: string, usageLimits?: UsageLimits }
+   */
+  async canSendMessage(session: Session): Promise<{ canSend: boolean; reason?: string; usageLimits?: UsageLimits }> {
+    try {
+      const limits = await this.getUsageLimits(session);
+
+      // Premium/Unlimited users have unlimited messages
+      if (limits.messages.is_unlimited) {
+        return { canSend: true, usageLimits: limits };
+      }
+
+      // Free users: Check if they have messages remaining
+      if (limits.messages.remaining > 0) {
+        return { canSend: true, usageLimits: limits };
+      }
+
+      return {
+        canSend: false,
+        reason: `You've reached your message limit (${limits.messages.limit} per month). Upgrade to Premium for unlimited messaging.`,
+        usageLimits: limits,
+      };
+    } catch (error) {
+      console.error('❌ Error checking message limits:', error);
+      // On error, allow sending (fail open)
+      return { canSend: true };
+    }
+  }
+
+  /**
+   * Check if user can perform a professional search (based on tier limits)
+   * Note: Backend enforces this automatically with 429 errors
+   * Returns { canSearch: boolean, reason?: string, usageLimits?: UsageLimits }
+   */
+  async canPerformSearch(session: Session): Promise<{ canSearch: boolean; reason?: string; usageLimits?: UsageLimits }> {
+    try {
+      const limits = await this.getUsageLimits(session);
+
+      // Premium/Unlimited users have unlimited searches
+      if (limits.searches.is_unlimited) {
+        return { canSearch: true, usageLimits: limits };
+      }
+
+      // Free users: Check if they have searches remaining
+      if (limits.searches.remaining > 0) {
+        return { canSearch: true, usageLimits: limits };
+      }
+
+      return {
+        canSearch: false,
+        reason: `You've reached your search limit (${limits.searches.limit} per month). Upgrade to Premium for unlimited searches.`,
+        usageLimits: limits,
+      };
+    } catch (error) {
+      console.error('❌ Error checking search limits:', error);
+      // On error, allow searching (fail open)
+      return { canSearch: true };
     }
   }
 
@@ -389,9 +524,11 @@ class SubscriptionService {
   formatTier(tier: string): string {
     switch (tier.toLowerCase()) {
       case 'free': return 'Free Plan';
-      case 'pro': return 'Pro Plan';
-      // Enterprise tier removed - defensive handling
-      case 'enterprise': return 'Pro Plan'; // Treat Enterprise as Pro
+      case 'premium': return 'Premium';
+      case 'unlimited': return 'Unlimited';
+      // Legacy support
+      case 'pro': return 'Premium';
+      case 'enterprise': return 'Unlimited';
       default: return 'Unknown Plan';
     }
   }
@@ -412,12 +549,37 @@ class SubscriptionService {
   }
 
   /**
-   * Check if user has Pro access
-   * IMPORTANT: Pro access requires both tier === 'pro' AND status === 'active'
+   * Check if user has Premium access
+   * IMPORTANT: Premium access requires both tier === 'premium' AND status === 'active'
+   */
+  hasPremiumAccess(subscription: SubscriptionStatus | null): boolean {
+    if (!subscription) return false;
+    return subscription.tier === 'premium' && subscription.status === 'active';
+  }
+
+  /**
+   * Check if user has Unlimited access
+   * IMPORTANT: Unlimited access requires both tier === 'unlimited' AND status === 'active'
+   */
+  hasUnlimitedAccess(subscription: SubscriptionStatus | null): boolean {
+    if (!subscription) return false;
+    return subscription.tier === 'unlimited' && subscription.status === 'active';
+  }
+
+  /**
+   * Check if user has any paid tier (Premium or Unlimited)
+   */
+  hasPaidAccess(subscription: SubscriptionStatus | null): boolean {
+    if (!subscription) return false;
+    return (subscription.tier === 'premium' || subscription.tier === 'unlimited') && subscription.status === 'active';
+  }
+
+  /**
+   * Legacy method for backward compatibility
+   * @deprecated Use hasPremiumAccess() or hasPaidAccess() instead
    */
   hasProAccess(subscription: SubscriptionStatus | null): boolean {
-    if (!subscription) return false;
-    return subscription.tier === 'pro' && subscription.status === 'active';
+    return this.hasPaidAccess(subscription);
   }
 
   /**
@@ -467,10 +629,15 @@ class SubscriptionService {
    */
   getPlanPrice(plan: string, billingCycle: string): string {
     switch (plan.toLowerCase()) {
+      case 'premium':
+        return billingCycle === 'yearly' ? '£69.99/year' : '£6.99/month';
+      case 'unlimited':
+        return billingCycle === 'yearly' ? '£129.99/year' : '£12.99/month';
+      // Legacy support
       case 'pro':
-        return billingCycle === 'yearly' ? '$99.99/year' : '$9.99/month';
+        return billingCycle === 'yearly' ? '£69.99/year' : '£6.99/month';
       default:
-        return '$0.00';
+        return '£0.00';
     }
   }
 
@@ -479,37 +646,42 @@ class SubscriptionService {
    */
   getPlanFeatures(plan: string): string[] {
     switch (plan.toLowerCase()) {
-      case 'pro':
+      case 'premium':
         return [
-          '10 uploads per month (resets on 1st)',
-          '500MB storage',
-          'Unlimited searches & messages',
-          'Advanced filters',
-          'Verified badge eligibility',
-          'Payment protection & escrow',
-          'Detailed analytics',
-          'Availability calendar',
+          '7 uploads per month (resets on renewal)',
+          'Pro badge on profile',
+          'Custom profile URL',
+          'Featured on Discover 1x/month',
+          'Advanced analytics',
+          'Priority in feed',
+          '60-second audio previews',
+          'AI collaboration matching',
           'Priority support'
         ];
-      // Enterprise tier removed - defensive handling
-      case 'enterprise':
-        // Treat Enterprise as Pro
+      case 'unlimited':
         return [
-          '10 uploads per month',
-          '500MB storage',
-          'Priority processing',
-          'Advanced analytics',
-          'White-label platform',
-          'Advanced analytics',
-          'Revenue sharing (95%)',
-          'HD audio quality',
-          'Direct fan messaging'
+          'UNLIMITED track uploads',
+          'Unlimited badge on profile',
+          'Featured on Discover 2x/month',
+          'Top priority in feed',
+          'All Premium features',
+          'Social media post generator',
+          'Custom promo codes',
+          'Email list export',
+          'Highest priority support'
         ];
+      // Legacy support
+      case 'pro':
+        return this.getPlanFeatures('premium');
+      case 'enterprise':
+        return this.getPlanFeatures('unlimited');
       default:
         return [
-          '3 uploads per month',
-          '0.5GB storage',
-          'Basic features',
+          '3 track uploads (lifetime)',
+          'Basic profile & networking',
+          'Receive tips (keep 95%)',
+          'Create & sell event tickets',
+          'Basic analytics',
           'Community support'
         ];
     }
@@ -534,4 +706,7 @@ class SubscriptionService {
   }
 }
 
-export const subscriptionService = new SubscriptionService();
+const subscriptionService = new SubscriptionService();
+
+export default subscriptionService;
+export { subscriptionService };

@@ -1,5 +1,6 @@
 import { Session } from '@supabase/supabase-js';
 import { apiFetch } from '../lib/apiClient';
+import RevenueCatService from './RevenueCatService';
 
 export type UploadQuota = {
   tier: string;
@@ -19,8 +20,8 @@ type UploadQuotaResponse = {
 
 /**
  * Get upload quota for the authenticated user
- * Uses Bearer token authentication only (per web team specification)
- * 
+ * Uses RevenueCat as source of truth for Pro status, falls back to backend
+ *
  * @param session - Supabase session containing access token
  * @returns Upload quota information or null if failed
  */
@@ -30,37 +31,99 @@ export async function getUploadQuota(session: Session | null): Promise<UploadQuo
     return null;
   }
 
+  let backendQuota: UploadQuota | null = null;
+
   try {
-    // Use Bearer token authentication only (endpoint now supports Bearer tokens)
-    // Per web team: endpoint updated to use getSupabaseRouteClient() which supports Bearer tokens
+    // First, try to get quota from backend
+    console.log('🔍 UploadQuotaService: Fetching quota from backend...');
     const response = await apiFetch<UploadQuotaResponse>('/api/upload/quota', {
       method: 'GET',
       session,
     });
 
-    if (!response.success || !response.quota) {
-      console.warn('UploadQuotaService: Invalid response', response);
-      return null;
+    if (response.success && response.quota) {
+      backendQuota = response.quota;
+      console.log('📊 Backend quota:', {
+        tier: backendQuota.tier,
+        limit: backendQuota.upload_limit,
+        used: backendQuota.uploads_this_month,
+      });
     }
-
-    return response.quota;
   } catch (error: any) {
-    // Log more details about the error
-    console.warn('UploadQuotaService: failed to load quota', {
+    console.warn('UploadQuotaService: Backend quota fetch failed', {
       error: error?.message,
       status: error?.status,
-      url: '/api/upload/quota',
-      hasSession: !!session,
-      hasToken: !!session?.access_token,
     });
-    
-    // Handle 401 - token expired or invalid
-    if (error?.status === 401) {
-      console.warn('UploadQuotaService: Authentication failed - token may be expired');
-    }
-    
-    return null;
   }
+
+  // Check RevenueCat for tier status (source of truth)
+  try {
+    console.log('🔍 UploadQuotaService: Checking RevenueCat for tier status...');
+
+    if (RevenueCatService.isReady()) {
+      const customerInfo = await RevenueCatService.getCustomerInfo();
+
+      if (customerInfo) {
+        const tier = RevenueCatService.getUserTier(customerInfo);
+        console.log('🎯 RevenueCat tier:', tier);
+
+        if (tier === 'unlimited') {
+          // Unlimited tier: no limits
+          console.log('✅ Using Unlimited quota from RevenueCat (overriding backend)');
+          return {
+            tier: 'unlimited',
+            upload_limit: null,
+            uploads_this_month: backendQuota?.uploads_this_month ?? 0,
+            remaining: null,
+            reset_date: null,
+            is_unlimited: true,
+            can_upload: true,
+          };
+        } else if (tier === 'premium') {
+          // Premium tier: 7 uploads per month (resets on renewal date)
+          console.log('✅ Using Premium quota from RevenueCat (overriding backend)');
+          
+          // Note: Reset date should come from backend (subscription renewal date)
+          // For now, use backend's reset_date if available
+          const resetDate = backendQuota?.reset_date || null;
+          const uploadsUsed = backendQuota?.uploads_this_month ?? 0;
+          const limit = 7;
+
+          return {
+            tier: 'premium',
+            upload_limit: limit,
+            uploads_this_month: uploadsUsed,
+            remaining: limit - uploadsUsed,
+            reset_date: resetDate,
+            is_unlimited: false,
+            can_upload: uploadsUsed < limit,
+          };
+        }
+      }
+    } else {
+      console.warn('⚠️ RevenueCat not ready, using backend quota');
+    }
+  } catch (error) {
+    console.error('❌ RevenueCat check failed:', error);
+  }
+
+  // Fall back to backend quota if available
+  if (backendQuota) {
+    console.log('📋 Using backend quota');
+    return backendQuota;
+  }
+
+  // Last resort: return Free tier defaults (3 lifetime uploads)
+  console.warn('⚠️ No quota available from backend or RevenueCat, using Free tier defaults');
+  return {
+    tier: 'free',
+    upload_limit: 3,
+    uploads_this_month: 0,
+    remaining: 3,
+    reset_date: null, // Lifetime limit, no reset
+    is_unlimited: false,
+    can_upload: true,
+  };
 }
 
 

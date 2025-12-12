@@ -398,7 +398,10 @@ export default function CreatorProfileScreen() {
   const saveCreatorNotificationPreferences = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) return;
+      if (!session?.access_token) {
+        Alert.alert('Error', 'You must be logged in to save preferences');
+        return;
+      }
 
       const response = await fetch(`https://www.soundbridge.live/api/user/follow/${creatorId}/notifications`, {
         method: 'PUT',
@@ -410,18 +413,22 @@ export default function CreatorProfileScreen() {
           notifyOnMusicUpload,
           notifyOnEventPost,
           notifyOnPodcastUpload,
-          notifyOnCollaborationAvailability,
+          notifyOnCollaborationAvailability: notifyOnCollabAvailability, // FIX: Use correct state variable name
         }),
       });
 
       if (response.ok) {
         console.log('✅ Notification preferences saved');
         setShowNotifPrefsModal(false);
+        Alert.alert('Success', 'Your notification preferences have been saved!');
       } else {
-        console.error('Failed to save notification preferences');
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Failed to save notification preferences:', errorData);
+        Alert.alert('Error', errorData.error || 'Failed to save preferences. Please try again.');
       }
     } catch (error) {
       console.error('❌ Error saving notification preferences:', error);
+      Alert.alert('Error', 'An error occurred while saving preferences. Please try again.');
     }
   };
 
@@ -479,18 +486,20 @@ export default function CreatorProfileScreen() {
     }
   };
 
-  const handleTipSuccess = async (amount: number, message?: string) => {
-    console.log('🎉 Tip sent successfully:', { amount, message });
-    
-    // Update creator stats locally
+  const handleTipSuccess = async (amountInCents: number, message?: string) => {
+    // Convert cents to dollars for display
+    const amountInDollars = amountInCents / 100;
+    console.log('🎉 Tip sent successfully:', { amountInCents, amountInDollars, message });
+
+    // Update creator stats locally (store in dollars, not cents)
     setCreator(prev => prev ? {
       ...prev,
-      total_tips_received: (prev.total_tips_received || 0) + amount,
+      total_tips_received: (prev.total_tips_received || 0) + amountInDollars,
       total_tip_count: (prev.total_tip_count || 0) + 1,
-      tips_this_month_amount: (prev.tips_this_month_amount || 0) + amount,
+      tips_this_month_amount: (prev.tips_this_month_amount || 0) + amountInDollars,
       tips_this_month_count: (prev.tips_this_month_count || 0) + 1,
     } : null);
-    
+
     // Optionally refresh the profile to get updated data
     // await loadCreatorProfile();
   };

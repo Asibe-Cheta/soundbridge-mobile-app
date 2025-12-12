@@ -85,7 +85,7 @@ class AudioEnhancementService {
 
   // ===== TIER MANAGEMENT =====
 
-  getTierFeatures(tier: 'free' | 'pro'): TierFeatures {
+  getTierFeatures(tier: 'free' | 'premium' | 'unlimited'): TierFeatures {
     const features: Record<string, TierFeatures> = {
       free: {
         maxQuality: 'standard',
@@ -96,7 +96,16 @@ class AudioEnhancementService {
         realTimeProcessing: false,
         exportFormats: ['mp3_128'],
       },
-      pro: {
+      premium: {
+        maxQuality: 'high',
+        enhancement: true,
+        advancedEQ: true,
+        noiseReduction: true,
+        spatialAudio: true,
+        realTimeProcessing: true,
+        exportFormats: ['mp3_128', 'mp3_320', 'wav'],
+      },
+      unlimited: {
         maxQuality: 'high',
         enhancement: true,
         advancedEQ: true,
@@ -107,10 +116,15 @@ class AudioEnhancementService {
       },
     };
 
-    return features[tier];
+    // Legacy support for 'pro' tier
+    if (tier === 'pro') {
+      return features.premium;
+    }
+
+    return features[tier] || features.free;
   }
 
-  async validateTierAccess(tier: 'free' | 'pro', feature: keyof TierFeatures): Promise<boolean> {
+  async validateTierAccess(tier: 'free' | 'premium' | 'unlimited', feature: keyof TierFeatures): Promise<boolean> {
     try {
       const { data: { user, session } } = await supabase.auth.getUser();
       if (!user || !session) return false;
@@ -140,13 +154,20 @@ class AudioEnhancementService {
         return tierFeatures[feature] === true;
       }
       
-      // IMPORTANT: Pro access requires both tier === 'pro' AND status === 'active'
+      // IMPORTANT: Paid access requires both tier === 'premium'|'unlimited' AND status === 'active'
       const userTier = subscription.tier || 'free';
       const userStatus = subscription.status || 'active';
-      const hasProAccess = userTier === 'pro' && userStatus === 'active';
+      const hasPaidAccess = (userTier === 'premium' || userTier === 'unlimited') && userStatus === 'active';
       
-      // If user doesn't have active Pro access, treat as free
-      const effectiveTier = hasProAccess ? 'pro' : 'free';
+      // If user doesn't have active paid access, treat as free
+      // Legacy: treat 'pro' as 'premium'
+      let effectiveTier: 'free' | 'premium' | 'unlimited' = 'free';
+      if (hasPaidAccess) {
+        effectiveTier = userTier === 'unlimited' ? 'unlimited' : 'premium';
+      } else if (userTier === 'pro') {
+        // Legacy support
+        effectiveTier = 'premium';
+      }
       const tierFeatures = this.getTierFeatures(effectiveTier);
       
       return tierFeatures[feature] === true || (
@@ -164,8 +185,13 @@ class AudioEnhancementService {
     const qualityLevels = { standard: 1, high: 2, lossless: 3 };
     const tierLevels = { free: 1, pro: 2 };
     
-    // Defensive: if tier is 'enterprise', treat as 'pro'
-    const normalizedTier = requiredTier === 'enterprise' ? 'pro' : requiredTier;
+    // Defensive: normalize tier names
+    let normalizedTier: 'free' | 'premium' | 'unlimited' = requiredTier;
+    if (requiredTier === 'enterprise') {
+      normalizedTier = 'unlimited';
+    } else if (requiredTier === 'pro') {
+      normalizedTier = 'premium';
+    }
     
     return qualityLevels[userQuality as keyof typeof qualityLevels] >= 
            (tierLevels[normalizedTier as keyof typeof tierLevels] || 2);
@@ -173,7 +199,7 @@ class AudioEnhancementService {
 
   // ===== PROFILE MANAGEMENT =====
 
-  async getUserProfiles(type: 'user' | 'public' | 'all' = 'user', tier?: 'free' | 'pro'): Promise<AudioEnhancementProfile[]> {
+  async getUserProfiles(type: 'user' | 'public' | 'all' = 'user', tier?: 'free' | 'premium' | 'unlimited'): Promise<AudioEnhancementProfile[]> {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user && type !== 'public') return [];
@@ -546,13 +572,14 @@ class AudioEnhancementService {
 
       const limits = {
         free: 5,
-        pro: 100,
+        premium: 100,
+        unlimited: 100,
       };
       
-      // Defensive: if tier is 'enterprise', treat as 'pro'
-      const normalizedTier = tier === 'enterprise' ? 'pro' : tier;
+      // Defensive: normalize tier names
+      let normalizedTier: 'free' | 'premium' | 'unlimited' = tier === 'enterprise' ? 'unlimited' : (tier === 'pro' ? 'premium' : tier as 'free' | 'premium' | 'unlimited');
 
-      const dailyLimit = limits[normalizedTier as keyof typeof limits] || limits.pro;
+      const dailyLimit = limits[normalizedTier] || limits.premium;
       const currentCount = count || 0;
 
       if (currentCount >= dailyLimit) {
@@ -1072,8 +1099,8 @@ export const audioEnhancementService = new AudioEnhancementService();
 
       };
 
-      // Defensive: if tier is 'enterprise', treat as 'pro'
-      const normalizedTier = tier === 'enterprise' ? 'pro' : tier;
+      // Defensive: normalize tier names
+      let normalizedTier: 'free' | 'premium' | 'unlimited' = tier === 'enterprise' ? 'unlimited' : (tier === 'pro' ? 'premium' : tier as 'free' | 'premium' | 'unlimited');
       const dailyLimit = limits[normalizedTier as keyof typeof limits] || limits.pro;
 
       const currentCount = count || 0;

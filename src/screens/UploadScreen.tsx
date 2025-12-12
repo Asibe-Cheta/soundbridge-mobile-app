@@ -24,6 +24,7 @@ import { supabase } from '../lib/supabase';
 import UploadLimitCard from '../components/UploadLimitCard';
 import { getUploadQuota, UploadQuota } from '../services/UploadQuotaService';
 import { uploadAudioFile, uploadImage, createAudioTrack } from '../services/UploadService';
+import subscriptionService from '../services/SubscriptionService';
 
 const { width } = Dimensions.get('window');
 
@@ -340,15 +341,55 @@ export default function UploadScreen() {
     }
 
     if (uploadQuota && !uploadQuota.can_upload) {
+      const tier = uploadQuota.tier?.toLowerCase() || 'free';
+      let message = '';
+      if (tier === 'free') {
+        message = 'You\'ve uploaded your 3 free tracks. Upgrade to Premium for 7 tracks/month or Unlimited for unlimited uploads.';
+      } else if (tier === 'premium') {
+        message = 'You\'ve uploaded 7 tracks this month. Your limit resets on your renewal date. Upgrade to Unlimited for unlimited uploads anytime.';
+      } else {
+        message = 'You have reached your upload limit. Please upgrade to continue uploading.';
+      }
+      
       Alert.alert(
         'Upload Limit Reached',
-        'You have reached your upload limit for this billing period. Upgrade to Pro to continue uploading.',
+        message,
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Upgrade', onPress: handleUpgradePress },
+          { text: tier === 'free' ? 'View Plans' : 'Upgrade to Unlimited', onPress: handleUpgradePress },
         ],
       );
       return;
+    }
+
+    // Check storage limits before upload
+    if (session && formData.audioFile?.size) {
+      try {
+        console.log('📊 Checking storage limits...');
+        const limits = await subscriptionService.getUsageLimits(session);
+        const fileSize = formData.audioFile.size;
+
+        // Check if upload would exceed storage limit
+        if (!limits.storage.is_unlimited && fileSize > limits.storage.remaining) {
+          const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+          const remainingMB = (limits.storage.remaining / (1024 * 1024)).toFixed(2);
+
+          Alert.alert(
+            'Storage Limit Exceeded',
+            `This file (${fileSizeMB} MB) exceeds your remaining storage (${remainingMB} MB). Upgrade to Premium or Unlimited for more storage.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'View Plans', onPress: handleUpgradePress },
+            ],
+          );
+          return;
+        }
+
+        console.log('✅ Storage check passed');
+      } catch (error) {
+        console.error('Error checking storage limits:', error);
+        // On error, allow upload (fail open)
+      }
     }
 
     try {

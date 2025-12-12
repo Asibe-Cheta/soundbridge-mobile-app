@@ -15,21 +15,29 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { getTwoFactorStatus } from '../services/twoFactorAuthService';
 import type { TwoFactorStatusResponse } from '../types/twoFactor';
+import { profileService } from '../services/ProfileService';
+import { supabase } from '../lib/supabase';
 
 export default function PrivacySecurityScreen() {
   const navigation = useNavigation();
-  const { session } = useAuth();
-  const [profileVisibility, setProfileVisibility] = useState('public');
+  const { user, session } = useAuth();
+  const { theme } = useTheme();
+  const [profileVisibility, setProfileVisibility] = useState<'public' | 'private'>('public');
+  const [showEmail, setShowEmail] = useState(false);
   const [allowMessages, setAllowMessages] = useState(true);
   const [showOnlineStatus, setShowOnlineStatus] = useState(true);
   const [allowDataCollection, setAllowDataCollection] = useState(false);
   const [twoFactorStatus, setTwoFactorStatus] = useState<TwoFactorStatusResponse | null>(null);
   const [loading2FA, setLoading2FA] = useState(true);
+  const [loadingPrivacy, setLoadingPrivacy] = useState(true);
+  const [savingPrivacy, setSavingPrivacy] = useState(false);
 
   useEffect(() => {
     loadTwoFactorStatus();
+    loadPrivacySettings();
   }, []);
 
   const loadTwoFactorStatus = async () => {
@@ -59,17 +67,92 @@ export default function PrivacySecurityScreen() {
     }
   };
 
+  const loadPrivacySettings = async () => {
+    if (!session || !user) {
+      setLoadingPrivacy(false);
+      return;
+    }
+
+    try {
+      setLoadingPrivacy(true);
+      // Load privacy settings from profile
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('profile_visibility, show_email, allow_messages')
+        .eq('id', user.id)
+        .single();
+
+      if (!error && profile) {
+        setProfileVisibility((profile.profile_visibility as 'public' | 'private') || 'public');
+        setShowEmail(profile.show_email || false);
+        setAllowMessages(profile.allow_messages !== false); // Default to true if null
+      }
+    } catch (error) {
+      console.error('❌ Error loading privacy settings:', error);
+    } finally {
+      setLoadingPrivacy(false);
+    }
+  };
+
+  const savePrivacySettings = async () => {
+    if (!session) return;
+
+    try {
+      setSavingPrivacy(true);
+      const result = await profileService.updatePrivacy(
+        {
+          profileVisibility,
+          showEmail,
+          allowMessages,
+        },
+        session
+      );
+
+      if (result.success) {
+        Alert.alert('Success', 'Privacy settings updated successfully');
+      } else {
+        Alert.alert('Error', result.error || 'Failed to update privacy settings');
+      }
+    } catch (error) {
+      console.error('❌ Error saving privacy settings:', error);
+      Alert.alert('Error', 'Failed to update privacy settings');
+    } finally {
+      setSavingPrivacy(false);
+    }
+  };
+
   const handleAccountVisibility = () => {
     Alert.alert(
       'Account Visibility',
       'Choose who can see your profile and tracks',
       [
-        { text: 'Public', onPress: () => setProfileVisibility('public') },
-        { text: 'Friends Only', onPress: () => setProfileVisibility('friends') },
-        { text: 'Private', onPress: () => setProfileVisibility('private') },
+        { 
+          text: 'Public', 
+          onPress: async () => {
+            setProfileVisibility('public');
+            await savePrivacySettings();
+          }
+        },
+        { 
+          text: 'Private', 
+          onPress: async () => {
+            setProfileVisibility('private');
+            await savePrivacySettings();
+          }
+        },
         { text: 'Cancel', style: 'cancel' },
       ]
     );
+  };
+
+  const handleShowEmailToggle = async (value: boolean) => {
+    setShowEmail(value);
+    await savePrivacySettings();
+  };
+
+  const handleAllowMessagesToggle = async (value: boolean) => {
+    setAllowMessages(value);
+    await savePrivacySettings();
   };
 
   const handleDownloadData = () => {
@@ -113,16 +196,28 @@ export default function PrivacySecurityScreen() {
         {/* Account Visibility */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account Visibility</Text>
-          <TouchableOpacity style={styles.settingItem} onPress={handleAccountVisibility}>
-            <View style={styles.settingInfo}>
-              <Ionicons name="eye" size={24} color="#FFFFFF" />
-              <View style={styles.settingContent}>
-                <Text style={styles.settingText}>Profile Visibility</Text>
-                <Text style={styles.settingSubtext}>Currently: {profileVisibility}</Text>
-              </View>
+          {loadingPrivacy ? (
+            <View style={styles.settingItem}>
+              <ActivityIndicator size="small" color="#FFFFFF" />
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#666" />
-          </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.settingItem} onPress={handleAccountVisibility} disabled={savingPrivacy}>
+              <View style={styles.settingInfo}>
+                <Ionicons name="eye" size={24} color="#FFFFFF" />
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingText}>Profile Visibility</Text>
+                  <Text style={styles.settingSubtext}>
+                    Currently: {profileVisibility === 'public' ? 'Public' : 'Private'}
+                  </Text>
+                </View>
+              </View>
+              {savingPrivacy ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Ionicons name="chevron-forward" size={20} color="#666" />
+              )}
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Two-Factor Authentication */}
@@ -155,6 +250,23 @@ export default function PrivacySecurityScreen() {
           
           <View style={styles.settingRow}>
             <View style={styles.settingInfo}>
+              <Ionicons name="mail" size={24} color="#FFFFFF" />
+              <View style={styles.settingContent}>
+                <Text style={styles.settingText}>Show Email</Text>
+                <Text style={styles.settingSubtext}>Display your email on your profile</Text>
+              </View>
+            </View>
+            <Switch
+              value={showEmail}
+              onValueChange={handleShowEmailToggle}
+              trackColor={{ false: '#767577', true: '#DC2626' }}
+              thumbColor={showEmail ? '#FFFFFF' : '#f4f3f4'}
+              disabled={loadingPrivacy || savingPrivacy}
+            />
+          </View>
+
+          <View style={styles.settingRow}>
+            <View style={styles.settingInfo}>
               <Ionicons name="chatbubble" size={24} color="#FFFFFF" />
               <View style={styles.settingContent}>
                 <Text style={styles.settingText}>Allow Messages</Text>
@@ -163,9 +275,10 @@ export default function PrivacySecurityScreen() {
             </View>
             <Switch
               value={allowMessages}
-              onValueChange={setAllowMessages}
+              onValueChange={handleAllowMessagesToggle}
               trackColor={{ false: '#767577', true: '#DC2626' }}
               thumbColor={allowMessages ? '#FFFFFF' : '#f4f3f4'}
+              disabled={loadingPrivacy || savingPrivacy}
             />
           </View>
 

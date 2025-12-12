@@ -19,6 +19,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { walletService, WalletBalance } from '../services/WalletService';
 import { currencyService } from '../services/CurrencyService';
 import { subscriptionService, SubscriptionStatus, UsageStatistics, BillingHistoryItem, RevenueData, TrackSelection } from '../services/SubscriptionService';
+import RevenueCatService from '../services/RevenueCatService';
 import TrackSelectionModal from '../components/TrackSelectionModal';
 
 // Interfaces moved to SubscriptionService
@@ -68,14 +69,62 @@ export default function BillingScreen() {
         walletService.checkStripeAccountStatusSafe(session)
       ]);
 
-      // Handle subscription data
-      if (subscriptionData.status === 'fulfilled' && subscriptionData.value) {
-        setSubscription(subscriptionData.value);
-        console.log('✅ Real subscription data loaded');
-      } else {
-        console.warn('⚠️ Failed to load subscription data, using fallback');
-        // Fallback to free plan with correct limits
-        setSubscription({
+      // Handle subscription data - use RevenueCat as source of truth
+      let finalSubscription: SubscriptionStatus | null = null;
+
+      // First, check RevenueCat for real-time subscription status
+      if (RevenueCatService.isReady()) {
+        try {
+          console.log('🔍 Checking RevenueCat for subscription status...');
+          const customerInfo = await RevenueCatService.getCustomerInfo();
+          if (customerInfo) {
+            const tier = RevenueCatService.getUserTier(customerInfo);
+            console.log('🎯 RevenueCat tier:', tier);
+
+            if (tier !== 'free') {
+              // Detect billing cycle and pricing from active subscriptions
+              const activeSubscriptions = customerInfo.activeSubscriptions;
+              const hasMonthly = activeSubscriptions.some(sub =>
+                sub.toLowerCase().includes('month') && !sub.toLowerCase().includes('annual')
+              );
+              const billingCycle = hasMonthly ? 'monthly' : 'yearly';
+              
+              // Determine amount based on tier and billing cycle
+              let amount = 0;
+              if (tier === 'premium') {
+                amount = billingCycle === 'monthly' ? 6.99 : 69.99;
+              } else if (tier === 'unlimited') {
+                amount = billingCycle === 'monthly' ? 12.99 : 129.99;
+              }
+
+              finalSubscription = {
+                tier: tier,
+                status: 'active',
+                current_period_start: new Date().toISOString(),
+                current_period_end: new Date(Date.now() + (billingCycle === 'monthly' ? 30 : 365) * 24 * 60 * 60 * 1000).toISOString(),
+                cancel_at_period_end: false,
+                amount,
+                currency: 'GBP',
+                billing_cycle: billingCycle,
+              };
+              console.log(`✅ Using ${tier} subscription from RevenueCat`);
+            }
+          }
+        } catch (error) {
+          console.error('❌ Error checking RevenueCat:', error);
+        }
+      }
+
+      // If RevenueCat didn't provide paid tier status, use backend data
+      if (!finalSubscription && subscriptionData.status === 'fulfilled' && subscriptionData.value) {
+        finalSubscription = subscriptionData.value;
+        console.log('✅ Using subscription data from backend');
+      }
+
+      // Final fallback to free plan
+      if (!finalSubscription) {
+        console.warn('⚠️ No subscription data from RevenueCat or backend, using free plan fallback');
+        finalSubscription = {
           tier: 'free',
           status: 'active',
           current_period_start: new Date().toISOString(),
@@ -84,8 +133,11 @@ export default function BillingScreen() {
           amount: 0,
           currency: 'USD',
           billing_cycle: 'monthly',
-        });
+        };
       }
+
+      setSubscription(finalSubscription);
+      console.log('✅ Final subscription tier:', finalSubscription.tier);
 
       // Handle usage data
       if (usageData.status === 'fulfilled' && usageData.value) {
@@ -499,7 +551,7 @@ export default function BillingScreen() {
                   {subscriptionService.formatTier(subscription.tier)}
                 </Text>
                 <Text style={[styles.planPrice, { color: theme.colors.text }]}>
-                  ${subscription.amount}/{subscription.billing_cycle === 'monthly' ? 'month' : 'year'}
+                  £{subscription.amount.toFixed(2)}/{subscription.billing_cycle === 'monthly' ? 'month' : 'year'}
                 </Text>
               </View>
               
@@ -547,7 +599,7 @@ export default function BillingScreen() {
                 <Text style={[styles.upgradeButtonText, { color: theme.colors.text }]}>Change Plan</Text>
               </TouchableOpacity>
               
-              {subscription.tier !== 'free' && !subscription.cancel_at_period_end && (
+              {(subscription.tier === 'premium' || subscription.tier === 'unlimited') && !subscription.cancel_at_period_end && (
                 <TouchableOpacity 
                   style={styles.cancelButton}
                   onPress={handleCancelSubscription}
@@ -643,7 +695,7 @@ export default function BillingScreen() {
         )}
 
         {/* Revenue Tracker */}
-        {revenue && subscription?.tier !== 'free' && (
+        {revenue && (subscription?.tier === 'premium' || subscription?.tier === 'unlimited') && (
           <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
             <Text style={[styles.cardTitle, { color: theme.colors.text }]}>Revenue & Payouts</Text>
             

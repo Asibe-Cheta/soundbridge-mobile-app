@@ -40,8 +40,8 @@ class InAppPurchaseService {
   // Product IDs based on web team's configuration
   private readonly productIds = Platform.select({
     ios: [
-      'com.soundbridge.pro.monthly',
-      'com.soundbridge.pro.yearly',
+      'com.soundbridge.premium.monthly',
+      'com.soundbridge.premium.yearly',
     ],
     android: [
       'soundbridge_pro_monthly',

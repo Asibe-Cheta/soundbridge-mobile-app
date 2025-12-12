@@ -7,6 +7,7 @@ import {
 import { networkService } from '../services/api/networkService';
 import { realtimeService } from '../services/realtime/realtimeService';
 import { useAuth } from '../contexts/AuthContext';
+import { mockConnections, mockConnectionRequests, mockConnectionSuggestions } from '../utils/mockNetworkData';
 
 export const useNetwork = () => {
   const { user, session, loading: authLoading } = useAuth();
@@ -24,8 +25,8 @@ export const useNetwork = () => {
       setConnections(data);
     } catch (err: any) {
       if (err?.status === 404) {
-        console.warn('Network API endpoint not available (404). Showing empty connections.');
-        setConnections([]);
+        console.warn('Network API endpoint not available (404). Showing mock connections.');
+        setConnections(mockConnections);
         setError(null); // Don't show error for missing endpoint
       } else {
         setError(err instanceof Error ? err.message : 'Failed to load connections');
@@ -42,8 +43,8 @@ export const useNetwork = () => {
       setSuggestions(data);
     } catch (err: any) {
       if (err?.status === 404) {
-        console.warn('Network API endpoint not available (404). Showing empty suggestions.');
-        setSuggestions([]);
+        console.warn('Network API endpoint not available (404). Showing mock suggestions.');
+        setSuggestions(mockConnectionSuggestions);
       } else {
         console.error('Failed to load suggestions:', err);
       }
@@ -58,8 +59,8 @@ export const useNetwork = () => {
       setRequests(data);
     } catch (err: any) {
       if (err?.status === 404) {
-        console.warn('Network API endpoint not available (404). Showing empty requests.');
-        setRequests([]);
+        console.warn('Network API endpoint not available (404). Showing mock requests.');
+        setRequests(mockConnectionRequests);
       } else {
         console.error('Failed to load requests:', err);
       }

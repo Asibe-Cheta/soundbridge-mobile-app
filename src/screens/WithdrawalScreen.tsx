@@ -20,6 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService, WalletBalance, WithdrawalMethod, WithdrawalRequest } from '../services/WalletService';
 import { currencyService } from '../services/CurrencyService';
+import { payoutService, PayoutEligibility, CreatorRevenue } from '../services/PayoutService';
 
 interface WithdrawalMethodOption {
   type: 'bank_transfer' | 'paypal' | 'crypto' | 'prepaid_card';
@@ -73,6 +74,9 @@ export default function WithdrawalScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [agreeToFees, setAgreeToFees] = useState(false);
+  const [payoutEligibility, setPayoutEligibility] = useState<PayoutEligibility | null>(null);
+  const [creatorRevenue, setCreatorRevenue] = useState<CreatorRevenue | null>(null);
+  const [showPayoutForm, setShowPayoutForm] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -88,17 +92,23 @@ export default function WithdrawalScreen() {
       setLoading(true);
       console.log('💸 Loading withdrawal data...');
 
-      // Load wallet balance and withdrawal methods in parallel
-      const [balanceResult, methodsResult] = await Promise.all([
+      // Load wallet balance, withdrawal methods, payout eligibility, and creator revenue in parallel
+      const [balanceResult, methodsResult, eligibilityResult, revenueResult] = await Promise.all([
         walletService.getWalletBalanceSafe(session),
-        walletService.getWithdrawalMethods(session).catch(() => ({ methods: [], count: 0 })) // Graceful fallback
+        walletService.getWithdrawalMethods(session).catch(() => ({ methods: [], count: 0 })),
+        payoutService.checkEligibility(session).catch(() => null),
+        payoutService.getCreatorRevenue(session).catch(() => null),
       ]);
 
       setWalletData(balanceResult);
       setSavedMethods(methodsResult.methods || []);
+      setPayoutEligibility(eligibilityResult);
+      setCreatorRevenue(revenueResult);
 
       console.log('💰 Wallet balance:', balanceResult);
-      console.log('🏦 Withdrawal methods:', methodsResult.length);
+      console.log('🏦 Withdrawal methods:', methodsResult.methods?.length || 0);
+      console.log('✅ Payout eligibility:', eligibilityResult);
+      console.log('💵 Creator revenue:', revenueResult);
     } catch (error) {
       console.error('Error loading withdrawal data:', error);
       Alert.alert('Error', 'Failed to load withdrawal information. Please try again.');
@@ -234,6 +244,102 @@ export default function WithdrawalScreen() {
     }
   };
 
+  const handlePayoutRequest = async () => {
+    try {
+      if (!session) {
+        Alert.alert('Error', 'You must be logged in to request a payout');
+        return;
+      }
+
+      if (!validatePayoutAmount(amount)) {
+        return;
+      }
+
+      const payoutAmount = parseFloat(amount);
+
+      // Show confirmation dialog
+      Alert.alert(
+        'Confirm Payout Request',
+        `Request payout of ${currencyService.formatAmount(payoutAmount, creatorRevenue?.currency || 'USD')}?\n\nEstimated processing: 2-7 business days\nNo platform fees for payouts.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Request', onPress: () => processPayoutRequest(payoutAmount) }
+        ]
+      );
+    } catch (error) {
+      console.error('Error preparing payout:', error);
+      Alert.alert('Error', 'Failed to prepare payout request. Please try again.');
+    }
+  };
+
+  const processPayoutRequest = async (payoutAmount: number) => {
+    try {
+      setSubmitting(true);
+      console.log('💸 Processing payout request...');
+
+      const result = await payoutService.requestPayout(session!, {
+        amount: payoutAmount,
+        currency: creatorRevenue?.currency || 'USD',
+        notes: description || `Creator payout request`,
+      });
+
+      if (result.success) {
+        console.log('✅ Payout request submitted:', result.payout);
+
+        Alert.alert(
+          'Payout Requested',
+          `Your payout request has been submitted successfully!\n\nAmount: ${currencyService.formatAmount(payoutAmount, creatorRevenue?.currency || 'USD')}\nStatus: Pending\n\nYour funds will arrive in 2-7 business days. You'll receive a notification when the payout is processed.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Reset form and reload data
+                setAmount('');
+                setDescription('');
+                setShowPayoutForm(false);
+                loadData();
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Payout Failed', result.error || 'Failed to submit payout request. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error processing payout:', error);
+      Alert.alert('Error', 'Payout request failed. Please try again later.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const validatePayoutAmount = (value: string): boolean => {
+    const numValue = parseFloat(value);
+    if (isNaN(numValue) || numValue <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid amount greater than $0');
+      return false;
+    }
+
+    if (!creatorRevenue || numValue > creatorRevenue.pending_balance) {
+      Alert.alert(
+        'Insufficient Balance',
+        `Your available balance is ${currencyService.formatAmount(creatorRevenue?.pending_balance || 0, creatorRevenue?.currency || 'USD')}`
+      );
+      return false;
+    }
+
+    const minPayout = 25.00; // $25 minimum
+    if (numValue < minPayout) {
+      Alert.alert(
+        'Minimum Amount',
+        `Minimum payout amount is ${currencyService.formatAmount(minPayout, creatorRevenue?.currency || 'USD')}`
+      );
+      return false;
+    }
+
+    return true;
+  };
+
   const getMethodIcon = (type: string) => {
     switch (type) {
       case 'bank_transfer': return 'card';
@@ -361,6 +467,112 @@ export default function WithdrawalScreen() {
             {walletData ? currencyService.formatAmount(walletData.balance, walletData.currency) : '$0.00'}
           </Text>
         </View>
+
+        {/* Creator Revenue Payout Section */}
+        {creatorRevenue && creatorRevenue.pending_balance > 0 && (
+          <View style={[styles.payoutCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.primary }]}>
+            <View style={styles.payoutHeader}>
+              <Ionicons name="trending-up" size={24} color={theme.colors.primary} />
+              <Text style={[styles.payoutTitle, { color: theme.colors.text }]}>Creator Earnings Payout</Text>
+            </View>
+
+            <View style={styles.payoutStats}>
+              <View style={styles.payoutStat}>
+                <Text style={[styles.payoutStatLabel, { color: theme.colors.textSecondary }]}>Available</Text>
+                <Text style={[styles.payoutStatAmount, { color: theme.colors.primary }]}>
+                  {currencyService.formatAmount(creatorRevenue.pending_balance, creatorRevenue.currency)}
+                </Text>
+              </View>
+              <View style={styles.payoutStat}>
+                <Text style={[styles.payoutStatLabel, { color: theme.colors.textSecondary }]}>Total Earned</Text>
+                <Text style={[styles.payoutStatAmount, { color: theme.colors.success }]}>
+                  {currencyService.formatAmount(creatorRevenue.total_earned, creatorRevenue.currency)}
+                </Text>
+              </View>
+            </View>
+
+            {payoutEligibility && !payoutEligibility.eligible && (
+              <View style={[styles.ineligibleBanner, { backgroundColor: theme.colors.warning + '20', borderColor: theme.colors.warning }]}>
+                <Ionicons name="alert-circle" size={20} color={theme.colors.warning} />
+                <View style={styles.ineligibleInfo}>
+                  <Text style={[styles.ineligibleTitle, { color: theme.colors.warning }]}>Payout Not Available</Text>
+                  {payoutEligibility.reasons.map((reason, index) => (
+                    <Text key={index} style={[styles.ineligibleReason, { color: theme.colors.textSecondary }]}>• {reason}</Text>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {(!payoutEligibility || payoutEligibility.eligible) && (
+              <TouchableOpacity
+                style={[styles.requestPayoutBtn, { backgroundColor: theme.colors.primary }]}
+                onPress={() => setShowPayoutForm(!showPayoutForm)}
+                disabled={creatorRevenue.pending_balance < 25}
+              >
+                <Ionicons name="cash" size={20} color="#FFFFFF" />
+                <Text style={styles.requestPayoutBtnText}>
+                  {creatorRevenue.pending_balance >= 25 ? 'Request Payout' : 'Minimum $25 Required'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {showPayoutForm && (
+              <View style={styles.payoutForm}>
+                <Text style={[styles.formLabel, { color: theme.colors.text }]}>Payout Amount</Text>
+                <View style={[styles.amountInputContainer, { borderColor: theme.colors.border }]}>
+                  <Text style={[styles.currencySymbol, { color: theme.colors.text }]}>$</Text>
+                  <TextInput
+                    style={[styles.amountInput, { color: theme.colors.text }]
+}
+                    placeholder="0.00"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={amount}
+                    onChangeText={setAmount}
+                    keyboardType="decimal-pad"
+                    maxLength={10}
+                  />
+                </View>
+
+                <View style={styles.quickAmounts}>
+                  {[25, 50, 100].map((quickAmount) => (
+                    <TouchableOpacity
+                      key={quickAmount}
+                      style={[styles.quickAmountBtn, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                      onPress={() => setAmount(Math.min(quickAmount, creatorRevenue.pending_balance).toString())}
+                    >
+                      <Text style={[styles.quickAmountText, { color: theme.colors.text }]}>${quickAmount}</Text>
+                    </TouchableOpacity>
+                  ))}
+                  <TouchableOpacity
+                    style={[styles.quickAmountBtn, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                    onPress={() => setAmount(creatorRevenue.pending_balance.toString())}
+                  >
+                    <Text style={[styles.quickAmountText, { color: theme.colors.text }]}>Max</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.submitPayoutBtn, { backgroundColor: theme.colors.primary }]}
+                  onPress={handlePayoutRequest}
+                  disabled={submitting || !amount || parseFloat(amount) <= 0}
+                >
+                  {submitting ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
+                      <Text style={styles.submitPayoutBtnText}>Confirm Payout</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <Text style={[styles.payoutNote, { color: theme.colors.textSecondary }]}>
+                  Funds will arrive in 2-7 business days. No fees charged.
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Amount Input */}
         <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
@@ -823,5 +1035,118 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#FFFFFF',
+  },
+  payoutCard: {
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 2,
+  },
+  payoutHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  payoutTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 12,
+  },
+  payoutStats: {
+    flexDirection: 'row',
+    gap: 16,
+    marginBottom: 16,
+  },
+  payoutStat: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  payoutStatLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  payoutStatAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  ineligibleBanner: {
+    flexDirection: 'row',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 16,
+    gap: 8,
+  },
+  ineligibleInfo: {
+    flex: 1,
+  },
+  ineligibleTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  ineligibleReason: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  requestPayoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    gap: 8,
+    marginBottom: 8,
+  },
+  requestPayoutBtnText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  payoutForm: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  formLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  quickAmountBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  quickAmountText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  submitPayoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    gap: 8,
+    marginTop: 16,
+  },
+  submitPayoutBtnText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  payoutNote: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 12,
+    lineHeight: 16,
   },
 });

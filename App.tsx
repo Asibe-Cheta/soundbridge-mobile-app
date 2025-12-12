@@ -63,6 +63,14 @@ import TwoFactorVerificationScreen from './src/screens/TwoFactorVerificationScre
 import TwoFactorSetupScreen from './src/screens/TwoFactorSetupScreen';
 import TwoFactorSettingsScreen from './src/screens/TwoFactorSettingsScreen';
 import SearchScreen from './src/screens/SearchScreen';
+import ExperienceManagementScreen from './src/screens/ExperienceManagementScreen';
+import SkillsManagementScreen from './src/screens/SkillsManagementScreen';
+import InstrumentsManagementScreen from './src/screens/InstrumentsManagementScreen';
+import AnalyticsDashboardScreen from './src/screens/AnalyticsDashboardScreen';
+import BrandingCustomizationScreen from './src/screens/BrandingCustomizationScreen';
+import TracksListScreen from './src/screens/TracksListScreen';
+import FollowersListScreen from './src/screens/FollowersListScreen';
+import FollowingListScreen from './src/screens/FollowingListScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -246,9 +254,18 @@ function AppNavigator() {
   const { theme } = useTheme();
   const navigationRef = React.useRef<any>(null);
 
-  // Initialize services
+  // Track if services have been initialized
+  const servicesInitializedRef = React.useRef(false);
+
+  // Initialize services (only once on mount)
   React.useEffect(() => {
+    // Prevent multiple initializations
+    if (servicesInitializedRef.current) {
+      return;
+    }
+
     console.log('🔧 Initializing services...');
+    servicesInitializedRef.current = true;
     
     // Initialize offline queue service (works without user)
     offlineQueueService.initialize().then(() => {
@@ -272,52 +289,26 @@ function AppNavigator() {
     }).catch(error => {
       console.error('❌ Error initializing error tracking service:', error);
     });
+  }, []); // Empty dependency array - only run once on mount
 
-    // Set user context for error tracking if user is available
+  // Set user context and initialize user-dependent services
+  React.useEffect(() => {
     if (user) {
+      // Set user context for error tracking
       errorTrackingService.setUser({
         id: user.id,
         email: user.email,
         username: user.user_metadata?.username,
       });
-    }
 
-    if (user) {
-      // Initialize notification service
+      // Initialize notification service (only once per user)
       notificationService.initialize().then(success => {
         if (success) {
           console.log('✅ Notification service ready');
         }
       });
     }
-
-    // Initialize deep linking
-    const handleDeepLink = async (event: { url: string }) => {
-      const { path, queryParams } = Linking.parse(event.url);
-      console.log('🔗 Deep link received:', path, queryParams);
-      
-      if (path && navigationRef.current) {
-        handleDeepLinkNavigation(path, queryParams);
-      }
-    };
-
-    // Listen for URL events
-    const subscription = Linking.addEventListener('url', handleDeepLink);
-
-    // Check for initial URL
-    Linking.getInitialURL().then(url => {
-      if (url) {
-        const { path, queryParams } = Linking.parse(url);
-        if (path && navigationRef.current) {
-          handleDeepLinkNavigation(path, queryParams);
-        }
-      }
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, [user]);
+  }, [user?.id]); // Only re-run if user ID changes
 
   // Handle deep link navigation
   const handleDeepLinkNavigation = (path: string, params: any) => {
@@ -362,6 +353,35 @@ function AppNavigator() {
         console.log('Unknown deep link path:', path);
     }
   };
+
+  // Initialize deep linking
+  React.useEffect(() => {
+    const handleDeepLink = async (event: { url: string }) => {
+      const { path, queryParams } = Linking.parse(event.url);
+      console.log('🔗 Deep link received:', path, queryParams);
+      
+      if (path && navigationRef.current) {
+        handleDeepLinkNavigation(path, queryParams);
+      }
+    };
+
+    // Listen for URL events
+    const subscription = Linking.addEventListener('url', handleDeepLink);
+
+    // Check for initial URL
+    Linking.getInitialURL().then(url => {
+      if (url) {
+        const { path, queryParams } = Linking.parse(url);
+        if (path && navigationRef.current) {
+          handleDeepLinkNavigation(path, queryParams);
+        }
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [user]);
 
   // Handle navigation ready
   const onNavigationReady = React.useCallback(() => {
@@ -463,6 +483,14 @@ function AppNavigator() {
             <Stack.Screen name="ServiceProviderOnboarding" component={ServiceProviderOnboardingScreen} />
             <Stack.Screen name="ServiceProviderDashboard" component={ServiceProviderDashboardScreen} />
             <Stack.Screen name="AudioEnhancementExpo" component={AudioEnhancementExpoScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="ExperienceManagement" component={ExperienceManagementScreen} />
+            <Stack.Screen name="SkillsManagement" component={SkillsManagementScreen} />
+            <Stack.Screen name="InstrumentsManagement" component={InstrumentsManagementScreen} />
+            <Stack.Screen name="AnalyticsDashboard" component={AnalyticsDashboardScreen} />
+            <Stack.Screen name="BrandingCustomization" component={BrandingCustomizationScreen} />
+            <Stack.Screen name="TracksList" component={TracksListScreen} />
+            <Stack.Screen name="FollowersList" component={FollowersListScreen} />
+            <Stack.Screen name="FollowingList" component={FollowingListScreen} />
             {/* Allow access to onboarding even after completion for testing */}
             <Stack.Screen name="OnboardingTest" component={OnboardingScreen} />
           </>

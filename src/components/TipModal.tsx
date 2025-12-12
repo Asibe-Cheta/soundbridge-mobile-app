@@ -388,12 +388,18 @@ Platform fee: $${platformFee.toFixed(2)}`,
                 >
                   <CardField
                     postalCodeEnabled={false}
-                    placeholders={{ number: '4242 4242 4242 4242' }}
+                    placeholders={{
+                      number: '4242 4242 4242 4242',
+                      expiration: 'MM/YY',
+                      cvc: 'CVC',
+                    }}
                     cardStyle={{
-                      backgroundColor: 'transparent',
+                      backgroundColor: theme.colors.surface,
                       textColor: theme.colors.text,
                       placeholderColor: theme.colors.textSecondary,
                       borderColor: 'transparent',
+                      fontSize: 16,
+                      textErrorColor: '#EF4444',
                     }}
                     style={styles.cardField}
                     onCardChange={(details) => setCardComplete(Boolean(details?.complete))}

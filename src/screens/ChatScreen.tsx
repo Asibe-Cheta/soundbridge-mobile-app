@@ -11,6 +11,7 @@ import {
   Image,
   ActivityIndicator,
   StatusBar,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,6 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { dbHelpers, supabase } from '../lib/supabase';
 import { useNavigation } from '@react-navigation/native';
+import subscriptionService from '../services/SubscriptionService';
 
 interface Message {
   id: string;
@@ -62,16 +64,16 @@ interface ChatScreenProps {
 }
 
 export default function ChatScreen({ navigation, route }: ChatScreenProps) {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const { theme } = useTheme();
   const { conversationId, otherUser } = route.params;
-  
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [typingTimeout, setTypingTimeout] = useState<NodeJS.Timeout | null>(null);
-  
+
   const flatListRef = useRef<FlatList>(null);
   const subscriptionRef = useRef<any>(null);
   const readStatusSubscriptionRef = useRef<any>(null);
@@ -285,13 +287,38 @@ export default function ChatScreen({ navigation, route }: ChatScreenProps) {
   };
 
   const sendMessage = async () => {
-    if (!messageText.trim() || !user) return;
-    
+    if (!messageText.trim() || !user || !session) return;
+
     try {
       setSending(true);
+
+      // Check message limits before sending
+      console.log('📬 Checking message limits before sending...');
+      const limitCheck = await subscriptionService.canSendMessage(session);
+
+      if (!limitCheck.canSend) {
+        console.log('❌ Message limit reached');
+        setSending(false);
+
+        Alert.alert(
+          'Message Limit Reached',
+          limitCheck.reason || 'You have reached your message limit for this month.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Upgrade to Pro',
+              onPress: () => navigation.navigate('Upgrade' as never),
+            },
+          ]
+        );
+        return;
+      }
+
+      console.log('✅ Message limit check passed');
+
       const [userId1, userId2] = conversationId.split('_');
       const recipientId = userId1 === user.id ? userId2 : userId1;
-      
+
       const { data, error } = await supabase
         .from('messages')
         .insert({
@@ -328,11 +355,11 @@ export default function ChatScreen({ navigation, route }: ChatScreenProps) {
         .single();
 
       if (error) throw error;
-      
+
       if (data) {
         setMessages(prev => [...prev, data]);
         setMessageText('');
-        
+
         // Auto-scroll to bottom
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: true });
@@ -340,6 +367,11 @@ export default function ChatScreen({ navigation, route }: ChatScreenProps) {
       }
     } catch (error) {
       console.error('Error sending message:', error);
+      Alert.alert(
+        'Error',
+        'Failed to send message. Please try again.',
+        [{ text: 'OK' }]
+      );
     } finally {
       setSending(false);
     }

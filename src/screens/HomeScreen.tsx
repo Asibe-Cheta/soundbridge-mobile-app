@@ -218,16 +218,18 @@ export default function HomeScreen() {
     setTipTargetCreator(null);
   };
 
-  const handleCreatorTipSuccess = (amount: number) => {
+  const handleCreatorTipSuccess = (amountInCents: number) => {
     if (!tipTargetCreator) {
       return;
     }
+    // Convert cents to dollars for display
+    const amountInDollars = amountInCents / 100;
     setHotCreators((prev) =>
       prev.map((creator) =>
         creator.id === tipTargetCreator.id
           ? {
               ...creator,
-              total_tips_received: (creator.total_tips_received || 0) + amount,
+              total_tips_received: (creator.total_tips_received || 0) + amountInDollars,
               total_tip_count: (creator.total_tip_count || 0) + 1,
             }
           : creator,
