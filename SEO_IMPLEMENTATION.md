@@ -51,7 +51,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'SoundBridge - Connect Through Music',
     description: 'Join SoundBridge to connect with music creators...',
-    url: 'https://soundbridge.com',
+    url: 'https://soundbridge.live',
     siteName: 'SoundBridge',
     images: [{ url: '/images/og-image.jpg', width: 1200, height: 630 }],
     locale: 'en_US',
@@ -126,7 +126,7 @@ export async function generateMetadata({ params }: CreatorProfilePageProps): Pro
     openGraph: {
       title,
       description,
-      url: `https://soundbridge.com/creator/${username}`,
+      url: `https://soundbridge.live/creator/${username}`,
       siteName: 'SoundBridge',
       images: [{ url: creator.avatar_url, width: 400, height: 400 }],
       locale: 'en_US',
@@ -154,8 +154,8 @@ export const organizationStructuredData = {
   '@context': 'https://schema.org',
   '@type': 'Organization',
   name: 'SoundBridge',
-  url: 'https://soundbridge.com',
-  logo: 'https://soundbridge.com/images/logos/logo-white-lockup.png',
+  url: 'https://soundbridge.live',
+  logo: 'https://soundbridge.live/images/logos/logo-white-lockup.png',
   description: 'Connect with music creators, discover amazing events...',
   sameAs: [
     'https://twitter.com/soundbridge',
@@ -166,7 +166,7 @@ export const organizationStructuredData = {
   contactPoint: {
     '@type': 'ContactPoint',
     contactType: 'customer service',
-    email: 'support@soundbridge.com',
+    email: 'support@soundbridge.live',
   },
   founder: {
     '@type': 'Person',
@@ -184,7 +184,7 @@ export const organizationStructuredData = {
 // app/api/sitemap/route.ts
 export async function GET(request: NextRequest) {
   const supabase = createServiceClient();
-  const baseUrl = 'https://soundbridge.com';
+  const baseUrl = 'https://soundbridge.live';
   
   // Fetch creators, events, and podcasts from database
   const { data: creators } = await supabase
@@ -305,15 +305,15 @@ Allow: /legal/
 Crawl-delay: 1
 
 # Sitemap location
-Sitemap: https://soundbridge.com/sitemap.xml
+Sitemap: https://soundbridge.live/sitemap.xml
 
 # Additional sitemaps for different content types
-Sitemap: https://soundbridge.com/sitemap-creators.xml
-Sitemap: https://soundbridge.com/sitemap-events.xml
-Sitemap: https://soundbridge.com/sitemap-podcasts.xml
+Sitemap: https://soundbridge.live/sitemap-creators.xml
+Sitemap: https://soundbridge.live/sitemap-events.xml
+Sitemap: https://soundbridge.live/sitemap-podcasts.xml
 
 # Host directive
-Host: https://soundbridge.com
+Host: https://soundbridge.live
 ```
 
 ## 📈 Analytics Integration
@@ -336,7 +336,7 @@ Host: https://soundbridge.com
       gtag('js', new Date());
       gtag('config', '${process.env.NEXT_PUBLIC_GA_ID}', {
         page_title: 'SoundBridge - Connect Through Music',
-        page_location: 'https://soundbridge.com',
+        page_location: 'https://soundbridge.live',
       });
     `,
   }}

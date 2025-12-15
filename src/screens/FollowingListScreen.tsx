@@ -16,6 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { profileService } from '../services/ProfileService';
 
 interface Following {
   id: string;
@@ -53,7 +54,28 @@ export default function FollowingListScreen() {
       setLoading(true);
       console.log('📋 Loading following for user:', userId);
 
-      // Get all users this user is following with their profile info
+      // Try API endpoint first, fallback to Supabase if it fails
+      let transformedFollowing: Following[] = [];
+
+      try {
+        const result = await profileService.getFollowing(userId, session || undefined);
+        if (result.success && result.following) {
+          console.log('✅ Loaded following from API:', result.following.length);
+          // Transform API response to screen format
+          transformedFollowing = result.following.map(following => ({
+            id: following.id,
+            user_id: following.id,
+            display_name: following.display_name || 'Unknown User',
+            username: following.username || 'unknown',
+            avatar_url: following.avatar_url || null,
+            bio: following.bio || null,
+            is_verified: following.is_verified || false,
+          }));
+        }
+      } catch (apiError) {
+        console.warn('⚠️ API endpoint failed, falling back to Supabase:', apiError);
+
+        // Fallback to Supabase
       const { data: followsData, error: followsError } = await supabase
         .from('follows')
         .select(`
@@ -64,8 +86,7 @@ export default function FollowingListScreen() {
             username,
             display_name,
             avatar_url,
-            bio,
-            is_verified
+              bio
           )
         `)
         .eq('follower_id', userId)
@@ -73,10 +94,8 @@ export default function FollowingListScreen() {
 
       if (followsError) throw followsError;
 
-      console.log('✅ Loaded following:', followsData?.length || 0);
-
       // Transform data
-      const transformedFollowing: Following[] = (followsData || [])
+        transformedFollowing = (followsData || [])
         .filter(f => f.following) // Filter out any null profiles
         .map(f => ({
           id: f.following_id,
@@ -85,8 +104,9 @@ export default function FollowingListScreen() {
           username: f.following.username || 'unknown',
           avatar_url: f.following.avatar_url,
           bio: f.following.bio,
-          is_verified: f.following.is_verified || false,
+            is_verified: false, // is_verified doesn't exist in DB
         }));
+      }
 
       setFollowing(transformedFollowing);
     } catch (error) {

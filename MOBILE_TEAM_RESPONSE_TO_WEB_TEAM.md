@@ -435,7 +435,7 @@ We've implemented **everything you recommended** and are ready to launch as soon
 
 **Prepared By:** Mobile Development Team  
 **Date:** October 14, 2025  
-**Contact:** mobile-team@soundbridge.com  
+**Contact:** mobile-team@soundbridge.live  
 
 **For Web Team Questions:** Reach out anytime - we're here to help!
 

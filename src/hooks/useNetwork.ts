@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Connection,
   ConnectionRequest,
@@ -8,26 +8,41 @@ import { networkService } from '../services/api/networkService';
 import { realtimeService } from '../services/realtime/realtimeService';
 import { useAuth } from '../contexts/AuthContext';
 import { mockConnections, mockConnectionRequests, mockConnectionSuggestions } from '../utils/mockNetworkData';
+import { networkCacheService } from '../services/networkCacheService';
 
 export const useNetwork = () => {
   const { user, session, loading: authLoading } = useAuth();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [suggestions, setSuggestions] = useState<ConnectionSuggestion[]>([]);
   const [requests, setRequests] = useState<ConnectionRequest[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Start false - show cached data immediately
   const [error, setError] = useState<string | null>(null);
+  const initialLoadRef = useRef(false);
+  const backgroundRefreshRef = useRef(false);
 
-  // Load connections
-  const loadConnections = useCallback(async () => {
+  // Load connections with caching
+  const loadConnections = useCallback(async (forceRefresh = false) => {
     if (!user || !session) return;
+
+    // Try cache first unless force refresh
+    if (!forceRefresh && !backgroundRefreshRef.current) {
+      const cached = await networkCacheService.getCachedConnections();
+      if (cached && cached.length > 0) {
+        setConnections(cached);
+        return;
+      }
+    }
+
     try {
       const { connections: data } = await networkService.getConnections(1, 50);
       setConnections(data);
+      await networkCacheService.saveConnections(data);
     } catch (err: any) {
       if (err?.status === 404) {
         console.warn('Network API endpoint not available (404). Showing mock connections.');
         setConnections(mockConnections);
-        setError(null); // Don't show error for missing endpoint
+        await networkCacheService.saveConnections(mockConnections);
+        setError(null);
       } else {
         setError(err instanceof Error ? err.message : 'Failed to load connections');
         console.error('Failed to load connections:', err);
@@ -35,32 +50,56 @@ export const useNetwork = () => {
     }
   }, [user, session]);
 
-  // Load suggestions
-  const loadSuggestions = useCallback(async () => {
+  // Load suggestions with caching
+  const loadSuggestions = useCallback(async (forceRefresh = false) => {
     if (!user || !session) return;
+
+    // Try cache first unless force refresh
+    if (!forceRefresh && !backgroundRefreshRef.current) {
+      const cached = await networkCacheService.getCachedSuggestions();
+      if (cached && cached.length > 0) {
+        setSuggestions(cached);
+        return;
+      }
+    }
+
     try {
       const { suggestions: data } = await networkService.getSuggestions(1, 10);
       setSuggestions(data);
+      await networkCacheService.saveSuggestions(data);
     } catch (err: any) {
       if (err?.status === 404) {
         console.warn('Network API endpoint not available (404). Showing mock suggestions.');
         setSuggestions(mockConnectionSuggestions);
+        await networkCacheService.saveSuggestions(mockConnectionSuggestions);
       } else {
         console.error('Failed to load suggestions:', err);
       }
     }
   }, [user, session]);
 
-  // Load pending requests
-  const loadRequests = useCallback(async () => {
+  // Load pending requests with caching
+  const loadRequests = useCallback(async (forceRefresh = false) => {
     if (!user || !session) return;
+
+    // Try cache first unless force refresh
+    if (!forceRefresh && !backgroundRefreshRef.current) {
+      const cached = await networkCacheService.getCachedRequests();
+      if (cached && cached.length > 0) {
+        setRequests(cached);
+        return;
+      }
+    }
+
     try {
       const { requests: data } = await networkService.getPendingRequests(1, 20);
       setRequests(data);
+      await networkCacheService.saveRequests(data);
     } catch (err: any) {
       if (err?.status === 404) {
         console.warn('Network API endpoint not available (404). Showing mock requests.');
         setRequests(mockConnectionRequests);
+        await networkCacheService.saveRequests(mockConnectionRequests);
       } else {
         console.error('Failed to load requests:', err);
       }
@@ -129,10 +168,10 @@ export const useNetwork = () => {
     return unsubscribe;
   }, [user?.id]);
 
-  // Initial load - wait for auth to be ready
+  // Initial load with instant cache display
   useEffect(() => {
     if (authLoading) {
-      return; // Wait for auth to finish loading
+      return;
     }
 
     if (!user || !session) {
@@ -144,14 +183,38 @@ export const useNetwork = () => {
     }
 
     const loadAll = async () => {
-      setLoading(true);
-      setError(null);
-      await Promise.all([
-        loadConnections(),
-        loadSuggestions(),
-        loadRequests(),
-      ]);
-      setLoading(false);
+      // First load: Try cache immediately
+      if (!initialLoadRef.current) {
+        console.log('⚡ Loading network data from cache...');
+        await Promise.all([
+          loadConnections(false),
+          loadSuggestions(false),
+          loadRequests(false),
+        ]);
+
+        initialLoadRef.current = true;
+
+        // Background refresh for fresh data
+        backgroundRefreshRef.current = true;
+        setTimeout(async () => {
+          await Promise.all([
+            loadConnections(true),
+            loadSuggestions(true),
+            loadRequests(true),
+          ]);
+          backgroundRefreshRef.current = false;
+        }, 100);
+      } else {
+        // Subsequent loads: fetch fresh data
+        setLoading(true);
+        setError(null);
+        await Promise.all([
+          loadConnections(true),
+          loadSuggestions(true),
+          loadRequests(true),
+        ]);
+        setLoading(false);
+      }
     };
 
     loadAll();
@@ -168,11 +231,13 @@ export const useNetwork = () => {
     declineRequest,
     dismissSuggestion,
     refresh: async () => {
+      setLoading(true);
       await Promise.all([
-        loadConnections(),
-        loadSuggestions(),
-        loadRequests(),
+        loadConnections(true),
+        loadSuggestions(true),
+        loadRequests(true),
       ]);
+      setLoading(false);
     },
   };
 };

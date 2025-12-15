@@ -108,8 +108,12 @@ export default function UploadScreen() {
         return;
       }
 
-      setQuotaLoading(true);
+      if (isMounted) {
+        setQuotaLoading(true);
+      }
+
       const quota = await getUploadQuota(session);
+
       if (isMounted) {
         setUploadQuota(quota);
         setQuotaLoading(false);

@@ -156,9 +156,9 @@ export const dbHelpers = {
 
             return {
               ...creator,
-              followers_count: followersResult.data?.count || 0,
-              tracks_count: tracksResult.data?.count || 0,
-              events_count: eventsResult.data?.count || 0,
+              followers_count: followersResult.count ?? 0,
+              tracks_count: tracksResult.count ?? 0,
+              events_count: eventsResult.count ?? 0,
             };
           } catch (error) {
             console.error(`Error getting stats for creator ${creator.id}:`, error);
@@ -906,10 +906,11 @@ export const dbHelpers = {
         return this.getTrendingTracks(limit);
       }
 
-      const genreIds = userGenres.map((g: any) => g.id || g.genre_id);
-      console.log('🎵 Filtering by genre IDs:', genreIds);
+      const genreNames = userGenres.map((g: any) => g.name || g.genre_name || g.genre);
+      console.log('🎵 Filtering by genre names:', genreNames);
 
       // Get tracks that match user's genres with timeout
+      // Note: Using genre field directly since content_genres table doesn't exist
       const { data: manualData, error: manualError } = await withQueryTimeout(
         supabase
           .from('audio_tracks')
@@ -925,18 +926,16 @@ export const dbHelpers = {
             play_count,
             likes_count,
             created_at,
+            genre,
             creator:profiles!creator_id(
               id,
               username,
               display_name,
               avatar_url
-            ),
-            content_genres!inner(
-              genre_id
             )
           `)
           .eq('is_public', true)
-          .in('content_genres.genre_id', genreIds)
+          .in('genre', genreNames)
           .order('play_count', { ascending: false })
           .limit(limit),
         { timeout: 6000, fallback: [] }

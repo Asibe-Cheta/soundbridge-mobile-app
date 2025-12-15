@@ -222,27 +222,30 @@ export default function CreatorProfileScreen() {
 
       if (profileError) throw profileError;
 
-      // Get computed stats with better error handling
-      
-      // Use a different approach - get actual data and count it
-      const [followersData, tracksData, eventsData, tipsResult] = await Promise.all([
-        // Get followers
+      // Get computed stats with better error handling - matching ProfileScreen approach
+      const [followersResult, followingResult, tracksResult, eventsResult, tipsResult] = await Promise.all([
+        // Get followers count
         supabase
           .from('follows')
-          .select('follower_id')
+          .select('*', { count: 'exact', head: true })
           .eq('following_id', creatorId),
         
-        // Get tracks
+        // Get following count
+        supabase
+          .from('follows')
+          .select('*', { count: 'exact', head: true })
+          .eq('follower_id', creatorId),
+        
+        // Get tracks count
         supabase
           .from('audio_tracks')
-          .select('id')
-          .eq('creator_id', creatorId)
-          .eq('is_public', true),
+          .select('*', { count: 'exact', head: true })
+          .eq('creator_id', creatorId),
         
-        // Get events
+        // Get events count
         supabase
           .from('events')
-          .select('id')
+          .select('*', { count: 'exact', head: true })
           .eq('creator_id', creatorId),
         
         // Get tip statistics (may not exist yet)
@@ -258,12 +261,13 @@ export default function CreatorProfileScreen() {
           })
       ]);
 
-      // Count the actual results
-      const followersResult = { count: followersData.data?.length || 0 };
-      const tracksResult = { count: tracksData.data?.length || 0 };
-      const eventsResult = { count: eventsData.data?.length || 0 };
+      // Extract counts from the results (matching ProfileScreen approach)
+      const followersCount = followersResult.count ?? 0;
+      const followingCount = followingResult.count ?? 0;
+      const tracksCount = tracksResult.count ?? 0;
+      const eventsCount = eventsResult.count ?? 0;
 
-      // Stats computation completed
+      console.log('📊 Creator stats - Followers:', followersCount, 'Following:', followingCount, 'Tracks:', tracksCount, 'Events:', eventsCount);
 
       // Calculate tip statistics
       const tipAmounts = tipsResult.data || [];
@@ -278,9 +282,10 @@ export default function CreatorProfileScreen() {
 
       const creatorWithStats = {
         ...profileData,
-        followers_count: followersResult.count || 0,
-        tracks_count: tracksResult.count || 0,
-        events_count: eventsResult.count || 0,
+        followers_count: followersCount,
+        following_count: followingCount,
+        tracks_count: tracksCount,
+        events_count: eventsCount,
         total_tips_received: totalTipsReceived,
         total_tip_count: totalTipCount,
         tips_this_month_amount: tipsThisMonthAmount,

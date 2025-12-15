@@ -21,6 +21,7 @@ import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { supabase, dbHelpers } from '../lib/supabase';
+import { config } from '../config/environment';
 import { 
   loadQueriesInParallel, 
   waitForValidSession,
@@ -51,6 +52,7 @@ interface AudioTrack {
   play_count?: number;
   plays_count?: number;
   likes_count?: number;
+  genre?: string;
   created_at: string;
   creator?: {
     id: string;
@@ -69,6 +71,8 @@ interface Creator {
   followers_count?: number;
   tracks_count?: number;
   events_count?: number;
+  genre?: string;
+  location?: string;
 }
 
 interface Event {
@@ -464,6 +468,16 @@ function DiscoverScreen() {
 
       try {
         console.log('🔍 Discover Screen - Checking tier status via RevenueCat...');
+
+        // Development bypass: Use hardcoded tier
+        if (config.bypassRevenueCat && config.developmentTier) {
+          console.log('🔧 DEVELOPMENT MODE: Using hardcoded tier');
+          console.log(`🔧 Hardcoded tier: ${config.developmentTier.toUpperCase()}`);
+          setIsPremium(config.developmentTier === 'premium' || config.developmentTier === 'unlimited');
+          setIsUnlimited(config.developmentTier === 'unlimited');
+          tierCheckCooldownRef.current = 0;
+          return;
+        }
 
         // Wait for RevenueCat to be ready
         let attempts = 0;
@@ -1327,14 +1341,30 @@ function DiscoverScreen() {
     return num.toString();
   };
 
-  const formatDuration = (seconds?: number) => {
-    if (!seconds) return '0m';
+  const formatDuration = (seconds?: number | null): string | null => {
+    // Return null if duration is missing/invalid so we can conditionally render
+    if (!seconds || seconds === 0 || isNaN(seconds)) return null;
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
     if (hours > 0) {
-      return `${hours}h ${minutes}m`;
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
-    return `${minutes}m`;
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Helper to check if track is new (uploaded < 7 days ago)
+  const isNewTrack = (createdAt: string): boolean => {
+    const trackDate = new Date(createdAt);
+    const daysAgo = (Date.now() - trackDate.getTime()) / (1000 * 60 * 60 * 24);
+    return daysAgo < 7;
+  };
+
+  // Helper to check if track is trending (high play count recently)
+  const isTrendingTrack = (track: AudioTrack): boolean => {
+    const playCount = track.play_count || track.plays_count || 0;
+    const isRecent = isNewTrack(track.created_at);
+    return playCount > 100 && isRecent;
   };
 
   // ✅ NEW: Test search data availability
@@ -1560,9 +1590,29 @@ function DiscoverScreen() {
                               <Text style={[styles.searchTrackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                                 {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
                               </Text>
-                              <Text style={[styles.searchTrackStats, { color: theme.colors.textSecondary }]}>
-                                {formatDuration(track.duration)} • {formatNumber(track.play_count)} plays
-                              </Text>
+                              <View style={styles.searchTrackMeta}>
+                                {track.genre && (
+                                  <>
+                                    <Text style={[styles.searchTrackGenre, { color: theme.colors.primary }]}>
+                                      {track.genre}
+                                    </Text>
+                                    {(formatDuration(track.duration) || formatNumber(track.play_count || track.plays_count || 0) !== '0') && (
+                                      <Text style={[styles.searchTrackStats, { color: theme.colors.textSecondary }]}> • </Text>
+                                    )}
+                                  </>
+                                )}
+                                {formatDuration(track.duration) && (
+                                  <>
+                                    <Text style={[styles.searchTrackStats, { color: theme.colors.textSecondary }]}>
+                                      {formatDuration(track.duration)}
+                                    </Text>
+                                    <Text style={[styles.searchTrackStats, { color: theme.colors.textSecondary }]}> • </Text>
+                                  </>
+                                )}
+                                <Text style={[styles.searchTrackStats, { color: theme.colors.textSecondary }]}>
+                                  {formatNumber(track.play_count || track.plays_count || 0)} plays
+                                </Text>
+                              </View>
                             </View>
                             <TouchableOpacity style={styles.searchTrackPlayButton} onPress={() => handleTrackPlay(track)}>
                               <Ionicons name="play" size={16} color={theme.colors.primary} />
@@ -1585,33 +1635,56 @@ function DiscoverScreen() {
               style={styles.inlineTabsScrollView}
               contentContainerStyle={styles.inlineTabsContainer}
             >
-              {tabs.map((tab) => (
-                <TouchableOpacity
-                  key={tab}
-                  style={[
-                    styles.inlineTabButton,
-                    activeTab === tab && styles.activeInlineTabButton
-                  ]}
-                  onPress={() => setActiveTab(tab)}
-                >
-                  <Text
+              {tabs.map((tab) => {
+                const tabIcons: Record<TabType, string> = {
+                  'Music': 'musical-notes',
+                  'Artists': 'people',
+                  'Events': 'calendar',
+                  'Playlists': 'list',
+                  'Services': 'briefcase',
+                  'Venues': 'location',
+                };
+                return (
+                  <TouchableOpacity
+                    key={tab}
                     style={[
-                      styles.inlineTabText,
-                      { color: activeTab === tab ? '#DC2626' : theme.colors.textSecondary },
-                      activeTab === tab && styles.activeInlineTabText
+                      styles.inlineTabButton,
+                      activeTab === tab && styles.activeInlineTabButton
                     ]}
+                    onPress={() => setActiveTab(tab)}
                   >
-                    {tab}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Ionicons
+                      name={tabIcons[tab] as any}
+                      size={16}
+                      color={activeTab === tab ? '#DC2626' : theme.colors.textSecondary}
+                      style={styles.inlineTabIcon}
+                    />
+                    <Text
+                      style={[
+                        styles.inlineTabText,
+                        { color: activeTab === tab ? '#DC2626' : theme.colors.textSecondary },
+                        activeTab === tab && styles.activeInlineTabText
+                      ]}
+                    >
+                      {tab}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
         {activeTab === 'Music' && (
           <>
             {/* Trending Now */}
             <View style={[styles.section, styles.firstSection]}>
               <View style={styles.sectionHeader}>
-                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Trending Now</Text>
+                <View>
+                  <View style={styles.sectionTitleRow}>
+                    <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>🔥 Trending This Week</Text>
+                  </View>
+                  <Text style={[styles.sectionSubtitle, { color: theme.colors.textSecondary }]}>
+                    Top tracks on SoundBridge
+                  </Text>
+                </View>
                 <TouchableOpacity>
                   <Ionicons name="chevron-forward" size={16} color="#DC2626" />
                 </TouchableOpacity>
@@ -1644,15 +1717,42 @@ function DiscoverScreen() {
                           <Ionicons name="play" size={20} color="#FFFFFF" />
                     </TouchableOpacity>
                   </View>
+                      <View style={styles.trendingCardHeader}>
+                        {isTrendingTrack(track) && (
+                          <View style={styles.trendingBadge}>
+                            <Text style={styles.trendingBadgeText}>🔥</Text>
+                          </View>
+                        )}
+                        {isNewTrack(track.created_at) && (
+                          <View style={styles.newBadge}>
+                            <Text style={styles.newBadgeText}>🆕</Text>
+                          </View>
+                        )}
+                      </View>
                       <Text style={[styles.trendingTitle, { color: theme.colors.text }]} numberOfLines={1}>
                         {track.title}
                       </Text>
                       <Text style={[styles.trendingArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                         by {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
                       </Text>
-                      <Text style={[styles.trendingDuration, { color: theme.colors.textSecondary }]}>
-                        {formatDuration(track.duration)}
-                      </Text>
+                      <View style={styles.trendingCardMeta}>
+                        {track.genre && (
+                          <Text style={[styles.trendingGenre, { color: theme.colors.primary }]}>
+                            {track.genre}
+                          </Text>
+                        )}
+                        {formatDuration(track.duration) && (
+                          <>
+                            <Text style={[styles.trendingDuration, { color: theme.colors.textSecondary }]}>
+                              {formatDuration(track.duration)}
+                            </Text>
+                            <Text style={[styles.trendingPlays, { color: theme.colors.textSecondary }]}> • </Text>
+                          </>
+                        )}
+                        <Text style={[styles.trendingPlays, { color: theme.colors.textSecondary }]}>
+                          {formatNumber(track.play_count || track.plays_count || 0)} plays
+                        </Text>
+                      </View>
                 </TouchableOpacity>
               ))}
           </ScrollView>
@@ -1697,16 +1797,56 @@ function DiscoverScreen() {
                       <Text style={[styles.artistCardName, { color: theme.colors.text }]} numberOfLines={1}>
                         {artist.display_name || artist.username}
                       </Text>
+                      <View style={styles.artistCardMeta}>
+                        {artist.genre && (
+                          <Text style={[styles.artistCardGenre, { color: theme.colors.primary }]} numberOfLines={1}>
+                            {artist.genre}
+                          </Text>
+                        )}
+                        {artist.location && (
+                          <Text style={[styles.artistCardLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            {artist.location}
+                          </Text>
+                        )}
+                      </View>
                       <Text style={[styles.artistCardStats, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                        {formatNumber(artist.followers_count)} followers
+                        {formatNumber(artist.followers_count)} followers • {formatNumber(artist.tracks_count)} tracks
                       </Text>
                 </TouchableOpacity>
               ))}
           </ScrollView>
         ) : (
                 <View style={styles.emptyState}>
-                  <Ionicons name="people" size={48} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>No featured artists yet</Text>
+                  <Ionicons name="mic" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>🎤 No Featured Artists Yet</Text>
+                  <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
+                    Be among the first to get featured!
+                  </Text>
+                  <Text style={[styles.emptyStateNote, { color: theme.colors.textSecondary, marginTop: 8 }]}>
+                    Premium users are featured 1x/month
+                  </Text>
+                  <Text style={[styles.emptyStateNote, { color: theme.colors.textSecondary }]}>
+                    Unlimited users are featured 2x/month
+                  </Text>
+                  <View style={styles.emptyStateButtons}>
+                    <TouchableOpacity
+                      style={[styles.emptyStateButton, styles.emptyStateButtonPrimary, { backgroundColor: theme.colors.primary }]}
+                      onPress={() => (navigation as any).navigate('Upgrade')}
+                    >
+                      <Ionicons name="rocket" size={16} color="#FFFFFF" />
+                      <Text style={styles.emptyStateButtonText}>Upgrade</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.emptyStateButton, { 
+                        borderColor: theme.colors.border,
+                        backgroundColor: theme.colors.card,
+                      }]}
+                      onPress={() => Alert.alert('Learn More', 'Featured artists are selected based on engagement, quality, and subscription tier. Premium users get featured once per month, while Unlimited users get featured twice per month.')}
+                    >
+                      <Ionicons name="information-circle-outline" size={16} color={theme.colors.textSecondary} />
+                      <Text style={[styles.emptyStateButtonText, { color: theme.colors.text }]}>Learn More</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               )}
             </View>
@@ -1742,12 +1882,44 @@ function DiscoverScreen() {
                   )}
                 </View>
                       <View style={styles.recentTrackInfo}>
-                        <Text style={[styles.recentTrackTitle, { color: theme.colors.text }]} numberOfLines={1}>
-                          {track.title}
-                        </Text>
+                        <View style={styles.recentTrackHeader}>
+                          <Text style={[styles.recentTrackTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                            {track.title}
+                          </Text>
+                          {isNewTrack(track.created_at) && (
+                            <View style={styles.newBadgeSmall}>
+                              <Text style={styles.newBadgeTextSmall}>🆕</Text>
+                            </View>
+                          )}
+                        </View>
                         <Text style={[styles.recentTrackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                           by {track.creator?.display_name || track.creator?.username || 'Music Creator'}
                         </Text>
+                        <View style={styles.recentTrackMeta}>
+                          {track.genre && (
+                            <>
+                              <Text style={[styles.recentTrackGenre, { color: theme.colors.primary }]}>
+                                {track.genre}
+                              </Text>
+                              {(formatDuration(track.duration) || formatNumber(track.play_count || track.plays_count || 0) !== '0') && (
+                                <Text style={[styles.recentTrackPlays, { color: theme.colors.textSecondary }]}> • </Text>
+                              )}
+                            </>
+                          )}
+                          {formatDuration(track.duration) && (
+                            <>
+                              <Text style={[styles.recentTrackPlays, { color: theme.colors.textSecondary }]}>
+                                {formatDuration(track.duration)}
+                              </Text>
+                              {formatNumber(track.play_count || track.plays_count || 0) !== '0' && (
+                                <Text style={[styles.recentTrackPlays, { color: theme.colors.textSecondary }]}> • </Text>
+                              )}
+                            </>
+                          )}
+                          <Text style={[styles.recentTrackPlays, { color: theme.colors.textSecondary }]}>
+                            {formatNumber(track.play_count || track.plays_count || 0)} plays
+                          </Text>
+                        </View>
                 </View>
                       <View style={styles.recentTrackActions}>
                   <TouchableOpacity 
@@ -1812,11 +1984,20 @@ function DiscoverScreen() {
                       <Text style={[styles.artistGridUsername, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                         @{artist.username}
                       </Text>
+                      <View style={styles.artistGridMeta}>
+                        {artist.genre && (
+                          <Text style={[styles.artistGridGenre, { color: theme.colors.primary }]} numberOfLines={1}>
+                            {artist.genre}
+                          </Text>
+                        )}
+                        {artist.location && (
+                          <Text style={[styles.artistGridLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            {artist.location}
+                          </Text>
+                        )}
+                      </View>
                       <Text style={[styles.artistGridStats, { color: theme.colors.textSecondary }]}>
-                        {formatNumber(artist.followers_count)} followers
-                      </Text>
-                      <Text style={[styles.artistGridTracks, { color: theme.colors.textSecondary }]}>
-                        {formatNumber(artist.tracks_count)} tracks
+                        {formatNumber(artist.followers_count)} followers • {formatNumber(artist.tracks_count)} tracks
                       </Text>
               </TouchableOpacity>
             ))}
@@ -2033,13 +2214,33 @@ function DiscoverScreen() {
               ) : (
                 <View style={styles.emptyState}>
                   <Ionicons name="musical-notes" size={48} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No playlists available yet</Text>
+                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>🎵 No Public Playlists Yet</Text>
                   <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
-                    Playlists will appear here once users start creating them!
+                    Be the first to create a playlist!
+                  </Text>
+                  <Text style={[styles.emptyStateNote, { color: theme.colors.textSecondary, marginTop: 8 }]}>
+                    Curate music, share with the community,
                   </Text>
                   <Text style={[styles.emptyStateNote, { color: theme.colors.textSecondary }]}>
-                    💡 Users can create playlists by adding tracks to custom collections
+                    and grow your followers
                   </Text>
+                  <View style={styles.emptyStateButtons}>
+                    <TouchableOpacity
+                      style={[styles.emptyStateButton, styles.emptyStateButtonPrimary, { backgroundColor: theme.colors.primary }]}
+                      onPress={() => (navigation as any).navigate('CreatePlaylist')}
+                    >
+                      <Text style={styles.emptyStateButtonText}>Create Playlist</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.emptyStateButton, { 
+                        borderColor: theme.colors.border,
+                        backgroundColor: theme.colors.card,
+                      }]}
+                      onPress={() => Alert.alert('How It Works', 'Create playlists to organize your favorite tracks. Share them publicly to grow your audience and help others discover great music!')}
+                    >
+                      <Text style={[styles.emptyStateButtonText, { color: theme.colors.text }]}>How It Works</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               )}
             </View>
@@ -2333,6 +2534,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   inlineTabButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: 8,
     paddingHorizontal: 16,
     marginRight: 24,
@@ -2807,6 +3010,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 2,
   },
+  searchTrackMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  searchTrackGenre: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
   searchTrackStats: {
     fontSize: 12,
   },
@@ -2988,6 +3201,138 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  emptyStateButtons: {
+    flexDirection: 'row',
+    marginTop: 20,
+    gap: 8,
+    paddingHorizontal: 32,
+    justifyContent: 'center',
+  },
+  emptyStateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 4,
+  },
+  emptyStateButtonPrimary: {
+    borderWidth: 0,
+  },
+  emptyStateButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  trendingCardHeader: {
+    flexDirection: 'row',
+    gap: 4,
+    marginBottom: 4,
+  },
+  trendingBadge: {
+    backgroundColor: 'rgba(255, 87, 34, 0.2)',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  trendingBadgeText: {
+    fontSize: 10,
+  },
+  newBadge: {
+    backgroundColor: 'rgba(76, 175, 80, 0.2)',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  newBadgeText: {
+    fontSize: 10,
+  },
+  newBadgeSmall: {
+    backgroundColor: 'rgba(76, 175, 80, 0.2)',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    marginLeft: 6,
+  },
+  newBadgeTextSmall: {
+    fontSize: 8,
+  },
+  trendingCardMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+    flexWrap: 'wrap',
+  },
+  trendingGenre: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  trendingPlays: {
+    fontSize: 12,
+  },
+  recentTrackHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  recentTrackMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  recentTrackGenre: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  recentTrackPlays: {
+    fontSize: 12,
+  },
+  artistCardMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+    marginBottom: 2,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  artistCardGenre: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  artistCardLocation: {
+    fontSize: 11,
+  },
+  artistGridMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+    marginBottom: 2,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  artistGridGenre: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  artistGridLocation: {
+    fontSize: 11,
+  },
+  inlineTabIcon: {
+    marginRight: 4,
   },
   // Service Provider Styles
   servicesContainer: {

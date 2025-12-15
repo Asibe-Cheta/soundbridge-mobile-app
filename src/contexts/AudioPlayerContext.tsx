@@ -81,6 +81,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   
   const playerRef = useRef<AudioPlayer | null>(null);
   const positionUpdateRef = useRef<NodeJS.Timeout | null>(null);
+  const statusUnsubscribeRef = useRef<(() => void) | null>(null);
 
   // Initialize audio session - let BackgroundAudioService handle background config
   useEffect(() => {
@@ -111,28 +112,40 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       if (positionUpdateRef.current) {
         clearInterval(positionUpdateRef.current);
       }
+      if (statusUnsubscribeRef.current) {
+        statusUnsubscribeRef.current();
+        statusUnsubscribeRef.current = null;
+      }
     };
   }, []);
 
-  // Position tracking
+  // Position tracking - polls backgroundAudioService for updates
   const startPositionTracking = () => {
     if (positionUpdateRef.current) {
       clearInterval(positionUpdateRef.current);
     }
     
     positionUpdateRef.current = setInterval(async () => {
-      if (playerRef.current && isPlaying) {
+      if (isPlaying || isPaused) {
         try {
-          // expo-audio uses currentTime property directly (in seconds)
-          const currentTime = playerRef.current.currentTime;
-          if (currentTime !== undefined) {
-            setPosition(Math.floor(currentTime)); // Already in seconds
+          // Get position and duration from backgroundAudioService
+          const currentPosition = backgroundAudioService.getPosition();
+          const currentDuration = backgroundAudioService.getDuration();
+          const serviceIsPlaying = backgroundAudioService.getIsPlaying();
+          
+          // Update state if values are valid
+          if (currentDuration > 0) {
+            setDuration(currentDuration);
           }
+          if (currentPosition >= 0) {
+            setPosition(currentPosition);
+          }
+          setIsPlaying(serviceIsPlaying);
         } catch (err) {
-          console.error('Failed to get position:', err);
+          console.error('Failed to get position from background service:', err);
         }
       }
-    }, 1000);
+    }, 500); // Poll every 500ms for smoother updates
   };
 
   const stopPositionTracking = () => {
@@ -178,15 +191,54 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       setIsLoading(true);
       setError(null);
       
-      // Stop current track if playing (using playerRef for expo-audio)
+      console.log('🛑 Stopping any currently playing track before starting new one...');
+      
+      // IMPORTANT: Stop ALL audio sources before starting new track
+      // 1. Stop background audio service first (this is the main player)
+      try {
+        await backgroundAudioService.stop();
+        console.log('✅ Background audio service stopped');
+      } catch (error) {
+        console.warn('Error stopping background audio service:', error);
+      }
+      
+      // 2. Stop expo-audio player if it exists
       if (playerRef.current) {
         try {
           playerRef.current.pause();
           playerRef.current.remove();
+          playerRef.current = null;
+          console.log('✅ Expo-audio player stopped');
         } catch (error) {
-          console.warn('Error stopping current track:', error);
+          console.warn('Error stopping expo-audio player:', error);
         }
       }
+      
+      // 3. Stop position tracking
+      stopPositionTracking();
+      
+      // 4. Clear any existing status subscriptions
+      if (statusUnsubscribeRef.current) {
+        statusUnsubscribeRef.current();
+        statusUnsubscribeRef.current = null;
+      }
+      
+      // 5. Clear track finished callback
+      try {
+        if (backgroundAudioService && typeof backgroundAudioService.clearOnTrackFinished === 'function') {
+          backgroundAudioService.clearOnTrackFinished();
+        }
+      } catch (error) {
+        console.warn('Error clearing track finished callback:', error);
+      }
+      
+      // 6. Reset state
+      setIsPlaying(false);
+      setIsPaused(false);
+      setPosition(0);
+      
+      // Small delay to ensure cleanup completes
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       // Check if track has a valid audio URL (support both field names)
       const audioUrl = track.file_url || track.audio_url;
@@ -240,11 +292,72 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
 
       await backgroundAudioService.playTrack(backgroundTrack);
       
-      // Update context state
+      // Clean up old subscription if any
+      if (statusUnsubscribeRef.current) {
+        statusUnsubscribeRef.current();
+        statusUnsubscribeRef.current = null;
+      }
+      
+      // Subscribe to status updates from background audio service
+      const unsubscribe = backgroundAudioService.onStatusUpdate((status) => {
+        // Position and duration are already in seconds
+        setPosition(status.position);
+        if (status.duration > 0) {
+          setDuration(status.duration);
+          setIsLoading(false);
+        }
+        // Update isPlaying state from status
+        setIsPlaying(status.isPlaying);
+        
+        // Check if track finished (position reached duration)
+        if (status.duration > 0 && status.position >= status.duration - 0.5 && !status.isPlaying) {
+          handleTrackFinished();
+        }
+      });
+      
+      // Set up track finished handler (with error handling)
+      // Note: This is optional - track finished is also handled via status updates
+      try {
+        // Check if method exists before calling
+        if (backgroundAudioService && 'setOnTrackFinished' in backgroundAudioService) {
+          const setOnTrackFinished = (backgroundAudioService as any).setOnTrackFinished;
+          if (typeof setOnTrackFinished === 'function') {
+            setOnTrackFinished(() => {
+              handleTrackFinished();
+            });
+          }
+        }
+      } catch (error) {
+        // Silently fail - track finished is handled via status updates anyway
+        console.warn('setOnTrackFinished not available (this is OK):', error);
+      }
+      
+      // Store unsubscribe function for cleanup
+      statusUnsubscribeRef.current = () => {
+        unsubscribe();
+        try {
+          // Check if method exists before calling
+          if (backgroundAudioService && 'clearOnTrackFinished' in backgroundAudioService) {
+            const clearOnTrackFinished = (backgroundAudioService as any).clearOnTrackFinished;
+            if (typeof clearOnTrackFinished === 'function') {
+              clearOnTrackFinished();
+            }
+          }
+        } catch (error) {
+          // Silently fail - not critical
+          console.warn('clearOnTrackFinished not available (this is OK):', error);
+        }
+      };
+      
+      // Update context state IMMEDIATELY to ensure UI updates
       setCurrentTrack(track);
       setIsPlaying(true);
       setIsPaused(false);
-      setIsLoading(false);
+      setPosition(0);
+      setDuration(track.duration || 0);
+      
+      // Start polling for position updates as fallback
+      startPositionTracking();
       
       // Increment play count in database
       incrementPlayCount(track.id);
@@ -321,27 +434,20 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
 
   const seekTo = async (newPosition: number) => {
     try {
-      // Validate position
-      if (newPosition < 0 || newPosition > duration) {
+      // Validate position (newPosition is in seconds)
+      const maxDuration = duration > 0 ? duration : 999999; // Allow seeking if duration not yet loaded
+      if (newPosition < 0 || (duration > 0 && newPosition > duration)) {
         console.warn('🎵 Invalid seek position:', newPosition, 'Duration:', duration);
         return;
       }
       
-      // Use background audio service
-      await backgroundAudioService.seekTo(newPosition * 1000); // Convert to milliseconds
+      // Use background audio service (expects seconds, not milliseconds)
+      await backgroundAudioService.seekTo(newPosition);
       
-      if (playerRef.current && isPlaying !== undefined) {
-        // Add a small delay to prevent rapid seeking
-        await new Promise(resolve => setTimeout(resolve, 50));
-        
-        if (playerRef.current.isLoaded) {
-          await playerRef.current.seekTo(newPosition); // expo-audio expects seconds
-          setPosition(newPosition);
-          console.log('🎵 Successfully seeked to:', newPosition);
-        } else {
-          console.warn('🎵 Audio not loaded, cannot seek');
-        }
-      }
+      // Update position immediately for responsive UI
+      setPosition(newPosition);
+      
+      console.log('🎵 Successfully seeked to:', newPosition, 'seconds');
     } catch (err) {
       console.warn('🎵 Seek interrupted or failed:', err);
       // Don't set error state for seeking issues, just log and continue
@@ -370,6 +476,21 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   const updateCurrentTrack = (updates: Partial<AudioTrack>) => {
     setCurrentTrack(prev => prev ? { ...prev, ...updates } : null);
     console.log('🎵 Updated current track:', updates);
+  };
+
+  const handleTrackFinished = async () => {
+    if (isRepeat && currentTrack) {
+      // Replay current track
+      await play(currentTrack);
+    } else if (autoPlay && queue.length > 0) {
+      // Auto-play next track in queue
+      await playNext();
+    } else {
+      // Stop playback
+      setIsPlaying(false);
+      setIsPaused(false);
+      stopPositionTracking();
+    }
   };
 
   const incrementPlayCount = async (trackId: string) => {
@@ -424,6 +545,13 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     let nextIndex: number;
     
     if (isShuffled) {
+      // When shuffled, pick a random track (but try to avoid current)
+      const availableTracks = queue.filter(track => track.id !== currentTrack?.id);
+      if (availableTracks.length > 0) {
+        const randomTrack = availableTracks[Math.floor(Math.random() * availableTracks.length)];
+        await play(randomTrack);
+        return;
+      }
       nextIndex = Math.floor(Math.random() * queue.length);
     } else {
       nextIndex = (currentIndex + 1) % queue.length;
@@ -442,6 +570,13 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     let prevIndex: number;
     
     if (isShuffled) {
+      // When shuffled, pick a random track (but try to avoid current)
+      const availableTracks = queue.filter(track => track.id !== currentTrack?.id);
+      if (availableTracks.length > 0) {
+        const randomTrack = availableTracks[Math.floor(Math.random() * availableTracks.length)];
+        await play(randomTrack);
+        return;
+      }
       prevIndex = Math.floor(Math.random() * queue.length);
     } else {
       prevIndex = currentIndex <= 0 ? queue.length - 1 : currentIndex - 1;

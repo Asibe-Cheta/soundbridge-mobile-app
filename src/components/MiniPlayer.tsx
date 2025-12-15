@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Image,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -34,7 +35,13 @@ export default function MiniPlayer() {
     return route?.name;
   });
 
-  if (!currentTrack || currentRouteName === 'AudioPlayer') {
+  if (
+    !currentTrack ||
+    currentRouteName === 'AudioPlayer' ||
+    currentRouteName === 'QueueView' ||
+    currentRouteName === 'LyricsView' ||
+    currentRouteName === 'SongDetail'
+  ) {
     return null;
   }
 
@@ -50,12 +57,6 @@ export default function MiniPlayer() {
   const progressPercentage = duration > 0 ? (position / duration) * 100 : 0;
 
   const isDark = theme.isDark;
-  // Web app glassmorphism colors
-  const glassGradientColors = isDark
-    ? ['rgba(86, 28, 133, 0.25)', 'rgba(37, 25, 70, 0.35)'] // #561C85 and #251946
-    : ['rgba(255, 255, 255, 0.87)', 'rgba(255, 255, 255, 0.55)'];
-  const fallbackBackground = isDark ? 'rgba(37, 25, 70, 0.7)' : 'rgba(255, 255, 255, 0.65)'; // #251946
-  const borderColor = isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(148, 163, 184, 0.35)';
   const titleColor = isDark ? '#FFFFFF' : '#0F172A';
   const artistColor = isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(30, 41, 59, 0.7)';
   const primaryControlColor = isDark ? '#FFFFFF' : '#111827';
@@ -63,13 +64,13 @@ export default function MiniPlayer() {
   return (
     <View style={styles.container}>
       <ExpoBlurView
-        intensity={isDark ? 90 : 55}
+        intensity={Platform.OS === 'ios' ? 40 : 70}
         tint={isDark ? 'dark' : 'light'}
         style={[
           styles.blurContainer,
           {
-            backgroundColor: fallbackBackground,
-            borderColor,
+            backgroundColor: 'transparent',
+            borderColor: 'rgba(255, 255, 255, 0.12)',
             shadowColor: isDark ? '#000' : '#0F172A',
             shadowOffset: { width: 0, height: 4 },
             shadowOpacity: 0.3,
@@ -78,11 +79,24 @@ export default function MiniPlayer() {
           },
         ]}
       >
+        {/* Adaptive Tint Layer - iOS 26 Liquid Glass */}
+        <View style={[
+          StyleSheet.absoluteFillObject,
+          {
+            backgroundColor: isDark 
+              ? 'rgba(0, 0, 0, 0.25)' 
+              : 'rgba(255, 255, 255, 0.25)'
+          }
+        ]} />
+
+        {/* Glass Highlight - top sheen for liquid glass effect */}
         <LinearGradient
-          colors={glassGradientColors}
-          style={StyleSheet.absoluteFillObject}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
+          colors={[
+            'rgba(255, 255, 255, 0.30)',
+            'rgba(255, 255, 255, 0.10)',
+            'transparent',
+          ]}
+          style={styles.glassHighlight}
         />
 
         <View
@@ -164,16 +178,25 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   blurContainer: {
-    borderRadius: 18,
+    borderRadius: 999,          // Capsule shape (pill-shaped)
     overflow: 'hidden',
-    borderWidth: 1,
+    borderWidth: 0.5,           // Thinner border for liquid glass
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 10,
     elevation: 12,
   },
+  glassHighlight: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 16,                 // Subtle top sheen
+    zIndex: 1,
+  },
   progressContainer: {
     height: 2,
+    zIndex: 2,                  // Above highlight
   },
   progressBar: {
     height: '100%',
@@ -184,6 +207,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 14,
     minHeight: 72,
+    zIndex: 2,                  // Above highlight
   },
   trackInfo: {
     flex: 1,

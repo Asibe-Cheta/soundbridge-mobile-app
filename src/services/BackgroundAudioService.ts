@@ -10,6 +10,8 @@ export interface BackgroundAudioTrack {
   duration?: number;
 }
 
+type StatusUpdateCallback = (status: { position: number; duration: number; isPlaying: boolean }) => void;
+
 class BackgroundAudioService {
   private player: AudioPlayer | null = null;
   private isInitialized = false;
@@ -19,6 +21,8 @@ class BackgroundAudioService {
   private duration = 0;
   private appStateSubscription: any = null;
   private statusListener: (() => void) | null = null;
+  private statusCallbacks: Set<StatusUpdateCallback> = new Set();
+  private onTrackFinished: (() => void) | null = null;
 
   async initialize() {
     if (this.isInitialized) return;
@@ -59,15 +63,28 @@ class BackgroundAudioService {
     try {
       await this.initialize();
 
-      // Stop current track if playing
+      // Stop current track if playing - ensure complete cleanup
       if (this.player) {
-        this.player.pause();
-        if (this.statusListener) {
-          this.player.removeListener('playbackStatusUpdate', this.statusListener);
+        console.log('🛑 Stopping previous track before playing new one...');
+        try {
+          this.player.pause();
+          if (this.statusListener) {
+            this.player.removeListener('playbackStatusUpdate', this.statusListener);
+          }
+          this.player.remove();
+          this.player = null;
+          this.statusListener = null;
+          console.log('✅ Previous track stopped');
+        } catch (error) {
+          console.error('Error stopping previous player:', error);
+          // Force cleanup
+          this.player = null;
+          this.statusListener = null;
         }
-        this.player.remove();
-        this.player = null;
       }
+
+      // Small delay to ensure cleanup completes
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       this.currentTrack = track;
       
@@ -75,10 +92,14 @@ class BackgroundAudioService {
       this.player = createAudioPlayer(
         { uri: track.url },
         {
-          updateInterval: 1000,
+          updateInterval: 500, // Update every 500ms for smoother progress
           keepAudioSessionActive: true,
         }
       );
+      
+      // Reset position and duration
+      this.position = 0;
+      this.duration = 0;
       
       // Set up status listener
       this.statusListener = this.onPlaybackStatusUpdate.bind(this);
@@ -88,6 +109,34 @@ class BackgroundAudioService {
       this.player.play();
       this.isPlaying = true;
 
+      // Poll for initial duration (expo-audio may not have it immediately)
+      const checkDuration = setInterval(() => {
+        if (this.player && this.player.isLoaded && this.player.duration > 0) {
+          const initialDuration = Math.floor(this.player.duration);
+          const initialPosition = Math.floor(this.player.currentTime || 0);
+          
+          if (initialDuration !== this.duration) {
+            this.duration = initialDuration;
+            this.position = initialPosition;
+            
+            // Notify callbacks immediately
+            this.statusCallbacks.forEach(callback => {
+              callback({
+                position: initialPosition,
+                duration: initialDuration,
+                isPlaying: this.isPlaying,
+              });
+            });
+            
+            console.log('🎵 Initial duration loaded:', initialDuration, 'seconds');
+            clearInterval(checkDuration);
+          }
+        }
+      }, 100);
+      
+      // Stop checking after 5 seconds
+      setTimeout(() => clearInterval(checkDuration), 5000);
+
       console.log('🎵 Started playing track in background:', track.title);
     } catch (error) {
       console.error('Failed to play track:', error);
@@ -95,38 +144,100 @@ class BackgroundAudioService {
   }
 
   async pause() {
-    if (this.player && this.isPlaying) {
-      this.player.pause();
-      this.isPlaying = false;
+    console.log('⏸️ Pausing background audio service...');
+    if (this.player) {
+      try {
+        this.player.pause();
+        this.isPlaying = false;
+        
+        // Notify all callbacks that playback has paused
+        this.statusCallbacks.forEach(callback => {
+          callback({
+            position: this.position,
+            duration: this.duration,
+            isPlaying: false,
+          });
+        });
+        
+        console.log('✅ Background audio service paused');
+      } catch (error) {
+        console.error('Error pausing player:', error);
+      }
+    } else {
+      console.warn('⚠️ No player to pause');
     }
   }
 
   async resume() {
-    if (this.player && !this.isPlaying) {
-      this.player.play();
-      this.isPlaying = true;
+    console.log('▶️ Resuming background audio service...');
+    if (this.player) {
+      try {
+        this.player.play();
+        this.isPlaying = true;
+        
+        // Notify all callbacks that playback has resumed
+        this.statusCallbacks.forEach(callback => {
+          callback({
+            position: this.position,
+            duration: this.duration,
+            isPlaying: true,
+          });
+        });
+        
+        console.log('✅ Background audio service resumed');
+      } catch (error) {
+        console.error('Error resuming player:', error);
+      }
+    } else {
+      console.warn('⚠️ No player to resume');
     }
   }
 
   async stop() {
+    console.log('🛑 Stopping background audio service...');
     if (this.player) {
-      this.player.pause();
-      if (this.statusListener) {
-        this.player.removeListener('playbackStatusUpdate', this.statusListener);
+      try {
+        this.player.pause();
+        if (this.statusListener) {
+          this.player.removeListener('playbackStatusUpdate', this.statusListener);
+        }
+        this.player.remove();
+        this.player = null;
+        this.isPlaying = false;
+        this.position = 0;
+        this.duration = 0;
+        this.statusListener = null;
+        this.currentTrack = null;
+        console.log('✅ Background audio service stopped successfully');
+      } catch (error) {
+        console.error('Error stopping player:', error);
+        // Force cleanup even if there's an error
+        this.player = null;
+        this.isPlaying = false;
+        this.position = 0;
+        this.duration = 0;
+        this.statusListener = null;
+        this.currentTrack = null;
       }
-      this.player.remove();
-      this.player = null;
-      this.isPlaying = false;
-      this.position = 0;
-      this.statusListener = null;
     }
   }
 
   async seekTo(position: number) {
     if (this.player) {
-      // expo-audio seekTo expects seconds, not milliseconds
-      await this.player.seekTo(position / 1000);
-      this.position = position;
+      // expo-audio seekTo expects seconds (position is already in seconds from AudioPlayerContext)
+      await this.player.seekTo(position);
+      this.position = Math.floor(position);
+      
+      // Notify callbacks of position change
+      this.statusCallbacks.forEach(callback => {
+        callback({
+          position: this.position,
+          duration: this.duration,
+          isPlaying: this.isPlaying,
+        });
+      });
+      
+      console.log('🎵 Seeked to:', position, 'seconds');
     }
   }
 
@@ -139,28 +250,87 @@ class BackgroundAudioService {
   private onPlaybackStatusUpdate = (status: any) => {
     // expo-audio status structure
     if (this.player) {
-      this.position = Math.floor((this.player.currentTime || 0) * 1000); // Convert seconds to milliseconds
-      this.duration = Math.floor((this.player.duration || 0) * 1000); // Convert seconds to milliseconds
-      this.isPlaying = this.player.playing || false;
+      // expo-audio provides currentTime and duration in seconds
+      const newPosition = Math.floor(this.player.currentTime || 0);
+      const newDuration = Math.floor(this.player.duration || 0);
+      const newIsPlaying = this.player.playing || false;
 
-      // Debug logging
-      console.log('🎵 Background playback status:', {
-        isPlaying: this.isPlaying,
-        position: this.position,
-        duration: this.duration,
-        isLoaded: this.player.isLoaded
-      });
+      // Check if track finished
+      if (newDuration > 0 && newPosition >= newDuration - 0.5 && this.position < newDuration - 0.5) {
+        // Track just finished - emit event for context to handle
+        this.statusCallbacks.forEach(callback => {
+          callback({
+            position: newDuration,
+            duration: newDuration,
+            isPlaying: false,
+          });
+        });
+        // Call track finished callback
+        this.onTrackComplete();
+        return;
+      }
+
+      // Update internal state (stored in seconds)
+      const positionChanged = this.position !== newPosition;
+      const durationChanged = this.duration !== newDuration;
+      
+      this.position = newPosition;
+      this.duration = newDuration;
+      this.isPlaying = newIsPlaying;
+
+      // Notify all callbacks (only if values changed to avoid unnecessary updates)
+      if (positionChanged || durationChanged || this.isPlaying !== newIsPlaying) {
+        this.statusCallbacks.forEach(callback => {
+          callback({
+            position: newPosition,
+            duration: newDuration,
+            isPlaying: newIsPlaying,
+          });
+        });
+      }
+
+      // Debug logging (only when duration is available or position changes significantly)
+      if (newDuration > 0 && (durationChanged || newPosition % 5 === 0)) {
+        console.log('🎵 Background playback status:', {
+          isPlaying: newIsPlaying,
+          position: newPosition,
+          duration: newDuration,
+          isLoaded: this.player.isLoaded
+        });
+      }
 
       // Handle playback completion
-      if (this.player.isLoaded && this.position >= this.duration && this.duration > 0) {
+      if (this.player.isLoaded && newDuration > 0 && newPosition >= newDuration) {
         this.onTrackComplete();
       }
     }
   };
 
+  // Subscribe to status updates
+  onStatusUpdate(callback: StatusUpdateCallback): () => void {
+    this.statusCallbacks.add(callback);
+    // Return unsubscribe function
+    return () => {
+      this.statusCallbacks.delete(callback);
+    };
+  }
+
+  // Set callback for when track finishes
+  setOnTrackFinished(callback: () => void) {
+    this.onTrackFinished = callback;
+  }
+
+  // Clear track finished callback
+  clearOnTrackFinished() {
+    this.onTrackFinished = null;
+  }
+
   private onTrackComplete() {
     console.log('🎵 Track completed');
-    // You can implement auto-play next track logic here
+    // Call the track finished callback if set
+    if (this.onTrackFinished) {
+      this.onTrackFinished();
+    }
   }
 
 

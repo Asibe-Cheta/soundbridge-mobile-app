@@ -27,6 +27,9 @@ import LiveSessionRoomScreen from './src/screens/LiveSessionRoomScreen';
 import CreateLiveSessionScreen from './src/screens/CreateLiveSessionScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import AudioPlayerScreen from './src/screens/AudioPlayerScreen';
+import QueueViewScreen from './src/screens/QueueViewScreen';
+import LyricsViewScreen from './src/screens/LyricsViewScreen';
+import SongDetailScreen from './src/screens/SongDetailScreen';
 import CreatorProfileScreen from './src/screens/CreatorProfileScreen';
 import CreatorSetupScreen from './src/screens/CreatorSetupScreen';
 import PrivacySecurityScreen from './src/screens/PrivacySecurityScreen';
@@ -213,8 +216,16 @@ function MainTabs() {
           headerShown: false,
         })}
       >
-        <Tab.Screen name="Feed" component={FeedScreen} />
-        <Tab.Screen name="Discover" component={DiscoverScreen} />
+        <Tab.Screen 
+          name="Feed" 
+          component={FeedScreen}
+          options={{ tabBarLabel: 'Feed' }}
+        />
+        <Tab.Screen 
+          name="Discover" 
+          component={DiscoverScreen}
+          options={{ tabBarLabel: 'Explore' }}
+        />
         <Tab.Screen 
           name="Upload" 
           component={UploadScreen}
@@ -239,10 +250,19 @@ function MainTabs() {
                 <Ionicons name="add" size={32} color="#FFFFFF" />
               </View>
             ),
+            tabBarLabel: 'Upload',
           }}
         />
-        <Tab.Screen name="Network" component={NetworkScreen} />
-        <Tab.Screen name="Profile" component={ProfileScreen} />
+        <Tab.Screen 
+          name="Network" 
+          component={NetworkScreen}
+          options={{ tabBarLabel: 'Connect' }}
+        />
+        <Tab.Screen 
+          name="Profile" 
+          component={ProfileScreen}
+          options={{ tabBarLabel: 'Profile' }}
+        />
       </Tab.Navigator>
     </>
   );
@@ -491,6 +511,9 @@ function AppNavigator() {
             <Stack.Screen name="TracksList" component={TracksListScreen} />
             <Stack.Screen name="FollowersList" component={FollowersListScreen} />
             <Stack.Screen name="FollowingList" component={FollowingListScreen} />
+            <Stack.Screen name="QueueView" component={QueueViewScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="LyricsView" component={LyricsViewScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="SongDetail" component={SongDetailScreen} options={{ headerShown: false }} />
             {/* Allow access to onboarding even after completion for testing */}
             <Stack.Screen name="OnboardingTest" component={OnboardingScreen} />
           </>

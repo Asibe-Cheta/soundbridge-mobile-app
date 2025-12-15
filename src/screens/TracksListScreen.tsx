@@ -35,7 +35,7 @@ interface Track {
 export default function TracksListScreen() {
   const navigation = useNavigation();
   const route = useRoute();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const { theme } = useTheme();
   const { playTrack, currentTrack, isPlaying } = useAudioPlayer();
 
@@ -84,38 +84,39 @@ export default function TracksListScreen() {
         
         // Fallback to Supabase
         const { data: tracksDataSupabase, error: tracksError } = await supabase
-          .from('audio_tracks')
-          .select('*')
-          .eq('creator_id', userId)
-          .order('created_at', { ascending: false });
+        .from('audio_tracks')
+        .select('*')
+        .eq('creator_id', userId)
+        .order('created_at', { ascending: false });
 
-        if (tracksError) throw tracksError;
+      if (tracksError) throw tracksError;
 
-        // Get current user's likes to check if they liked these tracks
-        let likedTrackIds: string[] = [];
-        if (user?.id) {
-          const { data: likesData } = await supabase
-            .from('likes')
-            .select('track_id')
-            .eq('user_id', user.id)
-            .in('track_id', tracksDataSupabase?.map(t => t.id) || []);
+      // Get current user's likes to check if they liked these tracks
+      let likedTrackIds: string[] = [];
+      if (user?.id) {
+        const { data: likesData } = await supabase
+          .from('likes')
+          .select('content_id')
+          .eq('user_id', user.id)
+          .eq('content_type', 'track')
+          .in('content_id', tracksDataSupabase?.map(t => t.id) || []);
 
-          likedTrackIds = likesData?.map(l => l.track_id) || [];
-        }
+        likedTrackIds = likesData?.map(l => l.content_id) || [];
+      }
 
-        // Transform data
+      // Transform data
         tracksData = (tracksDataSupabase || []).map(track => ({
-          id: track.id,
-          title: track.title || 'Untitled Track',
-          artist_name: track.artist_name || 'Unknown Artist',
-          cover_url: track.cover_image_url || track.cover_url || track.artwork_url || track.image_url,
-          audio_url: track.audio_url || track.file_url,
-          duration: track.duration || 0,
-          play_count: track.play_count || track.plays_count || 0,
-          likes_count: track.likes_count || track.like_count || 0,
-          created_at: track.created_at,
-          is_liked: likedTrackIds.includes(track.id),
-        }));
+        id: track.id,
+        title: track.title || 'Untitled Track',
+        artist_name: track.artist_name || 'Unknown Artist',
+        cover_url: track.cover_image_url || track.cover_url || track.artwork_url || track.image_url,
+        audio_url: track.audio_url || track.file_url,
+        duration: track.duration || 0,
+        play_count: track.play_count || track.plays_count || 0,
+        likes_count: track.likes_count || track.like_count || 0,
+        created_at: track.created_at,
+        is_liked: likedTrackIds.includes(track.id),
+      }));
       }
 
       setTracks(tracksData);
@@ -151,7 +152,8 @@ export default function TracksListScreen() {
           .from('likes')
           .delete()
           .eq('user_id', user.id)
-          .eq('track_id', trackId);
+          .eq('content_id', trackId)
+          .eq('content_type', 'track');
 
         if (error) throw error;
 
@@ -169,7 +171,8 @@ export default function TracksListScreen() {
           .from('likes')
           .insert({
             user_id: user.id,
-            track_id: trackId,
+            content_id: trackId,
+            content_type: 'track',
           });
 
         if (error) throw error;

@@ -16,6 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { profileService } from '../services/ProfileService';
 
 interface Follower {
   id: string;
@@ -54,7 +55,29 @@ export default function FollowersListScreen() {
       setLoading(true);
       console.log('📋 Loading followers for user:', userId);
 
-      // Get all followers with their profile info
+      // Try API endpoint first, fallback to Supabase if it fails
+      let transformedFollowers: Follower[] = [];
+
+      try {
+        const result = await profileService.getFollowers(userId, session || undefined);
+        if (result.success && result.followers) {
+          console.log('✅ Loaded followers from API:', result.followers.length);
+          // Transform API response to screen format
+          transformedFollowers = result.followers.map(follower => ({
+            id: follower.id,
+            user_id: follower.id,
+            display_name: follower.display_name || 'Unknown User',
+            username: follower.username || 'unknown',
+            avatar_url: follower.avatar_url || null,
+            bio: follower.bio || null,
+            is_verified: follower.is_verified || false,
+            is_following_back: follower.is_following_back || false,
+          }));
+        }
+      } catch (apiError) {
+        console.warn('⚠️ API endpoint failed, falling back to Supabase:', apiError);
+
+        // Fallback to Supabase
       const { data: followsData, error: followsError } = await supabase
         .from('follows')
         .select(`
@@ -65,16 +88,13 @@ export default function FollowersListScreen() {
             username,
             display_name,
             avatar_url,
-            bio,
-            is_verified
+              bio
           )
         `)
         .eq('following_id', userId)
         .order('created_at', { ascending: false });
 
       if (followsError) throw followsError;
-
-      console.log('✅ Loaded followers:', followsData?.length || 0);
 
       // Get current user's following list to check if they follow back
       let followingIds: string[] = [];
@@ -88,7 +108,7 @@ export default function FollowersListScreen() {
       }
 
       // Transform data
-      const transformedFollowers: Follower[] = (followsData || [])
+        transformedFollowers = (followsData || [])
         .filter(f => f.follower) // Filter out any null profiles
         .map(f => ({
           id: f.follower_id,
@@ -97,9 +117,10 @@ export default function FollowersListScreen() {
           username: f.follower.username || 'unknown',
           avatar_url: f.follower.avatar_url,
           bio: f.follower.bio,
-          is_verified: f.follower.is_verified || false,
+            is_verified: false, // is_verified doesn't exist in DB
           is_following_back: followingIds.includes(f.follower.id),
         }));
+      }
 
       setFollowers(transformedFollowers);
     } catch (error) {

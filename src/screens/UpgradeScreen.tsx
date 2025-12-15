@@ -20,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import RevenueCatService, { RevenueCatProduct } from '../services/RevenueCatService';
+import { config } from '../config/environment';
 
 interface Plan {
   id: 'free' | 'premium' | 'unlimited';
@@ -148,6 +149,15 @@ export default function UpgradeScreen() {
       console.log('🔍 Checking subscription status...');
       console.log('👤 User profile subscription_tier:', (user as any)?.subscription_tier);
 
+      // Development bypass: Use hardcoded tier
+      if (config.bypassRevenueCat && config.developmentTier) {
+        console.log('🔧 DEVELOPMENT MODE: Using hardcoded tier');
+        console.log(`🔧 Hardcoded tier: ${config.developmentTier.toUpperCase()}`);
+        setCurrentPlan(config.developmentTier);
+        setCurrentBillingCycle('monthly');
+        return;
+      }
+
       // Wait for RevenueCat to be ready (with longer timeout for sandbox)
       let attempts = 0;
       const maxAttempts = 20; // 10 seconds total
@@ -242,6 +252,13 @@ export default function UpgradeScreen() {
     try {
       setIsInitializing(true);
       console.log('🚀 Loading RevenueCat products...');
+
+      // Development bypass: Skip product loading
+      if (config.bypassRevenueCat) {
+        console.log('🔧 DEVELOPMENT MODE: Skipping RevenueCat product loading');
+        setRevenueCatProducts([]);
+        return;
+      }
 
       // Wait for RevenueCat to be ready (with timeout)
       let attempts = 0;
@@ -390,6 +407,16 @@ export default function UpgradeScreen() {
   const handleUpgrade = async (plan: Plan) => {
     if (plan.id === 'free') {
       Alert.alert('Downgrade to Free', 'To cancel your subscription, please manage your subscription in App Store settings.');
+      return;
+    }
+
+    // Development bypass: Show alert explaining bypass mode
+    if (config.bypassRevenueCat) {
+      Alert.alert(
+        'Development Mode',
+        `Subscription purchases are disabled in development mode.\n\nCurrent hardcoded tier: ${config.developmentTier?.toUpperCase()}\n\nTo enable purchases:\n1. Build a production app\n2. Set bypassRevenueCat: false in environment.ts`,
+        [{ text: 'OK' }]
+      );
       return;
     }
 

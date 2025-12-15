@@ -1,4 +1,5 @@
 import { Session } from '@supabase/supabase-js';
+import { config } from '../config/environment';
 
 const API_BASE_URL = __DEV__ ? 'http://192.168.1.122:3000' : 'https://soundbridge.live';
 
@@ -184,15 +185,31 @@ class SubscriptionService {
    * Response structure: { success: true, data: { subscription: {...}, usage: {...}, limits: {...}, features: {...} } }
    */
   async getSubscriptionStatus(session: Session): Promise<SubscriptionStatus> {
+    // Development bypass: Skip API call and return hardcoded tier
+    if (config.bypassRevenueCat && config.developmentTier) {
+      console.log('🔧 DEVELOPMENT MODE: Bypassing subscription API');
+      console.log(`🔧 Using hardcoded tier: ${config.developmentTier.toUpperCase()}`);
+      return {
+        tier: config.developmentTier,
+        status: 'active',
+        current_period_start: new Date().toISOString(),
+        current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // +30 days
+        cancel_at_period_end: false,
+        amount: config.developmentTier === 'premium' ? 6.99 : config.developmentTier === 'unlimited' ? 12.99 : 0,
+        currency: 'GBP',
+        billing_cycle: 'monthly',
+      };
+    }
+
     try {
       console.log('📊 Fetching subscription status...');
       const response = await this.makeRequest('/api/subscription/status', session);
       console.log('✅ Subscription status response:', response);
-      
+
       // Defensive: Use optional chaining - subscription might be null for free users
       const data = response?.data || {};
       const subscription = data?.subscription || null;
-      
+
       // If no subscription, return free tier default
       if (!subscription) {
         console.log('ℹ️ No subscription found, returning free tier');
@@ -207,7 +224,7 @@ class SubscriptionService {
           billing_cycle: 'monthly',
         };
       }
-      
+
       // Transform API response to match our interface
       return {
         tier: subscription.tier || 'free',
@@ -230,6 +247,63 @@ class SubscriptionService {
         moneyBackGuarantee: data.moneyBackGuarantee,
       };
     } catch (error) {
+      // Handle timeouts and network errors gracefully
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('timeout') || errorMessage.includes('connection')) {
+        console.warn('⏱️ Subscription status request timed out - checking Supabase fallback');
+
+        // Try to get tier from Supabase user profile as fallback
+        try {
+          const { supabase } = await import('../lib/supabase');
+          const { data: profile, error: profileError } = await supabase
+            .from('user_profiles')
+            .select('subscription_tier, subscription_status, currency')
+            .eq('id', session.user.id)
+            .single();
+
+          if (profileError) {
+            console.warn('⚠️ Supabase query error:', profileError);
+          } else if (profile) {
+            console.log('📊 Supabase profile data:', {
+              subscription_tier: profile.subscription_tier,
+              subscription_status: profile.subscription_status,
+              currency: profile.currency,
+            });
+
+            // Use the tier from profile if available
+            if (profile.subscription_tier && profile.subscription_tier !== 'free') {
+              console.log(`✅ Using Supabase fallback tier: ${profile.subscription_tier}`);
+              return {
+                tier: profile.subscription_tier as 'free' | 'premium' | 'unlimited',
+                status: (profile.subscription_status as any) || 'active',
+                current_period_start: new Date().toISOString(),
+                current_period_end: new Date().toISOString(),
+                cancel_at_period_end: false,
+                amount: 0,
+                currency: profile.currency || 'GBP',
+                billing_cycle: 'monthly',
+              };
+            } else {
+              console.log('⚠️ Supabase profile shows free tier or null');
+            }
+          }
+        } catch (supabaseError) {
+          console.warn('⚠️ Supabase fallback exception:', supabaseError);
+        }
+
+        // Final fallback to free tier
+        console.warn('⏱️ All fallbacks exhausted - returning free tier');
+        return {
+          tier: 'free',
+          status: 'active',
+          current_period_start: new Date().toISOString(),
+          current_period_end: new Date().toISOString(),
+          cancel_at_period_end: false,
+          amount: 0,
+          currency: 'GBP',
+          billing_cycle: 'monthly',
+        };
+      }
       console.error('❌ Error fetching subscription status:', error);
       throw error;
     }

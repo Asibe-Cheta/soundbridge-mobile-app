@@ -74,6 +74,14 @@ export default function GlassmorphicTabBar({ state, descriptors, navigation }: B
             } else {
               iconName = 'ellipse-outline';
             }
+            
+            // Use custom label if provided, otherwise map route names to display labels
+            let displayLabel = typeof label === 'string' ? label : route.name;
+            if (route.name === 'Discover' && displayLabel === 'Discover') {
+              displayLabel = 'Explore';
+            } else if (route.name === 'Network' && displayLabel === 'Network') {
+              displayLabel = 'Connect';
+            }
 
             return (
               <TouchableOpacity
@@ -103,7 +111,7 @@ export default function GlassmorphicTabBar({ state, descriptors, navigation }: B
                       },
                     ]}
                   >
-                    {typeof label === 'string' ? label : route.name}
+                    {displayLabel}
                   </Text>
                 </View>
               </TouchableOpacity>

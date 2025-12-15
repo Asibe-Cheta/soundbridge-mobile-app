@@ -119,7 +119,7 @@ class AudioEnhancementService {
     // Legacy support for 'pro' tier
     if (tier === 'pro') {
       return features.premium;
-    }
+  }
 
     return features[tier] || features.free;
   }

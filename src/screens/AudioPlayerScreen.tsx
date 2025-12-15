@@ -14,6 +14,7 @@ import {
   Alert,
   Modal,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,9 +24,9 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { offlineDownloadService } from '../services/OfflineDownloadService';
-import { adService } from '../services/AdService';
-import AdInterstitial from '../components/AdInterstitial';
 import TipModal from '../components/TipModal';
+import { BlurView as ExpoBlurView } from 'expo-blur';
+import Svg, { Circle } from 'react-native-svg';
 // import type { AudioTrack } from '@soundbridge/types'; // Commented out - using local type
 
 const { width, height } = Dimensions.get('window');
@@ -74,7 +75,6 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   const lyricsRecoveryAttempted = useRef(false);
   const [isOffline, setIsOffline] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [showAd, setShowAd] = useState(false);
   const [showTipModal, setShowTipModal] = useState(false);
   
   // Lyrics modal drag animation
@@ -82,24 +82,55 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   const lyricsModalOpacity = useRef(new Animated.Value(0)).current;
   const [lyricsModalDragOffset, setLyricsModalDragOffset] = useState(0);
 
-  // Reset like status and lyrics when track changes
+  // Check like status and reset lyrics when track changes
   useEffect(() => {
-    setIsLiked(false);
+    const checkLikeStatus = async () => {
+      if (!currentTrack || !user) {
+        setIsLiked(false);
+        return;
+      }
+      
+      try {
+        const { data, error } = await supabase
+          .from('likes')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('content_id', currentTrack.id)
+          .eq('content_type', 'track')
+          .maybeSingle();
+        
+        if (error) {
+          console.error('❌ Error checking like status:', error);
+          setIsLiked(false);
+        } else {
+          setIsLiked(!!data);
+        }
+      } catch (error) {
+        console.error('❌ Error checking like status:', error);
+        setIsLiked(false);
+      }
+    };
+    
+    checkLikeStatus();
     setShowLyrics(false);
     setLyricsData(null);
     lyricsRecoveryAttempted.current = false;
-  }, [currentTrack]);
+  }, [currentTrack, user]);
+  
+  // Track peeks are static - no animation resets needed
   
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(height)).current;
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
   
-  // Pan responder for swipe gestures
+  // Swipe feature disabled - using button controls only
+  
+  // Pan responder for vertical swipe (close player)
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (evt, gestureState) => {
-        return Math.abs(gestureState.dy) > 20;
+        return Math.abs(gestureState.dy) > 20 && Math.abs(gestureState.dx) < 50;
       },
       onPanResponderMove: (evt, gestureState) => {
         if (gestureState.dy > 0) {
@@ -120,6 +151,8 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
       },
     })
   ).current;
+  
+  // Swipe feature disabled - removed PanResponder
 
   useEffect(() => {
     // Animate in when screen loads
@@ -159,11 +192,16 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     });
   };
 
-  const handlePlayPause = () => {
-    if (isPlaying) {
-      pause();
-    } else {
-      resume();
+  const handlePlayPause = async () => {
+    console.log('🎮 Play/Pause button pressed, isPlaying:', isPlaying);
+    try {
+      if (isPlaying) {
+        await pause();
+      } else {
+        await resume();
+      }
+    } catch (error) {
+      console.error('Error in handlePlayPause:', error);
     }
   };
 
@@ -190,37 +228,54 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     try {
       setIsLiked(newLikeStatus);
       
-      // Update likes count in audio_tracks table only
-      // This is a safer approach that doesn't rely on a likes table that might not exist
-      const likeIncrement = newLikeStatus ? 1 : -1;
-      const newLikesCount = Math.max(0, (currentTrack.likes_count || 0) + likeIncrement);
-      
-      const { error: updateError } = await supabase
-        .from('audio_tracks')
-        .update({ 
-          likes_count: newLikesCount 
-        })
-        .eq('id', currentTrack.id);
-      
-      if (updateError) {
-        console.error('Error updating likes count:', updateError);
-        // Revert the like status if database update failed
-        setIsLiked(originalLikeStatus);
-        Alert.alert('Error', 'Failed to update likes count. Please try again.');
-        return;
+      if (newLikeStatus) {
+        // Like: Insert into likes table using polymorphic design
+        const { error } = await supabase
+          .from('likes')
+          .insert({
+            user_id: user.id,
+            content_id: currentTrack.id,
+            content_type: 'track', // Polymorphic type
+          });
+        
+        if (error) {
+          console.error('❌ Error inserting like:', error);
+          setIsLiked(originalLikeStatus);
+          Alert.alert('Error', 'Failed to like track. Please try again.');
+          return;
+        }
+        
+        // Update local likes count
+        const newLikesCount = (currentTrack.likes_count || 0) + 1;
+        updateCurrentTrack({ likes_count: newLikesCount });
+        console.log('✅ Liked track:', currentTrack.title);
+        
+      } else {
+        // Unlike: Delete from likes table
+        const { error } = await supabase
+          .from('likes')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('content_id', currentTrack.id)
+          .eq('content_type', 'track');
+        
+        if (error) {
+          console.error('❌ Error removing like:', error);
+          setIsLiked(originalLikeStatus);
+          Alert.alert('Error', 'Failed to unlike track. Please try again.');
+          return;
+        }
+        
+        // Update local likes count
+        const newLikesCount = Math.max(0, (currentTrack.likes_count || 0) - 1);
+        updateCurrentTrack({ likes_count: newLikesCount });
+        console.log('✅ Unliked track:', currentTrack.title);
       }
       
-      // Update the current track in the context with the new likes count
-      updateCurrentTrack({ likes_count: newLikesCount });
-      
-      console.log(`${newLikeStatus ? 'Liked' : 'Unliked'} track:`, currentTrack.title);
-      console.log('New likes count:', newLikesCount);
-      
     } catch (error) {
-      console.error('Error liking track:', error);
-      // Revert the like status if there was an error
+      console.error('❌ Error toggling like:', error);
       setIsLiked(originalLikeStatus);
-      Alert.alert('Error', 'Unable to like this track. Please try again.');
+      Alert.alert('Error', 'Unable to update like status. Please try again.');
     }
   };
 
@@ -373,24 +428,57 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     });
   };
 
+  // Parse lyrics into lines
+  const parseLyrics = (lyricsText: string | null | undefined): string[] => {
+    if (!lyricsText) return [];
+    // Split by newlines and filter empty lines
+    return lyricsText.split(/\r?\n/).filter(line => line.trim().length > 0);
+  };
+
+  // Calculate current lyric line index based on playback position
+  const getCurrentLyricIndex = (): number => {
+    if (!duration || !position || !hasLyrics) return -1;
+    
+    const lyricsText = currentTrack?.lyrics || lyricsData;
+    if (!lyricsText) return -1;
+    
+    const lines = parseLyrics(lyricsText);
+    if (lines.length === 0) return -1;
+    
+    // Simple calculation: distribute lyrics evenly across duration
+    // This is a basic implementation - can be enhanced with timestamped lyrics later
+    const progress = position / duration;
+    const lineIndex = Math.floor(progress * lines.length);
+    return Math.min(lineIndex, lines.length - 1);
+  };
+
   // Toggle lyrics display
-  const handleToggleLyrics = () => {
-    if (!currentTrack) return;
-    
-    console.log('🎵 Opening lyrics modal...');
-    
-    // If we don't have lyrics yet, try to recover them
-    if (!currentTrack.lyrics && !lyricsData && !lyricsRecoveryAttempted.current) {
-      recoverLyrics();
+  const handleToggleLyrics = async () => {
+    if (!currentTrack) {
+      console.log('❌ No current track');
+      return;
     }
     
+    console.log('🎵 Opening lyrics modal...');
+    console.log('🎵 Current track:', currentTrack.id);
+    console.log('🎵 Has lyrics in track:', !!currentTrack.lyrics);
+    console.log('🎵 Has lyrics data:', !!lyricsData);
+    console.log('🎵 Recovery attempted:', lyricsRecoveryAttempted.current);
+    
+    // Always try to recover lyrics if we don't have them yet
+    if (!currentTrack.lyrics && !lyricsData && !lyricsRecoveryAttempted.current) {
+      console.log('🔄 Attempting to recover lyrics...');
+      await recoverLyrics();
+    }
+    
+    // Always show the modal, even if no lyrics (will show "No lyrics available")
     setShowLyrics(true);
-    animateLyricsModalIn();
+    console.log('✅ Lyrics modal should now be visible');
   };
 
   // Close lyrics modal
   const handleCloseLyrics = () => {
-    animateLyricsModalOut();
+    setShowLyrics(false);
   };
 
   // Simple drag state
@@ -507,37 +595,6 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     }
   }, [currentTrack]);
 
-  // Initialize ad service
-  useEffect(() => {
-    adService.initialize();
-  }, []);
-
-  // Handle track play for ads
-  useEffect(() => {
-    if (currentTrack && isPlaying) {
-      handleTrackPlayForAds();
-    }
-  }, [currentTrack, isPlaying]);
-
-  // Handle track play for ad display logic
-  const handleTrackPlayForAds = async () => {
-    try {
-      // Get user tier (simplified - in real app, get from user profile)
-      const userTier = 'free'; // TODO: Get from user subscription status
-      
-      const shouldShowAd = await adService.onTrackPlay(userTier);
-      
-      if (shouldShowAd) {
-        // Show ad after a short delay to avoid interrupting immediate playback
-        setTimeout(() => {
-          setShowAd(true);
-        }, 2000);
-      }
-    } catch (error) {
-      console.error('Error handling track play for ads:', error);
-    }
-  };
-
   // Handle download track for offline
   const handleDownload = async () => {
     if (!currentTrack || isDownloading) return;
@@ -602,81 +659,68 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     })
   ).current;
 
-  const renderProgressBar = () => (
-    <View style={styles.progressContainer}>
-      <Text style={styles.timeText}>{formatTime(position)}</Text>
-      <View 
-        style={[
-          styles.progressBar,
-          isProgressPressed && styles.progressBarPressed
-        ]}
-        {...progressPanResponder.panHandlers}
-      >
-        <View style={[
-          styles.progressTrack,
-          isProgressPressed && styles.progressTrackPressed
-        ]}>
-          <View 
-            style={[
-              styles.progressFill, 
-              { width: `${(position / duration) * 100}%` }
-            ]} 
-          />
-        </View>
-      </View>
-      <Text style={styles.timeText}>{formatTime(duration)}</Text>
-    </View>
-  );
 
   const renderControls = () => (
     <View style={styles.controlsContainer}>
-      {/* Main row: Skip, Rewind, Play, Forward, Skip */}
       <View style={styles.controlsMainRow}>
-      <TouchableOpacity 
-        style={styles.controlButton}
-          onPress={playPrevious}
-        >
-          <Ionicons name="play-skip-back" size={32} color="#FFFFFF" />
-      </TouchableOpacity>
-
-      <TouchableOpacity 
-        style={styles.controlButton}
-          onPress={handleRewind}
-      >
-          <Ionicons name="play-back" size={28} color="#FFFFFF" />
-          <Text style={styles.seekLabel}>15s</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity 
-        style={styles.playButton}
-        onPress={handlePlayPause}
-      >
-        <LinearGradient
-          colors={['#DC2626', '#EC4899']}
-          style={styles.playButtonGradient}
+        {/* Shuffle */}
+        <TouchableOpacity 
+          style={styles.controlButton}
+          onPress={toggleShuffle}
+          activeOpacity={0.7}
         >
           <Ionicons 
-            name={isPlaying ? 'pause' : 'play'} 
-            size={32} 
-            color="#FFFFFF" 
+            name={isShuffled ? 'shuffle' : 'shuffle-outline'} 
+            size={24} 
+            color={isShuffled ? theme.colors.primary : theme.colors.textSecondary} 
           />
-        </LinearGradient>
-      </TouchableOpacity>
+        </TouchableOpacity>
 
-      <TouchableOpacity 
-        style={styles.controlButton}
-          onPress={handleFastForward}
-      >
-          <Ionicons name="play-forward" size={28} color="#FFFFFF" />
-          <Text style={styles.seekLabel}>15s</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity 
-        style={styles.controlButton}
-          onPress={playNext}
+        {/* Previous */}
+        <TouchableOpacity 
+          style={styles.controlButton}
+          onPress={playPrevious}
+          activeOpacity={0.7}
         >
-          <Ionicons name="play-skip-forward" size={32} color="#FFFFFF" />
-      </TouchableOpacity>
+          <Ionicons name="play-skip-back" size={28} color={theme.colors.text} />
+        </TouchableOpacity>
+
+        {/* Play/Pause */}
+        <TouchableOpacity 
+          style={styles.playButton}
+          onPress={handlePlayPause}
+          activeOpacity={0.9}
+        >
+          <View style={[styles.playButtonCircle, { backgroundColor: theme.colors.primary }]}>
+            <Ionicons 
+              name={isPlaying ? 'pause' : 'play'} 
+              size={32} 
+              color="#FFFFFF" 
+            />
+          </View>
+        </TouchableOpacity>
+
+        {/* Next */}
+        <TouchableOpacity 
+          style={styles.controlButton}
+          onPress={playNext}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="play-skip-forward" size={28} color={theme.colors.text} />
+        </TouchableOpacity>
+
+        {/* Repeat */}
+        <TouchableOpacity 
+          style={styles.controlButton}
+          onPress={toggleRepeat}
+          activeOpacity={0.7}
+        >
+          <Ionicons 
+            name={isRepeat ? 'repeat' : 'repeat-outline'} 
+            size={24} 
+            color={isRepeat ? theme.colors.primary : theme.colors.textSecondary} 
+          />
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -786,36 +830,34 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <Animated.View 
-        style={[
-          styles.container,
-          {
-            opacity: fadeAnim,
-            transform: [
-              { translateY: slideAnim },
-              { scale: scaleAnim }
-            ]
-          }
-        ]}
-        {...panResponder.panHandlers}
-      >
-        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+    <View style={styles.fullScreenContainer}>
+      <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} translucent />
+      <SafeAreaView style={styles.safeArea} edges={[]}>
+        <Animated.View 
+          style={[
+            styles.container,
+            {
+              opacity: fadeAnim,
+              transform: [
+                { translateY: slideAnim },
+                { scale: scaleAnim }
+              ]
+            }
+          ]}
+          {...panResponder.panHandlers}
+        >
       
+      {/* Purple gradient background matching reference */}
       <LinearGradient
-        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        locations={[0, 0.5, 1]}
-        style={styles.background}
-      />
-
-      {/* Bottom gradient overlay to blend with system UI */}
-      <LinearGradient
-        colors={['transparent', theme.colors.backgroundGradient.middle + '4D', theme.colors.backgroundGradient.end]}
+        colors={
+          theme.isDark
+            ? ['#1a0f2e', '#2d1b4e', '#1a0f2e'] // Dark purple gradient
+            : ['#f3e8ff', '#e9d5ff', '#f3e8ff'] // Light purple gradient
+        }
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
-        style={styles.bottomGradient}
+        locations={[0, 0.5, 1]}
+        style={styles.background}
       />
 
       <ScrollView 
@@ -824,169 +866,401 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
         showsVerticalScrollIndicator={false}
         scrollEnabled={!showLyrics}
       >
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={closePlayer}>
-          <Ionicons name="chevron-down" size={24} color="#FFFFFF" />
+      {/* Header - Matching HTML design */}
+      <View style={[styles.header, { paddingTop: Platform.OS === 'ios' ? 50 : 20 }]}>
+        <TouchableOpacity onPress={closePlayer} activeOpacity={0.7}>
+          <Ionicons name="chevron-down" size={32} color={theme.isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Now Playing</Text>
-        <TouchableOpacity onPress={() => setShowQueue(true)}>
-          <Ionicons name="list" size={24} color="#FFFFFF" />
+        <View style={styles.headerHandle}>
+          <View style={[styles.handleBar, { backgroundColor: theme.isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)' }]} />
+        </View>
+        <TouchableOpacity onPress={() => {/* TODO: Add menu */}} activeOpacity={0.7}>
+          <Ionicons name="ellipsis-vertical" size={24} color={theme.isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'} />
         </TouchableOpacity>
       </View>
 
-      {/* Album Art */}
-      <View style={styles.albumContainer}>
-        <TouchableOpacity style={styles.albumArtContainer} onPress={handleAlbumArtTap}>
-          <Image 
-            source={{ uri: currentTrack.cover_image_url || currentTrack.cover_art_url || currentTrack.artwork_url || 'https://via.placeholder.com/300' }}
-            style={styles.albumArt}
+      {/* Title Section - Matching HTML design */}
+      <View style={styles.titleSection}>
+        <View style={styles.titleTextContainer}>
+          <Text style={[styles.largeTitle, { color: theme.colors.text }]} numberOfLines={2}>
+            {currentTrack.title}
+          </Text>
+          <TouchableOpacity 
+            onPress={() => {
+              if (currentTrack.creator?.id) {
+                navigation.navigate('CreatorProfile' as never, { 
+                  creatorId: currentTrack.creator.id 
+                } as never);
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.artistName, { color: theme.isDark ? 'rgba(251, 207, 232, 0.6)' : 'rgba(147, 51, 234, 0.8)' }]} numberOfLines={1}>
+              {currentTrack.creator?.display_name || currentTrack.creator?.username || 'Unknown Artist'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity 
+          style={styles.heartButton} 
+          onPress={handleLike}
+          activeOpacity={0.7}
+        >
+          <Ionicons 
+            name={isLiked ? 'heart' : 'heart-outline'} 
+            size={28} 
+            color={isLiked ? theme.colors.primary : (theme.isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)')} 
           />
-          <View style={styles.albumArtOverlay} />
         </TouchableOpacity>
       </View>
 
-      {/* Track Info */}
-      <View style={styles.trackInfo}>
-        <Text style={styles.trackTitle} numberOfLines={2}>
-          {currentTrack.title}
-        </Text>
-        <Text style={styles.trackArtist} numberOfLines={1}>
-          {currentTrack.creator?.display_name || currentTrack.creator?.username || 'Unknown Artist'}
-        </Text>
+      {/* Main Visual / Player Ring - Matching HTML design */}
+      <View style={styles.mainVisualContainer}>
+        {/* Previous Track Peek - Static */}
+        {(() => {
+          const currentIndex = queue.findIndex(track => track.id === currentTrack?.id);
+          const prevTrack = currentIndex > 0 
+            ? queue[currentIndex - 1] 
+            : currentIndex === -1 && queue.length > 0 
+              ? queue[queue.length - 1] 
+              : null;
+          
+          if (!prevTrack) return null;
+          
+          return (
+            <View style={styles.trackPeekPrevious}>
+              <Image
+                source={{ uri: prevTrack.cover_image_url || prevTrack.cover_art_url || prevTrack.artwork_url || 'https://via.placeholder.com/300' }}
+                style={styles.trackPeekImage}
+                blurRadius={Platform.OS === 'ios' ? 2 : 0}
+              />
+            </View>
+          );
+        })()}
+        
+        {/* Next Track Peek - Static */}
+        {(() => {
+          const currentIndex = queue.findIndex(track => track.id === currentTrack?.id);
+          const nextTrack = currentIndex >= 0 && currentIndex < queue.length - 1
+            ? queue[currentIndex + 1]
+            : currentIndex === -1 && queue.length > 0
+              ? queue[0]
+              : null;
+          
+          if (!nextTrack) return null;
+          
+          return (
+            <View style={styles.trackPeekNext}>
+              <Image
+                source={{ uri: nextTrack.cover_image_url || nextTrack.cover_art_url || nextTrack.artwork_url || 'https://via.placeholder.com/300' }}
+                style={styles.trackPeekImage}
+                blurRadius={Platform.OS === 'ios' ? 2 : 0}
+              />
+            </View>
+          );
+        })()}
+        
+        {/* Central Player - Static, no swipe animations */}
+        <View style={styles.centralPlayerContainer}>
+          {/* Glass Ring */}
+          <ExpoBlurView intensity={20} tint={theme.isDark ? 'dark' : 'light'} style={styles.glassRingBlur}>
+            <LinearGradient
+              colors={theme.isDark 
+                ? ['rgba(255, 255, 255, 0.1)', 'transparent']
+                : ['rgba(0, 0, 0, 0.1)', 'transparent']
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={styles.glassRingGradient}
+            />
+          </ExpoBlurView>
+          <View style={[styles.glassRing, { 
+            borderColor: theme.isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+            shadowColor: theme.isDark ? '#a855f7' : '#9333ea',
+          }]} />
+          
+          {/* Progress Arc (SVG) - Matching HTML exactly */}
+          <View style={styles.progressArcContainer}>
+            <Svg width={320} height={320} style={styles.svgProgress}>
+              {/* Background track */}
+              <Circle
+                cx={160}
+                cy={160}
+                r={121.6} // 38% of 320
+                fill="none"
+                stroke={theme.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}
+                strokeWidth={1.5}
+              />
+              {/* Active Progress - grows in length using stroke-dashoffset */}
+              {duration > 0 && (() => {
+                const circumference = 2 * Math.PI * 121.6; // ~764
+                const progress = Math.min(position / duration, 1);
+                const strokeDashoffset = circumference * (1 - progress);
+                
+                return (
+                  <Circle
+                    cx={160}
+                    cy={160}
+                    r={121.6}
+                    fill="none"
+                    stroke="#60a5fa"
+                    strokeWidth={2.5}
+                    strokeDasharray={circumference}
+                    strokeDashoffset={strokeDashoffset}
+                    strokeLinecap="round"
+                    transform="rotate(-90 160 160)"
+                  />
+                );
+              })()}
+            </Svg>
+          </View>
+          
+          {/* Inner Glow Circle */}
+          <View style={[styles.innerGlowCircle, { 
+            borderColor: theme.isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+          }]} />
+          
+          {/* Album Art */}
+          <TouchableOpacity 
+            style={styles.albumArtContainer} 
+            onPress={handleAlbumArtTap}
+            activeOpacity={0.9}
+          >
+            <Image 
+              source={{ uri: currentTrack.cover_image_url || currentTrack.cover_art_url || currentTrack.artwork_url || 'https://via.placeholder.com/300' }}
+              style={styles.albumArt}
+            />
+            {/* Shine overlay */}
+            <LinearGradient
+              colors={theme.isDark 
+                ? ['rgba(0, 0, 0, 0.2)', 'transparent', 'rgba(255, 255, 255, 0.2)']
+                : ['rgba(0, 0, 0, 0.1)', 'transparent', 'rgba(255, 255, 255, 0.1)']
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.shineOverlay}
+              pointerEvents="none"
+            />
+          </TouchableOpacity>
+          
+          {/* Time Label */}
+          <Text style={[styles.timeLabel, { color: theme.colors.text }]}>
+            {formatTime(position)}
+          </Text>
+        </View>
       </View>
-
-      {/* Progress Bar */}
-      {renderProgressBar()}
 
       {/* Controls */}
       {renderControls()}
 
-      {/* Volume Control */}
-      {renderVolumeControl()}
+      {/* Lyrics Button - Always enabled */}
+      <TouchableOpacity
+        style={styles.lyricsButton}
+        onPress={handleToggleLyrics}
+        activeOpacity={0.7}
+      >
+        <Ionicons 
+          name="musical-notes" 
+          size={20} 
+          color={theme.colors.primary} 
+        />
+        <Text style={[styles.lyricsButtonText, { color: theme.colors.primary }]}>
+          Lyrics
+        </Text>
+      </TouchableOpacity>
 
-      {/* Action Buttons */}
-      <View style={styles.actionButtons}>
-        <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
-          <Ionicons 
-            name={isLiked ? 'heart' : 'heart-outline'} 
-            size={24} 
-            color={isLiked ? '#DC2626' : 'rgba(255, 255, 255, 0.6)'} 
-          />
-        </TouchableOpacity>
-
-        {hasLyrics && (
-          <TouchableOpacity style={styles.actionButton} onPress={handleToggleLyrics}>
-            <Ionicons name="chatbubble-outline" size={24} color="rgba(255, 255, 255, 0.6)" />
-          </TouchableOpacity>
-        )}
-
-        <TouchableOpacity 
-          style={styles.actionButton} 
-          onPress={handleDownload}
-          disabled={isDownloading || isOffline}
-        >
-          {isDownloading ? (
-            <ActivityIndicator size="small" color="#FF6B6B" />
-          ) : (
-            <Ionicons 
-              name={isOffline ? 'checkmark-circle' : 'download-outline'} 
-              size={24} 
-              color={isOffline ? '#4CAF50' : 'rgba(255, 255, 255, 0.6)'} 
+      {/* Next Songs Section */}
+      {queue.length > 0 && (
+        <View style={styles.nextSongsSection}>
+          <Text style={[styles.nextSongsTitle, { color: theme.colors.text }]}>Next Songs</Text>
+          <TouchableOpacity 
+            style={styles.nextSongItem}
+            onPress={() => queue[0] && play(queue[0])}
+            activeOpacity={0.7}
+          >
+            <Image 
+              source={{ 
+                uri: queue[0].cover_image_url || queue[0].cover_art_url || queue[0].artwork_url || 'https://via.placeholder.com/60' 
+              }}
+              style={styles.nextSongImage}
             />
+            <View style={styles.nextSongInfo}>
+              <Text style={[styles.nextSongTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                {queue[0].title}
+              </Text>
+              <Text style={[styles.nextSongArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                {queue[0].creator?.display_name || queue[0].creator?.username || 'Unknown Artist'}
+              </Text>
+            </View>
+            <Text style={[styles.nextSongDuration, { color: theme.colors.textSecondary }]}>
+              {formatTime(queue[0].duration || 0)}
+            </Text>
+          </TouchableOpacity>
+          
+          {queue.length > 1 && (
+            <TouchableOpacity 
+              style={styles.viewAllButton}
+              onPress={() => navigation.navigate('QueueView' as never)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.viewAllText, { color: theme.colors.primary }]}>+ See All</Text>
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-          <Ionicons name="share-outline" size={24} color="rgba(255, 255, 255, 0.6)" />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.actionButton} onPress={handleTipCreator}>
-          <Ionicons name="cash-outline" size={24} color="rgba(255, 255, 255, 0.6)" />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.actionButton} onPress={handleFollow}>
-          <Ionicons 
-            name={isFollowing ? 'person-remove' : 'person-add'} 
-            size={24} 
-            color={isFollowing ? '#DC2626' : 'rgba(255, 255, 255, 0.6)'} 
-          />
-        </TouchableOpacity>
-      </View>
+        </View>
+      )}
       </ScrollView>
 
       {/* Queue Modal */}
       {showQueue && renderQueue()}
 
-      {/* Lyrics Modal */}
+      {/* Lyrics Modal - Full Screen */}
       <Modal
         visible={showLyrics}
-        animationType="none"
-        transparent={true}
+        animationType="slide"
+        transparent={false}
         onRequestClose={handleCloseLyrics}
+        statusBarTranslucent={true}
+        presentationStyle="pageSheet"
       >
-        <View style={styles.lyricsModalOverlay}>
-          <TouchableOpacity 
-            style={styles.lyricsModalBackdrop}
-            activeOpacity={1}
-            onPress={handleCloseLyrics}
+        <SafeAreaView style={styles.lyricsModalFullScreen} edges={[]}>
+          {/* Background Gradient - Dark with visible progression */}
+          <LinearGradient
+            colors={['#16213e', '#0f1419', '#000000']}
+            locations={[0, 0.6, 1]}
+            style={StyleSheet.absoluteFill}
           />
-          <Animated.View
-            style={[
-              styles.lyricsModalContainer,
-              {
-                transform: [{ translateY: lyricsModalTranslateY }],
-                opacity: lyricsModalOpacity,
-              }
-            ]}
-          >
-            {/* Test drag handle with PanResponder */}
-            <View 
-              style={{ 
-                height: 50, 
-                backgroundColor: 'rgba(255,255,255,0.2)', 
-                justifyContent: 'center', 
-                alignItems: 'center',
-                borderTopLeftRadius: 16,
-                borderTopRightRadius: 16,
-              }}
-              {...createDragPanResponder().panHandlers}
-            >
-              <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>DRAG HERE TO MOVE</Text>
-            </View>
+          
+          <View style={styles.container}>
+
+            {/* Swipe indicator */}
+            <View style={styles.swipeIndicator} />
+            
             {/* Header */}
-            <View style={styles.lyricsHeader}>
-              <View>
-                <Text style={styles.lyricsTitle}>Lyrics</Text>
-                {currentTrack?.lyrics_language && (
-                  <Text style={styles.lyricsLanguage}>
-                    Language: {currentTrack.lyrics_language.toUpperCase()}
-                  </Text>
-                )}
-              </View>
-              <TouchableOpacity onPress={handleCloseLyrics}>
-                <Ionicons name="close" size={28} color="#FFFFFF" />
+            <View style={styles.header}>
+              <TouchableOpacity onPress={handleCloseLyrics} style={styles.headerButton}>
+                <Ionicons name="chevron-down" color="rgba(255, 255, 255, 0.8)" size={24} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.headerButton}>
+                <Ionicons name="ellipsis-vertical" color="rgba(255, 255, 255, 0.8)" size={24} />
               </TouchableOpacity>
             </View>
 
-            {/* Lyrics Content */}
-            <ScrollView style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.8)', padding: 20 }}>
-              <Text style={{ 
-                color: '#FFFFFF', 
-                fontSize: 18, 
-                lineHeight: 30, 
-                textAlign: 'left',
-                fontFamily: 'System'
-              }}>
-                {currentTrack?.lyrics || lyricsData || 'No lyrics available for this track'}
-              </Text>
+            {/* Lyrics */}
+            <ScrollView
+              style={styles.lyricsContainer}
+              contentContainerStyle={styles.lyricsContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {(() => {
+                const lyricsText = currentTrack?.lyrics || lyricsData;
+                const lyricsLines = parseLyrics(lyricsText);
+                const currentLineIndex = getCurrentLyricIndex();
+                
+                if (lyricsLines.length === 0) {
+                  return (
+                    <Text style={styles.lyricsEmptyText}>
+                      No lyrics available for this track
+                    </Text>
+                  );
+                }
+                
+                return lyricsLines.map((line, index) => (
+                  <Text
+                    key={index}
+                    style={[
+                      styles.lyricLine,
+                      index === currentLineIndex ? styles.currentLyric : styles.inactiveLyric,
+                    ]}
+                  >
+                    {line}
+                  </Text>
+                ));
+              })()}
             </ScrollView>
-          </Animated.View>
-        </View>
-      </Modal>
-      </Animated.View>
 
-      {/* Ad Interstitial */}
+            {/* Mini Player - Liquid Glass iOS 26 Style */}
+            <View style={styles.miniPlayerWrapper}>
+              {/* iOS System Material Blur */}
+              <ExpoBlurView 
+                intensity={Platform.OS === 'ios' ? 50 : 80} 
+                tint="dark" 
+                style={styles.miniPlayer}
+              >
+                {/* Adaptive Tint Layer - creates depth */}
+                <View style={[
+                  StyleSheet.absoluteFill,
+                  { 
+                    backgroundColor: theme.isDark 
+                      ? 'rgba(0, 0, 0, 0.3)' 
+                      : 'rgba(255, 255, 255, 0.2)' 
+                  }
+                ]} />
+
+                {/* Glass Highlight - top sheen for "liquid glass" feel */}
+                <LinearGradient
+                  colors={[
+                    'rgba(255, 255, 255, 0.35)',
+                    'rgba(255, 255, 255, 0.12)',
+                    'transparent',
+                  ]}
+                  style={styles.glassHighlight}
+                />
+
+                {/* Content Layer */}
+                <View style={styles.miniPlayerContent}>
+                  <View style={styles.albumArtContainer}>
+                    <Image
+                      source={{ 
+                        uri: currentTrack?.cover_image_url || 
+                             currentTrack?.cover_art_url || 
+                             currentTrack?.artwork_url || 
+                             'https://via.placeholder.com/56' 
+                      }}
+                      style={styles.albumArt}
+                    />
+                  </View>
+
+                  <View style={styles.songInfo}>
+                    <Text style={styles.songTitle} numberOfLines={1}>
+                      {currentTrack?.title || 'Unknown Track'}
+                    </Text>
+                    <Text style={styles.songArtist} numberOfLines={1}>
+                      {currentTrack?.creator?.display_name || 
+                       currentTrack?.creator?.username || 
+                       'Unknown Artist'}
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    onPress={isPlaying ? pause : resume}
+                    style={styles.playButton}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons
+                      name={isPlaying ? 'pause' : 'play'}
+                      color="#000000"
+                      size={20}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </ExpoBlurView>
+            </View>
+
+            {/* Progress Bar */}
+            <View style={styles.progressBarContainer}>
+              <View style={styles.progressBarBackground}>
+                <View 
+                  style={[
+                    styles.progressBarFill,
+                    { width: `${duration > 0 ? (position / duration) * 100 : 0}%` }
+                  ]} 
+                />
+              </View>
+            </View>
+          </View>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Tip Modal */}
       {currentTrack?.creator?.id && (
         <TipModal
           visible={showTipModal}
@@ -1000,18 +1274,17 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
           onTipSuccess={(amount) => handleTipSuccess()}
         />
       )}
-      <AdInterstitial
-        visible={showAd}
-        onAdClosed={() => setShowAd(false)}
-        onAdLoaded={() => console.log('Ad loaded')}
-        onAdError={(error) => console.log('Ad error:', error)}
-        onAdClicked={() => console.log('Ad clicked')}
-      />
-    </SafeAreaView>
+        </Animated.View>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  fullScreenContainer: {
+    flex: 1,
+    backgroundColor: '#1a0f2e', // Match gradient start color
+  },
   safeArea: {
     flex: 1,
     backgroundColor: 'transparent',
@@ -1027,6 +1300,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingBottom: 80, // Reduced to bring action buttons back up
+    overflow: 'visible', // Allow content to extend beyond bounds
   },
   background: {
     position: 'absolute',
@@ -1072,63 +1346,166 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 10,
+    paddingHorizontal: 32,
+    marginTop: 0,
+    paddingTop: Platform.OS === 'ios' ? 50 : 20,
   },
-  headerTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  albumContainer: {
+  headerHandle: {
+    flex: 1,
     alignItems: 'center',
-    marginVertical: 40,
+    paddingHorizontal: 20,
+  },
+  handleBar: {
+    width: 48,
+    height: 6,
+    borderRadius: 3,
+    opacity: 0.2,
+  },
+  titleSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingHorizontal: 32,
+    marginTop: 24,              // Reduced to bring content up
+    marginBottom: 12,            // Reduced spacing
+  },
+  titleTextContainer: {
+    flex: 1,
+    marginRight: 12,
+  },
+  largeTitle: {
+    fontSize: 48,
+    fontWeight: '300', // font-light
+    letterSpacing: -0.5,
+    marginBottom: 8,
+    lineHeight: 52,
+  },
+  artistName: {
+    fontSize: 20,
+    fontWeight: '400',
+  },
+  heartButton: {
+    padding: 8,
+    marginTop: 8,
+  },
+  mainVisualContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 8,           // Reduced to compress vertically
+    minHeight: 280,              // Reduced to bring content up
+    position: 'relative',
+    overflow: 'visible', // Allow peeks to extend outside container
+    width: '100%',
+  },
+  trackPeekPrevious: {
+    position: 'absolute',
+    left: -128, // -left-32 from HTML = -128px
+    top: '50%',
+    marginTop: -96, // Center vertically (half of 192px)
+    width: 192, // w-48 = 192px
+    height: 192,
+    borderRadius: 96,
+    overflow: 'hidden',
+    opacity: 0.3,
+    transform: [{ scale: 0.9 }],
+    zIndex: 10,
+  },
+  trackPeekNext: {
+    position: 'absolute',
+    right: -128, // -right-32 from HTML = -128px
+    top: '50%',
+    marginTop: -96, // Center vertically (half of 192px)
+    width: 192, // w-48 = 192px
+    height: 192,
+    borderRadius: 96,
+    overflow: 'hidden',
+    opacity: 0.3,
+    transform: [{ scale: 0.9 }],
+    zIndex: 10,
+  },
+  trackPeekImage: {
+    width: '100%',
+    height: '100%',
+  },
+  centralPlayerContainer: {
+    width: 320, // w-80 = 320px
+    height: 320,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  progressArcContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 320,
+    height: 320,
+    pointerEvents: 'none',
+  },
+  svgProgress: {
+    transform: [{ rotate: '-90deg' }],
+  },
+  glassRingBlur: {
+    position: 'absolute',
+    width: 320,
+    height: 320,
+    borderRadius: 160,
+    overflow: 'hidden',
+  },
+  glassRingGradient: {
+    width: '100%',
+    height: '100%',
+  },
+  glassRing: {
+    position: 'absolute',
+    width: 320,
+    height: 320,
+    borderRadius: 160,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: 40,
+    shadowOpacity: 0.15,
+    elevation: 5,
+  },
+  innerGlowCircle: {
+    position: 'absolute',
+    width: 304, // 320 - 16 (inset-4)
+    height: 304,
+    borderRadius: 152,
+    borderWidth: 1,
   },
   albumArtContainer: {
-    width: width * 0.7,
-    height: width * 0.7,
-    borderRadius: (width * 0.7) / 2,
-    shadowColor: '#DC2626',
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
+    width: 192, // w-48 = 192px
+    height: 192,
+    borderRadius: 96,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 24,
     shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 16,
+    elevation: 8,
   },
   albumArt: {
     width: '100%',
     height: '100%',
-    borderRadius: (width * 0.7) / 2,
   },
-  albumArtOverlay: {
+  shineOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    borderRadius: (width * 0.7) / 2,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    borderRadius: 96,
   },
-  trackInfo: {
-    alignItems: 'center',
-    paddingHorizontal: 40,
-    marginBottom: 30,
-  },
-  trackTitle: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  trackArtist: {
-    color: 'rgba(255, 255, 255, 0.8)',
+  timeLabel: {
+    position: 'absolute',
+    bottom: 24,
     fontSize: 18,
-    textAlign: 'center',
-    marginBottom: 4,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   trackCreator: {
     color: 'rgba(255, 255, 255, 0.6)',
@@ -1153,58 +1530,56 @@ const styles = StyleSheet.create({
   progressContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 30,
+    paddingHorizontal: 24,
+    marginBottom: 32,
   },
   timeText: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 12,
-    minWidth: 40,
+    fontSize: 13,
+    fontWeight: '500',
+    minWidth: 45,
   },
   progressBar: {
     flex: 1,
     marginHorizontal: 16,
-    height: 20,
+    height: 24,
     justifyContent: 'center',
   },
   progressTrack: {
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 2,
+    height: 3,
+    borderRadius: 1.5,
+    overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#DC2626',
-    borderRadius: 2,
+    borderRadius: 1.5,
   },
   progressBarPressed: {
-    transform: [{ scaleY: 1.5 }], // Magnify vertically when pressed
+    transform: [{ scaleY: 1.2 }],
   },
   progressTrackPressed: {
-    height: 6, // Make track thicker when pressed
+    height: 4,
   },
   controlsContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 40, // Increased margin
+    paddingHorizontal: 24,
+    marginTop: 12,              // Reduced space between album art and controls
+    marginBottom: 24,            // Reduced bottom margin
   },
   controlsMainRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 8,
   },
   controlButton: {
-    padding: 16,
+    padding: 12,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  seekLabel: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 10,
-    marginTop: 2,
+    minWidth: 44,
+    minHeight: 44,
   },
   playButton: {
-    marginHorizontal: 20,
-    shadowColor: '#DC2626',
+    marginHorizontal: 16,
+    shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 4,
@@ -1213,46 +1588,62 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  playButtonGradient: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+  playButtonCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  volumeContainer: {
+  nextSongsSection: {
+    paddingHorizontal: 24,
+    marginTop: 8,
+    marginBottom: 32,
+  },
+  nextSongsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  nextSongItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 40,
-    marginBottom: 40, // Reduced to bring action buttons closer to volume
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.2)', // Darker card background matching reference
+    marginBottom: 12,
   },
-  volumeBar: {
+  nextSongImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  nextSongInfo: {
     flex: 1,
-    height: 20,
-    marginHorizontal: 16,
-    justifyContent: 'center',
+    marginRight: 12,
   },
-  volumeTrack: {
-    height: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 1.5,
+  nextSongTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
   },
-  volumeFill: {
-    height: '100%',
-    backgroundColor: '#EC4899',
-    borderRadius: 1.5,
+  nextSongArtist: {
+    fontSize: 14,
+    fontWeight: '400',
   },
-  volumeBarPressed: {
-    transform: [{ scaleY: 1.5 }], // Magnify vertically when pressed
+  nextSongDuration: {
+    fontSize: 14,
+    fontWeight: '500',
   },
-  volumeTrackPressed: {
-    height: 5, // Make track thicker when pressed
+  viewAllButton: {
+    paddingVertical: 12,
+    alignItems: 'center',
   },
-  actionButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingHorizontal: 40,
-    marginBottom: 30, // Reduced to bring buttons up but still avoid obstruction
+  viewAllText: {
+    fontSize: 15,
+    fontWeight: '600',
   },
   actionButton: {
     padding: 12,
@@ -1393,5 +1784,164 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.6)',
     textAlign: 'center',
     marginTop: 16,
+  },
+  // Lyrics Button
+  lyricsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  lyricsButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  lyricsButtonDisabled: {
+    opacity: 0.5,
+  },
+  // Lyrics Screen Styles (Exact Figma code)
+  lyricsModalFullScreen: {
+    flex: 1,
+  },
+  container: {
+    flex: 1,
+    padding: 24,
+  },
+  swipeIndicator: {
+    width: 40,
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 32,
+    zIndex: 10,
+  },
+  headerButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lyricsContainer: {
+    flex: 1,
+    marginBottom: 24,
+  },
+  lyricsContent: {
+    paddingHorizontal: 8,
+    gap: 24,
+  },
+  lyricLine: {
+    marginBottom: 24,
+  },
+  currentLyric: {
+    color: '#FFFFFF',
+    fontSize: 20,
+  },
+  inactiveLyric: {
+    color: 'rgba(255, 255, 255, 0.3)',
+    fontSize: 16,
+  },
+  lyricsEmptyText: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 40,
+  },
+  miniPlayerWrapper: {
+    position: 'relative',
+    marginBottom: 8,
+  },
+  miniPlayer: {
+    borderRadius: 999,          // Capsule shape (pill-shaped)
+    overflow: 'hidden',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 255, 255, 0.12)',  // Subtle edge definition
+    backgroundColor: 'transparent',
+    height: 84,                 // Apple Music mini-player height
+  },
+  glassHighlight: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 18,                 // Subtle top sheen for glass effect
+    zIndex: 1,
+  },
+  miniPlayerContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+    zIndex: 2,                  // Above highlight
+  },
+  albumArtContainer: {
+    width: 48,                  // Apple Music mini-player artwork size
+    height: 48,
+    borderRadius: 6,            // iOS 26 style rounded corners
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  albumArt: {
+    width: '100%',
+    height: '100%',
+  },
+  songInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  songTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,               // Apple Music text sizing
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  songArtist: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 14,
+  },
+  playButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  progressBarContainer: {
+    marginTop: 8,
+  },
+  progressBarBackground: {
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    width: '27%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    borderRadius: 2,
   },
 });

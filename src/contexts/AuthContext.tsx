@@ -65,12 +65,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
   
   // ✅ CRITICAL: Use ref to store current value so onAuthStateChange handler can access latest value
   const isChecking2FARef = React.useRef(false);
-  
-  // Update ref whenever state changes
+  const userRef = React.useRef<User | null>(null);
+
+  // Update refs whenever state changes
   React.useEffect(() => {
     isChecking2FARef.current = isChecking2FA;
     console.log('🔄 isChecking2FA ref updated:', isChecking2FA);
   }, [isChecking2FA]);
+
+  React.useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
@@ -212,7 +217,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Listen for app state changes to restore subscription on app resume
     // This ensures subscription is maintained if user updates the app while it's closed
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
-      if (nextAppState === 'active' && user && RevenueCatService.isReady()) {
+      if (nextAppState === 'active' && userRef.current && RevenueCatService.isReady()) {
         // App came to foreground - restore subscription status
         console.log('🔄 App resumed - checking subscription status...');
         RevenueCatService.restoreSubscriptionStatus().then(result => {
@@ -235,7 +240,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       linkingListener?.remove();
       appStateSubscription?.remove();
     };
-  }, [user]);
+  }, []); // Empty dependency array - only run once on mount
 
   // Helper function to map error messages to user-friendly text
   const mapAuthError = (errorMessage: string): string => {

@@ -80,13 +80,19 @@ class PayoutService {
     try {
       console.log('🔍 Checking payout eligibility...');
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
       const response = await fetch(`${API_URL}/api/payouts/eligibility`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const error = await response.json();
@@ -98,6 +104,9 @@ class PayoutService {
 
       return data;
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Request timed out. Please check your connection and try again.');
+      }
       console.error('❌ Error checking payout eligibility:', error);
       throw error;
     }
@@ -113,6 +122,9 @@ class PayoutService {
     try {
       console.log('💸 Requesting payout:', payoutRequest);
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout for POST
+
       const response = await fetch(`${API_URL}/api/payouts/request`, {
         method: 'POST',
         headers: {
@@ -120,7 +132,10 @@ class PayoutService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payoutRequest),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       const data = await response.json();
 
@@ -138,6 +153,12 @@ class PayoutService {
         payout: data.payout,
       };
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return {
+          success: false,
+          error: 'Request timed out. Please check your connection and try again.',
+        };
+      }
       console.error('❌ Error requesting payout:', error);
       return {
         success: false,
@@ -157,6 +178,9 @@ class PayoutService {
     try {
       console.log(`📜 Fetching payout history (page ${page}, limit ${limit})...`);
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
       const response = await fetch(
         `${API_URL}/api/payouts/history?page=${page}&limit=${limit}`,
         {
@@ -165,8 +189,11 @@ class PayoutService {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
+          signal: controller.signal,
         }
       );
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const error = await response.json();
@@ -178,6 +205,9 @@ class PayoutService {
 
       return data;
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Request timed out. Please check your connection and try again.');
+      }
       console.error('❌ Error fetching payout history:', error);
       throw error;
     }
@@ -191,13 +221,19 @@ class PayoutService {
     try {
       console.log('💰 Fetching creator revenue...');
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
       const response = await fetch(`${API_URL}/api/revenue/balance`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         if (response.status === 404) {
@@ -214,8 +250,19 @@ class PayoutService {
 
       return data.revenue;
     } catch (error) {
+      // Handle network failures gracefully
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          console.warn('⏱️ Creator revenue request timed out - will use fallback');
+          return null;
+        }
+        if (error.message === 'Network request failed' || error.message.includes('fetch')) {
+          console.warn('🌐 Creator revenue endpoint unavailable - will use fallback');
+          return null;
+        }
+      }
       console.error('❌ Error fetching creator revenue:', error);
-      throw error;
+      return null; // Return null instead of throwing to allow graceful degradation
     }
   }
 

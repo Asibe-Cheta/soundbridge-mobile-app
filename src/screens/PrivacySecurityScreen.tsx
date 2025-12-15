@@ -175,7 +175,7 @@ export default function PrivacySecurityScreen() {
         { 
           text: 'Delete Account', 
           style: 'destructive',
-          onPress: () => Alert.alert('Account Deletion', 'Please contact support@soundbridge.com to delete your account.')
+          onPress: () => Alert.alert('Account Deletion', 'Please contact support@soundbridge.live to delete your account.')
         },
       ]
     );

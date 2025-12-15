@@ -10,6 +10,8 @@ interface EnvironmentConfig {
   analyticsEnabled: boolean;
   debugMode: boolean;
   revenueCatApiKey: string;
+  bypassRevenueCat?: boolean;
+  developmentTier?: 'free' | 'premium' | 'unlimited';
 }
 
 const configs: Record<Environment, EnvironmentConfig> = {
@@ -19,6 +21,10 @@ const configs: Record<Environment, EnvironmentConfig> = {
     supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1bnhkYnF1a2J4eXlpdXNhZXFpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI2OTA2MTUsImV4cCI6MjA2ODI2NjYxNX0.IP-c4_S7Fkbq6F2UkgzL-TibkoBN49yQ1Cqz4CkMzB0',
     sentryDsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
     revenueCatApiKey: process.env.EXPO_PUBLIC_REVENUECAT_API_KEY || 'appl_QQannJQTfGORGekvyojIgJoyTlt',
+    // Development bypass: Skip RevenueCat and use hardcoded tier for testing
+    // Set to true when RevenueCat is not available (Expo Go, test environment, etc.)
+    bypassRevenueCat: true,
+    developmentTier: 'premium', // 'free' | 'premium' | 'unlimited'
     analyticsEnabled: false,
     debugMode: true,
   },
@@ -37,6 +43,9 @@ const configs: Record<Environment, EnvironmentConfig> = {
     supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1bnhkYnF1a2J4eXlpdXNhZXFpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI2OTA2MTUsImV4cCI6MjA2ODI2NjYxNX0.IP-c4_S7Fkbq6F2UkgzL-TibkoBN49yQ1Cqz4CkMzB0',
     sentryDsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
     revenueCatApiKey: process.env.EXPO_PUBLIC_REVENUECAT_API_KEY || 'appl_QQannJQTfGORGekvyojIgJoyTlt',
+    // ✅ CRITICAL: Production MUST use real RevenueCat
+    bypassRevenueCat: false,
+    // developmentTier is not used in production
     analyticsEnabled: true,
     debugMode: false,
   },

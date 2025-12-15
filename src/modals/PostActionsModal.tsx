@@ -49,13 +49,18 @@ export default function PostActionsModal({
 
   const isOwnPost = post.author.id === user?.id;
 
-  console.log('📋 PostActionsModal opened:', {
-    isOwnPost,
-    userId: user?.id,
-    postAuthorId: post.author.id,
-    shouldShowReport: !isOwnPost,
-    shouldShowBlock: !isOwnPost,
-  });
+  // Only log when modal becomes visible (not on every render)
+  React.useEffect(() => {
+    if (visible) {
+      console.log('📋 PostActionsModal opened:', {
+        isOwnPost,
+        userId: user?.id,
+        postAuthorId: post.author.id,
+        shouldShowReport: !isOwnPost,
+        shouldShowBlock: !isOwnPost,
+      });
+    }
+  }, [visible, isOwnPost, user?.id, post.author.id]);
 
   const handleDelete = () => {
     Alert.alert(

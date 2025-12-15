@@ -84,7 +84,7 @@ export default function HelpSupportScreen() {
       'Contact Support',
       'Choose how you\'d like to reach us',
       [
-        { text: 'Email', onPress: () => Linking.openURL('mailto:support@soundbridge.com') },
+        { text: 'Email', onPress: () => Linking.openURL('mailto:support@soundbridge.live') },
         { text: 'Twitter', onPress: () => Linking.openURL('https://twitter.com/soundbridge') },
         { text: 'Discord', onPress: () => Linking.openURL('https://discord.gg/soundbridge') },
         { text: 'Cancel', style: 'cancel' },
@@ -97,7 +97,7 @@ export default function HelpSupportScreen() {
       'Report a Bug',
       'Help us improve SoundBridge by reporting bugs',
       [
-        { text: 'Email Bug Report', onPress: () => Linking.openURL('mailto:bugs@soundbridge.com?subject=Bug Report') },
+        { text: 'Email Bug Report', onPress: () => Linking.openURL('mailto:bugs@soundbridge.live?subject=Bug Report') },
         { text: 'GitHub Issues', onPress: () => Linking.openURL('https://github.com/soundbridge/mobile/issues') },
         { text: 'Cancel', style: 'cancel' },
       ]
@@ -109,8 +109,8 @@ export default function HelpSupportScreen() {
       'Feature Request',
       'We\'d love to hear your ideas!',
       [
-        { text: 'Email Request', onPress: () => Linking.openURL('mailto:features@soundbridge.com?subject=Feature Request') },
-        { text: 'Community Forum', onPress: () => Linking.openURL('https://community.soundbridge.com') },
+        { text: 'Email Request', onPress: () => Linking.openURL('mailto:features@soundbridge.live?subject=Feature Request') },
+        { text: 'Community Forum', onPress: () => Linking.openURL('https://community.soundbridge.live') },
         { text: 'Cancel', style: 'cancel' },
       ]
     );
@@ -230,14 +230,14 @@ export default function HelpSupportScreen() {
             
             <TouchableOpacity
               style={styles.contactButton}
-              onPress={() => Linking.openURL('mailto:support@soundbridge.com')}
+              onPress={() => Linking.openURL('mailto:support@soundbridge.live')}
             >
               <Ionicons name="mail" size={20} color="#FFFFFF" />
               <Text style={styles.contactButtonText}>Email Support</Text>
             </TouchableOpacity>
 
             <View style={styles.contactInfo}>
-              <Text style={styles.contactInfoText}>📧 support@soundbridge.com</Text>
+              <Text style={styles.contactInfoText}>📧 support@soundbridge.live</Text>
               <Text style={styles.contactInfoText}>🕒 Response time: 24-48 hours</Text>
               <Text style={styles.contactInfoText}>🌍 Available worldwide</Text>
             </View>

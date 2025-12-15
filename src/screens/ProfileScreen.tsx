@@ -264,13 +264,18 @@ export default function ProfileScreen() {
           name: 'tips',
           query: async () => {
             // Use wallet service to get tip transactions (same source as WalletScreen)
-            if (!session) {
+            // Get fresh session to avoid 401 errors
+            const { data: { session: freshSession } } = await supabase.auth.getSession();
+
+            if (!freshSession) {
+              console.warn('⚠️ No session available for tips query');
               return { data: 0, error: null };
             }
 
             try {
+              console.log('💰 Fetching tips with fresh session...');
               // Get all transactions and filter for tip_received
-              const transactionsResult = await walletService.getWalletTransactionsSafe(session, 100, 0);
+              const transactionsResult = await walletService.getWalletTransactionsSafe(freshSession, 100, 0);
               const tipTransactions = transactionsResult.transactions.filter(
                 (t) => t.transaction_type === 'tip_received' && t.status === 'completed'
               );
@@ -294,12 +299,16 @@ export default function ProfileScreen() {
           name: 'creatorRevenue',
           query: async () => {
             // Use payout service to get creator revenue (same source as WalletScreen)
-            if (!session) {
+            // Get fresh session to avoid 401 errors
+            const { data: { session: freshSession } } = await supabase.auth.getSession();
+
+            if (!freshSession) {
+              console.warn('⚠️ No session available for creator revenue query');
               return { data: null, error: null };
             }
 
             try {
-              const revenue = await payoutService.getCreatorRevenue(session);
+              const revenue = await payoutService.getCreatorRevenue(freshSession);
               console.log(`💰 Creator revenue: $${revenue?.total_earned?.toFixed(2) || '0.00'}`);
               return { data: revenue, error: null };
             } catch (error) {
@@ -432,26 +441,38 @@ export default function ProfileScreen() {
         const totalPlays = transformedTracks.reduce((sum, track) => sum + (track.play_count || 0), 0);
         const totalLikes = transformedTracks.reduce((sum, track) => sum + (track.likes_count || 0), 0);
 
-        setStats({
+        const newStats = {
           total_plays: totalPlays,
           total_likes: totalLikes,
           total_tips_received: totalTipsReceived,
           total_earnings: totalEarnings, // Use creator revenue total_earned (includes tips + other earnings)
           monthly_plays: Math.floor(totalPlays * 0.3),
           monthly_earnings: Math.floor(totalEarnings * 0.3),
+        };
+        console.log('📊 Setting ProfileScreen stats:', {
+          tips: totalTipsReceived,
+          earnings: totalEarnings,
+          statsObject: newStats
         });
+        setStats(newStats);
       } else {
         console.log('ℹ️ No user tracks found');
         setUserTracks([]);
         setRecentActivity([]);
-        setStats({
+        const newStats = {
           total_plays: 0,
           total_likes: 0,
           total_tips_received: totalTipsReceived,
           total_earnings: totalEarnings, // Use creator revenue total_earned (includes tips + other earnings)
           monthly_plays: 0,
           monthly_earnings: Math.floor(totalEarnings * 0.3),
+        };
+        console.log('📊 Setting ProfileScreen stats (no tracks):', {
+          tips: totalTipsReceived,
+          earnings: totalEarnings,
+          statsObject: newStats
         });
+        setStats(newStats);
       }
 
       // Save to cache
