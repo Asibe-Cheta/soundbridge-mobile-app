@@ -35,7 +35,8 @@ export type NotificationType =
   | 'track_approved'
   | 'track_featured'
   | 'creator_post'
-  | 'live_session';
+  | 'live_session'
+  | 'moderation';
 
 export interface NotificationData {
   type: NotificationType;
@@ -222,6 +223,13 @@ class NotificationService {
         importance: Notifications.AndroidImportance.HIGH,
         sound: 'default',
       },
+      {
+        id: 'moderation',
+        name: 'Content Moderation',
+        description: 'Notifications about your content moderation status',
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: 'default',
+      },
     ];
 
     for (const channel of channels) {
@@ -264,6 +272,47 @@ class NotificationService {
     
     // Handle deep linking
     await this.handleDeepLink(data);
+  }
+
+  // ===== PUSH TOKEN REGISTRATION FOR MODERATION =====
+
+  /**
+   * Register push token and save to profiles table for moderation notifications
+   * Call this after user login or when notification permissions are granted
+   */
+  async registerPushTokenForModeration(): Promise<boolean> {
+    try {
+      // Check if we have a push token
+      if (!this.expoPushToken) {
+        console.log('⚠️ No push token available. Initialize notification service first.');
+        return false;
+      }
+
+      // Get current user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !user) {
+        console.error('❌ Error getting user for push token registration:', authError);
+        return false;
+      }
+
+      // Save push token to profiles table
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ expo_push_token: this.expoPushToken })
+        .eq('id', user.id);
+
+      if (updateError) {
+        console.error('❌ Error saving push token to profile:', updateError);
+        return false;
+      }
+
+      console.log('✅ Push token registered for moderation notifications:', this.expoPushToken);
+      return true;
+    } catch (error) {
+      console.error('❌ Error in registerPushTokenForModeration:', error);
+      return false;
+    }
   }
 
   // ===== LOCATION & TIMEZONE =====
@@ -831,6 +880,7 @@ class NotificationService {
     if (type === 'tip') return 'tips';
     if (type === 'message') return 'messages';
     if (type.includes('collaboration')) return 'collaboration';
+    if (type === 'moderation') return 'moderation';
     return 'default';
   }
 
