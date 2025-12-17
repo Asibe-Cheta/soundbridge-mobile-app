@@ -33,6 +33,18 @@ interface Track {
   file_url?: string;          // Correct field name from schema
   genre?: string;
   created_at: string;
+  creator_id?: string;
+  // Moderation fields
+  moderation_status?: 'pending_check' | 'checking' | 'clean' | 'flagged' | 'approved' | 'rejected' | 'appealed';
+  moderation_flagged?: boolean;
+  flag_reasons?: string[];
+  moderation_confidence?: number;
+  moderation_checked_at?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  appeal_text?: string;
+  appeal_status?: 'pending' | 'approved' | 'rejected';
+  appeal_submitted_at?: string;
   creator?: {
     id: string;
     username: string;
@@ -88,6 +100,17 @@ export default function TrackDetailsScreen() {
           file_url,
           genre,
           created_at,
+          creator_id,
+          moderation_status,
+          moderation_flagged,
+          flag_reasons,
+          moderation_confidence,
+          moderation_checked_at,
+          reviewed_by,
+          reviewed_at,
+          appeal_text,
+          appeal_status,
+          appeal_submitted_at,
           creator:profiles!creator_id (
             id,
             username,
@@ -461,6 +484,116 @@ export default function TrackDetailsScreen() {
               {formatDate(track.created_at)}
             </Text>
           </View>
+
+          {/* Moderation Information (Owner Only) */}
+          {user && track.creator_id === user.id && track.moderation_status && (
+            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <View style={styles.moderationHeader}>
+                <Ionicons name="shield-checkmark" size={20} color={theme.colors.primary} />
+                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }]}>Content Moderation</Text>
+              </View>
+
+              {/* Status Badge */}
+              <View style={styles.moderationRow}>
+                <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary }]}>Status:</Text>
+                <View style={[
+                  styles.statusBadge,
+                  { 
+                    backgroundColor: 
+                      track.moderation_status === 'clean' || track.moderation_status === 'approved' ? '#10B981' :
+                      track.moderation_status === 'checking' ? '#3B82F6' :
+                      track.moderation_status === 'flagged' ? '#F59E0B' :
+                      track.moderation_status === 'rejected' ? '#EF4444' :
+                      track.moderation_status === 'appealed' ? '#F59E0B' :
+                      '#9CA3AF'
+                  }
+                ]}>
+                  <Text style={styles.statusBadgeText}>
+                    {track.moderation_status === 'pending_check' ? '⏳ Pending Check' :
+                     track.moderation_status === 'checking' ? '🔍 Checking...' :
+                     track.moderation_status === 'clean' ? '✓ Verified' :
+                     track.moderation_status === 'flagged' ? '⚠️ Under Review' :
+                     track.moderation_status === 'approved' ? '✓ Approved' :
+                     track.moderation_status === 'rejected' ? '✗ Not Approved' :
+                     track.moderation_status === 'appealed' ? '📬 Appeal Pending' :
+                     track.moderation_status}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Confidence Score */}
+              {track.moderation_confidence && track.moderation_confidence >= 50 && (
+                <View style={styles.moderationRow}>
+                  <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary }]}>Confidence:</Text>
+                  <Text style={[styles.moderationValue, { color: theme.colors.text }]}>
+                    {Math.round(track.moderation_confidence)}%
+                  </Text>
+                </View>
+              )}
+
+              {/* Checked At */}
+              {track.moderation_checked_at && (
+                <View style={styles.moderationRow}>
+                  <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary }]}>Checked:</Text>
+                  <Text style={[styles.moderationValue, { color: theme.colors.text }]}>
+                    {formatDate(track.moderation_checked_at)}
+                  </Text>
+                </View>
+              )}
+
+              {/* Flag Reasons */}
+              {track.flag_reasons && track.flag_reasons.length > 0 && (
+                <View style={styles.moderationColumn}>
+                  <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary }]}>Issues Found:</Text>
+                  {track.flag_reasons.map((reason, index) => (
+                    <View key={index} style={styles.flagReasonItem}>
+                      <Ionicons name="alert-circle" size={14} color="#F59E0B" />
+                      <Text style={[styles.flagReasonText, { color: theme.colors.text }]}>{reason}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Appeal Status */}
+              {track.appeal_status && (
+                <>
+                  <View style={styles.moderationRow}>
+                    <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary }]}>Appeal Status:</Text>
+                    <Text style={[styles.moderationValue, { color: theme.colors.text }]}>
+                      {track.appeal_status === 'pending' ? '⏳ Pending Review' :
+                       track.appeal_status === 'approved' ? '✓ Approved' :
+                       track.appeal_status === 'rejected' ? '✗ Rejected' :
+                       track.appeal_status}
+                    </Text>
+                  </View>
+                  {track.appeal_submitted_at && (
+                    <View style={styles.moderationRow}>
+                      <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary }]}>Appeal Submitted:</Text>
+                      <Text style={[styles.moderationValue, { color: theme.colors.text }]}>
+                        {formatDate(track.appeal_submitted_at)}
+                      </Text>
+                    </View>
+                  )}
+                </>
+              )}
+
+              {/* Info Message */}
+              <View style={[styles.moderationInfo, { backgroundColor: theme.colors.background }]}>
+                <Ionicons name="information-circle" size={16} color={theme.colors.textSecondary} />
+                <Text style={[styles.moderationInfoText, { color: theme.colors.textSecondary }]}>
+                  {track.moderation_status === 'pending_check' || track.moderation_status === 'checking'
+                    ? 'Your track is being reviewed. This usually takes a few minutes.'
+                    : track.moderation_status === 'flagged'
+                    ? 'Your track has been flagged for review by our team. We\'ll notify you once reviewed.'
+                    : track.moderation_status === 'rejected'
+                    ? 'Your track did not pass moderation. You can appeal this decision if you believe it\'s a mistake.'
+                    : track.moderation_status === 'appealed'
+                    ? 'Your appeal is being reviewed by our team. We\'ll notify you of the decision.'
+                    : 'Your track has been verified and is live on the platform.'}
+                </Text>
+              </View>
+            </View>
+          )}
         </View>
       </ScrollView>
       </SafeAreaView>
@@ -668,5 +801,64 @@ const styles = StyleSheet.create({
   infoValue: {
     fontSize: 14,
     fontWeight: '500',
+  },
+  moderationSection: {
+    marginTop: 24,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  moderationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  moderationRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  moderationColumn: {
+    marginBottom: 12,
+  },
+  moderationLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  moderationValue: {
+    fontSize: 14,
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  statusBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  flagReasonItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 8,
+  },
+  flagReasonText: {
+    fontSize: 13,
+    flex: 1,
+  },
+  moderationInfo: {
+    flexDirection: 'row',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 12,
+    gap: 8,
+  },
+  moderationInfoText: {
+    fontSize: 12,
+    lineHeight: 18,
+    flex: 1,
   },
 });
