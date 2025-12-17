@@ -593,7 +593,10 @@ export default function HomeScreen() {
         >
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={[styles.notificationButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+        <TouchableOpacity 
+          style={[styles.notificationButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+          onPress={() => navigation.navigate('Notifications' as never)}
+        >
           <Ionicons name="notifications-outline" size={24} color={theme.colors.text} />
         </TouchableOpacity>
       </View>

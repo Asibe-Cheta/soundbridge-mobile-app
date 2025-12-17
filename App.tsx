@@ -37,6 +37,7 @@ import ChangePasswordScreen from './src/screens/ChangePasswordScreen';
 import NotificationSettingsScreen from './src/screens/NotificationSettingsScreen';
 import NotificationPreferencesScreen from './src/screens/NotificationPreferencesScreen';
 import NotificationInboxScreen from './src/screens/NotificationInboxScreen';
+import NotificationsScreen from './src/screens/NotificationsScreen';
 import ThemeSettingsScreen from './src/screens/ThemeSettingsScreen';
 import HelpSupportScreen from './src/screens/HelpSupportScreen';
 import AboutScreen from './src/screens/AboutScreen';
@@ -473,6 +474,7 @@ function AppNavigator() {
             <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
             <Stack.Screen name="NotificationPreferences" component={NotificationPreferencesScreen} />
             <Stack.Screen name="NotificationInbox" component={NotificationInboxScreen} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} />
             <Stack.Screen name="Messages" component={MessagesScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
             <Stack.Screen name="Search" component={SearchScreen} />
