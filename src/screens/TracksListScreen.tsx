@@ -18,6 +18,7 @@ import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { supabase } from '../lib/supabase';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { profileService } from '../services/ProfileService';
+import { ModerationBadge } from '../components/ModerationBadge';
 
 interface Track {
   id: string;
@@ -30,6 +31,9 @@ interface Track {
   likes_count: number;
   created_at: string;
   is_liked: boolean;
+  creator_id?: string;
+  moderation_status?: 'pending_check' | 'checking' | 'clean' | 'flagged' | 'approved' | 'rejected' | 'appealed';
+  moderation_confidence?: number;
 }
 
 export default function TracksListScreen() {
@@ -47,6 +51,7 @@ export default function TracksListScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [processingLikes, setProcessingLikes] = useState<Set<string>>(new Set());
+  const [moderationFilter, setModerationFilter] = useState<'all' | 'approved' | 'pending' | 'flagged' | 'rejected'>('all');
 
   useEffect(() => {
     loadTracks();
@@ -116,6 +121,9 @@ export default function TracksListScreen() {
         likes_count: track.likes_count || track.like_count || 0,
         created_at: track.created_at,
         is_liked: likedTrackIds.includes(track.id),
+        creator_id: track.creator_id,
+        moderation_status: track.moderation_status,
+        moderation_confidence: track.moderation_confidence,
       }));
       }
 
@@ -300,6 +308,28 @@ export default function TracksListScreen() {
     return `${Math.floor(diffDays / 365)} years ago`;
   };
 
+  const filterTracksByModeration = (tracks: Track[]) => {
+    if (!isOwnProfile || moderationFilter === 'all') return tracks;
+
+    return tracks.filter((track) => {
+      const status = track.moderation_status;
+      switch (moderationFilter) {
+        case 'approved':
+          return status === 'clean' || status === 'approved';
+        case 'pending':
+          return status === 'pending_check' || status === 'checking';
+        case 'flagged':
+          return status === 'flagged';
+        case 'rejected':
+          return status === 'rejected' || status === 'appealed';
+        default:
+          return true;
+      }
+    });
+  };
+
+  const filteredTracks = filterTracksByModeration(tracks);
+
   const renderTrack = ({ item }: { item: Track }) => {
     const isProcessingLike = processingLikes.has(item.id);
     const isCurrentTrack = currentTrack?.id === item.id;
@@ -338,6 +368,13 @@ export default function TracksListScreen() {
             <Text style={[styles.artistName, { color: theme.colors.textSecondary }]} numberOfLines={1}>
               {item.artist_name}
             </Text>
+            {isOwnProfile && item.moderation_status && (
+              <ModerationBadge
+                status={item.moderation_status}
+                confidence={item.moderation_confidence}
+                isOwner={true}
+              />
+            )}
             <View style={styles.trackStats}>
               <View style={styles.stat}>
                 <Ionicons name="play" size={12} color={theme.colors.textSecondary} />
@@ -409,6 +446,41 @@ export default function TracksListScreen() {
         <View style={styles.backButton} />
       </View>
 
+      {/* Moderation Filter (Owner Only) */}
+      {isOwnProfile && (
+        <View style={styles.filterContainer}>
+          <Text style={[styles.filterLabel, { color: theme.colors.textSecondary }]}>Filter by status:</Text>
+          <View style={styles.filterButtons}>
+            {(['all', 'approved', 'pending', 'flagged', 'rejected'] as const).map((filter) => (
+              <TouchableOpacity
+                key={filter}
+                style={[
+                  styles.filterButton,
+                  {
+                    backgroundColor: moderationFilter === filter ? theme.colors.primary + '20' : theme.colors.surface,
+                    borderColor: moderationFilter === filter ? theme.colors.primary : theme.colors.border,
+                  },
+                ]}
+                onPress={() => setModerationFilter(filter)}
+              >
+                <Text
+                  style={[
+                    styles.filterButtonText,
+                    { color: moderationFilter === filter ? theme.colors.primary : theme.colors.textSecondary },
+                  ]}
+                >
+                  {filter === 'all' ? 'All' :
+                   filter === 'approved' ? 'Approved' :
+                   filter === 'pending' ? 'Pending' :
+                   filter === 'flagged' ? 'Flagged' :
+                   'Rejected'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
+
       {/* Tracks List */}
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -417,7 +489,7 @@ export default function TracksListScreen() {
             Loading tracks...
           </Text>
         </View>
-      ) : tracks.length === 0 ? (
+      ) : filteredTracks.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Ionicons name="musical-notes-outline" size={64} color={theme.colors.textSecondary} />
           <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
@@ -440,7 +512,7 @@ export default function TracksListScreen() {
         </View>
       ) : (
         <FlatList
-          data={tracks}
+          data={filteredTracks}
           keyExtractor={item => item.id}
           renderItem={renderTrack}
           contentContainerStyle={styles.listContent}
@@ -597,5 +669,30 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     padding: 8,
+  },
+  filterContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  filterLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  filterButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  filterButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
