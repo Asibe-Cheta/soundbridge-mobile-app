@@ -37,6 +37,7 @@ import { getRelativeTime } from '../utils/collaborationUtils';
 import TipModal from '../components/TipModal';
 import CollaborationRequestForm from '../components/CollaborationRequestForm';
 import { contentCacheService } from '../services/contentCacheService';
+import { ModerationBadge } from '../components/ModerationBadge';
 
 const { width, height } = Dimensions.get('window');
 
@@ -394,10 +395,12 @@ export default function HomeScreen() {
               .from('audio_tracks')
               .select(`
                 id, title, description, file_url, cover_art_url, artwork_url,
-                duration, play_count, likes_count, created_at,
+                duration, play_count, likes_count, created_at, creator_id,
+                moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
                 creator:profiles!creator_id(id, username, display_name, avatar_url)
               `)
               .eq('is_public', true)
+              .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
               .order('created_at', { ascending: false })
               .limit(10),
             { timeout: 5000, fallback: [] }
@@ -750,6 +753,11 @@ export default function HomeScreen() {
                     <Text style={[styles.trackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                       {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
                     </Text>
+                    <ModerationBadge
+                      status={track.moderation_status}
+                      confidence={track.moderation_confidence}
+                      isOwner={user?.id === track.creator_id}
+                    />
                     <Text style={[styles.trackDuration, { color: theme.colors.textSecondary }]}>
                       {formatDuration(track.duration)}
                     </Text>

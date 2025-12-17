@@ -11,6 +11,8 @@ import {
   Alert,
   RefreshControl,
   StatusBar,
+  Share,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -132,6 +134,45 @@ export default function PlaylistDetailsScreen() {
     console.log('🎵 Playing all tracks from playlist:', playlist.name);
     // Play the first track, others will be added to queue automatically
     handlePlayTrack(playlist.tracks[0]);
+  };
+
+  const handleShare = async () => {
+    if (!playlist) {
+      console.log('❌ No playlist to share');
+      return;
+    }
+    
+    try {
+      console.log('📤 Sharing playlist:', playlist.name);
+      
+      const shareUrl = `https://soundbridge.live/playlist/${playlist.id}`;
+      const message = `🎵 Check out "${playlist.name}" by ${playlist.creator?.display_name || playlist.creator?.username} on SoundBridge!\n\n${playlist.tracks_count} tracks • ${formatTotalDuration(playlist.total_duration || 0)}\n\n${shareUrl}`;
+      
+      const shareOptions = Platform.OS === 'ios' 
+        ? {
+            // iOS: Use url property for better native sharing
+            url: shareUrl,
+            title: `${playlist.name} - SoundBridge`,
+          }
+        : {
+            // Android: Use message with embedded URL
+            message: message,
+            title: `${playlist.name} - SoundBridge`,
+          };
+      
+      const result = await Share.share(shareOptions);
+      
+      if (result.action === Share.sharedAction) {
+        console.log('✅ Playlist shared successfully');
+      } else if (result.action === Share.dismissedAction) {
+        console.log('ℹ️ Share dismissed by user');
+      }
+    } catch (error: any) {
+      console.error('❌ Error sharing playlist:', error);
+      if (error?.message && !error.message.includes('User did not share')) {
+        Alert.alert('Share Failed', 'Unable to share this playlist. Please try again.');
+      }
+    }
   };
 
   const formatDuration = (seconds: number) => {
@@ -341,7 +382,10 @@ export default function PlaylistDetailsScreen() {
             <Ionicons name="heart-outline" size={24} color={theme.colors.text} />
           </TouchableOpacity>
           
-          <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card }]}>
+          <TouchableOpacity 
+            style={[styles.actionButton, { backgroundColor: theme.colors.card }]} 
+            onPress={handleShare}
+          >
             <Ionicons name="share-outline" size={24} color={theme.colors.text} />
           </TouchableOpacity>
         </View>

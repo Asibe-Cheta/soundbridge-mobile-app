@@ -21,7 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
+import { supabase, dbHelpers } from '../lib/supabase';
 import { 
   loadQueriesInParallel, 
   waitForValidSession,
@@ -44,6 +44,7 @@ import { uploadImage } from '../services/UploadService';
 import { profileService } from '../services/ProfileService';
 import { walletService } from '../services/WalletService';
 import { payoutService } from '../services/PayoutService';
+import { ModerationBadge } from '../components/ModerationBadge';
 
 const { width } = Dimensions.get('window');
 
@@ -104,6 +105,8 @@ export default function ProfileScreen() {
   const [stats, setStats] = useState<UserStats | null>(null);
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [userTracks, setUserTracks] = useState<UserTrack[]>([]);
+  const [userAlbums, setUserAlbums] = useState<any[]>([]);
+  const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'settings' | 'earnings'>('overview');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(false); // Start as false for instant cache display
@@ -260,6 +263,18 @@ export default function ProfileScreen() {
           timeout: 5000,
           fallback: [],
         },
+        albums: {
+          name: 'albums',
+          query: () => dbHelpers.getAlbumsByCreator(user.id),
+          timeout: 5000,
+          fallback: [],
+        },
+        playlists: {
+          name: 'playlists',
+          query: () => dbHelpers.getUserPlaylists(user.id),
+          timeout: 5000,
+          fallback: [],
+        },
         tips: {
           name: 'tips',
           query: async () => {
@@ -330,6 +345,8 @@ export default function ProfileScreen() {
       const followingCount = results.following ?? 0;
       const tracksCount = results.tracksCount ?? 0;
       const tracksData = results.tracks?.data || results.tracks || [];
+      const albumsData = results.albums?.data || results.albums || [];
+      const playlistsData = results.playlists?.data || results.playlists || [];
       const totalTipsReceived = results.tips?.data ?? results.tips ?? 0;
       const creatorRevenue = results.creatorRevenue?.data ?? null;
       
@@ -398,6 +415,23 @@ export default function ProfileScreen() {
         }));
         
         setUserTracks(transformedTracks);
+        
+        // Process albums data
+        if (albumsData && albumsData.length > 0) {
+          console.log('✅ User albums loaded:', albumsData.length);
+          setUserAlbums(albumsData);
+        } else {
+          console.log('ℹ️ No user albums found');
+          setUserAlbums([]);
+        }
+
+        if (playlistsData && playlistsData.length > 0) {
+          console.log('✅ User playlists loaded:', playlistsData.length);
+          setUserPlaylists(playlistsData);
+        } else {
+          console.log('ℹ️ No user playlists found');
+          setUserPlaylists([]);
+        }
         
         // Generate recent activity
         const activities: RecentActivity[] = [];
@@ -1094,6 +1128,11 @@ export default function ProfileScreen() {
                   <Ionicons name="heart" size={12} color={theme.colors.textSecondary} style={{ marginLeft: 8 }} />
                   <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>{formatNumber(track.likes_count || 0)}</Text>
                 </View>
+                <ModerationBadge
+                  status={track.moderation_status}
+                  confidence={track.moderation_confidence}
+                  isOwner={true}
+                />
               </View>
               
               <TouchableOpacity style={styles.trackMenu}>
@@ -1114,6 +1153,136 @@ export default function ProfileScreen() {
             onPress={() => navigation.navigate('TracksList' as never, { userId: profile?.id } as never)}
           >
             <Text style={[styles.viewAllText, { color: theme.colors.primary }]}>View All Tracks</Text>
+            <Ionicons name="arrow-forward" size={16} color={theme.colors.primary} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* My Albums */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>My Albums</Text>
+        {userAlbums.length > 0 ? (
+          userAlbums.slice(0, 5).map((album) => (
+            <TouchableOpacity
+              key={album.id}
+              style={[styles.trackItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+              onPress={() => navigation.navigate('AlbumDetails' as never, { albumId: album.id } as never)}
+            >
+              <View style={styles.trackImageContainer}>
+                {album.cover_image_url ? (
+                  <Image 
+                    source={{ uri: album.cover_image_url }} 
+                    style={styles.trackImage}
+                  />
+                ) : (
+                  <View style={[styles.trackImage, styles.trackImagePlaceholder, { backgroundColor: theme.colors.surface }]}>
+                    <Ionicons name="albums" size={20} color={theme.colors.textSecondary} />
+                  </View>
+                )}
+              </View>
+              
+              <View style={styles.trackInfo}>
+                <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                  {album.title}
+                </Text>
+                <View style={styles.trackStats}>
+                  <Ionicons name="musical-notes" size={12} color={theme.colors.textSecondary} />
+                  <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>
+                    {album.tracks_count || 0} tracks
+                  </Text>
+                  <Ionicons name="play" size={12} color={theme.colors.textSecondary} style={{ marginLeft: 8 }} />
+                  <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>
+                    {formatNumber(album.total_plays || 0)}
+                  </Text>
+                </View>
+              </View>
+              
+              <TouchableOpacity style={styles.trackMenu}>
+                <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.textSecondary} />
+              </TouchableOpacity>
+            </TouchableOpacity>
+          ))
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No albums yet</Text>
+            <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
+              Create your first album to showcase multiple tracks!
+            </Text>
+          </View>
+        )}
+        
+        {userAlbums.length > 5 && (
+          <TouchableOpacity
+            style={[styles.viewAllButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+          >
+            <Text style={[styles.viewAllText, { color: theme.colors.primary }]}>View All Albums</Text>
+            <Ionicons name="arrow-forward" size={16} color={theme.colors.primary} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* My Playlists */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>My Playlists</Text>
+        {userPlaylists.length > 0 ? (
+          userPlaylists.slice(0, 5).map((playlist) => (
+            <TouchableOpacity
+              key={playlist.id}
+              style={[styles.trackItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+              onPress={() => navigation.navigate('PlaylistDetails' as never, { playlistId: playlist.id } as never)}
+            >
+              <View style={styles.trackImageContainer}>
+                {playlist.cover_image_url ? (
+                  <Image 
+                    source={{ uri: playlist.cover_image_url }} 
+                    style={styles.trackImage}
+                  />
+                ) : (
+                  <View style={[styles.trackImage, styles.trackImagePlaceholder, { backgroundColor: theme.colors.surface }]}>
+                    <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />
+                  </View>
+                )}
+              </View>
+              
+              <View style={styles.trackInfo}>
+                <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                  {playlist.name}
+                </Text>
+                <View style={styles.trackStats}>
+                  <Ionicons name="musical-notes" size={12} color={theme.colors.textSecondary} />
+                  <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>
+                    {playlist.tracks_count || 0} tracks
+                  </Text>
+                  {!playlist.is_public && (
+                    <>
+                      <Ionicons name="lock-closed" size={12} color={theme.colors.textSecondary} style={{ marginLeft: 8 }} />
+                      <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>
+                        Private
+                      </Text>
+                    </>
+                  )}
+                </View>
+              </View>
+              
+              <TouchableOpacity style={styles.trackMenu}>
+                <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.textSecondary} />
+              </TouchableOpacity>
+            </TouchableOpacity>
+          ))
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No playlists yet</Text>
+            <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
+              Create your first playlist to organize your favorite tracks!
+            </Text>
+          </View>
+        )}
+        
+        {userPlaylists.length > 5 && (
+          <TouchableOpacity
+            style={[styles.viewAllButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+          >
+            <Text style={[styles.viewAllText, { color: theme.colors.primary }]}>View All Playlists</Text>
             <Ionicons name="arrow-forward" size={16} color={theme.colors.primary} />
           </TouchableOpacity>
         )}

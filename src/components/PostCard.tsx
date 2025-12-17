@@ -24,6 +24,7 @@ interface PostCardProps {
   onSaveImage?: (imageUrl: string) => void;
   onBlocked?: () => void;
   onReported?: () => void;
+  onAuthorPress?: (authorId: string) => void;
   isSaved?: boolean;
 }
 
@@ -54,6 +55,7 @@ const PostCard = memo(function PostCard({
   onSaveImage,
   onBlocked,
   onReported,
+  onAuthorPress,
   isSaved = false,
 }: PostCardProps) {
   const { theme } = useTheme();
@@ -93,24 +95,37 @@ const PostCard = memo(function PostCard({
       {/* Header Section */}
       <View style={styles.header}>
         {/* Avatar */}
-        <View
-          style={[
-            styles.avatar,
-            { borderColor: theme.colors.border },
-          ]}
+        <TouchableOpacity
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onAuthorPress?.(post.author.id);
+          }}
         >
-          {post.author.avatar_url ? (
-            <Image
-              source={{ uri: post.author.avatar_url }}
-              style={styles.avatarImage}
-            />
-          ) : (
-            <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
-          )}
-        </View>
+          <View
+            style={[
+              styles.avatar,
+              { borderColor: theme.colors.border },
+            ]}
+          >
+            {post.author.avatar_url ? (
+              <Image
+                source={{ uri: post.author.avatar_url }}
+                style={styles.avatarImage}
+              />
+            ) : (
+              <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
+            )}
+          </View>
+        </TouchableOpacity>
 
         {/* Author Info */}
-        <View style={styles.authorInfo}>
+        <TouchableOpacity
+          style={styles.authorInfo}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onAuthorPress?.(post.author.id);
+          }}
+        >
           <Text style={[styles.authorName, { color: theme.colors.text }]}>
             {post.author.display_name}
           </Text>
@@ -122,7 +137,7 @@ const PostCard = memo(function PostCard({
           <Text style={[styles.timestamp, { color: theme.colors.textSecondary }]}>
             {formatTimeAgo(post.created_at)}
           </Text>
-        </View>
+        </TouchableOpacity>
 
         {/* More Options Button */}
         <TouchableOpacity

@@ -37,6 +37,7 @@ import { getServiceCategoryLabel } from '../utils/serviceCategoryLabels';
 import subscriptionService from '../services/SubscriptionService';
 import RevenueCatService from '../services/RevenueCatService';
 import type { PublicProfile } from '../types/database';
+import { ModerationBadge } from '../components/ModerationBadge';
 
 const { width } = Dimensions.get('window');
 
@@ -118,7 +119,7 @@ interface Playlist {
   };
 }
 
-type TabType = 'Music' | 'Artists' | 'Events' | 'Playlists' | 'Services' | 'Venues';
+type TabType = 'Music' | 'Albums' | 'Artists' | 'Events' | 'Playlists' | 'Services' | 'Venues';
 
 const DISCOVER_MOCK_TRACKS: AudioTrack[] = [
   {
@@ -416,6 +417,8 @@ function DiscoverScreen() {
   // Content states
   const [trendingTracks, setTrendingTracks] = useState<AudioTrack[]>([]);
   const [recentTracks, setRecentTracks] = useState<AudioTrack[]>([]);
+  const [featuredAlbums, setFeaturedAlbums] = useState<any[]>([]);
+  const [recentAlbums, setRecentAlbums] = useState<any[]>([]);
   const [featuredArtists, setFeaturedArtists] = useState<Creator[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -429,6 +432,7 @@ function DiscoverScreen() {
   
   // Individual loading states for UI - start as false for instant cache display
   const [loadingTracks, setLoadingTracks] = useState(false);
+  const [loadingAlbums, setLoadingAlbums] = useState(false);
   const [loadingArtists, setLoadingArtists] = useState(false);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [loadingPlaylists, setLoadingPlaylists] = useState(false);
@@ -438,7 +442,7 @@ function DiscoverScreen() {
   // Track if initial cache load has happened
   const initialCacheLoadRef = useRef(false);
 
-  const tabs: TabType[] = ['Music', 'Artists', 'Events', 'Playlists', 'Services', 'Venues'];
+  const tabs: TabType[] = ['Music', 'Albums', 'Artists', 'Events', 'Playlists', 'Services', 'Venues'];
 
   // Track tier check attempts to prevent repeated failed requests
   const tierCheckAttemptedRef = useRef(false);
@@ -645,7 +649,7 @@ function DiscoverScreen() {
       if (missingContent) {
         loadDiscoverContent();
       }
-    }, [trendingTracks.length, recentTracks.length, featuredArtists.length, events.length, playlists.length, activeTab])
+    }, [trendingTracks.length, recentTracks.length, featuredAlbums.length, recentAlbums.length, featuredArtists.length, events.length, playlists.length, activeTab])
   );
 
   const loadDiscoverContent = async () => {
@@ -678,10 +682,12 @@ function DiscoverScreen() {
                   .select(`
                     id, title, description, audio_url, file_url,
                     cover_art_url, artwork_url, duration, play_count,
-                    likes_count, created_at,
+                    likes_count, created_at, creator_id,
+                    moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
                     creator:profiles!creator_id(id, username, display_name, avatar_url)
                   `)
                   .eq('is_public', true)
+                  .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
                   .order('created_at', { ascending: false })
                   .limit(10),
                 { timeout: 5000, fallback: [] }
@@ -693,6 +699,27 @@ function DiscoverScreen() {
           setTrendingTracks(musicResults.trending?.data || musicResults.trending || DISCOVER_MOCK_TRACKS);
           setRecentTracks(musicResults.recent?.data || musicResults.recent || DISCOVER_MOCK_TRACKS);
           loadingManager.setLoading('tracks', false, 0);
+          break;
+
+        case 'Albums':
+          loadingManager.setLoading('albums', true, 8000);
+          const albumsResult = await loadQueriesInParallel({
+            featured: {
+              name: 'featuredAlbums',
+              query: () => dbHelpers.getAlbumsWithStats(10),
+              timeout: 8000,
+              fallback: [],
+            },
+            recent: {
+              name: 'recentAlbums',
+              query: () => dbHelpers.getPublicAlbums(10),
+              timeout: 8000,
+              fallback: [],
+            },
+          });
+          setFeaturedAlbums(albumsResult.featured?.data || albumsResult.featured || []);
+          setRecentAlbums(albumsResult.recent?.data || albumsResult.recent || []);
+          loadingManager.setLoading('albums', false, 0);
           break;
 
         case 'Artists':
@@ -770,10 +797,12 @@ function DiscoverScreen() {
                   .select(`
                     id, title, description, audio_url, file_url,
                     cover_art_url, artwork_url, duration, play_count,
-                    likes_count, created_at,
+                    likes_count, created_at, creator_id,
+                    moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
                     creator:profiles!creator_id(id, username, display_name, avatar_url)
                   `)
                   .eq('is_public', true)
+                  .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
                   .order('created_at', { ascending: false })
                   .limit(10),
                 { timeout: 5000, fallback: [] }
@@ -909,6 +938,8 @@ function DiscoverScreen() {
             avatar_url
           )
         `)
+        .eq('is_public', true)
+        .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
         .order('created_at', { ascending: false })
         .limit(10);
 
@@ -1638,6 +1669,7 @@ function DiscoverScreen() {
               {tabs.map((tab) => {
                 const tabIcons: Record<TabType, string> = {
                   'Music': 'musical-notes',
+                  'Albums': 'albums',
                   'Artists': 'people',
                   'Events': 'calendar',
                   'Playlists': 'list',
@@ -1895,6 +1927,11 @@ function DiscoverScreen() {
                         <Text style={[styles.recentTrackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                           by {track.creator?.display_name || track.creator?.username || 'Music Creator'}
                         </Text>
+                        <ModerationBadge
+                          status={track.moderation_status}
+                          confidence={track.moderation_confidence}
+                          isOwner={user?.id === track.creator_id}
+                        />
                         <View style={styles.recentTrackMeta}>
                           {track.genre && (
                             <>
@@ -1939,6 +1976,148 @@ function DiscoverScreen() {
                 <View style={styles.emptyState}>
                   <Ionicons name="musical-notes" size={48} color={theme.colors.textSecondary} />
                   <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>No recent music yet</Text>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+
+        {activeTab === 'Albums' && (
+          <>
+            {/* Featured Albums */}
+            <View style={[styles.section, styles.firstSection]}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Featured Albums</Text>
+              </View>
+              
+              {loadingAlbums ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading albums...</Text>
+                </View>
+              ) : featuredAlbums.length > 0 ? (
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.horizontalScrollContent}
+                >
+                  {featuredAlbums.map((album) => (
+                    <TouchableOpacity
+                      key={album.id}
+                      style={styles.albumCard}
+                      onPress={() => navigation.navigate('AlbumDetails', { albumId: album.id })}
+                    >
+                      {album.cover_image_url ? (
+                        <Image
+                          source={{ uri: album.cover_image_url }}
+                          style={styles.albumCover}
+                        />
+                      ) : (
+                        <View style={[styles.albumCoverPlaceholder, { backgroundColor: theme.colors.surface }]}>
+                          <Ionicons name="albums" size={40} color={theme.colors.textSecondary} />
+                        </View>
+                      )}
+                      <View style={styles.albumInfo}>
+                        <Text style={[styles.albumTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                          {album.title}
+                        </Text>
+                        <Text style={[styles.albumArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                          {album.creator?.display_name || album.creator?.username}
+                        </Text>
+                        <View style={styles.albumStats}>
+                          <View style={styles.albumStat}>
+                            <Ionicons name="musical-notes-outline" size={12} color={theme.colors.textSecondary} />
+                            <Text style={[styles.albumStatText, { color: theme.colors.textSecondary }]}>
+                              {album.tracks_count || 0} tracks
+                            </Text>
+                          </View>
+                          <View style={styles.albumStat}>
+                            <Ionicons name="play-circle-outline" size={12} color={theme.colors.textSecondary} />
+                            <Text style={[styles.albumStatText, { color: theme.colors.textSecondary }]}>
+                              {formatNumber(album.total_plays || 0)}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="albums" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
+                    No featured albums yet
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Recent Albums */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Releases</Text>
+              </View>
+              
+              {loadingAlbums ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                </View>
+              ) : recentAlbums.length > 0 ? (
+                <View style={styles.recentTracksContainer}>
+                  {recentAlbums.map((album, index) => (
+                    <TouchableOpacity
+                      key={album.id}
+                      style={[styles.recentTrackItem, { backgroundColor: theme.colors.surface }]}
+                      onPress={() => navigation.navigate('AlbumDetails', { albumId: album.id })}
+                    >
+                      <View style={styles.recentTrackLeft}>
+                        <Text style={[styles.trackNumber, { color: theme.colors.textSecondary }]}>
+                          {index + 1}
+                        </Text>
+                        {album.cover_image_url ? (
+                          <Image
+                            source={{ uri: album.cover_image_url }}
+                            style={styles.recentTrackCover}
+                          />
+                        ) : (
+                          <View style={[styles.recentTrackCoverPlaceholder, { backgroundColor: theme.colors.border }]}>
+                            <Ionicons name="albums" size={20} color={theme.colors.textSecondary} />
+                          </View>
+                        )}
+                        <View style={styles.recentTrackInfo}>
+                          <Text style={[styles.recentTrackTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                            {album.title}
+                          </Text>
+                          <Text style={[styles.recentTrackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            {album.creator?.display_name || album.creator?.username} • {album.tracks_count || 0} tracks
+                          </Text>
+                          <View style={styles.recentTrackMeta}>
+                            <Text style={[styles.recentTrackMetaText, { color: theme.colors.textSecondary }]}>
+                              {formatNumber(album.total_plays || 0)} plays
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                      <View style={styles.recentTrackActions}>
+                        <TouchableOpacity 
+                          style={styles.playButton}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            navigation.navigate('AlbumDetails', { albumId: album.id });
+                          }}
+                        >
+                          <Ionicons name="play" size={16} color="#DC2626" />
+                        </TouchableOpacity>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="albums" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
+                    No recent albums yet
+                  </Text>
                 </View>
               )}
             </View>
@@ -3438,6 +3617,47 @@ const styles = StyleSheet.create({
   venueEvents: {
     fontSize: 14,
     fontWeight: '500',
+  },
+  albumCard: {
+    width: 160,
+    marginRight: 16,
+  },
+  albumCover: {
+    width: 160,
+    height: 160,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  albumCoverPlaceholder: {
+    width: 160,
+    height: 160,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  albumInfo: {
+    gap: 4,
+  },
+  albumTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  albumArtist: {
+    fontSize: 12,
+  },
+  albumStats: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 4,
+  },
+  albumStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  albumStatText: {
+    fontSize: 11,
   },
 });
 

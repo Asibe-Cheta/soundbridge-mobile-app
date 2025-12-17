@@ -44,7 +44,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     duration, 
     volume, 
     isShuffled, 
-    isRepeat,
+    repeatMode,
     queue,
     play,
     pause,
@@ -76,6 +76,10 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   const [isOffline, setIsOffline] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [showTipModal, setShowTipModal] = useState(false);
+  const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
+  const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
+  const [isLoadingPlaylists, setIsLoadingPlaylists] = useState(false);
   
   // Lyrics modal drag animation
   const lyricsModalTranslateY = useRef(new Animated.Value(0)).current;
@@ -123,6 +127,10 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(height)).current;
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
+  
+  // Menu dropdown animation
+  const menuFadeAnim = useRef(new Animated.Value(0)).current;
+  const menuSlideAnim = useRef(new Animated.Value(-50)).current;
   
   // Swipe feature disabled - using button controls only
   
@@ -289,20 +297,41 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   };
 
   const handleShare = async () => {
-    if (!currentTrack) return;
+    if (!currentTrack) {
+      console.log('❌ No current track to share');
+      return;
+    }
     
     try {
+      console.log('📤 Sharing track:', currentTrack.title);
+      
       const shareUrl = `https://soundbridge.live/track/${currentTrack.id}`;
       const message = `🎵 Check out "${currentTrack.title}" by ${currentTrack.creator?.display_name || 'Unknown Artist'} on SoundBridge!\n\n${shareUrl}`;
       
-      await Share.share({
-        message: message,
-        url: shareUrl,
-        title: `${currentTrack.title} - SoundBridge`,
-      });
-    } catch (error) {
-      console.error('Error sharing track:', error);
-      Alert.alert('Share Failed', 'Unable to share this track. Please try again.');
+      const shareOptions = Platform.OS === 'ios' 
+        ? {
+            // iOS: Use url property for better native sharing
+            url: shareUrl,
+            message: `🎵 ${currentTrack.title} by ${currentTrack.creator?.display_name || 'Unknown Artist'}`,
+          }
+        : {
+            // Android: Use message with URL included
+            message: message,
+            title: `${currentTrack.title} - SoundBridge`,
+          };
+      
+      const result = await Share.share(shareOptions);
+      
+      if (result.action === Share.sharedAction) {
+        console.log('✅ Track shared successfully');
+      } else if (result.action === Share.dismissedAction) {
+        console.log('ℹ️ Share dismissed by user');
+      }
+    } catch (error: any) {
+      console.error('❌ Error sharing track:', error);
+      if (error?.message && !error.message.includes('User did not share')) {
+        Alert.alert('Share Failed', 'Unable to share this track. Please try again.');
+      }
     }
   };
 
@@ -313,6 +342,190 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     }
     
     setShowTipModal(true);
+  };
+
+  const handleOptionsMenu = () => {
+    setShowOptionsMenu(true);
+    // Animate menu dropdown
+    Animated.parallel([
+      Animated.timing(menuFadeAnim, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.spring(menuSlideAnim, {
+        toValue: 0,
+        tension: 65,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const closeOptionsMenu = () => {
+    Animated.parallel([
+      Animated.timing(menuFadeAnim, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+      Animated.timing(menuSlideAnim, {
+        toValue: -50,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowOptionsMenu(false);
+      // Reset animation values
+      menuSlideAnim.setValue(-50);
+      menuFadeAnim.setValue(0);
+    });
+  };
+
+  const handleAddToPlaylist = async () => {
+    closeOptionsMenu();
+    
+    // Wait for menu to close before showing playlist selector
+    setTimeout(async () => {
+      setIsLoadingPlaylists(true);
+      
+      try {
+        if (!user) {
+          Alert.alert('Sign In Required', 'Please sign in to add tracks to playlists');
+          return;
+        }
+
+        console.log('📋 Loading user playlists...');
+        
+        const { data, error } = await supabase
+          .from('playlists')
+          .select('id, name, description, cover_image_url, tracks_count')
+          .eq('creator_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('❌ Error loading playlists:', error);
+          throw error;
+        }
+
+        console.log('✅ Loaded playlists:', data?.length || 0);
+        setUserPlaylists(data || []);
+        setShowPlaylistSelector(true);
+      } catch (error) {
+        console.error('❌ Error loading playlists:', error);
+        Alert.alert('Error', 'Unable to load your playlists. Please try again.');
+      } finally {
+        setIsLoadingPlaylists(false);
+      }
+    }, 300);
+  };
+
+  const handlePlaylistSelect = async (playlistId: string) => {
+    try {
+      if (!currentTrack) return;
+
+      // Check if track is already in playlist
+      const { data: existing } = await supabase
+        .from('playlist_tracks')
+        .select('id')
+        .eq('playlist_id', playlistId)
+        .eq('track_id', currentTrack.id)
+        .maybeSingle();
+
+      if (existing) {
+        Alert.alert('Already Added', 'This track is already in the selected playlist');
+        setShowPlaylistSelector(false);
+        return;
+      }
+
+      // Get current max position
+      const { data: maxPos } = await supabase
+        .from('playlist_tracks')
+        .select('position')
+        .eq('playlist_id', playlistId)
+        .order('position', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const newPosition = (maxPos?.position || 0) + 1;
+
+      // Add track to playlist
+      const { error } = await supabase
+        .from('playlist_tracks')
+        .insert({
+          playlist_id: playlistId,
+          track_id: currentTrack.id,
+          position: newPosition,
+        });
+
+      if (error) throw error;
+
+      Alert.alert('Success', 'Track added to playlist!');
+      setShowPlaylistSelector(false);
+    } catch (error) {
+      console.error('Error adding to playlist:', error);
+      Alert.alert('Error', 'Unable to add track to playlist. Please try again.');
+    }
+  };
+
+  const handleCreateNewPlaylist = () => {
+    setShowPlaylistSelector(false);
+    navigation.navigate('CreatePlaylist' as never, { 
+      trackToAdd: currentTrack 
+    } as never);
+  };
+
+  const handleShareTrackMenu = async () => {
+    closeOptionsMenu();
+    // Wait a brief moment for menu to close before showing share sheet
+    setTimeout(() => {
+      handleShare();
+    }, 300);
+  };
+
+  const handleGoToAlbum = async () => {
+    closeOptionsMenu();
+    
+    // Check if track has an album_id
+    if (!currentTrack.id) {
+      Alert.alert('Error', 'No track is currently playing');
+      return;
+    }
+
+    try {
+      // Query the album_tracks table to find which album this track belongs to
+      const { data, error } = await supabase
+        .from('album_tracks')
+        .select('album_id')
+        .eq('track_id', currentTrack.id)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (data && data.album_id) {
+        // Navigate to the album
+        navigation.navigate('AlbumDetails' as never, { 
+          albumId: data.album_id 
+        } as never);
+      } else {
+        // Track is not part of an album
+        Alert.alert('Not Available', 'This track is not part of an album');
+      }
+    } catch (error) {
+      console.error('Error checking album:', error);
+      Alert.alert('Error', 'Failed to load album information');
+    }
+  };
+
+  const handleGoToArtist = () => {
+    closeOptionsMenu();
+    if (currentTrack.creator?.id) {
+      navigation.navigate('CreatorProfile' as never, { 
+        creatorId: currentTrack.creator.id 
+      } as never);
+    } else {
+      Alert.alert('Error', 'Artist information not available');
+    }
   };
 
   const handleFastForward = async () => {
@@ -715,11 +928,18 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
           onPress={toggleRepeat}
           activeOpacity={0.7}
         >
-          <Ionicons 
-            name={isRepeat ? 'repeat' : 'repeat-outline'} 
-            size={24} 
-            color={isRepeat ? theme.colors.primary : theme.colors.textSecondary} 
-          />
+          <View>
+            <Ionicons 
+              name={repeatMode !== 'off' ? 'repeat' : 'repeat-outline'} 
+              size={24} 
+              color={repeatMode !== 'off' ? theme.colors.primary : theme.colors.textSecondary} 
+            />
+            {repeatMode === 'one' && (
+              <View style={styles.repeatOneBadge}>
+                <Text style={styles.repeatOneBadgeText}>1</Text>
+              </View>
+            )}
+          </View>
         </TouchableOpacity>
       </View>
     </View>
@@ -874,7 +1094,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
         <View style={styles.headerHandle}>
           <View style={[styles.handleBar, { backgroundColor: theme.isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)' }]} />
         </View>
-        <TouchableOpacity onPress={() => {/* TODO: Add menu */}} activeOpacity={0.7}>
+        <TouchableOpacity onPress={handleOptionsMenu} activeOpacity={0.7}>
           <Ionicons name="ellipsis-vertical" size={24} color={theme.isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'} />
         </TouchableOpacity>
       </View>
@@ -1139,7 +1359,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
               <TouchableOpacity onPress={handleCloseLyrics} style={styles.headerButton}>
                 <Ionicons name="chevron-down" color="rgba(255, 255, 255, 0.8)" size={24} />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.headerButton}>
+              <TouchableOpacity style={styles.headerButton} onPress={handleOptionsMenu}>
                 <Ionicons name="ellipsis-vertical" color="rgba(255, 255, 255, 0.8)" size={24} />
               </TouchableOpacity>
             </View>
@@ -1274,6 +1494,195 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
           onTipSuccess={(amount) => handleTipSuccess()}
         />
       )}
+
+      {/* Options Menu Modal */}
+      <Modal
+        visible={showOptionsMenu}
+        transparent={true}
+        animationType="none"
+        onRequestClose={closeOptionsMenu}
+      >
+        <TouchableOpacity 
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={closeOptionsMenu}
+        >
+          <Animated.View 
+            style={[
+              styles.menuContainer,
+              {
+                opacity: menuFadeAnim,
+                transform: [{ translateY: menuSlideAnim }]
+              }
+            ]}
+          >
+            <ExpoBlurView
+              intensity={80}
+              tint={theme.isDark ? 'dark' : 'light'}
+              style={styles.menuBlur}
+            >
+              <ScrollView 
+                style={styles.menuContent}
+                contentContainerStyle={styles.menuContentContainer}
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+              >
+                {/* Menu Header */}
+                <View style={styles.menuHeader}>
+                  <View style={styles.menuTrackInfo}>
+                    {currentTrack?.cover_image_url && (
+                      <Image 
+                        source={{ uri: currentTrack.cover_image_url }} 
+                        style={styles.menuTrackImage}
+                      />
+                    )}
+                    <View style={styles.menuTrackDetails}>
+                      <Text style={[styles.menuTrackTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                        {currentTrack?.title}
+                      </Text>
+                      <Text style={[styles.menuTrackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                        {currentTrack?.creator?.display_name || 'Unknown Artist'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Menu Options */}
+                <View style={styles.menuOptions}>
+                  <TouchableOpacity 
+                    style={styles.menuOption}
+                    onPress={handleAddToPlaylist}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="add-circle-outline" size={24} color={theme.colors.text} />
+                    <Text style={[styles.menuOptionText, { color: theme.colors.text }]}>
+                      Add to a Playlist
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={styles.menuOption}
+                    onPress={handleShareTrackMenu}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="share-outline" size={24} color={theme.colors.text} />
+                    <Text style={[styles.menuOptionText, { color: theme.colors.text }]}>
+                      Share Track
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={styles.menuOption}
+                    onPress={handleGoToAlbum}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="disc-outline" size={24} color={theme.colors.text} />
+                    <Text style={[styles.menuOptionText, { color: theme.colors.text }]}>
+                      Go to Album
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={styles.menuOption}
+                    onPress={handleGoToArtist}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="person-outline" size={24} color={theme.colors.text} />
+                    <View style={styles.menuOptionTextContainer}>
+                      <Text style={[styles.menuOptionText, { color: theme.colors.text }]}>
+                        Go to Artist
+                      </Text>
+                      <Text style={[styles.menuOptionSubtext, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                        {currentTrack?.creator?.display_name || 'Unknown'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </ExpoBlurView>
+          </Animated.View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Playlist Selector Modal */}
+      <Modal
+        visible={showPlaylistSelector}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowPlaylistSelector(false)}
+      >
+        <View style={styles.playlistModalContainer}>
+          <View style={[styles.playlistModalContent, { backgroundColor: theme.colors.card }]}>
+            {/* Header */}
+            <View style={styles.playlistModalHeader}>
+              <Text style={[styles.playlistModalTitle, { color: theme.colors.text }]}>
+                Add to Playlist
+              </Text>
+              <TouchableOpacity onPress={() => setShowPlaylistSelector(false)}>
+                <Ionicons name="close" size={28} color={theme.colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Create New Playlist Button */}
+            <TouchableOpacity 
+              style={[styles.createPlaylistButton, { backgroundColor: theme.colors.primary }]}
+              onPress={handleCreateNewPlaylist}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="add" size={24} color="#fff" />
+              <Text style={styles.createPlaylistText}>Create New Playlist</Text>
+            </TouchableOpacity>
+
+            {/* Playlists List */}
+            {isLoadingPlaylists ? (
+              <View style={styles.playlistLoadingContainer}>
+                <ActivityIndicator size="large" color={theme.colors.primary} />
+              </View>
+            ) : userPlaylists.length === 0 ? (
+              <View style={styles.noPlaylistsContainer}>
+                <Ionicons name="musical-notes-outline" size={64} color={theme.colors.textSecondary} />
+                <Text style={[styles.noPlaylistsText, { color: theme.colors.textSecondary }]}>
+                  No playlists yet
+                </Text>
+                <Text style={[styles.noPlaylistsSubtext, { color: theme.colors.textSecondary }]}>
+                  Create your first playlist to get started
+                </Text>
+              </View>
+            ) : (
+              <ScrollView style={styles.playlistsList}>
+                {userPlaylists.map((playlist) => (
+                  <TouchableOpacity
+                    key={playlist.id}
+                    style={styles.playlistItem}
+                    onPress={() => handlePlaylistSelect(playlist.id)}
+                    activeOpacity={0.7}
+                  >
+                    {playlist.cover_image_url ? (
+                      <Image 
+                        source={{ uri: playlist.cover_image_url }} 
+                        style={styles.playlistCover}
+                      />
+                    ) : (
+                      <View style={[styles.playlistCoverPlaceholder, { backgroundColor: theme.colors.primary + '30' }]}>
+                        <Ionicons name="musical-notes" size={24} color={theme.colors.primary} />
+                      </View>
+                    )}
+                    <View style={styles.playlistInfo}>
+                      <Text style={[styles.playlistName, { color: theme.colors.text }]} numberOfLines={1}>
+                        {playlist.name}
+                      </Text>
+                      <Text style={[styles.playlistMeta, { color: theme.colors.textSecondary }]}>
+                        {playlist.tracks_count || 0} tracks
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
         </Animated.View>
       </SafeAreaView>
     </View>
@@ -1576,6 +1985,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minWidth: 44,
     minHeight: 44,
+  },
+  repeatOneBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#DC2626',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  repeatOneBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '700',
   },
   playButton: {
     marginHorizontal: 16,
@@ -1943,5 +2368,187 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: 'rgba(255, 255, 255, 0.6)',
     borderRadius: 2,
+  },
+  // Options Menu Modal Styles
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingTop: Platform.OS === 'ios' ? 80 : 60,
+    paddingRight: 20,
+    paddingLeft: 20,
+  },
+  menuContainer: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 80 : 60,
+    right: 20,
+    maxWidth: 320,
+    width: '85%',
+    maxHeight: '70%',
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  menuBlur: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  menuContent: {
+    flex: 1,
+  },
+  menuContentContainer: {
+    padding: 8,
+    paddingBottom: 12,
+  },
+  menuHeader: {
+    padding: 16,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  menuTrackInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  menuTrackImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  menuTrackDetails: {
+    flex: 1,
+  },
+  menuTrackTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  menuTrackArtist: {
+    fontSize: 14,
+  },
+  menuOptions: {
+    paddingVertical: 8,
+  },
+  menuOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+  },
+  menuOptionText: {
+    fontSize: 17,
+    fontWeight: '500',
+    marginLeft: 16,
+    flex: 1,
+  },
+  menuOptionTextContainer: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  menuOptionSubtext: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  // Playlist Selector Modal Styles
+  playlistModalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  playlistModalContent: {
+    maxHeight: '80%',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 8,
+  },
+  playlistModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  playlistModalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  createPlaylistButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    marginHorizontal: 20,
+    marginVertical: 16,
+    borderRadius: 12,
+    gap: 8,
+  },
+  createPlaylistText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  playlistLoadingContainer: {
+    padding: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noPlaylistsContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noPlaylistsText: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 16,
+  },
+  noPlaylistsSubtext: {
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  playlistsList: {
+    maxHeight: 400,
+  },
+  playlistItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  playlistCover: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  playlistCoverPlaceholder: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playlistInfo: {
+    flex: 1,
+  },
+  playlistName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  playlistMeta: {
+    fontSize: 14,
   },
 });

@@ -46,7 +46,7 @@ interface AudioPlayerContextType {
   incrementPlayCount: (trackId: string) => Promise<void>;
   volume: number;
   isShuffled: boolean;
-  isRepeat: boolean;
+  repeatMode: 'off' | 'all' | 'one';
   autoPlay: boolean;
   toggleShuffle: () => void;
   toggleRepeat: () => void;
@@ -73,7 +73,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   const [position, setPosition] = useState(0);
   const [volume, setVolumeState] = useState(1);
   const [isShuffled, setIsShuffled] = useState(false);
-  const [isRepeat, setIsRepeat] = useState(false);
+  const [repeatMode, setRepeatMode] = useState<'off' | 'all' | 'one'>('off');
   const [autoPlay, setAutoPlay] = useState(true);
   const [queue, setQueue] = useState<AudioTrack[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -163,13 +163,13 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       
       // Check if track finished
       if (playerRef.current.currentTime >= playerRef.current.duration && playerRef.current.duration > 0) {
-        // Track finished, handle based on repeat and auto-play settings
-        if (isRepeat) {
-          // Replay current track
+        // Track finished, handle based on repeat mode and auto-play settings
+        if (repeatMode === 'one') {
+          // Repeat current track
           playerRef.current.seekTo(0);
           playerRef.current.play();
-        } else if (autoPlay && queue.length > 0) {
-          // Auto-play next track in queue
+        } else if (repeatMode === 'all' || (autoPlay && queue.length > 0)) {
+          // Play next track (loop back to start if repeatMode is 'all')
           playNext();
         } else {
           // Stop playback if auto-play is disabled or no tracks in queue
@@ -479,11 +479,11 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   };
 
   const handleTrackFinished = async () => {
-    if (isRepeat && currentTrack) {
-      // Replay current track
+    if (repeatMode === 'one' && currentTrack) {
+      // Repeat current track
       await play(currentTrack);
-    } else if (autoPlay && queue.length > 0) {
-      // Auto-play next track in queue
+    } else if (repeatMode === 'all' || (autoPlay && queue.length > 0)) {
+      // Play next track in queue
       await playNext();
     } else {
       // Stop playback
@@ -609,8 +609,13 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   };
 
   const toggleRepeat = () => {
-    setIsRepeat(prev => !prev);
-    console.log('Repeat toggled:', !isRepeat);
+    setRepeatMode(prev => {
+      // Cycle: off → all → one → off
+      if (prev === 'off') return 'all';
+      if (prev === 'all') return 'one';
+      return 'off';
+    });
+    console.log('Repeat mode cycled');
   };
 
   const toggleAutoPlay = () => {
@@ -636,7 +641,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     incrementPlayCount,
     volume,
     isShuffled,
-    isRepeat,
+    repeatMode,
     autoPlay,
     toggleShuffle,
     toggleRepeat,

@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import type { Post } from '../types/feed.types';
@@ -25,6 +26,7 @@ import { imageSaveService } from '../services/ImageSaveService';
 import { Alert } from 'react-native';
 
 export default function FeedScreen() {
+  const navigation = useNavigation();
   const { theme } = useTheme();
   const { user } = useAuth();
   const {
@@ -181,6 +183,11 @@ export default function FeedScreen() {
     }
   };
 
+  const handleAuthorPress = (authorId: string) => {
+    console.log('👤 Navigating to author profile:', authorId);
+    navigation.navigate('CreatorProfile' as never, { creatorId: authorId } as never);
+  };
+
   return (
     <View style={styles.container}>
       {/* Main Background Gradient */}
@@ -218,6 +225,7 @@ export default function FeedScreen() {
                   onSave={handleSavePost}
                   onUnsave={handleUnsavePost}
                   onSaveImage={handleSaveImage}
+                  onAuthorPress={handleAuthorPress}
                   onBlocked={async () => {
                     // Refresh feed to remove blocked user's posts
                     await refresh();
