@@ -262,6 +262,15 @@ class NotificationService {
 
     // Store notification for later retrieval
     await this.storeNotification(notification);
+
+    // Special handling for moderation notifications
+    if (data.type === 'moderation') {
+      console.log('📋 Moderation notification received:', {
+        action: data.action,
+        trackId: data.trackId,
+      });
+      // The notification will be stored and user can tap to navigate
+    }
   }
 
   private async handleNotificationResponse(response: Notifications.NotificationResponse) {
@@ -270,7 +279,16 @@ class NotificationService {
     // Mark as read
     await this.markNotificationAsRead(response.notification.request.identifier);
     
-    // Handle deep linking
+    // Special handling for moderation notifications
+    if (data.type === 'moderation' && data.trackId) {
+      console.log('📋 Moderation notification tapped, navigating to track:', data.trackId);
+      // Build deep link to track detail screen
+      const deepLink = `soundbridge://track/${data.trackId}`;
+      await this.handleDeepLink({ ...data, deepLink });
+      return;
+    }
+    
+    // Handle deep linking for other notification types
     await this.handleDeepLink(data);
   }
 
