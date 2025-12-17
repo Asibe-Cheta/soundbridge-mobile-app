@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import BackButton from '../components/BackButton';
+import AppealModal from '../components/AppealModal';
 import {
   View,
   Text,
@@ -66,6 +67,7 @@ export default function TrackDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
+  const [showAppealModal, setShowAppealModal] = useState(false);
 
   useEffect(() => {
     loadTrackDetails();
@@ -592,10 +594,36 @@ export default function TrackDetailsScreen() {
                     : 'Your track has been verified and is live on the platform.'}
                 </Text>
               </View>
+
+              {/* Appeal Button (Only for rejected tracks) */}
+              {track.moderation_status === 'rejected' && (
+                <TouchableOpacity
+                  style={[styles.appealButton, { backgroundColor: theme.colors.primary }]}
+                  onPress={() => setShowAppealModal(true)}
+                >
+                  <Ionicons name="mail" size={20} color="#FFFFFF" />
+                  <Text style={styles.appealButtonText}>Submit Appeal</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </View>
       </ScrollView>
+
+      {/* Appeal Modal */}
+      {track && (
+        <AppealModal
+          visible={showAppealModal}
+          trackId={track.id}
+          trackTitle={track.title}
+          flagReasons={track.flag_reasons || []}
+          onClose={() => setShowAppealModal(false)}
+          onSuccess={() => {
+            setShowAppealModal(false);
+            loadTrackDetails(); // Reload track to show updated status
+          }}
+        />
+      )}
       </SafeAreaView>
     </View>
   );
@@ -860,5 +888,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     flex: 1,
+  },
+  appealButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginTop: 16,
+    gap: 8,
+  },
+  appealButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
