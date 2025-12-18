@@ -33,10 +33,15 @@ export class FeedService {
     hasMore: boolean;
   }> {
     try {
+      console.log(`📡 FeedService: Getting feed posts (page: ${page}, limit: ${limit})`);
+      
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
+        console.error('❌ FeedService: Not authenticated');
         throw new Error('Not authenticated');
       }
+
+      console.log('✅ FeedService: User authenticated, fetching from API endpoint...');
 
       // Response format: { success: true, data: { posts: [...], pagination: {...} } }
       const response = await apiFetch<{ success: boolean; data: FeedResponse }>(
@@ -99,18 +104,25 @@ export class FeedService {
     } catch (error: any) {
       // If API endpoint returns 404 or fails, fall back to Supabase query
       if (error?.status === 404 || error?.message?.includes('404')) {
-        console.log('ℹ️ Feed API endpoint not available, querying Supabase directly');
-        return this.getFeedPostsFromSupabase(page, limit, session);
+        console.log('ℹ️ FeedService: API endpoint not available (404), falling back to direct Supabase query');
+        const { data: { session: fallbackSession } } = await supabase.auth.getSession();
+        if (fallbackSession) {
+          return this.getFeedPostsFromSupabase(page, limit, fallbackSession);
+        } else {
+          console.error('❌ FeedService: No session for Supabase fallback');
+          throw new Error('Not authenticated');
+        }
       } else {
-        console.error('FeedService.getFeedPosts:', error);
+        console.error('❌ FeedService.getFeedPosts error:', error);
         // Try Supabase fallback even for other errors
         try {
+          console.log('⚠️ FeedService: API failed, trying Supabase fallback...');
           const { data: { session: fallbackSession } } = await supabase.auth.getSession();
           if (fallbackSession) {
             return this.getFeedPostsFromSupabase(page, limit, fallbackSession);
           }
         } catch (fallbackError) {
-          console.error('FeedService.getFeedPosts: Supabase fallback also failed:', fallbackError);
+          console.error('❌ FeedService: Supabase fallback also failed:', fallbackError);
         }
         throw error;
       }
@@ -131,42 +143,46 @@ export class FeedService {
     try {
       const offset = (page - 1) * limit;
 
-      // Query posts with author information
+      console.log('🔍 Querying posts from Supabase (page:', page, 'limit:', limit, 'offset:', offset, ')');
+
+      // Step 1: Get posts first (without join to avoid RLS issues)
       const { data: postsData, error: postsError } = await supabase
         .from('posts')
-        .select(`
-          id,
-          user_id,
-          content,
-          post_type,
-          visibility,
-          image_url,
-          audio_url,
-          event_id,
-          created_at,
-          updated_at,
-          deleted_at,
-          author:profiles!user_id (
-            id,
-            username,
-            display_name,
-            avatar_url,
-            role
-          )
-        `)
-        .is('deleted_at', null) // Only get non-deleted posts
-        .eq('visibility', 'public') // For now, only show public posts (can be expanded later)
+        .select('id, user_id, content, post_type, visibility, image_url, audio_url, event_id, created_at, updated_at')
+        .is('deleted_at', null) // CRITICAL: Filter soft-deleted posts
+        .eq('visibility', 'public') // CRITICAL: Only public posts
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
 
       if (postsError) {
-        console.error('Error querying posts from Supabase:', postsError);
+        console.error('❌ Error querying posts from Supabase:', postsError);
         return { posts: [], hasMore: false };
       }
 
       if (!postsData || postsData.length === 0) {
+        console.log('ℹ️ No posts found in database');
         return { posts: [], hasMore: false };
       }
+
+      console.log(`✅ Found ${postsData.length} posts from database`);
+
+      // Step 2: Get author information separately (to avoid RLS join issues)
+      const userIds = [...new Set(postsData.map(p => p.user_id))];
+      const { data: authorsData, error: authorsError } = await supabase
+        .from('profiles')
+        .select('id, username, display_name, avatar_url, role')
+        .in('id', userIds);
+
+      if (authorsError) {
+        console.warn('⚠️ Could not fetch author profiles:', authorsError);
+        // Continue without author data - better to show posts without avatars than no posts
+      }
+
+      // Build author map
+      const authorsMap = new Map();
+      authorsData?.forEach(author => {
+        authorsMap.set(author.id, author);
+      });
 
       // Get reactions for posts
       const postIds = postsData.map(p => p.id);
@@ -217,27 +233,37 @@ export class FeedService {
       });
 
       // Map to Post format
-      const posts: Post[] = postsData.map((post: any) => ({
-        id: post.id,
-        author: {
-          id: post.author?.id || post.user_id,
-          username: post.author?.username || 'unknown',
-          display_name: post.author?.display_name || post.author?.username || 'Unknown User',
-          avatar_url: post.author?.avatar_url || undefined,
-          role: post.author?.role || undefined,
-        },
-        content: post.content || '',
-        post_type: post.post_type || 'update',
-        visibility: post.visibility || 'public',
-        image_url: post.image_url || undefined,
-        audio_url: post.audio_url || undefined,
-        event_id: post.event_id || undefined,
-        reactions_count: reactionsMap.get(post.id) || { support: 0, love: 0, fire: 0, congrats: 0 },
-        comments_count: commentsCountMap.get(post.id) || 0,
-        user_reaction: userReactionsMap.get(post.id) || null,
-        created_at: post.created_at,
-        updated_at: post.updated_at || post.created_at,
-      }));
+      const posts: Post[] = postsData.map((post: any) => {
+        const author = authorsMap.get(post.user_id) || {
+          id: post.user_id,
+          username: 'unknown',
+          display_name: 'Unknown User',
+          avatar_url: undefined,
+          role: undefined,
+        };
+
+        return {
+          id: post.id,
+          author: {
+            id: author.id,
+            username: author.username || 'unknown',
+            display_name: author.display_name || author.username || 'Unknown User',
+            avatar_url: author.avatar_url || undefined,
+            role: author.role || undefined,
+          },
+          content: post.content || '',
+          post_type: post.post_type || 'update',
+          visibility: post.visibility || 'public',
+          image_url: post.image_url || undefined,
+          audio_url: post.audio_url || undefined,
+          event_id: post.event_id || undefined,
+          reactions_count: reactionsMap.get(post.id) || { support: 0, love: 0, fire: 0, congrats: 0 },
+          comments_count: commentsCountMap.get(post.id) || 0,
+          user_reaction: userReactionsMap.get(post.id) || null,
+          created_at: post.created_at,
+          updated_at: post.updated_at || post.created_at,
+        };
+      });
 
       return {
         posts,
