@@ -42,9 +42,10 @@ export class SocialService {
         console.log(`✅ Bookmark toggled via API: ${isSaved ? 'saved' : 'unsaved'}`);
         return { data: response.data || null, error: null, isSaved };
       } catch (apiError: any) {
-        // If 405, fall back to Supabase direct query
-        if (apiError?.status === 405) {
-          console.log('⚠️ API returned 405, falling back to Supabase direct query');
+        // If 405 or 401, fall back to Supabase direct query
+        // 405 = endpoint not deployed, 401 = backend auth misconfigured
+        if (apiError?.status === 405 || apiError?.status === 401) {
+          console.log(`⚠️ API returned ${apiError?.status}, falling back to Supabase direct query`);
           return await this.toggleBookmarkSupabase(request, session);
         }
         throw apiError;
