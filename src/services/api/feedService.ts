@@ -56,6 +56,15 @@ export class FeedService {
       const feedData = response.success ? response.data : response;
       const rawPosts = feedData.posts || [];
       
+      // If API returns 0 posts, fall back to Supabase direct query
+      if (!rawPosts || rawPosts.length === 0) {
+        console.log('⚠️ FeedService: API returned 0 posts, falling back to direct Supabase query');
+        const { data: { session: fallbackSession } } = await supabase.auth.getSession();
+        if (fallbackSession) {
+          return this.getFeedPostsFromSupabase(page, limit, fallbackSession);
+        }
+      }
+      
       // Transform API response to match our Post type
       // API returns: { author: { name, ... }, attachments: [...], reactions: { user_reaction, ... } }
       // Our Post type expects: { author: { display_name, ... }, image_url, audio_url, reactions_count, user_reaction }
