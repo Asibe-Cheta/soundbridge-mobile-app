@@ -76,6 +76,7 @@ import TracksListScreen from './src/screens/TracksListScreen';
 import FollowersListScreen from './src/screens/FollowersListScreen';
 import FollowingListScreen from './src/screens/FollowingListScreen';
 import AlbumDetailsScreen from './src/screens/AlbumDetailsScreen';
+import SavedPostsScreen from './src/screens/SavedPostsScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -506,6 +507,7 @@ function AppNavigator() {
             <Stack.Screen name="TrackDetails" component={TrackDetailsScreen} />
             <Stack.Screen name="PlaylistDetails" component={PlaylistDetailsScreen} />
             <Stack.Screen name="AlbumDetails" component={AlbumDetailsScreen} />
+            <Stack.Screen name="SavedPosts" component={SavedPostsScreen} options={{ headerShown: false }} />
             <Stack.Screen name="OfflineDownloads" component={OfflineDownloadScreen} />
             <Stack.Screen name="AvailabilityCalendar" component={AvailabilityCalendarScreen} />
             <Stack.Screen name="CollaborationRequests" component={CollaborationRequestsScreen} />

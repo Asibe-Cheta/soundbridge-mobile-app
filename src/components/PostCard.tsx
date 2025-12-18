@@ -10,6 +10,7 @@ import FullScreenImageModal from '../modals/FullScreenImageModal';
 import BlockUserModal from '../modals/BlockUserModal';
 import ReportContentModal from '../modals/ReportContentModal';
 import PostAudioPlayer from './PostAudioPlayer';
+import PostSaveButton from './PostSaveButton';
 
 interface PostCardProps {
   post: Post;
@@ -138,6 +139,13 @@ const PostCard = memo(function PostCard({
             {formatTimeAgo(post.created_at)}
           </Text>
         </TouchableOpacity>
+
+        {/* Save Button */}
+        <PostSaveButton 
+          postId={post.id} 
+          initialIsSaved={isSaved}
+          size={22}
+        />
 
         {/* More Options Button */}
         <TouchableOpacity

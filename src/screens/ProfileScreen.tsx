@@ -1095,6 +1095,13 @@ export default function ProfileScreen() {
           <Ionicons name="musical-notes" size={24} color={theme.colors.primary} />
           <Text style={[styles.actionText, { color: theme.colors.text }]}>Create Playlist</Text>
         </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
+          onPress={() => navigation.navigate('SavedPosts' as never)}
+        >
+          <Ionicons name="bookmark" size={24} color={theme.colors.primary} />
+          <Text style={[styles.actionText, { color: theme.colors.text }]}>Saved Posts</Text>
+        </TouchableOpacity>
       </View>
 
       {/* My Tracks (matching web app) */}
