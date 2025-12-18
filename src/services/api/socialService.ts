@@ -47,20 +47,14 @@ export class SocialService {
         // 401 = backend auth misconfigured
         // 400 with RLS = backend RLS policy missing or incorrect
         
-        // Debug: Log error structure to help diagnose
-        console.log('🔍 API Error Status:', apiError?.status);
-        console.log('🔍 API Error Body:', JSON.stringify(apiError?.body, null, 2));
-        
         // Check for RLS error in the error body
         const isRlsError = apiError?.status === 400 && 
           (apiError?.message?.includes('row-level security') || 
            apiError?.body?.error?.message?.includes('row-level security') ||
            apiError?.body?.message?.includes('row-level security'));
         
-        console.log('🔍 RLS Error Detected:', isRlsError);
-        
         if (apiError?.status === 405 || apiError?.status === 401 || isRlsError) {
-          console.log(`⚠️ API returned ${apiError?.status}${isRlsError ? ' (RLS policy error)' : ''}, falling back to Supabase direct query`);
+          console.log(`⚠️ Bookmark API not available (${apiError?.status}), using direct Supabase query`);
           return await this.toggleBookmarkSupabase(request, session);
         }
         throw apiError;
