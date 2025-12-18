@@ -155,9 +155,10 @@ export class FeedService {
       console.log('🔍 Querying posts from Supabase (page:', page, 'limit:', limit, 'offset:', offset, ')');
 
       // Step 1: Get posts first (without join to avoid RLS issues)
+      // NOTE: posts table doesn't have image_url/audio_url - those are in attachments table
       const { data: postsData, error: postsError } = await supabase
         .from('posts')
-        .select('id, user_id, content, post_type, visibility, image_url, audio_url, event_id, created_at, updated_at')
+        .select('id, user_id, content, post_type, visibility, event_id, created_at, updated_at')
         .is('deleted_at', null) // CRITICAL: Filter soft-deleted posts
         .eq('visibility', 'public') // CRITICAL: Only public posts
         .order('created_at', { ascending: false })
@@ -193,8 +194,35 @@ export class FeedService {
         authorsMap.set(author.id, author);
       });
 
-      // Get reactions for posts
+      // Step 3: Get attachments for posts (images and audio)
       const postIds = postsData.map(p => p.id);
+      const { data: attachmentsData, error: attachmentsError } = await supabase
+        .from('post_attachments')
+        .select('post_id, attachment_type, file_url')
+        .in('post_id', postIds);
+
+      if (attachmentsError) {
+        console.warn('⚠️ Could not fetch attachments:', attachmentsError);
+        // Continue without attachments - better to show posts without media than no posts
+      }
+
+      // Build attachments map
+      const attachmentsMap = new Map<string, { image_url?: string; audio_url?: string }>();
+      postIds.forEach(postId => {
+        attachmentsMap.set(postId, {});
+      });
+      
+      attachmentsData?.forEach(attachment => {
+        const current = attachmentsMap.get(attachment.post_id) || {};
+        if (attachment.attachment_type === 'image') {
+          current.image_url = attachment.file_url;
+        } else if (attachment.attachment_type === 'audio') {
+          current.audio_url = attachment.file_url;
+        }
+        attachmentsMap.set(attachment.post_id, current);
+      });
+
+      // Get reactions for posts
       const { data: reactionsData } = await supabase
         .from('post_reactions')
         .select('post_id, reaction_type, user_id')
@@ -251,6 +279,8 @@ export class FeedService {
           role: undefined,
         };
 
+        const attachments = attachmentsMap.get(post.id) || {};
+
         return {
           id: post.id,
           author: {
@@ -263,8 +293,8 @@ export class FeedService {
           content: post.content || '',
           post_type: post.post_type || 'update',
           visibility: post.visibility || 'public',
-          image_url: post.image_url || undefined,
-          audio_url: post.audio_url || undefined,
+          image_url: attachments.image_url || undefined,
+          audio_url: attachments.audio_url || undefined,
           event_id: post.event_id || undefined,
           reactions_count: reactionsMap.get(post.id) || { support: 0, love: 0, fire: 0, congrats: 0 },
           comments_count: commentsCountMap.get(post.id) || 0,
