@@ -126,6 +126,7 @@ export default function CreatorProfileScreen() {
   const [notifyOnEventPost, setNotifyOnEventPost] = useState(true); // Default true for events
   const [notifyOnPodcastUpload, setNotifyOnPodcastUpload] = useState(false);
   const [notifyOnCollabAvailability, setNotifyOnCollabAvailability] = useState(false);
+  const [showFullScreenAvatar, setShowFullScreenAvatar] = useState(false);
 
   const canRequestCollaboration = useMemo(() => {
     if (bookingStatus) {
@@ -679,13 +680,18 @@ export default function CreatorProfileScreen() {
           )}
           
         <View style={styles.profileInfo}>
-            {creator.avatar_url ? (
-              <Image source={{ uri: creator.avatar_url }} style={styles.avatar} />
-            ) : (
-              <View style={[styles.defaultAvatar, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-                <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
-              </View>
-            )}
+            <TouchableOpacity 
+              onPress={() => creator.avatar_url && setShowFullScreenAvatar(true)}
+              activeOpacity={creator.avatar_url ? 0.8 : 1}
+            >
+              {creator.avatar_url ? (
+                <Image source={{ uri: creator.avatar_url }} style={styles.avatar} />
+              ) : (
+                <View style={[styles.defaultAvatar, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                  <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
+                </View>
+              )}
+            </TouchableOpacity>
 
             <View style={styles.nameSection}>
               <View style={styles.nameRow}>
@@ -1130,6 +1136,46 @@ export default function CreatorProfileScreen() {
         </View>
       </Modal>
 
+      {/* Full-Screen Avatar Modal */}
+      <Modal
+        visible={showFullScreenAvatar}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowFullScreenAvatar(false)}
+      >
+        <View style={styles.fullScreenAvatarContainer}>
+          <TouchableOpacity
+            style={styles.fullScreenAvatarOverlay}
+            activeOpacity={1}
+            onPress={() => setShowFullScreenAvatar(false)}
+          >
+            <View style={styles.fullScreenAvatarHeader}>
+              <TouchableOpacity
+                style={[styles.fullScreenAvatarCloseButton, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}
+                onPress={() => setShowFullScreenAvatar(false)}
+              >
+                <Ionicons name="close" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.fullScreenAvatarContent}>
+              {creator?.avatar_url && (
+                <Image
+                  source={{ uri: creator.avatar_url }}
+                  style={styles.fullScreenAvatarImage}
+                  resizeMode="contain"
+                />
+              )}
+            </View>
+            
+            <View style={styles.fullScreenAvatarFooter}>
+              <Text style={styles.fullScreenAvatarName}>{creator?.display_name}</Text>
+              <Text style={styles.fullScreenAvatarUsername}>@{creator?.username}</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
       </SafeAreaView>
     </View>
   );
@@ -1568,5 +1614,56 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  // Full-Screen Avatar Modal Styles
+  fullScreenAvatarContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+  },
+  fullScreenAvatarOverlay: {
+    flex: 1,
+  },
+  fullScreenAvatarHeader: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+  },
+  fullScreenAvatarCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenAvatarContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  fullScreenAvatarImage: {
+    width: '100%',
+    height: '100%',
+    maxWidth: 500,
+    maxHeight: 500,
+  },
+  fullScreenAvatarFooter: {
+    position: 'absolute',
+    bottom: 50,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  fullScreenAvatarName: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  fullScreenAvatarUsername: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 16,
   },
 });

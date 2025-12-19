@@ -11,6 +11,7 @@ import {
   Dimensions,
   Image,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,15 +21,19 @@ import * as DocumentPicker from 'expo-document-picker';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { supabase } from '../lib/supabase';
+import { supabase, dbHelpers } from '../lib/supabase';
 import UploadLimitCard from '../components/UploadLimitCard';
 import { getUploadQuota, UploadQuota } from '../services/UploadQuotaService';
 import { uploadAudioFile, uploadImage, createAudioTrack } from '../services/UploadService';
 import subscriptionService from '../services/SubscriptionService';
+// Temporarily disabled for Expo Go compatibility
+// import DraggableFlatList, { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
+// import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 const { width } = Dimensions.get('window');
 
 type ContentType = 'music' | 'podcast';
+type UploadMode = 'single' | 'album';
 
 interface UploadFormData {
   contentType: ContentType;
@@ -51,6 +56,26 @@ interface UploadFormData {
   audioFile: { uri: string; name: string; type: string } | null;
 }
 
+interface AlbumTrack {
+  id: string; // temp ID for UI
+  trackNumber: number;
+  title: string;
+  audioFile: { uri: string; name: string; type: string; size?: number } | null;
+  duration?: number;
+  lyrics?: string;
+  lyricsLanguage?: string;
+}
+
+interface AlbumFormData {
+  albumTitle: string;
+  albumDescription: string;
+  albumGenre: string;
+  albumCover: { uri: string; name: string; type: string } | null;
+  releaseDate: Date | null;
+  status: 'draft' | 'scheduled' | 'published';
+  tracks: AlbumTrack[];
+}
+
 export default function UploadScreen() {
   const navigation = useNavigation<any>();
   const { user, session } = useAuth();
@@ -59,6 +84,7 @@ export default function UploadScreen() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadQuota, setUploadQuota] = useState<UploadQuota | null>(null);
   const [quotaLoading, setQuotaLoading] = useState(true);
+  const [uploadMode, setUploadMode] = useState<UploadMode>('single');
   const [formData, setFormData] = useState<UploadFormData>({
     contentType: 'music',
     title: '',
@@ -76,6 +102,18 @@ export default function UploadScreen() {
     coverImage: null,
     audioFile: null,
   });
+  
+  // Album-specific state
+  const [albumFormData, setAlbumFormData] = useState<AlbumFormData>({
+    albumTitle: '',
+    albumDescription: '',
+    albumGenre: '',
+    albumCover: null,
+    releaseDate: null,
+    status: 'draft',
+    tracks: [],
+  });
+  const [albumStep, setAlbumStep] = useState<1 | 2 | 3>(1);
 
   const genres = [
     'Electronic', 'Hip Hop', 'Rock', 'Pop', 'Jazz', 'Classical', 
@@ -235,6 +273,184 @@ export default function UploadScreen() {
     }
     
     return { isValid: errors.length === 0, errors };
+  };
+
+  // Album validation
+  const validateAlbumForm = (): { isValid: boolean; errors: string[] } => {
+    const errors: string[] = [];
+    
+    // Album metadata validation
+    if (!albumFormData.albumTitle.trim()) {
+      errors.push('Album title is required');
+    }
+    
+    if (albumFormData.albumTitle.length > 200) {
+      errors.push('Album title must be less than 200 characters');
+    }
+    
+    if (!albumFormData.albumGenre) {
+      errors.push('Album genre is required');
+    }
+    
+    if (!albumFormData.albumCover) {
+      errors.push('Album cover image is required');
+    }
+    
+    // Tracks validation
+    if (albumFormData.tracks.length === 0) {
+      errors.push('Please add at least one track to the album');
+    }
+    
+    // Check tier limits
+    if (uploadQuota) {
+      const tier = uploadQuota.tier?.toLowerCase() || 'free';
+      
+      if (tier === 'free') {
+        errors.push('Albums are only available for Premium and Unlimited users');
+      } else if (tier === 'premium' && albumFormData.tracks.length > 7) {
+        errors.push(`Premium users can add up to 7 tracks per album. You have ${albumFormData.tracks.length} tracks.`);
+      }
+    }
+    
+    // Validate each track
+    albumFormData.tracks.forEach((track, index) => {
+      if (!track.title.trim()) {
+        errors.push(`Track ${index + 1}: Title is required`);
+      }
+      if (!track.audioFile) {
+        errors.push(`Track ${index + 1}: Audio file is required`);
+      }
+    });
+    
+    return {
+      isValid: errors.length === 0,
+      errors,
+    };
+  };
+
+  // Album helper functions
+  const pickAlbumCover = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'We need camera roll permissions to select an album cover.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        
+        // Validate image size (2MB limit for album covers)
+        const albumCoverMaxSize = 2 * 1024 * 1024; // 2MB
+        if (asset.fileSize && asset.fileSize > albumCoverMaxSize) {
+          Alert.alert(
+            'File Too Large',
+            'Album cover must be less than 2MB. Please select a smaller image.'
+          );
+          return;
+        }
+        
+        const fileExtension = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
+        const mimeType = {
+          'jpg': 'image/jpeg',
+          'jpeg': 'image/jpeg',
+          'png': 'image/png',
+          'webp': 'image/webp',
+        }[fileExtension] || 'image/jpeg';
+        
+        setAlbumFormData(prev => ({ 
+          ...prev, 
+          albumCover: {
+            uri: asset.uri,
+            name: asset.fileName || `album_cover_${Date.now()}.${fileExtension}`,
+            type: mimeType
+          }
+        }));
+      }
+    } catch (error) {
+      console.error('Error picking album cover:', error);
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
+    }
+  };
+
+  const addTrackToAlbum = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'audio/*',
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        
+        // Validate audio file
+        const validation = validateAudioFile({
+          name: asset.name || 'audio_file',
+          size: asset.size,
+          mimeType: asset.mimeType
+        });
+        
+        if (!validation.isValid) {
+          Alert.alert('Invalid File', validation.errors.join('\n'));
+          return;
+        }
+        
+        // Check track limit for premium users
+        const tier = uploadQuota?.tier?.toLowerCase() || 'free';
+        if (tier === 'premium' && albumFormData.tracks.length >= 7) {
+          Alert.alert(
+            'Track Limit Reached',
+            'Premium users can add up to 7 tracks per album. Upgrade to Unlimited for unlimited tracks!'
+          );
+          return;
+        }
+        
+        const newTrack: AlbumTrack = {
+          id: Date.now().toString(),
+          trackNumber: albumFormData.tracks.length + 1,
+          title: asset.name.replace(/\.[^/.]+$/, '') || `Track ${albumFormData.tracks.length + 1}`,
+          audioFile: {
+            uri: asset.uri,
+            name: asset.name || `track_${Date.now()}.mp3`,
+            type: asset.mimeType || 'audio/mpeg',
+            size: asset.size,
+          },
+        };
+        
+        setAlbumFormData(prev => ({
+          ...prev,
+          tracks: [...prev.tracks, newTrack],
+        }));
+      }
+    } catch (error) {
+      console.error('Error picking audio file:', error);
+      Alert.alert('Error', 'Failed to pick audio file. Please try again.');
+    }
+  };
+
+  const removeTrackFromAlbum = (trackId: string) => {
+    setAlbumFormData(prev => ({
+      ...prev,
+      tracks: prev.tracks
+        .filter(t => t.id !== trackId)
+        .map((t, index) => ({ ...t, trackNumber: index + 1 })),
+    }));
+  };
+
+  const updateTrackTitle = (trackId: string, title: string) => {
+    setAlbumFormData(prev => ({
+      ...prev,
+      tracks: prev.tracks.map(t => 
+        t.id === trackId ? { ...t, title } : t
+      ),
+    }));
   };
 
   const pickCoverImage = async () => {
@@ -518,6 +734,179 @@ export default function UploadScreen() {
     }
   };
 
+  // Album upload handler
+  const handleAlbumUpload = async () => {
+    // Validate
+    const validation = validateAlbumForm();
+    if (!validation.isValid) {
+      Alert.alert('Validation Error', validation.errors.join('\n'));
+      return;
+    }
+    
+    if (!user || !session) {
+      Alert.alert('Error', 'You must be logged in to upload albums.');
+      return;
+    }
+    
+    try {
+      setIsUploading(true);
+      setUploadProgress(0);
+      
+      console.log('🎵 Starting album upload...');
+      
+      // Check album limit
+      const { data: limitCheck, error: limitError } = await dbHelpers.checkAlbumLimit(user.id);
+      if (limitError || !limitCheck) {
+        throw new Error('Failed to check album limit');
+      }
+      
+      if (!limitCheck.canCreate) {
+        const tier = limitCheck.tier || 'free';
+        let message = '';
+        if (tier === 'free') {
+          message = 'Albums are only available for Premium and Unlimited users. Upgrade now to create albums!';
+        } else if (tier === 'premium') {
+          message = `You've reached your album limit (${limitCheck.limit} albums). Upgrade to Unlimited for unlimited albums!`;
+        }
+        
+        Alert.alert(
+          'Album Limit Reached',
+          message,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'View Plans', onPress: handleUpgradePress },
+          ],
+        );
+        setIsUploading(false);
+        return;
+      }
+      
+      // Step 1: Upload album cover (10% progress)
+      setUploadProgress(10);
+      let albumCoverUrl = null;
+      if (albumFormData.albumCover) {
+        const imageUploadResult = await uploadImage(
+          user.id, 
+          albumFormData.albumCover, 
+          'album-covers'
+        );
+        
+        if (imageUploadResult.success) {
+          albumCoverUrl = imageUploadResult.data?.url;
+          console.log('✅ Album cover uploaded');
+        } else {
+          console.warn('Failed to upload album cover:', imageUploadResult.error);
+        }
+      }
+      
+      setUploadProgress(20);
+      
+      // Step 2: Create album in database
+      const { data: album, error: albumError } = await dbHelpers.createAlbum({
+        creator_id: user.id,
+        title: albumFormData.albumTitle,
+        description: albumFormData.albumDescription,
+        genre: albumFormData.albumGenre,
+        cover_image_url: albumCoverUrl,
+        release_date: albumFormData.releaseDate?.toISOString().split('T')[0],
+        status: albumFormData.status,
+        is_public: true,
+      });
+      
+      if (albumError || !album) {
+        throw new Error('Failed to create album: ' + albumError?.message);
+      }
+      
+      console.log('✅ Album created:', album.id);
+      setUploadProgress(30);
+      
+      // Step 3: Upload tracks (60% progress split among tracks)
+      const totalTracks = albumFormData.tracks.length;
+      const progressPerTrack = 60 / totalTracks;
+      
+      for (let i = 0; i < albumFormData.tracks.length; i++) {
+        const track = albumFormData.tracks[i];
+        console.log(`🎵 Uploading track ${i + 1}/${totalTracks}...`);
+        
+        // Upload audio file
+        const audioUploadResult = await uploadAudioFile(user.id, track.audioFile!);
+        if (!audioUploadResult.success) {
+          throw new Error(`Failed to upload track ${i + 1}: ${audioUploadResult.error?.message}`);
+        }
+        
+        // Create track record
+        const trackData = {
+          creator_id: user.id,
+          title: track.title,
+          description: '',
+          genre: albumFormData.albumGenre,
+          audio_file_url: audioUploadResult.data?.url || '',
+          duration: track.duration || 0,
+          lyrics: track.lyrics || null,
+          lyrics_language: track.lyricsLanguage || 'en',
+          is_public: albumFormData.status === 'published',
+          content_type: 'music' as const,
+          tags: [],
+        };
+        
+        const trackResult = await createAudioTrack(trackData);
+        if (!trackResult.success || !trackResult.data) {
+          throw new Error(`Failed to create track ${i + 1}: ${trackResult.error?.message}`);
+        }
+        
+        // Add track to album
+        const { error: addTrackError } = await dbHelpers.addTrackToAlbum(
+          album.id,
+          trackResult.data.id,
+          track.trackNumber
+        );
+        
+        if (addTrackError) {
+          throw new Error(`Failed to add track ${i + 1} to album: ${addTrackError.message}`);
+        }
+        
+        console.log(`✅ Track ${i + 1} uploaded and added to album`);
+        setUploadProgress(30 + (i + 1) * progressPerTrack);
+      }
+      
+      setUploadProgress(100);
+      
+      Alert.alert(
+        'Success!',
+        `Album "${albumFormData.albumTitle}" ${albumFormData.status === 'published' ? 'published' : 'saved as draft'} successfully!`,
+        [
+          {
+            text: 'View Album',
+            onPress: () => navigation.navigate('AlbumDetails', { albumId: album.id }),
+          },
+          { text: 'OK' },
+        ]
+      );
+      
+      // Reset form
+      setAlbumFormData({
+        albumTitle: '',
+        albumDescription: '',
+        albumGenre: '',
+        albumCover: null,
+        releaseDate: null,
+        status: 'draft',
+        tracks: [],
+      });
+      setAlbumStep(1);
+      
+      // Refresh quota
+      loadUploadQuota();
+      
+    } catch (error) {
+      console.error('Album upload failed:', error);
+      Alert.alert('Upload Failed', error instanceof Error ? error.message : 'An unexpected error occurred.');
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
+  };
+
   const ContentTypeSelector = () => (
     <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
       <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Content Type</Text>
@@ -606,6 +995,470 @@ export default function UploadScreen() {
     </View>
   );
 
+  // Upload Mode Selector Component
+  const UploadModeSelector = () => (
+    <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Upload Mode</Text>
+      <View style={styles.modeSelector}>
+        <TouchableOpacity
+          style={[
+            styles.modeOption,
+            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+            uploadMode === 'single' && { 
+              borderColor: theme.colors.primary, 
+              borderWidth: 2,
+              backgroundColor: theme.colors.primary + '10',
+            }
+          ]}
+          onPress={() => {
+            setUploadMode('single');
+            setAlbumStep(1);
+          }}
+        >
+          <Ionicons 
+            name="musical-note" 
+            size={32} 
+            color={uploadMode === 'single' ? theme.colors.primary : theme.colors.textSecondary} 
+          />
+          <Text style={[
+            styles.modeLabel, 
+            { color: uploadMode === 'single' ? theme.colors.primary : theme.colors.text }
+          ]}>
+            Single Track
+          </Text>
+          <Text style={[styles.modeDescription, { color: theme.colors.textSecondary }]}>
+            Upload one track
+          </Text>
+          {uploadMode === 'single' && (
+            <Ionicons 
+              name="checkmark-circle" 
+              size={24} 
+              color={theme.colors.primary} 
+              style={styles.modeCheckmark} 
+            />
+          )}
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[
+            styles.modeOption,
+            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+            uploadMode === 'album' && { 
+              borderColor: theme.colors.primary, 
+              borderWidth: 2,
+              backgroundColor: theme.colors.primary + '10',
+            }
+          ]}
+          onPress={() => {
+            const tier = uploadQuota?.tier?.toLowerCase() || 'free';
+            if (tier === 'free') {
+              Alert.alert(
+                'Upgrade Required',
+                'Albums are only available for Premium and Unlimited users. Upgrade now to create albums!',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'View Plans', onPress: handleUpgradePress },
+                ]
+              );
+              return;
+            }
+            setUploadMode('album');
+            setAlbumStep(1);
+          }}
+        >
+          <Ionicons 
+            name="albums" 
+            size={32} 
+            color={uploadMode === 'album' ? theme.colors.primary : theme.colors.textSecondary} 
+          />
+          <Text style={[
+            styles.modeLabel, 
+            { color: uploadMode === 'album' ? theme.colors.primary : theme.colors.text }
+          ]}>
+            Album
+          </Text>
+          <Text style={[styles.modeDescription, { color: theme.colors.textSecondary }]}>
+            Multiple tracks
+          </Text>
+          {uploadMode === 'album' && (
+            <Ionicons 
+              name="checkmark-circle" 
+              size={24} 
+              color={theme.colors.primary} 
+              style={styles.modeCheckmark} 
+            />
+          )}
+          {(uploadQuota?.tier === 'free' || !uploadQuota?.tier) && (
+            <View style={[styles.upgradeBadge, { backgroundColor: theme.colors.warning }]}>
+              <Text style={styles.upgradeBadgeText}>PRO</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  // Album Form - Step 1: Metadata
+  const AlbumMetadataForm = () => (
+    <View>
+      {/* Album Title */}
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Album Title *</Text>
+        <TextInput
+          style={[styles.input, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
+          placeholder="Enter album title"
+          placeholderTextColor={theme.colors.textSecondary}
+          value={albumFormData.albumTitle}
+          onChangeText={(text) => setAlbumFormData(prev => ({ ...prev, albumTitle: text }))}
+        />
+      </View>
+
+      {/* Album Description */}
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Description</Text>
+        <TextInput
+          style={[styles.textArea, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
+          placeholder="Tell us about this album..."
+          placeholderTextColor={theme.colors.textSecondary}
+          value={albumFormData.albumDescription}
+          onChangeText={(text) => setAlbumFormData(prev => ({ ...prev, albumDescription: text }))}
+          multiline
+          numberOfLines={4}
+        />
+      </View>
+
+      {/* Album Genre */}
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Genre *</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.genreScroll}>
+          {genres.map((genre) => (
+            <TouchableOpacity
+              key={genre}
+              style={[
+                styles.genreChip,
+                { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                albumFormData.albumGenre === genre && { 
+                  backgroundColor: theme.colors.primary, 
+                  borderColor: theme.colors.primary 
+                }
+              ]}
+              onPress={() => setAlbumFormData(prev => ({ ...prev, albumGenre: genre }))}
+            >
+              <Text style={[
+                styles.genreChipText,
+                { color: albumFormData.albumGenre === genre ? '#fff' : theme.colors.text }
+              ]}>
+                {genre}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
+      {/* Album Cover */}
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Album Cover *</Text>
+        {albumFormData.albumCover ? (
+          <View style={[styles.filePreview, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <Image source={{ uri: albumFormData.albumCover.uri }} style={styles.albumCoverPreview} />
+            <TouchableOpacity
+              style={styles.removeButton}
+              onPress={() => setAlbumFormData(prev => ({ ...prev, albumCover: null }))}
+            >
+              <Ionicons name="close" size={20} color={theme.colors.error} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.uploadButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+            onPress={pickAlbumCover}
+          >
+            <Ionicons name="camera" size={32} color={theme.colors.textSecondary} />
+            <Text style={[styles.uploadButtonText, { color: theme.colors.text }]}>Select Album Cover</Text>
+            <Text style={[styles.uploadButtonSubtext, { color: theme.colors.textSecondary }]}>
+              JPG, PNG (Max 2MB)
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Release Status */}
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Release Status</Text>
+        <View style={styles.statusContainer}>
+          {(['draft', 'published'] as const).map((status) => (
+            <TouchableOpacity
+              key={status}
+              style={[
+                styles.statusOption,
+                { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                albumFormData.status === status && { 
+                  borderColor: theme.colors.primary, 
+                  borderWidth: 2,
+                  backgroundColor: theme.colors.primary + '10',
+                }
+              ]}
+              onPress={() => setAlbumFormData(prev => ({ ...prev, status }))}
+            >
+              <Text style={[
+                styles.statusLabel,
+                { color: albumFormData.status === status ? theme.colors.primary : theme.colors.text }
+              ]}>
+                {status === 'draft' ? 'Save as Draft' : 'Publish Now'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      {/* Next Button */}
+      <TouchableOpacity
+        style={[styles.primaryButton, { backgroundColor: theme.colors.primary }]}
+        onPress={() => {
+          if (!albumFormData.albumTitle.trim()) {
+            Alert.alert('Required', 'Please enter an album title');
+            return;
+          }
+          if (!albumFormData.albumGenre) {
+            Alert.alert('Required', 'Please select a genre');
+            return;
+          }
+          if (!albumFormData.albumCover) {
+            Alert.alert('Required', 'Please select an album cover');
+            return;
+          }
+          setAlbumStep(2);
+        }}
+      >
+        <Text style={styles.primaryButtonText}>Next: Add Tracks</Text>
+        <Ionicons name="arrow-forward" size={20} color="#fff" />
+      </TouchableOpacity>
+    </View>
+  );
+
+  // Album Form - Step 2: Add Tracks
+  const AlbumTracksForm = () => (
+    <View style={{ flex: 1 }}>
+      <View>
+        {/* Track List */}
+        <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+            Tracks ({albumFormData.tracks.length})
+          </Text>
+          
+          {albumFormData.tracks.length === 0 ? (
+            <View style={styles.emptyTracksContainer}>
+              <Ionicons name="musical-notes-outline" size={64} color={theme.colors.textSecondary} />
+              <Text style={[styles.emptyTracksText, { color: theme.colors.textSecondary }]}>
+                No tracks added yet
+              </Text>
+              <Text style={[styles.emptyTracksSubtext, { color: theme.colors.textSecondary }]}>
+                Tap the button below to add tracks to your album
+              </Text>
+            </View>
+          ) : (
+            <View>
+              {albumFormData.tracks.map((item, index) => (
+                <View
+                  key={item.id}
+                  style={[
+                    styles.trackItem,
+                    { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }
+                  ]}
+                >
+                  {/* Reorder Buttons */}
+                  <View style={styles.trackReorderButtons}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (index > 0) {
+                          const newTracks = [...albumFormData.tracks];
+                          [newTracks[index], newTracks[index - 1]] = [newTracks[index - 1], newTracks[index]];
+                          setAlbumFormData(prev => ({
+                            ...prev,
+                            tracks: newTracks.map((track, idx) => ({ ...track, trackNumber: idx + 1 })),
+                          }));
+                        }
+                      }}
+                      disabled={index === 0}
+                      style={{ opacity: index === 0 ? 0.3 : 1 }}
+                    >
+                      <Ionicons name="chevron-up" size={20} color={theme.colors.textSecondary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (index < albumFormData.tracks.length - 1) {
+                          const newTracks = [...albumFormData.tracks];
+                          [newTracks[index], newTracks[index + 1]] = [newTracks[index + 1], newTracks[index]];
+                          setAlbumFormData(prev => ({
+                            ...prev,
+                            tracks: newTracks.map((track, idx) => ({ ...track, trackNumber: idx + 1 })),
+                          }));
+                        }
+                      }}
+                      disabled={index === albumFormData.tracks.length - 1}
+                      style={{ opacity: index === albumFormData.tracks.length - 1 ? 0.3 : 1 }}
+                    >
+                      <Ionicons name="chevron-down" size={20} color={theme.colors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.trackNumber}>
+                    <Text style={[styles.trackNumberText, { color: theme.colors.text }]}>
+                      {item.trackNumber}
+                    </Text>
+                  </View>
+                  <View style={styles.trackInfo}>
+                    <TextInput
+                      style={[styles.trackTitleInput, { color: theme.colors.text }]}
+                      value={item.title}
+                      onChangeText={(text) => updateTrackTitle(item.id, text)}
+                      placeholder="Track title"
+                      placeholderTextColor={theme.colors.textSecondary}
+                    />
+                    <Text style={[styles.trackFileName, { color: theme.colors.textSecondary }]}>
+                      {item.audioFile?.name}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.trackRemoveButton}
+                    onPress={() => removeTrackFromAlbum(item.id)}
+                  >
+                    <Ionicons name="trash-outline" size={20} color={theme.colors.error} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Add Track Button */}
+          <TouchableOpacity
+            style={[styles.addTrackButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+            onPress={addTrackToAlbum}
+          >
+            <Ionicons name="add-circle-outline" size={24} color={theme.colors.primary} />
+            <Text style={[styles.addTrackButtonText, { color: theme.colors.primary }]}>
+              Add Track
+            </Text>
+          </TouchableOpacity>
+
+          {/* Tier Limit Info */}
+          {uploadQuota?.tier === 'premium' && (
+            <Text style={[styles.limitInfo, { color: theme.colors.textSecondary }]}>
+              Premium: {albumFormData.tracks.length}/7 tracks
+            </Text>
+          )}
+        </View>
+
+        {/* Navigation Buttons */}
+        <View style={styles.navigationButtons}>
+          <TouchableOpacity
+            style={[styles.secondaryButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+            onPress={() => setAlbumStep(1)}
+          >
+            <Ionicons name="arrow-back" size={20} color={theme.colors.text} />
+            <Text style={[styles.secondaryButtonText, { color: theme.colors.text }]}>Back</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[styles.primaryButton, { backgroundColor: theme.colors.primary, flex: 1 }]}
+            onPress={() => {
+              if (albumFormData.tracks.length === 0) {
+                Alert.alert('Required', 'Please add at least one track');
+                return;
+              }
+              setAlbumStep(3);
+            }}
+          >
+            <Text style={styles.primaryButtonText}>Next: Review</Text>
+            <Ionicons name="arrow-forward" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  );
+
+  // Album Form - Step 3: Review & Upload
+  const AlbumReviewForm = () => (
+    <View>
+      {/* Album Summary */}
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Album Summary</Text>
+        
+        <View style={styles.reviewRow}>
+          {albumFormData.albumCover && (
+            <Image source={{ uri: albumFormData.albumCover.uri }} style={styles.reviewAlbumCover} />
+          )}
+          <View style={styles.reviewInfo}>
+            <Text style={[styles.reviewTitle, { color: theme.colors.text }]}>
+              {albumFormData.albumTitle}
+            </Text>
+            <Text style={[styles.reviewDetail, { color: theme.colors.textSecondary }]}>
+              {albumFormData.albumGenre} • {albumFormData.tracks.length} tracks
+            </Text>
+            <Text style={[styles.reviewDetail, { color: theme.colors.textSecondary }]}>
+              Status: {albumFormData.status === 'draft' ? 'Draft' : 'Published'}
+            </Text>
+          </View>
+        </View>
+
+        {albumFormData.albumDescription && (
+          <Text style={[styles.reviewDescription, { color: theme.colors.textSecondary }]}>
+            {albumFormData.albumDescription}
+          </Text>
+        )}
+      </View>
+
+      {/* Track List Summary */}
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Track List</Text>
+        {albumFormData.tracks.map((track) => (
+          <View key={track.id} style={styles.reviewTrack}>
+            <Text style={[styles.reviewTrackNumber, { color: theme.colors.textSecondary }]}>
+              {track.trackNumber}.
+            </Text>
+            <Text style={[styles.reviewTrackTitle, { color: theme.colors.text }]}>
+              {track.title}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Navigation Buttons */}
+      <View style={styles.navigationButtons}>
+        <TouchableOpacity
+          style={[styles.secondaryButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+          onPress={() => setAlbumStep(2)}
+        >
+          <Ionicons name="arrow-back" size={20} color={theme.colors.text} />
+          <Text style={[styles.secondaryButtonText, { color: theme.colors.text }]}>Back</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[
+            styles.primaryButton, 
+            { backgroundColor: theme.colors.primary, flex: 1 },
+            isUploading && { opacity: 0.6 }
+          ]}
+          onPress={handleAlbumUpload}
+          disabled={isUploading}
+        >
+          {isUploading ? (
+            <>
+              <ActivityIndicator size="small" color="#fff" />
+              <Text style={styles.primaryButtonText}>Uploading... {uploadProgress}%</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.primaryButtonText}>
+                {albumFormData.status === 'draft' ? 'Save Draft' : 'Publish Album'}
+              </Text>
+              <Ionicons name="cloud-upload" size={20} color="#fff" />
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       {/* Main Background Gradient - Uses theme colors */}
@@ -663,8 +1516,14 @@ export default function UploadScreen() {
             onUpgrade={handleUpgradePress}
           />
 
-          {/* Content Type Selection */}
-          <ContentTypeSelector />
+          {/* Upload Mode Selector */}
+          <UploadModeSelector />
+
+          {/* Single Track Mode */}
+          {uploadMode === 'single' && (
+            <>
+              {/* Content Type Selection */}
+              <ContentTypeSelector />
 
           {/* File Upload */}
           {renderFileUpload('audioFile', 'Audio File *', formData.audioFile)}
@@ -875,6 +1734,38 @@ export default function UploadScreen() {
 
           {/* Cover Art */}
           {renderFileUpload('coverImage', 'Cover Art (Optional)', formData.coverImage)}
+            </>
+          )}
+
+          {/* Album Mode */}
+          {uploadMode === 'album' && (
+            <>
+              {/* Album Step Indicator */}
+              <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                <View style={styles.stepIndicator}>
+                  <View style={[styles.step, albumStep >= 1 && { backgroundColor: theme.colors.primary }]}>
+                    <Text style={[styles.stepNumber, { color: albumStep >= 1 ? '#fff' : theme.colors.text }]}>1</Text>
+                  </View>
+                  <View style={[styles.stepLine, albumStep >= 2 && { backgroundColor: theme.colors.primary }]} />
+                  <View style={[styles.step, albumStep >= 2 && { backgroundColor: theme.colors.primary }]}>
+                    <Text style={[styles.stepNumber, { color: albumStep >= 2 ? '#fff' : theme.colors.text }]}>2</Text>
+                  </View>
+                  <View style={[styles.stepLine, albumStep >= 3 && { backgroundColor: theme.colors.primary }]} />
+                  <View style={[styles.step, albumStep >= 3 && { backgroundColor: theme.colors.primary }]}>
+                    <Text style={[styles.stepNumber, { color: albumStep >= 3 ? '#fff' : theme.colors.text }]}>3</Text>
+                  </View>
+                </View>
+                <Text style={[styles.stepLabel, { color: theme.colors.textSecondary }]}>
+                  Step {albumStep}: {albumStep === 1 ? 'Album Info' : albumStep === 2 ? 'Add Tracks' : 'Review'}
+                </Text>
+              </View>
+
+              {/* Album Forms */}
+              {albumStep === 1 && <AlbumMetadataForm />}
+              {albumStep === 2 && <AlbumTracksForm />}
+              {albumStep === 3 && <AlbumReviewForm />}
+            </>
+          )}
       </ScrollView>
         </View>
       </SafeAreaView>
@@ -1102,5 +1993,248 @@ const styles = StyleSheet.create({
   },
   removeButton: {
     padding: 4,
+  },
+  // Album Mode Styles
+  modeSelector: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modeOption: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 16,
+    alignItems: 'center',
+    position: 'relative',
+  },
+  modeLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  modeDescription: {
+    fontSize: 12,
+    marginTop: 4,
+  },
+  modeCheckmark: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+  },
+  upgradeBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  upgradeBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  // Step Indicator
+  stepIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 8,
+  },
+  step: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#ccc',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepNumber: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  stepLine: {
+    width: 60,
+    height: 2,
+    backgroundColor: '#ccc',
+  },
+  stepLabel: {
+    textAlign: 'center',
+    fontSize: 14,
+    marginTop: 8,
+  },
+  // Album Form Styles
+  genreScroll: {
+    marginTop: 8,
+  },
+  albumCoverPreview: {
+    width: 100,
+    height: 100,
+    borderRadius: 8,
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  statusOption: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 12,
+    alignItems: 'center',
+  },
+  statusLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  // Track List Styles
+  emptyTracksContainer: {
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyTracksText: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 16,
+  },
+  emptyTracksSubtext: {
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  trackItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 8,
+  },
+  trackReorderButtons: {
+    flexDirection: 'column',
+    marginRight: 12,
+    gap: 4,
+  },
+  trackNumber: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  trackNumberText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  trackInfo: {
+    flex: 1,
+  },
+  trackTitleInput: {
+    fontSize: 15,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  trackFileName: {
+    fontSize: 12,
+  },
+  trackRemoveButton: {
+    padding: 8,
+  },
+  addTrackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    padding: 16,
+    marginTop: 12,
+  },
+  addTrackButtonText: {
+    fontSize: 15,
+    fontWeight: '500',
+    marginLeft: 8,
+  },
+  limitInfo: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  // Navigation Buttons
+  navigationButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
+  primaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    padding: 16,
+    gap: 8,
+  },
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 16,
+    gap: 8,
+  },
+  secondaryButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  // Review Styles
+  reviewRow: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  reviewAlbumCover: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    marginRight: 16,
+  },
+  reviewInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  reviewTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  reviewDetail: {
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  reviewDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  reviewTrack: {
+    flexDirection: 'row',
+    paddingVertical: 8,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#e0e0e0',
+  },
+  reviewTrackNumber: {
+    width: 30,
+    fontSize: 14,
+  },
+  reviewTrackTitle: {
+    flex: 1,
+    fontSize: 14,
   },
 });

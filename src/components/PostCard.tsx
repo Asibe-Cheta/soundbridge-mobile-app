@@ -1,6 +1,7 @@
-import React, { memo, useCallback, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import React, { memo, useCallback, useState, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { ActivityIndicator } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import type { Post } from '../types/feed.types';
@@ -10,6 +11,11 @@ import FullScreenImageModal from '../modals/FullScreenImageModal';
 import BlockUserModal from '../modals/BlockUserModal';
 import ReportContentModal from '../modals/ReportContentModal';
 import PostAudioPlayer from './PostAudioPlayer';
+import PostSaveButton from './PostSaveButton';
+import { ReactionPicker } from './ReactionPicker';
+import CommentsModal from '../modals/CommentsModal';
+import { RepostModal } from './RepostModal';
+import { RepostedPostCard } from './RepostedPostCard';
 
 interface PostCardProps {
   post: Post;
@@ -24,21 +30,36 @@ interface PostCardProps {
   onSaveImage?: (imageUrl: string) => void;
   onBlocked?: () => void;
   onReported?: () => void;
+  onAuthorPress?: (authorId: string) => void;
+  onRepost?: (post: Post, withComment?: boolean, comment?: string) => void;
   isSaved?: boolean;
 }
 
-const REACTION_ICONS = {
-  support: 'hand-left',
-  love: 'heart',
-  fire: 'flame',
-  congrats: 'trophy',
-} as const;
-
-const REACTION_EMOJIS = {
-  support: '👏',
-  love: '❤️',
-  fire: '🔥',
-  congrats: '🎉',
+const REACTION_TYPES = {
+  support: {
+    id: 'support' as const,
+    emoji: '👍',
+    label: 'Like',
+    color: '#DC2626',
+  },
+  love: {
+    id: 'love' as const,
+    emoji: '❤️',
+    label: 'Love',
+    color: '#EC4899',
+  },
+  fire: {
+    id: 'fire' as const,
+    emoji: '🔥',
+    label: 'Fire',
+    color: '#F5A623',
+  },
+  congrats: {
+    id: 'congrats' as const,
+    emoji: '👏',
+    label: 'Congrats',
+    color: '#7B68EE',
+  },
 } as const;
 
 const PostCard = memo(function PostCard({
@@ -54,6 +75,8 @@ const PostCard = memo(function PostCard({
   onSaveImage,
   onBlocked,
   onReported,
+  onAuthorPress,
+  onRepost,
   isSaved = false,
 }: PostCardProps) {
   const { theme } = useTheme();
@@ -61,10 +84,118 @@ const PostCard = memo(function PostCard({
   const [showFullScreenImage, setShowFullScreenImage] = useState(false);
   const [showBlockModal, setShowBlockModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const [showCommentsModal, setShowCommentsModal] = useState(false);
+  const [showRepostModal, setShowRepostModal] = useState(false);
+  const [isReposting, setIsReposting] = useState(false);
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const handleReactionPress = (reactionType: 'support' | 'love' | 'fire' | 'congrats') => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onReactionPress?.(reactionType);
+  };
+
+  // Long-press detection for Support button
+  const handleSupportPressIn = () => {
+    longPressTimer.current = setTimeout(() => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setShowReactionPicker(true);
+    }, 500); // 500ms hold
+  };
+
+  const handleSupportPressOut = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  // Quick Support reaction (single tap)
+  const handleQuickSupport = () => {
+    if (!showReactionPicker) {
+      handleReactionPress('support');
+    }
+  };
+
+  // Handle reaction selection from picker
+  const handleReactionSelect = (reactionType: 'support' | 'love' | 'fire' | 'congrats') => {
+    setShowReactionPicker(false);
+    handleReactionPress(reactionType);
+  };
+
+  // Get current reaction display
+  const getCurrentReaction = () => {
+    if (post.user_reaction) {
+      return REACTION_TYPES[post.user_reaction];
+    }
+    return { emoji: '👍', label: 'Like', color: theme.colors.textSecondary };
+  };
+
+  // Calculate total reactions
+  const totalReactions = 
+    post.reactions_count.support +
+    post.reactions_count.love +
+    post.reactions_count.fire +
+    post.reactions_count.congrats;
+
+  // Debug logging for repost detection
+  console.log('🔍 PostCard Debug:', {
+    postId: post.id,
+    hasRepostedFromId: !!post.reposted_from_id,
+    hasRepostedFrom: !!post.reposted_from,
+    repostedFromId: post.reposted_from_id,
+    content: post.content?.substring(0, 30) + '...',
+  });
+
+  const isRepost = post.reposted_from_id && post.reposted_from;
+
+  // Handle repost with toggle behavior
+  const handleRepostPress = () => {
+    if (post.user_reposted) {
+      // User already reposted - show unrepost option
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setShowRepostModal(true);
+    } else {
+      // User hasn't reposted - show repost options
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setShowRepostModal(true);
+    }
+  };
+
+  const handleQuickRepost = async () => {
+    setIsReposting(true);
+    try {
+      await onRepost?.(post, false); // Quick repost without comment
+      setShowRepostModal(false);
+    } catch (error) {
+      console.error('Error reposting:', error);
+    } finally {
+      setIsReposting(false);
+    }
+  };
+
+  const handleRepostWithComment = async (comment: string) => {
+    setIsReposting(true);
+    try {
+      await onRepost?.(post, true, comment); // Repost with comment
+      setShowRepostModal(false);
+    } catch (error) {
+      console.error('Error reposting with comment:', error);
+    } finally {
+      setIsReposting(false);
+    }
+  };
+
+  const handleUnrepost = async () => {
+    setIsReposting(true);
+    try {
+      await onRepost?.(post); // onRepost will handle toggle logic (no withComment param)
+      setShowRepostModal(false);
+    } catch (error) {
+      console.error('Error unreposting:', error);
+    } finally {
+      setIsReposting(false);
+    }
   };
 
   const formatTimeAgo = (dateString: string) => {
@@ -90,27 +221,50 @@ const PostCard = memo(function PostCard({
       onPress={onPress}
       activeOpacity={0.95}
     >
+      {/* Repost Indicator */}
+      {isRepost && (
+        <View style={styles.repostIndicator}>
+          <Ionicons name="repeat" size={16} color={theme.colors.textSecondary} />
+          <Text style={[styles.repostText, { color: theme.colors.textSecondary }]}>
+            REPOSTED
+          </Text>
+        </View>
+      )}
+
       {/* Header Section */}
       <View style={styles.header}>
         {/* Avatar */}
-        <View
-          style={[
-            styles.avatar,
-            { borderColor: theme.colors.border },
-          ]}
+        <TouchableOpacity
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onAuthorPress?.(post.author.id);
+          }}
         >
-          {post.author.avatar_url ? (
-            <Image
-              source={{ uri: post.author.avatar_url }}
-              style={styles.avatarImage}
-            />
-          ) : (
-            <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
-          )}
-        </View>
+          <View
+            style={[
+              styles.avatar,
+              { borderColor: theme.colors.border },
+            ]}
+          >
+            {post.author.avatar_url ? (
+              <Image
+                source={{ uri: post.author.avatar_url }}
+                style={styles.avatarImage}
+              />
+            ) : (
+              <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
+            )}
+          </View>
+        </TouchableOpacity>
 
         {/* Author Info */}
-        <View style={styles.authorInfo}>
+        <TouchableOpacity
+          style={styles.authorInfo}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onAuthorPress?.(post.author.id);
+          }}
+        >
           <Text style={[styles.authorName, { color: theme.colors.text }]}>
             {post.author.display_name}
           </Text>
@@ -122,7 +276,14 @@ const PostCard = memo(function PostCard({
           <Text style={[styles.timestamp, { color: theme.colors.textSecondary }]}>
             {formatTimeAgo(post.created_at)}
           </Text>
-        </View>
+        </TouchableOpacity>
+
+        {/* Save Button */}
+        <PostSaveButton 
+          postId={post.id} 
+          initialIsSaved={isSaved}
+          size={22}
+        />
 
         {/* More Options Button */}
         <TouchableOpacity
@@ -153,8 +314,31 @@ const PostCard = memo(function PostCard({
         )}
       </View>
 
-      {/* Media Section */}
-      {post.image_url && (
+      {/* Reposted Original Post (Quote Repost - Twitter style) */}
+      {isRepost && (
+        <>
+          {console.log('✅ Rendering RepostedPostCard for:', post.reposted_from?.author?.display_name)}
+          <RepostedPostCard
+            post={post.reposted_from!}
+            onPress={() => {
+              // Navigate to the original post detail
+              if (post.reposted_from_id) {
+                // TODO: Navigate to post detail screen
+                console.log('🔗 Navigating to original post:', post.reposted_from_id);
+                // navigation.navigate('PostDetail', { postId: post.reposted_from_id });
+              }
+            }}
+            onAuthorPress={(authorId) => {
+              // Navigate to author's profile
+              console.log('🔗 Navigating to author profile:', authorId);
+              onAuthorPress?.(authorId);
+            }}
+          />
+        </>
+      )}
+
+      {/* Media Section (only if NOT a repost with original post data) */}
+      {post.image_url && !isRepost && (
         <View style={styles.mediaSection}>
           <TouchableOpacity
             activeOpacity={0.9}
@@ -179,61 +363,188 @@ const PostCard = memo(function PostCard({
         />
       )}
 
-      {/* Engagement Section */}
+      {/* Engagement Section - LinkedIn Style */}
       <View
         style={[
           styles.engagementSection,
           { borderTopColor: theme.colors.border },
         ]}
       >
-        {/* Reactions Row */}
-        <View style={styles.reactionsRow}>
-          {(['support', 'love', 'fire', 'congrats'] as const).map((reactionType) => {
-            const count = post.reactions_count[reactionType];
-            const isActive = post.user_reaction === reactionType;
+        {/* Interaction Buttons Row */}
+        <View style={styles.interactionButtonsRow}>
+          {/* Like Button with Long-Press */}
+          <Pressable
+            style={[
+              styles.interactionButton,
+              post.user_reaction && {
+                backgroundColor: theme.isDark 
+                  ? 'rgba(220, 38, 38, 0.15)' 
+                  : 'rgba(220, 38, 38, 0.08)',
+              },
+            ]}
+            onPressIn={handleSupportPressIn}
+            onPressOut={handleSupportPressOut}
+            onPress={handleQuickSupport}
+          >
+            <Text style={styles.interactionIcon}>
+              {getCurrentReaction().emoji}
+            </Text>
+            <Text
+              style={[
+                styles.interactionLabel,
+                {
+                  color: post.user_reaction ? '#DC2626' : theme.colors.textSecondary,
+                  fontWeight: post.user_reaction ? '600' : '500',
+                },
+              ]}
+              numberOfLines={1}
+            >
+              {getCurrentReaction().label}
+            </Text>
+          </Pressable>
 
-            return (
-              <TouchableOpacity
-                key={reactionType}
-                style={[
-                  styles.reactionButton,
-                  isActive && {
-                    backgroundColor: theme.isDark 
-                      ? 'rgba(236, 72, 153, 0.2)' 
-                      : 'rgba(236, 72, 153, 0.1)',
-                  },
-                ]}
-                onPress={() => handleReactionPress(reactionType)}
-              >
-                <Text style={styles.reactionEmoji}>
-                  {REACTION_EMOJIS[reactionType]}
-                </Text>
-                <Text
+          {/* Comment Button */}
+          <TouchableOpacity
+            style={styles.interactionButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowCommentsModal(true);
+            }}
+          >
+            <Ionicons 
+              name="chatbubble-outline" 
+              size={18} 
+              color={theme.colors.textSecondary} 
+            />
+            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+              Comment
+            </Text>
+          </TouchableOpacity>
+
+          {/* Repost Button */}
+          <TouchableOpacity
+            style={[
+              styles.interactionButton,
+              post.user_reposted && {
+                backgroundColor: theme.isDark 
+                  ? 'rgba(34, 197, 94, 0.15)' 
+                  : 'rgba(34, 197, 94, 0.08)',
+              },
+            ]}
+            onPress={handleRepostPress}
+            disabled={isReposting}
+          >
+            {isReposting ? (
+              <ActivityIndicator size="small" color={post.user_reposted ? '#22C55E' : theme.colors.textSecondary} />
+            ) : (
+              <>
+                <Ionicons 
+                  name={post.user_reposted ? "repeat" : "repeat-outline"}
+                  size={18} 
+                  color={post.user_reposted ? '#22C55E' : theme.colors.textSecondary}
+                />
+                <Text 
                   style={[
-                    styles.reactionCount,
-                    {
-                      color: isActive ? theme.colors.primary : theme.colors.textSecondary,
-                    },
-                  ]}
+                    styles.interactionLabel, 
+                    { 
+                      color: post.user_reposted ? '#22C55E' : theme.colors.textSecondary,
+                      fontWeight: post.user_reposted ? '600' : '500',
+                    }
+                  ]} 
+                  numberOfLines={1}
                 >
-                  {count}
+                  {post.user_reposted ? 'Reposted' : 'Repost'}
                 </Text>
-              </TouchableOpacity>
-            );
-          })}
+              </>
+            )}
+          </TouchableOpacity>
+
+          {/* Share Button */}
+          <TouchableOpacity
+            style={styles.interactionButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onShare?.(post);
+            }}
+          >
+            <Ionicons 
+              name="arrow-redo-outline" 
+              size={18} 
+              color={theme.colors.textSecondary} 
+            />
+            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+              Share
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Comments Row */}
-        <TouchableOpacity
-          style={styles.commentsRow}
-          onPress={onCommentPress}
-        >
-          <Ionicons name="chatbubble-outline" size={18} color={theme.colors.textSecondary} />
-          <Text style={[styles.commentCount, { color: theme.colors.textSecondary }]}>
-            {post.comments_count} {post.comments_count === 1 ? 'comment' : 'comments'}
-          </Text>
-        </TouchableOpacity>
+        {/* Summary Line */}
+        {(totalReactions > 0 || post.comments_count > 0 || (post.shares_count && post.shares_count > 0)) && (
+          <TouchableOpacity 
+            style={styles.summaryLine}
+            onPress={() => {
+              if (post.comments_count > 0) {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setShowCommentsModal(true);
+              }
+            }}
+            activeOpacity={post.comments_count > 0 ? 0.7 : 1}
+          >
+            {totalReactions > 0 && (
+              <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
+                {post.user_reaction 
+                  ? `You and ${totalReactions - 1} other${totalReactions - 1 !== 1 ? 's' : ''} reacted`
+                  : `${totalReactions} reaction${totalReactions !== 1 ? 's' : ''}`
+                }
+              </Text>
+            )}
+            {totalReactions > 0 && (post.comments_count > 0 || (post.shares_count && post.shares_count > 0)) && (
+              <Text style={[styles.summaryDot, { color: theme.colors.textSecondary }]}> • </Text>
+            )}
+            {post.comments_count > 0 && (
+              <>
+                <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
+                  {post.comments_count} comment{post.comments_count !== 1 ? 's' : ''}
+                </Text>
+                {post.shares_count && post.shares_count > 0 && (
+                  <Text style={[styles.summaryDot, { color: theme.colors.textSecondary }]}> • </Text>
+                )}
+              </>
+            )}
+            {post.shares_count && post.shares_count > 0 && (
+              <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
+                {post.shares_count} repost{post.shares_count !== 1 ? 's' : ''}
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
+
+      {/* Reaction Picker Modal */}
+      <ReactionPicker
+        visible={showReactionPicker}
+        onSelect={handleReactionSelect}
+        onDismiss={() => setShowReactionPicker(false)}
+      />
+
+      {/* Comments Modal */}
+      <CommentsModal
+        visible={showCommentsModal}
+        post={post}
+        onClose={() => setShowCommentsModal(false)}
+      />
+
+      {/* Repost Modal */}
+      <RepostModal
+        visible={showRepostModal}
+        post={post}
+        onClose={() => setShowRepostModal(false)}
+        onQuickRepost={handleQuickRepost}
+        onRepostWithComment={handleRepostWithComment}
+        onUnrepost={handleUnrepost}
+        isReposting={isReposting}
+        isReposted={post.user_reposted || false}
+      />
 
       {/* Post Actions Modal */}
       <PostActionsModal
@@ -325,6 +636,17 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
   },
+  repostIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  repostText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -392,33 +714,44 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     paddingTop: 12,
   },
-  reactionsRow: {
+  interactionButtonsRow: {
     flexDirection: 'row',
-    gap: 16,
+    justifyContent: 'space-between',
     marginBottom: 8,
+    paddingHorizontal: 4,
   },
-  reactionButton: {
+  interactionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'center',
+    gap: 4,
     paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 20,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    flex: 1,
+    marginHorizontal: 2,
   },
-  reactionEmoji: {
+  interactionIcon: {
     fontSize: 18,
   },
-  reactionCount: {
-    fontSize: 14,
+  interactionLabel: {
+    fontSize: 12,
     fontWeight: '500',
   },
-  commentsRow: {
+  summaryLine: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+    marginTop: 8,
   },
-  commentCount: {
-    fontSize: 14,
+  summaryText: {
+    fontSize: 13,
+    fontWeight: '400',
+  },
+  summaryDot: {
+    fontSize: 13,
     fontWeight: '400',
   },
 });

@@ -37,6 +37,7 @@ import ChangePasswordScreen from './src/screens/ChangePasswordScreen';
 import NotificationSettingsScreen from './src/screens/NotificationSettingsScreen';
 import NotificationPreferencesScreen from './src/screens/NotificationPreferencesScreen';
 import NotificationInboxScreen from './src/screens/NotificationInboxScreen';
+import NotificationsScreen from './src/screens/NotificationsScreen';
 import ThemeSettingsScreen from './src/screens/ThemeSettingsScreen';
 import HelpSupportScreen from './src/screens/HelpSupportScreen';
 import AboutScreen from './src/screens/AboutScreen';
@@ -74,12 +75,15 @@ import BrandingCustomizationScreen from './src/screens/BrandingCustomizationScre
 import TracksListScreen from './src/screens/TracksListScreen';
 import FollowersListScreen from './src/screens/FollowersListScreen';
 import FollowingListScreen from './src/screens/FollowingListScreen';
+import AlbumDetailsScreen from './src/screens/AlbumDetailsScreen';
+import SavedPostsScreen from './src/screens/SavedPostsScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { AudioPlayerProvider } from './src/contexts/AudioPlayerContext';
 import { ThemeProvider } from './src/contexts/ThemeContext';
 import { CollaborationProvider } from './src/contexts/CollaborationContext';
+import { ToastProvider } from './src/contexts/ToastContext';
 
 // Import components
 import MiniPlayer from './src/components/MiniPlayer';
@@ -349,6 +353,11 @@ function AppNavigator() {
           navigationRef.current.navigate('TrackDetails', { trackId: segments[1] });
         }
         break;
+      case 'album':
+        if (segments[1]) {
+          navigationRef.current.navigate('AlbumDetails', { albumId: segments[1] });
+        }
+        break;
       case 'creator':
         if (segments[1]) {
           navigationRef.current.navigate('CreatorProfile', { creatorId: segments[1] });
@@ -467,6 +476,7 @@ function AppNavigator() {
             <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
             <Stack.Screen name="NotificationPreferences" component={NotificationPreferencesScreen} />
             <Stack.Screen name="NotificationInbox" component={NotificationInboxScreen} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} />
             <Stack.Screen name="Messages" component={MessagesScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
             <Stack.Screen name="Search" component={SearchScreen} />
@@ -497,6 +507,8 @@ function AppNavigator() {
             <Stack.Screen name="CreatePlaylist" component={CreatePlaylistScreen} />
             <Stack.Screen name="TrackDetails" component={TrackDetailsScreen} />
             <Stack.Screen name="PlaylistDetails" component={PlaylistDetailsScreen} />
+            <Stack.Screen name="AlbumDetails" component={AlbumDetailsScreen} />
+            <Stack.Screen name="SavedPosts" component={SavedPostsScreen} options={{ headerShown: false }} />
             <Stack.Screen name="OfflineDownloads" component={OfflineDownloadScreen} />
             <Stack.Screen name="AvailabilityCalendar" component={AvailabilityCalendarScreen} />
             <Stack.Screen name="CollaborationRequests" component={CollaborationRequestsScreen} />
@@ -592,7 +604,9 @@ export default function App() {
           <AuthProvider>
             <CollaborationProvider>
               <AudioPlayerProvider>
-                {renderWithStripe()}
+                <ToastProvider>
+                  {renderWithStripe()}
+                </ToastProvider>
               </AudioPlayerProvider>
             </CollaborationProvider>
           </AuthProvider>

@@ -32,6 +32,7 @@ export interface Database {
           total_likes: number | null
           total_events: number | null
           last_active: string | null
+          expo_push_token: string | null
           created_at: string
           updated_at: string | null
         }
@@ -109,6 +110,17 @@ export interface Database {
           lyrics: string | null
           lyrics_language: string | null
           has_lyrics: boolean | null
+          // Moderation fields
+          moderation_status: 'pending_check' | 'checking' | 'clean' | 'flagged' | 'approved' | 'rejected' | 'appealed'
+          moderation_flagged: boolean | null
+          flag_reasons: string[] | null
+          moderation_confidence: number | null
+          transcription: string | null
+          moderation_checked_at: string | null
+          reviewed_by: string | null
+          reviewed_at: string | null
+          file_hash: string | null
+          appeal_text: string | null
           created_at: string
           updated_at: string | null
           deleted_at: string | null

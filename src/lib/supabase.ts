@@ -1630,12 +1630,16 @@ export const dbHelpers = {
           track:audio_tracks!playlist_tracks_track_id_fkey(
             id,
             title,
-            artist_name,
-            duration,
-            cover_art_url,
+            description,
+            audio_url,
             file_url,
+            cover_art_url,
+            artwork_url,
+            duration,
+            play_count,
             likes_count,
-            plays_count,
+            genre,
+            created_at,
             creator:profiles!audio_tracks_creator_id_fkey(
               id,
               username,
@@ -2369,5 +2373,599 @@ export const dbHelpers = {
       .subscribe();
 
     return subscription;
+  },
+
+  // =========================================
+  // 🎵 ALBUMS MANAGEMENT (Phase 2)
+  // =========================================
+
+  // Create a new album (draft by default)
+  async createAlbum(albumData: {
+    creator_id: string;
+    title: string;
+    description?: string;
+    cover_image_url?: string;
+    release_date?: string;
+    genre?: string;
+    is_public?: boolean;
+    status?: 'draft' | 'scheduled' | 'published';
+  }) {
+    try {
+      console.log('🎵 Creating album:', albumData.title);
+      
+      const { data, error } = await supabase
+        .from('albums')
+        .insert({
+          creator_id: albumData.creator_id,
+          title: albumData.title,
+          description: albumData.description || null,
+          cover_image_url: albumData.cover_image_url || null,
+          release_date: albumData.release_date || null,
+          genre: albumData.genre || null,
+          is_public: albumData.is_public !== false, // default true
+          status: albumData.status || 'draft', // default draft
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      console.log('✅ Album created:', data.id);
+      return { data, error: null };
+    } catch (error) {
+      console.error('❌ Error creating album:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Update album details
+  async updateAlbum(albumId: string, updates: {
+    title?: string;
+    description?: string;
+    cover_image_url?: string;
+    release_date?: string;
+    genre?: string;
+    is_public?: boolean;
+    status?: 'draft' | 'scheduled' | 'published';
+  }) {
+    try {
+      console.log('🎵 Updating album:', albumId);
+      
+      const { data, error } = await supabase
+        .from('albums')
+        .update(updates)
+        .eq('id', albumId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      console.log('✅ Album updated:', data.id);
+      return { data, error: null };
+    } catch (error) {
+      console.error('❌ Error updating album:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Publish an album (change status to 'published')
+  async publishAlbum(albumId: string) {
+    try {
+      console.log('🎵 Publishing album:', albumId);
+      
+      const { data, error } = await supabase
+        .from('albums')
+        .update({ 
+          status: 'published',
+          published_at: new Date().toISOString(),
+        })
+        .eq('id', albumId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      console.log('✅ Album published:', data.id);
+      return { data, error: null };
+    } catch (error) {
+      console.error('❌ Error publishing album:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Delete an album
+  async deleteAlbum(albumId: string) {
+    try {
+      console.log('🎵 Deleting album:', albumId);
+      
+      // Note: Tracks are not deleted, only the album and album_tracks entries
+      const { error } = await supabase
+        .from('albums')
+        .delete()
+        .eq('id', albumId);
+
+      if (error) throw error;
+      
+      console.log('✅ Album deleted');
+      return { data: null, error: null };
+    } catch (error) {
+      console.error('❌ Error deleting album:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Get album by ID with tracks
+  async getAlbumById(albumId: string) {
+    try {
+      console.log('🎵 Fetching album:', albumId);
+      
+      // Get album details
+      const { data: album, error: albumError } = await supabase
+        .from('albums')
+        .select(`
+          id,
+          title,
+          description,
+          cover_image_url,
+          release_date,
+          status,
+          genre,
+          is_public,
+          tracks_count,
+          total_duration,
+          total_plays,
+          total_likes,
+          created_at,
+          updated_at,
+          published_at,
+          creator:profiles!albums_creator_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url,
+            role
+          )
+        `)
+        .eq('id', albumId)
+        .single();
+
+      if (albumError) throw albumError;
+      
+      // Get album tracks
+      const { data: albumTracks, error: tracksError } = await supabase
+        .from('album_tracks')
+        .select(`
+          track_number,
+          added_at,
+          track:audio_tracks!album_tracks_track_id_fkey(
+            id,
+            title,
+            duration,
+            cover_image_url,
+            cover_art_url,
+            artwork_url,
+            genre,
+            is_public,
+            plays_count,
+            likes_count,
+            created_at,
+            creator:profiles!audio_tracks_creator_id_fkey(
+              id,
+              username,
+              display_name,
+              avatar_url
+            )
+          )
+        `)
+        .eq('album_id', albumId)
+        .order('track_number', { ascending: true });
+
+      if (tracksError) throw tracksError;
+      
+      // Combine data
+      const result = {
+        ...album,
+        tracks: albumTracks?.map(at => ({
+          ...at.track,
+          track_number: at.track_number,
+          added_at: at.added_at,
+        })) || [],
+      };
+      
+      console.log('✅ Album fetched with', result.tracks.length, 'tracks');
+      return { data: result, error: null };
+    } catch (error) {
+      console.error('❌ Error fetching album:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Get albums by creator
+  async getAlbumsByCreator(creatorId: string, includeStatus?: 'draft' | 'scheduled' | 'published') {
+    try {
+      console.log('🎵 Fetching albums for creator:', creatorId);
+      
+      let query = supabase
+        .from('albums')
+        .select(`
+          id,
+          title,
+          description,
+          cover_image_url,
+          release_date,
+          status,
+          genre,
+          is_public,
+          tracks_count,
+          total_duration,
+          total_plays,
+          total_likes,
+          created_at,
+          updated_at,
+          published_at
+        `)
+        .eq('creator_id', creatorId)
+        .order('created_at', { ascending: false });
+
+      // Filter by status if specified
+      if (includeStatus) {
+        query = query.eq('status', includeStatus);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+      
+      console.log('✅ Fetched', data?.length || 0, 'albums for creator');
+      return { data, error: null };
+    } catch (error) {
+      console.error('❌ Error fetching creator albums:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Get public published albums (for Discover screen)
+  async getPublicAlbums(limit = 20) {
+    try {
+      console.log('🎵 Fetching public albums...');
+      
+      const { data, error } = await supabase
+        .from('albums')
+        .select(`
+          id,
+          title,
+          description,
+          cover_image_url,
+          release_date,
+          genre,
+          tracks_count,
+          total_duration,
+          total_plays,
+          total_likes,
+          created_at,
+          published_at,
+          creator:profiles!albums_creator_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url
+          )
+        `)
+        .eq('is_public', true)
+        .eq('status', 'published')
+        .order('published_at', { ascending: false })
+        .limit(limit);
+
+      if (error) throw error;
+      
+      console.log('✅ Fetched', data?.length || 0, 'public albums');
+      return { data, error: null };
+    } catch (error) {
+      console.error('❌ Error fetching public albums:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Get albums with stats (for Discover featured section)
+  async getAlbumsWithStats(limit = 20) {
+    try {
+      console.log('🎵 Fetching albums with stats...');
+      
+      const { data, error } = await supabase
+        .from('albums')
+        .select(`
+          id,
+          title,
+          description,
+          cover_image_url,
+          release_date,
+          genre,
+          tracks_count,
+          total_duration,
+          total_plays,
+          total_likes,
+          created_at,
+          published_at,
+          creator:profiles!albums_creator_id_fkey(
+            id,
+            username,
+            display_name,
+            avatar_url,
+            role
+          )
+        `)
+        .eq('is_public', true)
+        .eq('status', 'published')
+        .order('total_plays', { ascending: false })
+        .limit(limit);
+
+      if (error) throw error;
+      
+      console.log('✅ Fetched', data?.length || 0, 'albums with stats');
+      return { data, error: null };
+    } catch (error) {
+      console.error('❌ Error fetching albums with stats:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Add track to album
+  async addTrackToAlbum(albumId: string, trackId: string, trackNumber: number) {
+    try {
+      console.log('🎵 Adding track to album:', { albumId, trackId, trackNumber });
+      
+      const { data, error } = await supabase
+        .from('album_tracks')
+        .insert({
+          album_id: albumId,
+          track_id: trackId,
+          track_number: trackNumber,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      console.log('✅ Track added to album');
+      return { data, error: null };
+    } catch (error) {
+      console.error('❌ Error adding track to album:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Remove track from album
+  async removeTrackFromAlbum(albumId: string, trackId: string) {
+    try {
+      console.log('🎵 Removing track from album:', { albumId, trackId });
+      
+      const { error } = await supabase
+        .from('album_tracks')
+        .delete()
+        .eq('album_id', albumId)
+        .eq('track_id', trackId);
+
+      if (error) throw error;
+      
+      console.log('✅ Track removed from album');
+      return { data: null, error: null };
+    } catch (error) {
+      console.error('❌ Error removing track from album:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Reorder album tracks
+  async reorderAlbumTracks(albumId: string, newOrder: { trackId: string; trackNumber: number }[]) {
+    try {
+      console.log('🎵 Reordering album tracks:', albumId);
+      
+      // Update each track's position
+      const updates = newOrder.map(({ trackId, trackNumber }) =>
+        supabase
+          .from('album_tracks')
+          .update({ track_number: trackNumber })
+          .eq('album_id', albumId)
+          .eq('track_id', trackId)
+      );
+
+      // Execute all updates
+      const results = await Promise.all(updates);
+      
+      // Check for errors
+      const errors = results.filter(r => r.error);
+      if (errors.length > 0) {
+        throw new Error(`Failed to reorder ${errors.length} tracks`);
+      }
+      
+      console.log('✅ Album tracks reordered');
+      return { data: null, error: null };
+    } catch (error) {
+      console.error('❌ Error reordering album tracks:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Get album tracks
+  async getAlbumTracks(albumId: string) {
+    try {
+      console.log('🎵 Fetching album tracks:', albumId);
+      
+      const { data, error } = await supabase
+        .from('album_tracks')
+        .select(`
+          track_number,
+          added_at,
+          track:audio_tracks!album_tracks_track_id_fkey(
+            id,
+            title,
+            duration,
+            cover_image_url,
+            cover_art_url,
+            artwork_url,
+            genre,
+            is_public,
+            plays_count,
+            likes_count,
+            created_at,
+            creator:profiles!audio_tracks_creator_id_fkey(
+              id,
+              username,
+              display_name,
+              avatar_url
+            )
+          )
+        `)
+        .eq('album_id', albumId)
+        .order('track_number', { ascending: true });
+
+      if (error) throw error;
+      
+      console.log('✅ Fetched', data?.length || 0, 'album tracks');
+      return { data, error: null };
+    } catch (error) {
+      console.error('❌ Error fetching album tracks:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Check album limits for user based on tier
+  async checkAlbumLimit(userId: string) {
+    try {
+      console.log('🎵 Checking album limit for user:', userId);
+      
+      // Get user's subscription tier
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('subscription_tier')
+        .eq('id', userId)
+        .single();
+
+      if (profileError) throw profileError;
+      
+      const tier = profile.subscription_tier || 'free';
+      
+      // Define tier limits
+      const limits = {
+        free: 0,
+        premium: 2,
+        unlimited: -1, // unlimited
+      };
+      
+      const limit = limits[tier as keyof typeof limits] || 0;
+      
+      // Count published albums only (drafts don't count)
+      const { count, error: countError } = await supabase
+        .from('albums')
+        .select('*', { count: 'exact', head: true })
+        .eq('creator_id', userId)
+        .eq('status', 'published');
+
+      if (countError) throw countError;
+      
+      const current = count || 0;
+      const canCreate = limit === -1 || current < limit;
+      
+      console.log('✅ Album limit check:', { tier, limit, current, canCreate });
+      return { 
+        data: { canCreate, limit, current, tier }, 
+        error: null 
+      };
+    } catch (error) {
+      console.error('❌ Error checking album limit:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Check track limit for album based on tier
+  async checkTrackLimitForAlbum(albumId: string, userId: string) {
+    try {
+      console.log('🎵 Checking track limit for album:', albumId);
+      
+      // Get user's subscription tier
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('subscription_tier')
+        .eq('id', userId)
+        .single();
+
+      if (profileError) throw profileError;
+      
+      const tier = profile.subscription_tier || 'free';
+      
+      // Define tier limits for tracks per album
+      const limits = {
+        free: 0, // Free users can't create albums
+        premium: 7,
+        unlimited: -1, // unlimited
+      };
+      
+      const limit = limits[tier as keyof typeof limits] || 0;
+      
+      // Count current tracks in album
+      const { count, error: countError } = await supabase
+        .from('album_tracks')
+        .select('*', { count: 'exact', head: true })
+        .eq('album_id', albumId);
+
+      if (countError) throw countError;
+      
+      const current = count || 0;
+      const canAdd = limit === -1 || current < limit;
+      
+      console.log('✅ Track limit check:', { tier, limit, current, canAdd });
+      return { 
+        data: { canAdd, limit, current, tier }, 
+        error: null 
+      };
+    } catch (error) {
+      console.error('❌ Error checking track limit:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Increment album plays
+  async incrementAlbumPlays(albumId: string) {
+    try {
+      const { error } = await supabase.rpc('increment_album_plays', {
+        p_album_id: albumId,
+      });
+
+      if (error) {
+        // Fallback to manual increment if RPC doesn't exist
+        const { error: updateError } = await supabase
+          .from('albums')
+          .update({ total_plays: supabase.sql`total_plays + 1` })
+          .eq('id', albumId);
+        
+        if (updateError) throw updateError;
+      }
+      
+      return { data: null, error: null };
+    } catch (error) {
+      console.error('❌ Error incrementing album plays:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Get album statistics
+  async getAlbumStats(albumId: string) {
+    try {
+      console.log('🎵 Fetching album stats:', albumId);
+      
+      const { data, error } = await supabase
+        .from('albums')
+        .select('total_plays, total_likes, tracks_count, total_duration')
+        .eq('id', albumId)
+        .single();
+
+      if (error) throw error;
+      
+      console.log('✅ Album stats fetched');
+      return { data, error: null };
+    } catch (error) {
+      console.error('❌ Error fetching album stats:', error);
+      return { data: null, error };
+    }
   },
 };
