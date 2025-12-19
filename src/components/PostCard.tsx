@@ -320,7 +320,19 @@ const PostCard = memo(function PostCard({
           {console.log('✅ Rendering RepostedPostCard for:', post.reposted_from?.author?.display_name)}
           <RepostedPostCard
             post={post.reposted_from!}
-            onPress={() => onPress?.()}
+            onPress={() => {
+              // Navigate to the original post detail
+              if (post.reposted_from_id) {
+                // TODO: Navigate to post detail screen
+                console.log('🔗 Navigating to original post:', post.reposted_from_id);
+                // navigation.navigate('PostDetail', { postId: post.reposted_from_id });
+              }
+            }}
+            onAuthorPress={(authorId) => {
+              // Navigate to author's profile
+              console.log('🔗 Navigating to author profile:', authorId);
+              onAuthorPress?.(authorId);
+            }}
           />
         </>
       )}

@@ -8,6 +8,7 @@ import { formatTimeAgo } from '../utils/timeAgo';
 interface RepostedPostCardProps {
   post: Post;
   onPress?: () => void;
+  onAuthorPress?: (authorId: string) => void;
 }
 
 /**
@@ -17,8 +18,15 @@ interface RepostedPostCardProps {
 export const RepostedPostCard = memo(function RepostedPostCard({
   post,
   onPress,
+  onAuthorPress,
 }: RepostedPostCardProps) {
   const { theme } = useTheme();
+
+  const handleAuthorPress = () => {
+    if (onAuthorPress && post.author?.id) {
+      onAuthorPress(post.author.id);
+    }
+  };
 
   return (
     <TouchableOpacity
@@ -33,7 +41,11 @@ export const RepostedPostCard = memo(function RepostedPostCard({
       activeOpacity={0.8}
     >
       {/* Author Info */}
-      <View style={styles.header}>
+      <TouchableOpacity 
+        style={styles.header}
+        onPress={handleAuthorPress}
+        activeOpacity={0.7}
+      >
         <View style={[styles.avatar, { borderColor: theme.colors.border }]}>
           {post.author.avatar_url ? (
             <Image
@@ -52,7 +64,7 @@ export const RepostedPostCard = memo(function RepostedPostCard({
             {formatTimeAgo(post.created_at)}
           </Text>
         </View>
-      </View>
+      </TouchableOpacity>
 
       {/* Content */}
       <Text
