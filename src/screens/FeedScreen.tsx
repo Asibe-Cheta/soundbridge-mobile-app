@@ -146,7 +146,7 @@ export default function FeedScreen() {
         
         // Refresh feed to show updated state
         console.log('🔄 Refreshing feed after unrepost...');
-        await loadFeed();
+        await refresh();
         
         Alert.alert('Success', '✅ Repost removed successfully!');
       } else {
@@ -162,7 +162,7 @@ export default function FeedScreen() {
         
         // Refresh feed to show new repost at top
         console.log('🔄 Refreshing feed after repost...');
-        await loadFeed();
+        await refresh();
         
         Alert.alert('Success', '✅ Post reposted successfully!');
       }
