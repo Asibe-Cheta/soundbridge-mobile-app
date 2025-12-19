@@ -158,7 +158,7 @@ export class FeedService {
       // NOTE: posts table doesn't have image_url/audio_url - those are in attachments table
       const { data: postsData, error: postsError } = await supabase
         .from('posts')
-        .select('id, user_id, content, post_type, visibility, event_id, created_at, updated_at')
+        .select('id, user_id, content, post_type, visibility, event_id, created_at, updated_at, reposted_from_id')
         .is('deleted_at', null) // CRITICAL: Filter soft-deleted posts
         .eq('visibility', 'public') // CRITICAL: Only public posts
         .order('created_at', { ascending: false })
@@ -178,7 +178,7 @@ export class FeedService {
 
       // Step 2: Get author information separately (to avoid RLS join issues)
       const userIds = [...new Set(postsData.map(p => p.user_id))];
-      const { data: authorsData, error: authorsError } = await supabase
+      const { data: authorsData, error: authorsError} = await supabase
         .from('profiles')
         .select('id, username, display_name, avatar_url, role')
         .in('id', userIds);
@@ -193,6 +193,53 @@ export class FeedService {
       authorsData?.forEach(author => {
         authorsMap.set(author.id, author);
       });
+
+      // Step 2.5: Get reposted_from posts (for quote reposts)
+      const repostedFromIds = postsData
+        .filter(p => p.reposted_from_id)
+        .map(p => p.reposted_from_id)
+        .filter((id): id is string => id !== null);
+
+      console.log(`🔍 Found ${repostedFromIds.length} reposts, fetching original posts...`);
+
+      let repostedPostsMap = new Map();
+      if (repostedFromIds.length > 0) {
+        const { data: repostedPostsData, error: repostedError } = await supabase
+          .from('posts')
+          .select('id, user_id, content, created_at, visibility')
+          .in('id', repostedFromIds);
+
+        if (repostedError) {
+          console.warn('⚠️ Could not fetch reposted posts:', repostedError);
+        } else if (repostedPostsData) {
+          console.log(`✅ Fetched ${repostedPostsData.length} original posts for reposts`);
+          
+          // Get authors for reposted posts
+          const repostedUserIds = [...new Set(repostedPostsData.map(p => p.user_id))];
+          const { data: repostedAuthorsData } = await supabase
+            .from('profiles')
+            .select('id, username, display_name, avatar_url')
+            .in('id', repostedUserIds);
+
+          const repostedAuthorsMap = new Map();
+          repostedAuthorsData?.forEach(author => {
+            repostedAuthorsMap.set(author.id, author);
+          });
+
+          // Build reposted posts map with author data
+          repostedPostsData.forEach(repostedPost => {
+            repostedPostsMap.set(repostedPost.id, {
+              ...repostedPost,
+              author: repostedAuthorsMap.get(repostedPost.user_id) || {
+                id: repostedPost.user_id,
+                username: 'unknown',
+                display_name: 'Unknown User',
+                avatar_url: null,
+              },
+            });
+          });
+        }
+      }
 
       // Step 3: Get attachments for posts (images and audio)
       const postIds = postsData.map(p => p.id);
@@ -280,6 +327,9 @@ export class FeedService {
         };
 
         const attachments = attachmentsMap.get(post.id) || {};
+        const repostedFrom = post.reposted_from_id ? repostedPostsMap.get(post.reposted_from_id) : null;
+
+        console.log(`📦 Post ${post.id}: reposted_from_id=${post.reposted_from_id}, has reposted_from=${!!repostedFrom}`);
 
         return {
           id: post.id,
@@ -301,6 +351,8 @@ export class FeedService {
           user_reaction: userReactionsMap.get(post.id) || null,
           created_at: post.created_at,
           updated_at: post.updated_at || post.created_at,
+          reposted_from_id: post.reposted_from_id || undefined,
+          reposted_from: repostedFrom || undefined,
         };
       });
 
