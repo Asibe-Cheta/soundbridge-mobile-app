@@ -83,6 +83,7 @@ import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { AudioPlayerProvider } from './src/contexts/AudioPlayerContext';
 import { ThemeProvider } from './src/contexts/ThemeContext';
 import { CollaborationProvider } from './src/contexts/CollaborationContext';
+import { ToastProvider } from './src/contexts/ToastContext';
 
 // Import components
 import MiniPlayer from './src/components/MiniPlayer';
@@ -603,7 +604,9 @@ export default function App() {
           <AuthProvider>
             <CollaborationProvider>
               <AudioPlayerProvider>
-                {renderWithStripe()}
+                <ToastProvider>
+                  {renderWithStripe()}
+                </ToastProvider>
               </AudioPlayerProvider>
             </CollaborationProvider>
           </AuthProvider>

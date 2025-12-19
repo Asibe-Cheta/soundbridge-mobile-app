@@ -24,11 +24,13 @@ import { deepLinkingService } from '../services/DeepLinkingService';
 import { socialService } from '../services/api/socialService';
 import { imageSaveService } from '../services/ImageSaveService';
 import { Alert } from 'react-native';
+import { useToast } from '../contexts/ToastContext';
 
 export default function FeedScreen() {
   const navigation = useNavigation();
   const { theme } = useTheme();
   const { user } = useAuth();
+  const { showToast } = useToast();
   const {
     posts,
     loading,
@@ -148,7 +150,7 @@ export default function FeedScreen() {
         console.log('🔄 Refreshing feed after unrepost...');
         await refresh();
         
-        Alert.alert('Success', '✅ Repost removed successfully!');
+        showToast('Repost removed successfully', 'success');
       } else {
         // Determine if this is a quick repost or repost with comment
         console.log('📤 Reposting post:', post.id, 'with comment:', withComment);
@@ -164,13 +166,13 @@ export default function FeedScreen() {
         console.log('🔄 Refreshing feed after repost...');
         await refresh();
         
-        Alert.alert('Success', '✅ Post reposted successfully!');
+        showToast('Your post was sent', 'success');
       }
     } catch (error: any) {
       console.error('❌ Failed to repost/unrepost:', error);
-      Alert.alert(
-        'Error',
-        error.message || 'Failed to complete action. Please try again.'
+      showToast(
+        error.message || 'Failed to complete action. Please try again.',
+        'error'
       );
     }
   };

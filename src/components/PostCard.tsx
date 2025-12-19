@@ -15,6 +15,7 @@ import PostSaveButton from './PostSaveButton';
 import { ReactionPicker } from './ReactionPicker';
 import CommentsModal from '../modals/CommentsModal';
 import { RepostModal } from './RepostModal';
+import { RepostedPostCard } from './RepostedPostCard';
 
 interface PostCardProps {
   post: Post;
@@ -302,8 +303,16 @@ const PostCard = memo(function PostCard({
         )}
       </View>
 
-      {/* Media Section */}
-      {post.image_url && (
+      {/* Reposted Original Post (Quote Repost - Twitter style) */}
+      {post.reposted_from_id && post.reposted_from && (
+        <RepostedPostCard
+          post={post.reposted_from}
+          onPress={() => onPress?.()}
+        />
+      )}
+
+      {/* Media Section (only if NOT a repost, or if repost has its own media) */}
+      {post.image_url && !post.reposted_from_id && (
         <View style={styles.mediaSection}>
           <TouchableOpacity
             activeOpacity={0.9}
