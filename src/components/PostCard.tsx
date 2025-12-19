@@ -138,6 +138,17 @@ const PostCard = memo(function PostCard({
     post.reactions_count.fire +
     post.reactions_count.congrats;
 
+  // Debug logging for repost detection
+  console.log('🔍 PostCard Debug:', {
+    postId: post.id,
+    hasRepostedFromId: !!post.reposted_from_id,
+    hasRepostedFrom: !!post.reposted_from,
+    repostedFromId: post.reposted_from_id,
+    content: post.content?.substring(0, 30) + '...',
+  });
+
+  const isRepost = post.reposted_from_id && post.reposted_from;
+
   // Handle repost with toggle behavior
   const handleRepostPress = () => {
     if (post.user_reposted) {
@@ -211,11 +222,11 @@ const PostCard = memo(function PostCard({
       activeOpacity={0.95}
     >
       {/* Repost Indicator */}
-      {post.reposted_from_id && (
+      {isRepost && (
         <View style={styles.repostIndicator}>
-          <Ionicons name="repeat" size={14} color={theme.colors.textSecondary} />
+          <Ionicons name="repeat" size={16} color={theme.colors.textSecondary} />
           <Text style={[styles.repostText, { color: theme.colors.textSecondary }]}>
-            {post.author.display_name} reposted
+            REPOSTED
           </Text>
         </View>
       )}
@@ -304,15 +315,18 @@ const PostCard = memo(function PostCard({
       </View>
 
       {/* Reposted Original Post (Quote Repost - Twitter style) */}
-      {post.reposted_from_id && post.reposted_from && (
-        <RepostedPostCard
-          post={post.reposted_from}
-          onPress={() => onPress?.()}
-        />
+      {isRepost && (
+        <>
+          {console.log('✅ Rendering RepostedPostCard for:', post.reposted_from?.author?.display_name)}
+          <RepostedPostCard
+            post={post.reposted_from!}
+            onPress={() => onPress?.()}
+          />
+        </>
       )}
 
-      {/* Media Section (only if NOT a repost, or if repost has its own media) */}
-      {post.image_url && !post.reposted_from_id && (
+      {/* Media Section (only if NOT a repost with original post data) */}
+      {post.image_url && !isRepost && (
         <View style={styles.mediaSection}>
           <TouchableOpacity
             activeOpacity={0.9}
@@ -613,15 +627,13 @@ const styles = StyleSheet.create({
   repostIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     marginBottom: 12,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
   repostText: {
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.8,
   },
   header: {
     flexDirection: 'row',
