@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { ActivityIndicator } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import type { Post } from '../types/feed.types';
@@ -13,6 +14,7 @@ import PostAudioPlayer from './PostAudioPlayer';
 import PostSaveButton from './PostSaveButton';
 import { ReactionPicker } from './ReactionPicker';
 import { CommentsModal } from './CommentsModal';
+import { RepostModal } from './RepostModal';
 
 interface PostCardProps {
   post: Post;
@@ -28,6 +30,7 @@ interface PostCardProps {
   onBlocked?: () => void;
   onReported?: () => void;
   onAuthorPress?: (authorId: string) => void;
+  onRepost?: (post: Post) => void;
   isSaved?: boolean;
 }
 
@@ -72,6 +75,7 @@ const PostCard = memo(function PostCard({
   onBlocked,
   onReported,
   onAuthorPress,
+  onRepost,
   isSaved = false,
 }: PostCardProps) {
   const { theme } = useTheme();
@@ -81,6 +85,8 @@ const PostCard = memo(function PostCard({
   const [showReportModal, setShowReportModal] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [showCommentsModal, setShowCommentsModal] = useState(false);
+  const [showRepostModal, setShowRepostModal] = useState(false);
+  const [isReposting, setIsReposting] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const handleReactionPress = (reactionType: 'support' | 'love' | 'fire' | 'congrats') => {
@@ -131,6 +137,31 @@ const PostCard = memo(function PostCard({
     post.reactions_count.fire +
     post.reactions_count.congrats;
 
+  // Handle repost
+  const handleQuickRepost = async () => {
+    setIsReposting(true);
+    try {
+      await onRepost?.(post);
+      setShowRepostModal(false);
+    } catch (error) {
+      console.error('Error reposting:', error);
+    } finally {
+      setIsReposting(false);
+    }
+  };
+
+  const handleRepostWithComment = async (comment: string) => {
+    setIsReposting(true);
+    try {
+      await onRepost?.({ ...post, content: comment } as Post);
+      setShowRepostModal(false);
+    } catch (error) {
+      console.error('Error reposting with comment:', error);
+    } finally {
+      setIsReposting(false);
+    }
+  };
+
   const formatTimeAgo = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
@@ -154,6 +185,16 @@ const PostCard = memo(function PostCard({
       onPress={onPress}
       activeOpacity={0.95}
     >
+      {/* Repost Indicator */}
+      {post.reposted_from_id && (
+        <View style={styles.repostIndicator}>
+          <Ionicons name="repeat" size={14} color={theme.colors.textSecondary} />
+          <Text style={[styles.repostText, { color: theme.colors.textSecondary }]}>
+            {post.author.display_name} reposted
+          </Text>
+        </View>
+      )}
+
       {/* Header Section */}
       <View style={styles.header}>
         {/* Avatar */}
@@ -326,17 +367,24 @@ const PostCard = memo(function PostCard({
             style={styles.interactionButton}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              // TODO: Implement repost functionality
+              setShowRepostModal(true);
             }}
+            disabled={isReposting}
           >
-            <Ionicons 
-              name="repeat-outline" 
-              size={18} 
-              color={theme.colors.textSecondary} 
-            />
-            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-              Repost
-            </Text>
+            {isReposting ? (
+              <ActivityIndicator size="small" color={theme.colors.textSecondary} />
+            ) : (
+              <>
+                <Ionicons 
+                  name="repeat-outline" 
+                  size={18} 
+                  color={theme.colors.textSecondary} 
+                />
+                <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                  Repost
+                </Text>
+              </>
+            )}
           </TouchableOpacity>
 
           {/* Share Button */}
@@ -359,7 +407,7 @@ const PostCard = memo(function PostCard({
         </View>
 
         {/* Summary Line */}
-        {(totalReactions > 0 || post.comments_count > 0) && (
+        {(totalReactions > 0 || post.comments_count > 0 || (post.shares_count && post.shares_count > 0)) && (
           <TouchableOpacity 
             style={styles.summaryLine}
             onPress={() => {
@@ -378,12 +426,22 @@ const PostCard = memo(function PostCard({
                 }
               </Text>
             )}
-            {totalReactions > 0 && post.comments_count > 0 && (
+            {totalReactions > 0 && (post.comments_count > 0 || (post.shares_count && post.shares_count > 0)) && (
               <Text style={[styles.summaryDot, { color: theme.colors.textSecondary }]}> • </Text>
             )}
             {post.comments_count > 0 && (
+              <>
+                <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
+                  {post.comments_count} comment{post.comments_count !== 1 ? 's' : ''}
+                </Text>
+                {post.shares_count && post.shares_count > 0 && (
+                  <Text style={[styles.summaryDot, { color: theme.colors.textSecondary }]}> • </Text>
+                )}
+              </>
+            )}
+            {post.shares_count && post.shares_count > 0 && (
               <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
-                {post.comments_count} comment{post.comments_count !== 1 ? 's' : ''}
+                {post.shares_count} repost{post.shares_count !== 1 ? 's' : ''}
               </Text>
             )}
           </TouchableOpacity>
@@ -402,6 +460,16 @@ const PostCard = memo(function PostCard({
         visible={showCommentsModal}
         postId={post.id}
         onClose={() => setShowCommentsModal(false)}
+      />
+
+      {/* Repost Modal */}
+      <RepostModal
+        visible={showRepostModal}
+        post={post}
+        onClose={() => setShowRepostModal(false)}
+        onQuickRepost={handleQuickRepost}
+        onRepostWithComment={handleRepostWithComment}
+        isReposting={isReposting}
       />
 
       {/* Post Actions Modal */}
@@ -493,6 +561,19 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 3,
+  },
+  repostIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  repostText: {
+    fontSize: 13,
+    fontWeight: '500',
   },
   header: {
     flexDirection: 'row',

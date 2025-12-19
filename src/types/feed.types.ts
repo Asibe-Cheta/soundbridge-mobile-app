@@ -26,7 +26,10 @@ export interface Post {
     congrats: number;
   };
   comments_count: number;
+  shares_count?: number; // Total reposts/shares count
   user_reaction?: 'support' | 'love' | 'fire' | 'congrats' | null;
+  reposted_from_id?: string; // UUID of original post if this is a repost
+  reposted_from?: Post; // Original post data (if loaded)
   created_at: string;
   updated_at: string;
 }
@@ -49,5 +52,28 @@ export interface CreatePostDto {
   // Note: image_url and audio_url are NOT accepted in post creation
   // Attachments are uploaded separately using /api/posts/upload-image or /api/posts/upload-audio
   event_id?: string;
+}
+
+export interface RepostRequest {
+  with_comment: boolean;
+  comment?: string; // Required if with_comment is true, max 500 chars
+}
+
+export interface RepostResponse {
+  success: boolean;
+  data?: {
+    id: string;
+    content: string;
+    user_id: string;
+    created_at: string;
+    reposted_from_id: string;
+    author: {
+      id: string;
+      name: string;
+      username: string;
+    };
+  };
+  error?: string;
+  details?: string;
 }
 

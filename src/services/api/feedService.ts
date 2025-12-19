@@ -606,6 +606,45 @@ export class FeedService {
   }
 
   /**
+   * Repost a post
+   */
+  async repost(postId: string, withComment: boolean = false, comment?: string): Promise<any> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Not authenticated');
+      }
+
+      // Validate comment if with_comment is true
+      if (withComment) {
+        if (!comment || comment.trim().length === 0) {
+          throw new Error('Comment is required when reposting with thoughts');
+        }
+        if (comment.length > 500) {
+          throw new Error('Comment must be 500 characters or less');
+        }
+      }
+
+      const response = await apiFetch(
+        `/api/posts/${postId}/repost`,
+        {
+          method: 'POST',
+          session,
+          body: JSON.stringify({
+            with_comment: withComment,
+            ...(withComment && comment && { comment: comment.trim() }),
+          }),
+        }
+      );
+
+      return response;
+    } catch (error: any) {
+      console.error('FeedService.repost:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get post comments
    */
   async getComments(postId: string, page: number = 1, limit: number = 20): Promise<{

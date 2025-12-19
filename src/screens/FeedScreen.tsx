@@ -136,6 +136,31 @@ export default function FeedScreen() {
     }
   };
 
+  const handleRepost = async (post: Post) => {
+    try {
+      // Determine if this is a quick repost or repost with comment
+      // based on whether the content matches the original
+      const isRepostWithComment = post.content !== post.content; // Will be updated by modal
+      
+      await feedService.repost(
+        post.reposted_from_id || post.id, // Repost from original if already a repost
+        isRepostWithComment,
+        isRepostWithComment ? post.content : undefined
+      );
+      
+      // Refresh feed to show new repost
+      await refresh();
+      
+      Alert.alert('Success', 'Post reposted successfully!');
+    } catch (error: any) {
+      console.error('Failed to repost:', error);
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to repost. Please try again.'
+      );
+    }
+  };
+
   const handleSavePost = async (postId: string) => {
     try {
       const { data, error } = await socialService.toggleBookmark({
@@ -226,6 +251,7 @@ export default function FeedScreen() {
                   onUnsave={handleUnsavePost}
                   onSaveImage={handleSaveImage}
                   onAuthorPress={handleAuthorPress}
+                  onRepost={handleRepost}
                   onBlocked={async () => {
                     // Refresh feed to remove blocked user's posts
                     await refresh();
