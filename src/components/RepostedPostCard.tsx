@@ -72,19 +72,23 @@ export const RepostedPostCard = memo(function RepostedPostCard({
       )}
 
       {/* Interaction Summary (minimal) */}
-      {(post.reactions_count.support > 0 || post.comments_count > 0) && (
-        <View style={styles.statsRow}>
-          {post.reactions_count.support > 0 && (
-            <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
-              {Object.values(post.reactions_count).reduce((sum, count) => sum + count, 0)} reactions
-            </Text>
+      {post.reactions_count && post.comments_count !== undefined && (
+        <>
+          {(Object.values(post.reactions_count || {}).reduce((sum: number, count: number) => sum + count, 0) > 0 || (post.comments_count || 0) > 0) && (
+            <View style={styles.statsRow}>
+              {Object.values(post.reactions_count || {}).reduce((sum: number, count: number) => sum + count, 0) > 0 && (
+                <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
+                  {Object.values(post.reactions_count).reduce((sum, count) => sum + count, 0)} reactions
+                </Text>
+              )}
+              {(post.comments_count || 0) > 0 && (
+                <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
+                  {post.comments_count} comments
+                </Text>
+              )}
+            </View>
           )}
-          {post.comments_count > 0 && (
-            <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
-              {post.comments_count} comments
-            </Text>
-          )}
-        </View>
+        </>
       )}
     </TouchableOpacity>
   );
