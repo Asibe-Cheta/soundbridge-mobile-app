@@ -12,6 +12,7 @@ import ReportContentModal from '../modals/ReportContentModal';
 import PostAudioPlayer from './PostAudioPlayer';
 import PostSaveButton from './PostSaveButton';
 import { ReactionPicker } from './ReactionPicker';
+import { CommentsModal } from './CommentsModal';
 
 interface PostCardProps {
   post: Post;
@@ -34,7 +35,7 @@ const REACTION_TYPES = {
   support: {
     id: 'support' as const,
     emoji: '👍',
-    label: 'Support',
+    label: 'Like',
     color: '#DC2626',
   },
   love: {
@@ -79,6 +80,7 @@ const PostCard = memo(function PostCard({
   const [showBlockModal, setShowBlockModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const [showCommentsModal, setShowCommentsModal] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const handleReactionPress = (reactionType: 'support' | 'love' | 'fire' | 'congrats') => {
@@ -119,7 +121,7 @@ const PostCard = memo(function PostCard({
     if (post.user_reaction) {
       return REACTION_TYPES[post.user_reaction];
     }
-    return { emoji: '👍', label: 'Support', color: theme.colors.textSecondary };
+    return { emoji: '👍', label: 'Like', color: theme.colors.textSecondary };
   };
 
   // Calculate total reactions
@@ -270,7 +272,7 @@ const PostCard = memo(function PostCard({
       >
         {/* Interaction Buttons Row */}
         <View style={styles.interactionButtonsRow}>
-          {/* Support/Like Button with Long-Press */}
+          {/* Like Button with Long-Press */}
           <Pressable
             style={[
               styles.interactionButton,
@@ -295,6 +297,7 @@ const PostCard = memo(function PostCard({
                   fontWeight: post.user_reaction ? '600' : '500',
                 },
               ]}
+              numberOfLines={1}
             >
               {getCurrentReaction().label}
             </Text>
@@ -303,34 +306,35 @@ const PostCard = memo(function PostCard({
           {/* Comment Button */}
           <TouchableOpacity
             style={styles.interactionButton}
-            onPress={onCommentPress}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowCommentsModal(true);
+            }}
           >
             <Ionicons 
               name="chatbubble-outline" 
-              size={20} 
+              size={18} 
               color={theme.colors.textSecondary} 
             />
-            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]}>
+            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]} numberOfLines={1}>
               Comment
             </Text>
           </TouchableOpacity>
 
-          {/* Repost Button (Placeholder) */}
+          {/* Repost Button */}
           <TouchableOpacity
             style={styles.interactionButton}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               // TODO: Implement repost functionality
             }}
-            disabled
-            opacity={0.5}
           >
             <Ionicons 
               name="repeat-outline" 
-              size={20} 
+              size={18} 
               color={theme.colors.textSecondary} 
             />
-            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]}>
+            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]} numberOfLines={1}>
               Repost
             </Text>
           </TouchableOpacity>
@@ -345,10 +349,10 @@ const PostCard = memo(function PostCard({
           >
             <Ionicons 
               name="arrow-redo-outline" 
-              size={20} 
+              size={18} 
               color={theme.colors.textSecondary} 
             />
-            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]}>
+            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]} numberOfLines={1}>
               Share
             </Text>
           </TouchableOpacity>
@@ -356,7 +360,16 @@ const PostCard = memo(function PostCard({
 
         {/* Summary Line */}
         {(totalReactions > 0 || post.comments_count > 0) && (
-          <View style={styles.summaryLine}>
+          <TouchableOpacity 
+            style={styles.summaryLine}
+            onPress={() => {
+              if (post.comments_count > 0) {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setShowCommentsModal(true);
+              }
+            }}
+            activeOpacity={post.comments_count > 0 ? 0.7 : 1}
+          >
             {totalReactions > 0 && (
               <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
                 {post.user_reaction 
@@ -373,7 +386,7 @@ const PostCard = memo(function PostCard({
                 {post.comments_count} comment{post.comments_count !== 1 ? 's' : ''}
               </Text>
             )}
-          </View>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -382,6 +395,13 @@ const PostCard = memo(function PostCard({
         visible={showReactionPicker}
         onSelect={handleReactionSelect}
         onDismiss={() => setShowReactionPicker(false)}
+      />
+
+      {/* Comments Modal */}
+      <CommentsModal
+        visible={showCommentsModal}
+        postId={post.id}
+        onClose={() => setShowCommentsModal(false)}
       />
 
       {/* Post Actions Modal */}
@@ -543,24 +563,26 @@ const styles = StyleSheet.create({
   },
   interactionButtonsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
     marginBottom: 8,
+    paddingHorizontal: 4,
   },
   interactionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    minWidth: 70,
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    flex: 1,
+    marginHorizontal: 2,
   },
   interactionIcon: {
-    fontSize: 20,
+    fontSize: 18,
   },
   interactionLabel: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '500',
   },
   summaryLine: {
