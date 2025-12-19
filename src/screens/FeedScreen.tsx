@@ -136,35 +136,38 @@ export default function FeedScreen() {
     }
   };
 
-  const handleRepost = async (post: Post) => {
+  const handleRepost = async (post: Post, withComment?: boolean, comment?: string) => {
     try {
       // Check if user has already reposted (toggle behavior)
       if (post.user_reposted) {
         // Un-repost
+        console.log('🗑️ Un-reposting post:', post.id);
         await feedService.unrepost(post.reposted_from_id || post.id);
         
         // Refresh feed to show updated state
-        await refresh();
+        console.log('🔄 Refreshing feed after unrepost...');
+        await loadFeed();
         
-        Alert.alert('Success', 'Repost removed successfully!');
+        Alert.alert('Success', '✅ Repost removed successfully!');
       } else {
         // Determine if this is a quick repost or repost with comment
-        // based on whether the content matches the original
-        const isRepostWithComment = post.content !== post.content; // Will be updated by modal
-        
-        await feedService.repost(
+        console.log('📤 Reposting post:', post.id, 'with comment:', withComment);
+        const result = await feedService.repost(
           post.reposted_from_id || post.id, // Repost from original if already a repost
-          isRepostWithComment,
-          isRepostWithComment ? post.content : undefined
+          withComment || false,
+          comment
         );
         
-        // Refresh feed to show new repost
-        await refresh();
+        console.log('✅ Repost created:', result);
         
-        Alert.alert('Success', 'Post reposted successfully!');
+        // Refresh feed to show new repost at top
+        console.log('🔄 Refreshing feed after repost...');
+        await loadFeed();
+        
+        Alert.alert('Success', '✅ Post reposted successfully!');
       }
     } catch (error: any) {
-      console.error('Failed to repost/unrepost:', error);
+      console.error('❌ Failed to repost/unrepost:', error);
       Alert.alert(
         'Error',
         error.message || 'Failed to complete action. Please try again.'

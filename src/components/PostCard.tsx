@@ -13,7 +13,7 @@ import ReportContentModal from '../modals/ReportContentModal';
 import PostAudioPlayer from './PostAudioPlayer';
 import PostSaveButton from './PostSaveButton';
 import { ReactionPicker } from './ReactionPicker';
-import { CommentsModal } from './CommentsModal';
+import CommentsModal from '../modals/CommentsModal';
 import { RepostModal } from './RepostModal';
 
 interface PostCardProps {
@@ -30,7 +30,7 @@ interface PostCardProps {
   onBlocked?: () => void;
   onReported?: () => void;
   onAuthorPress?: (authorId: string) => void;
-  onRepost?: (post: Post) => void;
+  onRepost?: (post: Post, withComment?: boolean, comment?: string) => void;
   isSaved?: boolean;
 }
 
@@ -153,7 +153,7 @@ const PostCard = memo(function PostCard({
   const handleQuickRepost = async () => {
     setIsReposting(true);
     try {
-      await onRepost?.(post);
+      await onRepost?.(post, false); // Quick repost without comment
       setShowRepostModal(false);
     } catch (error) {
       console.error('Error reposting:', error);
@@ -165,7 +165,7 @@ const PostCard = memo(function PostCard({
   const handleRepostWithComment = async (comment: string) => {
     setIsReposting(true);
     try {
-      await onRepost?.({ ...post, content: comment } as Post);
+      await onRepost?.(post, true, comment); // Repost with comment
       setShowRepostModal(false);
     } catch (error) {
       console.error('Error reposting with comment:', error);
@@ -177,7 +177,7 @@ const PostCard = memo(function PostCard({
   const handleUnrepost = async () => {
     setIsReposting(true);
     try {
-      await onRepost?.(post); // onRepost will handle toggle logic
+      await onRepost?.(post); // onRepost will handle toggle logic (no withComment param)
       setShowRepostModal(false);
     } catch (error) {
       console.error('Error unreposting:', error);
@@ -495,7 +495,7 @@ const PostCard = memo(function PostCard({
       {/* Comments Modal */}
       <CommentsModal
         visible={showCommentsModal}
-        postId={post.id}
+        post={post}
         onClose={() => setShowCommentsModal(false)}
       />
 
