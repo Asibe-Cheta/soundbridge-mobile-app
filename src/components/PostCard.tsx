@@ -1,5 +1,5 @@
-import React, { memo, useCallback, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import React, { memo, useCallback, useState, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -11,6 +11,7 @@ import BlockUserModal from '../modals/BlockUserModal';
 import ReportContentModal from '../modals/ReportContentModal';
 import PostAudioPlayer from './PostAudioPlayer';
 import PostSaveButton from './PostSaveButton';
+import { ReactionPicker } from './ReactionPicker';
 
 interface PostCardProps {
   post: Post;
@@ -29,18 +30,31 @@ interface PostCardProps {
   isSaved?: boolean;
 }
 
-const REACTION_ICONS = {
-  support: 'hand-left',
-  love: 'heart',
-  fire: 'flame',
-  congrats: 'trophy',
-} as const;
-
-const REACTION_EMOJIS = {
-  support: '👏',
-  love: '❤️',
-  fire: '🔥',
-  congrats: '🎉',
+const REACTION_TYPES = {
+  support: {
+    id: 'support' as const,
+    emoji: '👍',
+    label: 'Support',
+    color: '#DC2626',
+  },
+  love: {
+    id: 'love' as const,
+    emoji: '❤️',
+    label: 'Love',
+    color: '#EC4899',
+  },
+  fire: {
+    id: 'fire' as const,
+    emoji: '🔥',
+    label: 'Fire',
+    color: '#F5A623',
+  },
+  congrats: {
+    id: 'congrats' as const,
+    emoji: '👏',
+    label: 'Congrats',
+    color: '#7B68EE',
+  },
 } as const;
 
 const PostCard = memo(function PostCard({
@@ -64,11 +78,56 @@ const PostCard = memo(function PostCard({
   const [showFullScreenImage, setShowFullScreenImage] = useState(false);
   const [showBlockModal, setShowBlockModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const handleReactionPress = (reactionType: 'support' | 'love' | 'fire' | 'congrats') => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onReactionPress?.(reactionType);
   };
+
+  // Long-press detection for Support button
+  const handleSupportPressIn = () => {
+    longPressTimer.current = setTimeout(() => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setShowReactionPicker(true);
+    }, 500); // 500ms hold
+  };
+
+  const handleSupportPressOut = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  // Quick Support reaction (single tap)
+  const handleQuickSupport = () => {
+    if (!showReactionPicker) {
+      handleReactionPress('support');
+    }
+  };
+
+  // Handle reaction selection from picker
+  const handleReactionSelect = (reactionType: 'support' | 'love' | 'fire' | 'congrats') => {
+    setShowReactionPicker(false);
+    handleReactionPress(reactionType);
+  };
+
+  // Get current reaction display
+  const getCurrentReaction = () => {
+    if (post.user_reaction) {
+      return REACTION_TYPES[post.user_reaction];
+    }
+    return { emoji: '👍', label: 'Support', color: theme.colors.textSecondary };
+  };
+
+  // Calculate total reactions
+  const totalReactions = 
+    post.reactions_count.support +
+    post.reactions_count.love +
+    post.reactions_count.fire +
+    post.reactions_count.congrats;
 
   const formatTimeAgo = (dateString: string) => {
     const date = new Date(dateString);
@@ -202,61 +261,128 @@ const PostCard = memo(function PostCard({
         />
       )}
 
-      {/* Engagement Section */}
+      {/* Engagement Section - LinkedIn Style */}
       <View
         style={[
           styles.engagementSection,
           { borderTopColor: theme.colors.border },
         ]}
       >
-        {/* Reactions Row */}
-        <View style={styles.reactionsRow}>
-          {(['support', 'love', 'fire', 'congrats'] as const).map((reactionType) => {
-            const count = post.reactions_count[reactionType];
-            const isActive = post.user_reaction === reactionType;
+        {/* Interaction Buttons Row */}
+        <View style={styles.interactionButtonsRow}>
+          {/* Support/Like Button with Long-Press */}
+          <Pressable
+            style={[
+              styles.interactionButton,
+              post.user_reaction && {
+                backgroundColor: theme.isDark 
+                  ? 'rgba(220, 38, 38, 0.15)' 
+                  : 'rgba(220, 38, 38, 0.08)',
+              },
+            ]}
+            onPressIn={handleSupportPressIn}
+            onPressOut={handleSupportPressOut}
+            onPress={handleQuickSupport}
+          >
+            <Text style={styles.interactionIcon}>
+              {getCurrentReaction().emoji}
+            </Text>
+            <Text
+              style={[
+                styles.interactionLabel,
+                {
+                  color: post.user_reaction ? '#DC2626' : theme.colors.textSecondary,
+                  fontWeight: post.user_reaction ? '600' : '500',
+                },
+              ]}
+            >
+              {getCurrentReaction().label}
+            </Text>
+          </Pressable>
 
-            return (
-              <TouchableOpacity
-                key={reactionType}
-                style={[
-                  styles.reactionButton,
-                  isActive && {
-                    backgroundColor: theme.isDark 
-                      ? 'rgba(236, 72, 153, 0.2)' 
-                      : 'rgba(236, 72, 153, 0.1)',
-                  },
-                ]}
-                onPress={() => handleReactionPress(reactionType)}
-              >
-                <Text style={styles.reactionEmoji}>
-                  {REACTION_EMOJIS[reactionType]}
-                </Text>
-                <Text
-                  style={[
-                    styles.reactionCount,
-                    {
-                      color: isActive ? theme.colors.primary : theme.colors.textSecondary,
-                    },
-                  ]}
-                >
-                  {count}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+          {/* Comment Button */}
+          <TouchableOpacity
+            style={styles.interactionButton}
+            onPress={onCommentPress}
+          >
+            <Ionicons 
+              name="chatbubble-outline" 
+              size={20} 
+              color={theme.colors.textSecondary} 
+            />
+            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]}>
+              Comment
+            </Text>
+          </TouchableOpacity>
+
+          {/* Repost Button (Placeholder) */}
+          <TouchableOpacity
+            style={styles.interactionButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              // TODO: Implement repost functionality
+            }}
+            disabled
+            opacity={0.5}
+          >
+            <Ionicons 
+              name="repeat-outline" 
+              size={20} 
+              color={theme.colors.textSecondary} 
+            />
+            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]}>
+              Repost
+            </Text>
+          </TouchableOpacity>
+
+          {/* Share Button */}
+          <TouchableOpacity
+            style={styles.interactionButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onShare?.(post);
+            }}
+          >
+            <Ionicons 
+              name="arrow-redo-outline" 
+              size={20} 
+              color={theme.colors.textSecondary} 
+            />
+            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]}>
+              Share
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Comments Row */}
-        <TouchableOpacity
-          style={styles.commentsRow}
-          onPress={onCommentPress}
-        >
-          <Ionicons name="chatbubble-outline" size={18} color={theme.colors.textSecondary} />
-          <Text style={[styles.commentCount, { color: theme.colors.textSecondary }]}>
-            {post.comments_count} {post.comments_count === 1 ? 'comment' : 'comments'}
-          </Text>
-        </TouchableOpacity>
+        {/* Summary Line */}
+        {(totalReactions > 0 || post.comments_count > 0) && (
+          <View style={styles.summaryLine}>
+            {totalReactions > 0 && (
+              <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
+                {post.user_reaction 
+                  ? `You and ${totalReactions - 1} other${totalReactions - 1 !== 1 ? 's' : ''} reacted`
+                  : `${totalReactions} reaction${totalReactions !== 1 ? 's' : ''}`
+                }
+              </Text>
+            )}
+            {totalReactions > 0 && post.comments_count > 0 && (
+              <Text style={[styles.summaryDot, { color: theme.colors.textSecondary }]}> • </Text>
+            )}
+            {post.comments_count > 0 && (
+              <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
+                {post.comments_count} comment{post.comments_count !== 1 ? 's' : ''}
+              </Text>
+            )}
+          </View>
+        )}
       </View>
+
+      {/* Reaction Picker Modal */}
+      <ReactionPicker
+        visible={showReactionPicker}
+        onSelect={handleReactionSelect}
+        onDismiss={() => setShowReactionPicker(false)}
+      />
 
       {/* Post Actions Modal */}
       <PostActionsModal
@@ -415,33 +541,42 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     paddingTop: 12,
   },
-  reactionsRow: {
+  interactionButtonsRow: {
     flexDirection: 'row',
-    gap: 16,
+    justifyContent: 'space-around',
     marginBottom: 8,
   },
-  reactionButton: {
+  interactionButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    minWidth: 70,
   },
-  reactionEmoji: {
-    fontSize: 18,
+  interactionIcon: {
+    fontSize: 20,
   },
-  reactionCount: {
+  interactionLabel: {
     fontSize: 14,
     fontWeight: '500',
   },
-  commentsRow: {
+  summaryLine: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+    marginTop: 8,
   },
-  commentCount: {
-    fontSize: 14,
+  summaryText: {
+    fontSize: 13,
+    fontWeight: '400',
+  },
+  summaryDot: {
+    fontSize: 13,
     fontWeight: '400',
   },
 });
