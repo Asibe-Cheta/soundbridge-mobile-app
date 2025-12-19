@@ -138,25 +138,36 @@ export default function FeedScreen() {
 
   const handleRepost = async (post: Post) => {
     try {
-      // Determine if this is a quick repost or repost with comment
-      // based on whether the content matches the original
-      const isRepostWithComment = post.content !== post.content; // Will be updated by modal
-      
-      await feedService.repost(
-        post.reposted_from_id || post.id, // Repost from original if already a repost
-        isRepostWithComment,
-        isRepostWithComment ? post.content : undefined
-      );
-      
-      // Refresh feed to show new repost
-      await refresh();
-      
-      Alert.alert('Success', 'Post reposted successfully!');
+      // Check if user has already reposted (toggle behavior)
+      if (post.user_reposted) {
+        // Un-repost
+        await feedService.unrepost(post.reposted_from_id || post.id);
+        
+        // Refresh feed to show updated state
+        await refresh();
+        
+        Alert.alert('Success', 'Repost removed successfully!');
+      } else {
+        // Determine if this is a quick repost or repost with comment
+        // based on whether the content matches the original
+        const isRepostWithComment = post.content !== post.content; // Will be updated by modal
+        
+        await feedService.repost(
+          post.reposted_from_id || post.id, // Repost from original if already a repost
+          isRepostWithComment,
+          isRepostWithComment ? post.content : undefined
+        );
+        
+        // Refresh feed to show new repost
+        await refresh();
+        
+        Alert.alert('Success', 'Post reposted successfully!');
+      }
     } catch (error: any) {
-      console.error('Failed to repost:', error);
+      console.error('Failed to repost/unrepost:', error);
       Alert.alert(
         'Error',
-        error.message || 'Failed to repost. Please try again.'
+        error.message || 'Failed to complete action. Please try again.'
       );
     }
   };

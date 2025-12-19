@@ -28,6 +28,8 @@ export interface Post {
   comments_count: number;
   shares_count?: number; // Total reposts/shares count
   user_reaction?: 'support' | 'love' | 'fire' | 'congrats' | null;
+  user_reposted?: boolean; // NEW: true if current user has reposted this post
+  user_repost_id?: string; // NEW: ID of user's repost post (for DELETE)
   reposted_from_id?: string; // UUID of original post if this is a repost
   reposted_from?: Post; // Original post data (if loaded)
   created_at: string;

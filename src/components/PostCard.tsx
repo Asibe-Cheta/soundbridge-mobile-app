@@ -137,7 +137,19 @@ const PostCard = memo(function PostCard({
     post.reactions_count.fire +
     post.reactions_count.congrats;
 
-  // Handle repost
+  // Handle repost with toggle behavior
+  const handleRepostPress = () => {
+    if (post.user_reposted) {
+      // User already reposted - show unrepost option
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setShowRepostModal(true);
+    } else {
+      // User hasn't reposted - show repost options
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setShowRepostModal(true);
+    }
+  };
+
   const handleQuickRepost = async () => {
     setIsReposting(true);
     try {
@@ -157,6 +169,18 @@ const PostCard = memo(function PostCard({
       setShowRepostModal(false);
     } catch (error) {
       console.error('Error reposting with comment:', error);
+    } finally {
+      setIsReposting(false);
+    }
+  };
+
+  const handleUnrepost = async () => {
+    setIsReposting(true);
+    try {
+      await onRepost?.(post); // onRepost will handle toggle logic
+      setShowRepostModal(false);
+    } catch (error) {
+      console.error('Error unreposting:', error);
     } finally {
       setIsReposting(false);
     }
@@ -364,24 +388,37 @@ const PostCard = memo(function PostCard({
 
           {/* Repost Button */}
           <TouchableOpacity
-            style={styles.interactionButton}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setShowRepostModal(true);
-            }}
+            style={[
+              styles.interactionButton,
+              post.user_reposted && {
+                backgroundColor: theme.isDark 
+                  ? 'rgba(34, 197, 94, 0.15)' 
+                  : 'rgba(34, 197, 94, 0.08)',
+              },
+            ]}
+            onPress={handleRepostPress}
             disabled={isReposting}
           >
             {isReposting ? (
-              <ActivityIndicator size="small" color={theme.colors.textSecondary} />
+              <ActivityIndicator size="small" color={post.user_reposted ? '#22C55E' : theme.colors.textSecondary} />
             ) : (
               <>
                 <Ionicons 
-                  name="repeat-outline" 
+                  name={post.user_reposted ? "repeat" : "repeat-outline"}
                   size={18} 
-                  color={theme.colors.textSecondary} 
+                  color={post.user_reposted ? '#22C55E' : theme.colors.textSecondary}
                 />
-                <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                  Repost
+                <Text 
+                  style={[
+                    styles.interactionLabel, 
+                    { 
+                      color: post.user_reposted ? '#22C55E' : theme.colors.textSecondary,
+                      fontWeight: post.user_reposted ? '600' : '500',
+                    }
+                  ]} 
+                  numberOfLines={1}
+                >
+                  {post.user_reposted ? 'Reposted' : 'Repost'}
                 </Text>
               </>
             )}
@@ -469,7 +506,9 @@ const PostCard = memo(function PostCard({
         onClose={() => setShowRepostModal(false)}
         onQuickRepost={handleQuickRepost}
         onRepostWithComment={handleRepostWithComment}
+        onUnrepost={handleUnrepost}
         isReposting={isReposting}
+        isReposted={post.user_reposted || false}
       />
 
       {/* Post Actions Modal */}

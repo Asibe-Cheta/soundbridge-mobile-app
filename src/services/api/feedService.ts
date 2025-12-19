@@ -606,7 +606,7 @@ export class FeedService {
   }
 
   /**
-   * Repost a post
+   * Repost a post (create repost)
    */
   async repost(postId: string, withComment: boolean = false, comment?: string): Promise<any> {
     try {
@@ -640,6 +640,43 @@ export class FeedService {
       return response;
     } catch (error: any) {
       console.error('FeedService.repost:', error);
+      
+      // Handle 409 Conflict (already reposted)
+      if (error.status === 409) {
+        throw new Error('You have already reposted this post');
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Remove repost (un-repost)
+   */
+  async unrepost(postId: string): Promise<any> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await apiFetch(
+        `/api/posts/${postId}/repost`,
+        {
+          method: 'DELETE',
+          session,
+        }
+      );
+
+      return response;
+    } catch (error: any) {
+      console.error('FeedService.unrepost:', error);
+      
+      // Handle 404 Not Found (not reposted)
+      if (error.status === 404) {
+        throw new Error('You have not reposted this post');
+      }
+      
       throw error;
     }
   }

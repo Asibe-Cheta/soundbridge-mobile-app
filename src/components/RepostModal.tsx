@@ -25,7 +25,9 @@ interface RepostModalProps {
   onClose: () => void;
   onQuickRepost: () => void;
   onRepostWithComment: (comment: string) => void;
+  onUnrepost: () => void;
   isReposting: boolean;
+  isReposted: boolean;
 }
 
 export const RepostModal: React.FC<RepostModalProps> = ({
@@ -34,7 +36,9 @@ export const RepostModal: React.FC<RepostModalProps> = ({
   onClose,
   onQuickRepost,
   onRepostWithComment,
+  onUnrepost,
   isReposting,
+  isReposted,
 }) => {
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -101,7 +105,7 @@ export const RepostModal: React.FC<RepostModalProps> = ({
                 <Ionicons name="close" size={28} color={theme.colors.text} />
               </TouchableOpacity>
               <Text style={[styles.title, { color: theme.colors.text }]}>
-                {showCommentInput ? 'Repost with your thoughts' : 'Repost'}
+                {showCommentInput ? 'Repost with your thoughts' : isReposted ? 'Undo Repost' : 'Repost'}
               </Text>
               <View style={styles.placeholder} />
             </View>
@@ -109,47 +113,74 @@ export const RepostModal: React.FC<RepostModalProps> = ({
             {!showCommentInput ? (
               /* Repost Options */
               <View style={styles.optionsContainer}>
-                {/* Quick Repost */}
-                <TouchableOpacity
-                  style={[styles.option, { borderBottomColor: theme.colors.border }]}
-                  onPress={handleQuickRepost}
-                  disabled={isReposting}
-                >
-                  <View style={styles.optionIcon}>
-                    <Ionicons name="repeat-outline" size={24} color={theme.colors.text} />
-                  </View>
-                  <View style={styles.optionText}>
-                    <Text style={[styles.optionTitle, { color: theme.colors.text }]}>
-                      Repost
-                    </Text>
-                    <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
-                      Share instantly to your feed
-                    </Text>
-                  </View>
-                  {isReposting && <ActivityIndicator size="small" color={theme.colors.primary} />}
-                </TouchableOpacity>
+                {isReposted ? (
+                  /* Undo Repost Option */
+                  <TouchableOpacity
+                    style={[styles.option, { borderBottomColor: theme.colors.border }]}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      onUnrepost();
+                    }}
+                    disabled={isReposting}
+                  >
+                    <View style={styles.optionIcon}>
+                      <Ionicons name="close-circle-outline" size={24} color="#EF4444" />
+                    </View>
+                    <View style={styles.optionText}>
+                      <Text style={[styles.optionTitle, { color: '#EF4444' }]}>
+                        Undo Repost
+                      </Text>
+                      <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
+                        Remove your repost from your feed
+                      </Text>
+                    </View>
+                    {isReposting && <ActivityIndicator size="small" color="#EF4444" />}
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    {/* Quick Repost */}
+                    <TouchableOpacity
+                      style={[styles.option, { borderBottomColor: theme.colors.border }]}
+                      onPress={handleQuickRepost}
+                      disabled={isReposting}
+                    >
+                      <View style={styles.optionIcon}>
+                        <Ionicons name="repeat-outline" size={24} color={theme.colors.text} />
+                      </View>
+                      <View style={styles.optionText}>
+                        <Text style={[styles.optionTitle, { color: theme.colors.text }]}>
+                          Repost
+                        </Text>
+                        <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
+                          Share instantly to your feed
+                        </Text>
+                      </View>
+                      {isReposting && <ActivityIndicator size="small" color={theme.colors.primary} />}
+                    </TouchableOpacity>
 
-                {/* Repost with Comment */}
-                <TouchableOpacity
-                  style={styles.option}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setShowCommentInput(true);
-                  }}
-                  disabled={isReposting}
-                >
-                  <View style={styles.optionIcon}>
-                    <Ionicons name="pencil-outline" size={24} color={theme.colors.text} />
-                  </View>
-                  <View style={styles.optionText}>
-                    <Text style={[styles.optionTitle, { color: theme.colors.text }]}>
-                      Repost with your thoughts
-                    </Text>
-                    <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
-                      Add a comment to this repost
-                    </Text>
-                  </View>
-                </TouchableOpacity>
+                    {/* Repost with Comment */}
+                    <TouchableOpacity
+                      style={styles.option}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        setShowCommentInput(true);
+                      }}
+                      disabled={isReposting}
+                    >
+                      <View style={styles.optionIcon}>
+                        <Ionicons name="pencil-outline" size={24} color={theme.colors.text} />
+                      </View>
+                      <View style={styles.optionText}>
+                        <Text style={[styles.optionTitle, { color: theme.colors.text }]}>
+                          Repost with your thoughts
+                        </Text>
+                        <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
+                          Add a comment to this repost
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  </>
+                )}
               </View>
             ) : (
               /* Comment Input */
