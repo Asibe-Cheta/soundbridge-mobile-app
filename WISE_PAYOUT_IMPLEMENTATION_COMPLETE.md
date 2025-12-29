@@ -474,29 +474,109 @@ WHERE created_at >= NOW() - INTERVAL '24 hours';
 
 ---
 
+## Backend Integration Status
+
+### ✅ Web Team Implementation (COMPLETE)
+
+The web team has successfully implemented and deployed the webhook integration:
+
+**Webhook Endpoint:**
+- URL: `https://www.soundbridge.live/wise-webhook`
+- Also available at: `https://www.soundbridge.live/api/webhooks/wise`
+- Status: ✅ Active and verified
+
+**Environment Variables (Configured in Vercel):**
+```bash
+WISE_API_TOKEN=9e0fac28-5fd2-419d-83fe-b647faf7a5c3
+WISE_PROFILE_ID=81429203
+WISE_ENVIRONMENT=live
+WISE_API_URL=https://api.wise.com
+WISE_WEBHOOK_SECRET=21e42673263a23ff40d5cc2be1c7d9bb58502549ba6846687dd6fca06e9b519
+WISE_WEBHOOK_SUBSCRIPTION_ID=60fe6c03-7cf8-4a95-8fa0-f1d936a765f0
+```
+
+**Implementation Details:**
+- ✅ Webhook signature verification (HMAC-SHA256)
+- ✅ Event handlers for `transfers#state-change` and `transfers#active-cases`
+- ✅ Automatic status updates in `wise_payouts` table
+- ✅ Status history tracking
+- ✅ Error handling and logging
+- ✅ Vercel redirect configuration updated
+- ✅ Middleware exclusion for webhook endpoint
+
+**See:** [WISE_WEBHOOK_INTEGRATION_FEEDBACK.md](WISE_WEBHOOK_INTEGRATION_FEEDBACK.md) for complete implementation details.
+
+---
+
+## Testing & Verification Scripts
+
+### 1. End-to-End Test Script
+**File:** [scripts/test-wise-payout-e2e.ts](scripts/test-wise-payout-e2e.ts)
+
+Tests the complete payout flow from mobile app → Wise → webhook → database.
+
+**Usage:**
+```bash
+npx ts-node scripts/test-wise-payout-e2e.ts
+```
+
+**What it tests:**
+- ✅ Create payout record
+- ✅ Initiate Wise transfer
+- ✅ Verify transfer in Wise API
+- ✅ Wait for webhook updates
+- ✅ Verify database updates
+- ✅ Validate status history
+
+### 2. Webhook Verification Script
+**File:** [scripts/verify-wise-webhook.js](scripts/verify-wise-webhook.js)
+
+Verifies that the webhook integration is working correctly.
+
+**Usage:**
+```bash
+node scripts/verify-wise-webhook.js
+```
+
+**What it checks:**
+- ✅ Environment variables are set
+- ✅ Webhook endpoint is accessible
+- ✅ Webhook subscription exists in Wise
+- ✅ Test notification can be sent
+- ✅ Webhook receives events
+
+### 3. Existing Scripts
+- `node scripts/list-wise-webhooks.js` - List all webhook subscriptions
+- `node scripts/test-wise-webhook.js <subscription-id>` - Send test notification
+- `node scripts/create-wise-webhook.js` - Create new webhook (if needed)
+
+---
+
 ## Next Steps
 
 ### For Mobile Team:
 1. ✅ **DONE** - Payout logic implemented
-2. Integrate payout functions into admin dashboard UI
-3. Add payout history screen for creators
-4. Test thoroughly in sandbox environment
-5. Monitor production payouts
+2. ✅ **DONE** - Testing scripts created
+3. **TODO** - Run end-to-end test: `npx ts-node scripts/test-wise-payout-e2e.ts`
+4. **TODO** - Integrate payout functions into admin dashboard UI
+5. **TODO** - Add payout history screen for creators
+6. **TODO** - Monitor production payouts
 
 ### For Backend Team:
-1. Implement admin API endpoints (see [WISE_ADMIN_PAYOUT_API_SPECIFICATION.md](WISE_ADMIN_PAYOUT_API_SPECIFICATION.md))
-2. Set up rate limiting
-3. Implement authentication middleware
-4. Create audit logs table
-5. Set up monitoring and alerts
-6. Test webhook integration
+1. ✅ **DONE** - Webhook endpoint implemented and deployed
+2. ✅ **DONE** - Environment variables configured
+3. ✅ **DONE** - Database schema updated
+4. **TODO** - Implement admin API endpoints (see [WISE_ADMIN_PAYOUT_API_SPECIFICATION.md](WISE_ADMIN_PAYOUT_API_SPECIFICATION.md))
+5. **TODO** - Set up rate limiting
+6. **TODO** - Create audit logs table
+7. **TODO** - Set up monitoring and alerts
 
 ### For Both Teams:
-1. Schedule monthly payout automation
-2. Create admin dashboard UI
-3. Set up error notification system
-4. Create payout approval workflow (optional)
-5. Document operational procedures
+1. **TODO** - Test end-to-end flow with real payout
+2. **TODO** - Schedule monthly payout automation
+3. **TODO** - Create admin dashboard UI
+4. **TODO** - Set up error notification system
+5. **TODO** - Create payout approval workflow (optional)
 
 ---
 
