@@ -445,9 +445,11 @@ GROUP BY error_code;
 
 -- Success rate (last 24 hours)
 SELECT
-  COUNT(*) FILTER (WHERE status = 'completed') * 100.0 / COUNT(*) as success_rate
+  COUNT(*) FILTER (WHERE status = 'completed') * 100.0 / NULLIF(COUNT(*), 0) as success_rate,
+  COUNT(*) as total_payouts
 FROM wise_payouts
-WHERE created_at >= NOW() - INTERVAL '24 hours';
+WHERE created_at >= NOW() - INTERVAL '24 hours'
+  AND deleted_at IS NULL;
 ```
 
 ---

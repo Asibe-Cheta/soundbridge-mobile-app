@@ -90,7 +90,7 @@ Create a dashboard showing:
 ```sql
 -- Success rate (last 24 hours)
 SELECT
-  COUNT(*) FILTER (WHERE status = 'completed') * 100.0 / COUNT(*) as success_rate,
+  COUNT(*) FILTER (WHERE status = 'completed') * 100.0 / NULLIF(COUNT(*), 0) as success_rate,
   COUNT(*) as total_payouts,
   COUNT(*) FILTER (WHERE status = 'completed') as completed,
   COUNT(*) FILTER (WHERE status = 'failed') as failed,

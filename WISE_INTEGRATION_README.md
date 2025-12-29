@@ -306,7 +306,8 @@ psql $DATABASE_URL -c "
 # Check today's success rate
 psql $DATABASE_URL -c "
   SELECT
-    COUNT(*) FILTER (WHERE status = 'completed') * 100.0 / COUNT(*) as success_rate
+    COUNT(*) FILTER (WHERE status = 'completed') * 100.0 / NULLIF(COUNT(*), 0) as success_rate,
+    COUNT(*) as total_payouts
   FROM wise_payouts
   WHERE DATE(created_at) = CURRENT_DATE;
 "
