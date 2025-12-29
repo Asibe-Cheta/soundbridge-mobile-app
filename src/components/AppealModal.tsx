@@ -14,7 +14,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
-import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://www.soundbridge.live';
 
 interface AppealModalProps {
   visible: boolean;
@@ -34,6 +36,7 @@ export default function AppealModal({
   onSuccess,
 }: AppealModalProps) {
   const { theme } = useTheme();
+  const { session } = useAuth();
   const [appealText, setAppealText] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -48,30 +51,38 @@ export default function AppealModal({
       return;
     }
 
+    if (appealText.trim().length > 500) {
+      Alert.alert('Appeal Too Long', 'Please limit your appeal to 500 characters.');
+      return;
+    }
+
+    if (!session?.access_token) {
+      Alert.alert('Authentication Required', 'Please log in to submit an appeal.');
+      return;
+    }
+
     try {
       setSubmitting(true);
 
-      // Update track with appeal
-      const { error } = await supabase
-        .from('audio_tracks')
-        .update({
-          moderation_status: 'appealed',
-          appeal_text: appealText.trim(),
-          appeal_status: 'pending',
-          appeal_submitted_at: new Date().toISOString(),
-        })
-        .eq('id', trackId);
+      // Use API endpoint instead of direct Supabase call
+      const response = await fetch(`${API_BASE_URL}/api/tracks/${trackId}/appeal`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          appealText: appealText.trim(),
+        }),
+      });
 
-      if (error) {
-        console.error('❌ Error submitting appeal:', error);
-        Alert.alert('Error', 'Failed to submit appeal. Please try again.');
-        return;
-      }
+      const data = await response.json();
 
+      if (response.ok && data.success) {
       console.log('✅ Appeal submitted successfully for track:', trackId);
       Alert.alert(
         'Appeal Submitted',
-        'Your appeal has been submitted successfully. Our team will review it and notify you of the decision.',
+          "We'll review your appeal within 24-48 hours. You'll receive a notification with our decision.",
         [
           {
             text: 'OK',
@@ -82,9 +93,13 @@ export default function AppealModal({
           },
         ]
       );
-    } catch (error) {
+      } else {
+        throw new Error(data.error || 'Failed to submit appeal');
+      }
+    } catch (error: any) {
       console.error('❌ Exception submitting appeal:', error);
-      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+      const errorMessage = error.message || 'An unexpected error occurred. Please try again.';
+      Alert.alert('Error', errorMessage);
     } finally {
       setSubmitting(false);
     }
@@ -199,18 +214,19 @@ export default function AppealModal({
                     borderColor: theme.colors.border,
                   },
                 ]}
-                placeholder="Explain your case here... (minimum 20 characters)"
+                placeholder="Explain your case here... (20-500 characters)"
                 placeholderTextColor={theme.colors.textSecondary}
                 multiline
                 numberOfLines={8}
-                maxLength={1000}
+                maxLength={500}
                 value={appealText}
                 onChangeText={setAppealText}
                 editable={!submitting}
                 textAlignVertical="top"
               />
               <Text style={[styles.characterCount, { color: theme.colors.textSecondary }]}>
-                {appealText.length}/1000 characters
+                {appealText.length}/500 characters
+                {appealText.length < 20 && ` (${20 - appealText.length} more needed)`}
               </Text>
             </View>
 

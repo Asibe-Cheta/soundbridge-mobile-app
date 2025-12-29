@@ -2,6 +2,7 @@ import React, { memo, useCallback, useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ActivityIndicator } from 'react-native';
+import { walkthroughable } from 'react-native-copilot';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import type { Post } from '../types/feed.types';
@@ -16,6 +17,9 @@ import { ReactionPicker } from './ReactionPicker';
 import CommentsModal from '../modals/CommentsModal';
 import { RepostModal } from './RepostModal';
 import { RepostedPostCard } from './RepostedPostCard';
+
+// Create walkthroughable component for tour
+const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
 
 interface PostCardProps {
   post: Post;
@@ -32,6 +36,7 @@ interface PostCardProps {
   onReported?: () => void;
   onAuthorPress?: (authorId: string) => void;
   onRepost?: (post: Post, withComment?: boolean, comment?: string) => void;
+  onTip?: (authorId: string, authorName: string) => void;
   isSaved?: boolean;
 }
 
@@ -77,6 +82,7 @@ const PostCard = memo(function PostCard({
   onReported,
   onAuthorPress,
   onRepost,
+  onTip,
   isSaved = false,
 }: PostCardProps) {
   const { theme } = useTheme();
@@ -209,6 +215,39 @@ const PostCard = memo(function PostCard({
     return `${Math.floor(diffInSeconds / 86400)}d ago`;
   };
 
+  const getPostTypeLabel = (type: string): string => {
+    const labels: Record<string, string> = {
+      opportunity: 'Opportunity',
+      achievement: 'Achievement',
+      collaboration: 'Collaboration',
+      event: 'Event',
+      update: 'Update',
+    };
+    return labels[type] || type;
+  };
+
+  const getPostTypeIcon = (type: string): any => {
+    const icons: Record<string, any> = {
+      opportunity: 'briefcase',
+      achievement: 'trophy',
+      collaboration: 'people',
+      event: 'calendar',
+      update: 'chatbubble',
+    };
+    return icons[type] || 'chatbubble';
+  };
+
+  const getPostTypeColor = (type: string): string => {
+    const colors: Record<string, string> = {
+      opportunity: '#10B981', // Green
+      achievement: '#F59E0B', // Amber/Gold
+      collaboration: '#8B5CF6', // Purple
+      event: '#3B82F6', // Blue
+      update: '#6B7280', // Gray
+    };
+    return colors[type] || '#6B7280';
+  };
+
   return (
     <TouchableOpacity
       style={[
@@ -221,12 +260,12 @@ const PostCard = memo(function PostCard({
       onPress={onPress}
       activeOpacity={0.95}
     >
-      {/* Repost Indicator */}
+      {/* Redrop Indicator */}
       {isRepost && (
         <View style={styles.repostIndicator}>
           <Ionicons name="repeat" size={16} color={theme.colors.textSecondary} />
           <Text style={[styles.repostText, { color: theme.colors.textSecondary }]}>
-            REPOSTED
+            REDROPPED
           </Text>
         </View>
       )}
@@ -265,9 +304,27 @@ const PostCard = memo(function PostCard({
             onAuthorPress?.(post.author.id);
           }}
         >
-          <Text style={[styles.authorName, { color: theme.colors.text }]}>
-            {post.author.display_name}
-          </Text>
+          <View style={styles.authorInfoRow}>
+            <Text style={[styles.authorName, { color: theme.colors.text }]}>
+              {post.author.display_name}
+            </Text>
+            {/* Post Type Badge */}
+            {post.post_type && post.post_type !== 'update' && (
+              <View style={[styles.postTypeBadge, {
+                backgroundColor: getPostTypeColor(post.post_type) + '20',
+                borderColor: getPostTypeColor(post.post_type) + '40',
+              }]}>
+                <Ionicons
+                  name={getPostTypeIcon(post.post_type)}
+                  size={12}
+                  color={getPostTypeColor(post.post_type)}
+                />
+                <Text style={[styles.postTypeBadgeText, { color: getPostTypeColor(post.post_type) }]}>
+                  {getPostTypeLabel(post.post_type)}
+                </Text>
+              </View>
+            )}
+          </View>
           {post.author.headline && (
             <Text style={[styles.authorHeadline, { color: theme.colors.textSecondary }]}>
               {post.author.headline}
@@ -377,8 +434,8 @@ const PostCard = memo(function PostCard({
             style={[
               styles.interactionButton,
               post.user_reaction && {
-                backgroundColor: theme.isDark 
-                  ? 'rgba(220, 38, 38, 0.15)' 
+                backgroundColor: theme.isDark
+                  ? 'rgba(220, 38, 38, 0.15)'
                   : 'rgba(220, 38, 38, 0.08)',
               },
             ]}
@@ -386,20 +443,8 @@ const PostCard = memo(function PostCard({
             onPressOut={handleSupportPressOut}
             onPress={handleQuickSupport}
           >
-            <Text style={styles.interactionIcon}>
+            <Text style={[styles.interactionIcon, { fontSize: 20 }]}>
               {getCurrentReaction().emoji}
-            </Text>
-            <Text
-              style={[
-                styles.interactionLabel,
-                {
-                  color: post.user_reaction ? '#DC2626' : theme.colors.textSecondary,
-                  fontWeight: post.user_reaction ? '600' : '500',
-                },
-              ]}
-              numberOfLines={1}
-            >
-              {getCurrentReaction().label}
             </Text>
           </Pressable>
 
@@ -411,23 +456,20 @@ const PostCard = memo(function PostCard({
               setShowCommentsModal(true);
             }}
           >
-            <Ionicons 
-              name="chatbubble-outline" 
-              size={18} 
-              color={theme.colors.textSecondary} 
+            <Ionicons
+              name="chatbubble-outline"
+              size={20}
+              color={theme.colors.textSecondary}
             />
-            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-              Comment
-            </Text>
           </TouchableOpacity>
 
-          {/* Repost Button */}
+          {/* Redrop Button */}
           <TouchableOpacity
             style={[
               styles.interactionButton,
               post.user_reposted && {
-                backgroundColor: theme.isDark 
-                  ? 'rgba(34, 197, 94, 0.15)' 
+                backgroundColor: theme.isDark
+                  ? 'rgba(34, 197, 94, 0.15)'
                   : 'rgba(34, 197, 94, 0.08)',
               },
             ]}
@@ -437,25 +479,11 @@ const PostCard = memo(function PostCard({
             {isReposting ? (
               <ActivityIndicator size="small" color={post.user_reposted ? '#22C55E' : theme.colors.textSecondary} />
             ) : (
-              <>
-                <Ionicons 
-                  name={post.user_reposted ? "repeat" : "repeat-outline"}
-                  size={18} 
-                  color={post.user_reposted ? '#22C55E' : theme.colors.textSecondary}
-                />
-                <Text 
-                  style={[
-                    styles.interactionLabel, 
-                    { 
-                      color: post.user_reposted ? '#22C55E' : theme.colors.textSecondary,
-                      fontWeight: post.user_reposted ? '600' : '500',
-                    }
-                  ]} 
-                  numberOfLines={1}
-                >
-                  {post.user_reposted ? 'Reposted' : 'Repost'}
-                </Text>
-              </>
+              <Ionicons
+                name={post.user_reposted ? "repeat" : "repeat-outline"}
+                size={20}
+                color={post.user_reposted ? '#22C55E' : theme.colors.textSecondary}
+              />
             )}
           </TouchableOpacity>
 
@@ -467,15 +495,33 @@ const PostCard = memo(function PostCard({
               onShare?.(post);
             }}
           >
-            <Ionicons 
-              name="arrow-redo-outline" 
-              size={18} 
-              color={theme.colors.textSecondary} 
+            <Ionicons
+              name="arrow-redo-outline"
+              size={20}
+              color={theme.colors.textSecondary}
             />
-            <Text style={[styles.interactionLabel, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-              Share
-            </Text>
           </TouchableOpacity>
+
+          {/* Tip Button - Step 2 */}
+          <WalkthroughableTouchable
+            order={2}
+            name="tip_button_location"
+            text="This 💰 icon is where you tip creators to support their work. When others tip YOUR drops, you keep 95%. Tap it to see how tipping works - this is how you earn on SoundBridge while growing your professional network."
+          >
+            <TouchableOpacity
+              style={styles.interactionButton}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                onTip?.(post.author.id, post.author.display_name);
+              }}
+            >
+              <Ionicons
+                name="cash-outline"
+                size={20}
+                color={theme.colors.primary}
+              />
+            </TouchableOpacity>
+          </WalkthroughableTouchable>
         </View>
 
         {/* Summary Line */}
@@ -513,7 +559,7 @@ const PostCard = memo(function PostCard({
             )}
             {post.shares_count && post.shares_count > 0 && (
               <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
-                {post.shares_count} repost{post.shares_count !== 1 ? 's' : ''}
+                {post.shares_count} redrop{post.shares_count !== 1 ? 's' : ''}
               </Text>
             )}
           </TouchableOpacity>
@@ -670,10 +716,29 @@ const styles = StyleSheet.create({
   authorInfo: {
     flex: 1,
   },
+  authorInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 2,
+  },
   authorName: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 2,
+  },
+  postTypeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 4,
+  },
+  postTypeBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'capitalize',
   },
   authorHeadline: {
     fontSize: 13,

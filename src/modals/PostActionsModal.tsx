@@ -64,8 +64,8 @@ export default function PostActionsModal({
 
   const handleDelete = () => {
     Alert.alert(
-      'Delete Post',
-      'Are you sure you want to delete this post? This action cannot be undone.',
+      'Delete Drop',
+      'Are you sure you want to delete this drop? This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -102,7 +102,7 @@ export default function PostActionsModal({
           >
             {/* Header */}
             <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
-              <Text style={[styles.title, { color: theme.colors.text }]}>Post Options</Text>
+              <Text style={[styles.title, { color: theme.colors.text }]}>Drop Options</Text>
               <TouchableOpacity onPress={onClose}>
                 <Ionicons name="close" size={24} color={theme.colors.text} />
               </TouchableOpacity>

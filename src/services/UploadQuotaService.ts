@@ -1,6 +1,13 @@
 import { Session } from '@supabase/supabase-js';
 import { apiFetch } from '../lib/apiClient';
 import RevenueCatService from './RevenueCatService';
+import { config } from '../config/environment';
+import {
+  getStorageQuotaCached,
+  StorageQuota,
+  StorageTier,
+  invalidateStorageCache,
+} from './StorageQuotaService';
 
 export type UploadQuota = {
   tier: string;
@@ -10,6 +17,8 @@ export type UploadQuota = {
   reset_date: string | null;
   is_unlimited: boolean;
   can_upload: boolean;
+  // Storage-based quota (new)
+  storage?: StorageQuota;
 };
 
 type UploadQuotaResponse = {
@@ -65,9 +74,11 @@ function setCachedQuota(userId: string, quota: UploadQuota): void {
 
 /**
  * Invalidate quota cache (call after uploading a track)
+ * Also invalidates storage cache
  */
 export function invalidateQuotaCache(): void {
   quotaCache = null;
+  invalidateStorageCache(); // Also invalidate storage cache
   console.log('🗑️ Upload quota cache invalidated');
 }
 
@@ -104,7 +115,34 @@ export async function getUploadQuota(
   }
 
   console.log('🔍 UploadQuotaService: Fetching fresh quota...');
+  console.log('🔍 User ID:', userId);
+  console.log('🔍 bypassRevenueCat:', config.bypassRevenueCat);
+  console.log('🔍 developmentTier:', config.developmentTier);
   let backendQuota: UploadQuota | null = null;
+
+  // Development bypass: Use hardcoded tier
+  if (config.bypassRevenueCat && config.developmentTier) {
+    console.log('🔧 DEVELOPMENT MODE: Using hardcoded tier for upload quota');
+    console.log(`🔧 Hardcoded tier: ${config.developmentTier.toUpperCase()}`);
+
+    const tier = config.developmentTier;
+    const tierForStorage: StorageTier = tier === 'unlimited' ? 'unlimited' : tier === 'premium' ? 'premium' : 'free';
+    const storageQuota = await getStorageQuotaCached(userId, tierForStorage, forceRefresh);
+
+    const quota: UploadQuota = {
+      tier,
+      upload_limit: tier === 'free' ? 3 : null,
+      uploads_this_month: 0,
+      remaining: tier === 'free' ? 3 : null,
+      reset_date: null,
+      is_unlimited: tier === 'unlimited',
+      can_upload: storageQuota.can_upload,
+      storage: storageQuota,
+    };
+
+    setCachedQuota(userId, quota);
+    return quota;
+  }
 
   // Run backend API call and RevenueCat check in parallel
   const [backendResult, revenueCatResult] = await Promise.allSettled([
@@ -163,9 +201,11 @@ export async function getUploadQuota(
   if (revenueCatResult.status === 'fulfilled' && revenueCatResult.value) {
     const { tier, customerInfo } = revenueCatResult.value;
     console.log('🎯 RevenueCat tier:', tier);
+    console.log('🎯 RevenueCat entitlements:', Object.keys(customerInfo.entitlements.active));
 
     if (tier === 'unlimited') {
-      // Unlimited tier: no limits
+      // Unlimited tier: storage-based only (10GB)
+      const storageQuota = await getStorageQuotaCached(userId, 'unlimited', forceRefresh);
       const quota: UploadQuota = {
         tier: 'unlimited',
         upload_limit: null,
@@ -173,22 +213,25 @@ export async function getUploadQuota(
         remaining: null,
         reset_date: null,
         is_unlimited: true,
-        can_upload: true,
+        can_upload: storageQuota.can_upload, // Storage-based check
+        storage: storageQuota,
       };
       setCachedQuota(userId, quota);
       return quota;
     } else if (tier === 'premium') {
-      // Premium tier: 7 uploads per month
+      // Premium tier: storage-based (2GB), unlimited uploads
+      const storageQuota = await getStorageQuotaCached(userId, 'premium', forceRefresh);
       const uploadsUsed = backendQuota?.uploads_this_month ?? 0;
-      const limit = 7;
+
       const quota: UploadQuota = {
         tier: 'premium',
-        upload_limit: limit,
+        upload_limit: null, // Changed from 7 to null (unlimited uploads, storage-limited)
         uploads_this_month: uploadsUsed,
-        remaining: limit - uploadsUsed,
+        remaining: null, // No longer count-based
         reset_date: backendQuota?.reset_date || null,
         is_unlimited: false,
-        can_upload: uploadsUsed < limit,
+        can_upload: storageQuota.can_upload, // Storage-based check
+        storage: storageQuota,
       };
       setCachedQuota(userId, quota);
       return quota;
@@ -198,20 +241,50 @@ export async function getUploadQuota(
   // Fall back to backend quota if available
   if (backendQuota) {
     console.log('📋 Using backend quota');
-    setCachedQuota(userId, backendQuota);
-    return backendQuota;
+    console.log('📋 Backend tier (raw):', backendQuota.tier);
+
+    // Normalize legacy tier names
+    const normalizedTier =
+      backendQuota.tier === 'pro' ? 'premium' :
+      backendQuota.tier === 'enterprise' ? 'unlimited' :
+      backendQuota.tier;
+
+    console.log('📋 Backend tier (normalized):', normalizedTier);
+    console.log('📋 Backend upload_limit:', backendQuota.upload_limit);
+
+    // Add storage quota based on normalized tier
+    const tierForStorage: StorageTier =
+      normalizedTier === 'unlimited' ? 'unlimited' :
+      normalizedTier === 'premium' ? 'premium' : 'free';
+
+    const storageQuota = await getStorageQuotaCached(userId, tierForStorage, forceRefresh);
+
+    const quotaWithStorage: UploadQuota = {
+      ...backendQuota,
+      tier: normalizedTier, // Use normalized tier instead of raw backend tier
+      can_upload: storageQuota.can_upload, // Override with storage-based check
+      storage: storageQuota,
+    };
+
+    setCachedQuota(userId, quotaWithStorage);
+    return quotaWithStorage;
   }
 
   // Last resort: return Free tier defaults
   console.warn('⚠️ No quota available, using Free tier defaults');
+  console.warn('⚠️ Backend quota was:', backendQuota);
+  console.warn('⚠️ RevenueCat result was:', revenueCatResult.status);
+  const storageQuota = await getStorageQuotaCached(userId, 'free', forceRefresh);
+
   const defaultQuota: UploadQuota = {
     tier: 'free',
-    upload_limit: 3,
+    upload_limit: 3, // Free tier: 3 uploads lifetime
     uploads_this_month: 0,
     remaining: 3,
     reset_date: null,
     is_unlimited: false,
-    can_upload: true,
+    can_upload: storageQuota.can_upload && storageQuota.storage_used < 3, // Storage + count check
+    storage: storageQuota,
   };
   setCachedQuota(userId, defaultQuota);
   return defaultQuota;

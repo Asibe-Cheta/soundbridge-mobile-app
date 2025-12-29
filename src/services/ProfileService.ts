@@ -146,7 +146,15 @@ class ProfileService {
         throw new Error(`HTTP ${response.status}: ${responseText}`);
       }
 
-      return JSON.parse(responseText);
+      const result = JSON.parse(responseText);
+
+      // Map 'url' to 'avatarUrl' for consistency with expected interface
+      return {
+        success: result.success,
+        avatarUrl: result.url,
+        message: result.message,
+        error: result.error,
+      };
     } catch (error) {
       console.error(`❌ Avatar Upload Error:`, error);
       throw error;

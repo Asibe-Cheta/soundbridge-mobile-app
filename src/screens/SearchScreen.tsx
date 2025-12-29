@@ -185,7 +185,7 @@ export default function SearchScreen() {
             <Ionicons name="search" size={20} color={theme.colors.textSecondary} />
             <TextInput
               style={[styles.searchInput, { color: theme.colors.text }]}
-              placeholder="Search posts, people, opportunities..."
+              placeholder="Search drops, people, opportunities..."
               placeholderTextColor={theme.colors.textSecondary}
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -215,8 +215,8 @@ export default function SearchScreen() {
         >
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {(['all', 'posts', 'people', 'opportunities'] as SearchTab[]).map((tab) => {
-              // Map opportunities tab to show services and venues
-              const tabLabel = tab === 'opportunities' ? 'Services & Venues' : tab.charAt(0).toUpperCase() + tab.slice(1);
+              // Map opportunities tab to show services and venues, posts tab to show drops
+              const tabLabel = tab === 'opportunities' ? 'Services & Venues' : tab === 'posts' ? 'Drops' : tab.charAt(0).toUpperCase() + tab.slice(1);
               return (
               <TouchableOpacity
                 key={tab}
@@ -340,7 +340,7 @@ export default function SearchScreen() {
               <View style={styles.emptyContainer}>
                 <Ionicons name="search-outline" size={64} color={theme.colors.textSecondary} />
                 <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
-                  {activeTab === 'all' ? 'No results found' : `No ${activeTab} found`}
+                  {activeTab === 'all' ? 'No results found' : `No ${activeTab === 'posts' ? 'drops' : activeTab} found`}
                 </Text>
                 <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
                   {activeTab === 'all' 

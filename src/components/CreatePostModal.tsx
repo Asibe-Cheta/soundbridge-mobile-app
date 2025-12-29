@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -162,7 +163,7 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
       setVisibility('public');
       onClose();
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to create post. Please try again.');
+      Alert.alert('Error', err.message || 'Failed to create drop. Please try again.');
     } finally {
       setUploadingPost(false);
     }
@@ -235,20 +236,31 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
       onRequestClose={handleClose}
     >
       <SafeAreaView
-        style={[styles.container, { backgroundColor: theme.colors.background }]}
-        edges={['top', 'bottom']}
+        style={[styles.container, { backgroundColor: theme.colors.backgroundGradient.end }]}
+        edges={['top']}
       >
-        <KeyboardAvoidingView
-          style={styles.keyboardView}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        <LinearGradient
+          colors={[
+            theme.colors.backgroundGradient.start,
+            theme.colors.backgroundGradient.middle,
+            theme.colors.backgroundGradient.end,
+          ]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          locations={[0, 0.5, 1]}
+          style={styles.gradientBackground}
         >
-          {/* Header */}
+          <KeyboardAvoidingView
+            style={styles.keyboardView}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          >
+            {/* Header */}
           <View
             style={[
               styles.header,
               {
-                backgroundColor: theme.colors.surface,
+                backgroundColor: 'transparent',
                 borderBottomColor: theme.colors.border,
               },
             ]}
@@ -258,7 +270,7 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
             </TouchableOpacity>
 
             <Text style={[styles.title, { color: theme.colors.text }]}>
-              {editingPost ? 'Edit Post' : 'New Post'}
+              {editingPost ? 'Edit Drop' : 'New Drop'}
             </Text>
 
                 <TouchableOpacity
@@ -295,7 +307,12 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
           >
             {/* Post Type Selector */}
             <View style={styles.postTypeSection}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.typeChipsRow}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.typeChipsRow}
+                contentContainerStyle={styles.typeChipsContent}
+              >
                 {POST_TYPES.map((type) => (
                   <TouchableOpacity
                     key={type.value}
@@ -452,7 +469,7 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
             {/* Attachment Options */}
             <View style={styles.attachmentSection}>
               <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-                Add to your post:
+                Add to your drop:
               </Text>
               <View style={styles.attachmentButtonsRow}>
                 <TouchableOpacity
@@ -567,7 +584,8 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
               )}
             </View>
           </ScrollView>
-        </KeyboardAvoidingView>
+          </KeyboardAvoidingView>
+        </LinearGradient>
       </SafeAreaView>
     </Modal>
   );
@@ -575,6 +593,9 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  gradientBackground: {
     flex: 1,
   },
   keyboardView: {
@@ -585,18 +606,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    height: 56,
+    minHeight: 64,
   },
   closeButton: {
     padding: 8,
+    marginRight: 4,
+    minWidth: 40,
   },
   title: {
-    flex: 1,
+    position: 'absolute',
+    left: 0,
+    right: 0,
     fontSize: 18,
     fontWeight: '600',
     textAlign: 'center',
+    zIndex: -1,
   },
   publishButton: {
     paddingVertical: 8,
@@ -612,19 +638,26 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
+    flexGrow: 1,
   },
   postTypeSection: {
     marginBottom: 20,
+    marginHorizontal: -16, // Negative margin to extend to screen edges
   },
   typeChipsRow: {
-    flexDirection: 'row',
-    gap: 8,
+    flexGrow: 0,
+  },
+  typeChipsContent: {
+    paddingHorizontal: 16,
+    gap: 10,
+    alignItems: 'center',
   },
   typeChip: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 24,
     borderWidth: 1,
+    marginRight: 0, // Remove since we're using gap in contentContainerStyle
   },
   chipText: {
     fontSize: 14,

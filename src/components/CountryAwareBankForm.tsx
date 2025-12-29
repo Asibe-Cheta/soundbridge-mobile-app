@@ -53,65 +53,67 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
       const result = await walletService.getSupportedCountriesSafe(session);
       setCountries(result.countries || []);
       
-      // If no countries loaded, provide fallback with all 30+ Stripe Connect supported countries
+      // IMPORTANT: Only include Stripe Connect supported countries
+      // Verified as of Dec 2025 - Stripe Connect supports limited countries
+      // NOT SUPPORTED: Nigeria, Ghana, Kenya, Egypt, and most African countries
+      // For unsupported countries, users should use alternative withdrawal methods
       if (result.countries.length === 0) {
         setCountries([
-          // Major Markets (Tier 1)
+          // ✅ CONFIRMED STRIPE CONNECT SUPPORTED COUNTRIES
+
+          // Major Markets (Tier 1) - Fully Supported
           { country_code: 'US', country_name: 'United States', currency: 'USD', banking_system: 'ACH' },
           { country_code: 'GB', country_name: 'United Kingdom', currency: 'GBP', banking_system: 'Faster Payments' },
           { country_code: 'CA', country_name: 'Canada', currency: 'CAD', banking_system: 'Interac' },
           { country_code: 'AU', country_name: 'Australia', currency: 'AUD', banking_system: 'NPP' },
-          { country_code: 'DE', country_name: 'Germany', currency: 'EUR', banking_system: 'SEPA' },
-          { country_code: 'FR', country_name: 'France', currency: 'EUR', banking_system: 'SEPA' },
-          { country_code: 'ES', country_name: 'Spain', currency: 'EUR', banking_system: 'SEPA' },
-          { country_code: 'IT', country_name: 'Italy', currency: 'EUR', banking_system: 'SEPA' },
-          { country_code: 'NL', country_name: 'Netherlands', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'NZ', country_name: 'New Zealand', currency: 'NZD', banking_system: 'ESAS' },
           { country_code: 'JP', country_name: 'Japan', currency: 'JPY', banking_system: 'Zengin' },
-          
-          // European Markets (SEPA)
-          { country_code: 'AT', country_name: 'Austria', currency: 'EUR', banking_system: 'SEPA' },
-          { country_code: 'BE', country_name: 'Belgium', currency: 'EUR', banking_system: 'SEPA' },
-          { country_code: 'CH', country_name: 'Switzerland', currency: 'CHF', banking_system: 'SEPA' },
-          { country_code: 'DK', country_name: 'Denmark', currency: 'DKK', banking_system: 'SEPA' },
-          { country_code: 'FI', country_name: 'Finland', currency: 'EUR', banking_system: 'SEPA' },
-          { country_code: 'IE', country_name: 'Ireland', currency: 'EUR', banking_system: 'SEPA' },
-          { country_code: 'LU', country_name: 'Luxembourg', currency: 'EUR', banking_system: 'SEPA' },
-          { country_code: 'NO', country_name: 'Norway', currency: 'NOK', banking_system: 'SEPA' },
-          { country_code: 'PT', country_name: 'Portugal', currency: 'EUR', banking_system: 'SEPA' },
-          { country_code: 'SE', country_name: 'Sweden', currency: 'SEK', banking_system: 'SEPA' },
-          
-          // Asian Markets
           { country_code: 'SG', country_name: 'Singapore', currency: 'SGD', banking_system: 'FAST' },
           { country_code: 'HK', country_name: 'Hong Kong', currency: 'HKD', banking_system: 'RTGS' },
-          { country_code: 'IN', country_name: 'India', currency: 'INR', banking_system: 'NEFT/RTGS' },
-          { country_code: 'CN', country_name: 'China', currency: 'CNY', banking_system: 'CNAPS' },
-          { country_code: 'MY', country_name: 'Malaysia', currency: 'MYR', banking_system: 'RENTAS' },
-          { country_code: 'TH', country_name: 'Thailand', currency: 'THB', banking_system: 'BAHTNET' },
-          { country_code: 'PH', country_name: 'Philippines', currency: 'PHP', banking_system: 'InstaPay' },
-          { country_code: 'ID', country_name: 'Indonesia', currency: 'IDR', banking_system: 'BI-RTGS' },
-          { country_code: 'VN', country_name: 'Vietnam', currency: 'VND', banking_system: 'VNPAY' },
-          { country_code: 'KR', country_name: 'South Korea', currency: 'KRW', banking_system: 'BOK-Wire+' },
-          
-          // Americas
-          { country_code: 'MX', country_name: 'Mexico', currency: 'MXN', banking_system: 'SPEI' },
-          { country_code: 'BR', country_name: 'Brazil', currency: 'BRL', banking_system: 'PIX' },
-          { country_code: 'AR', country_name: 'Argentina', currency: 'ARS', banking_system: 'CBU' },
-          { country_code: 'CL', country_name: 'Chile', currency: 'CLP', banking_system: 'LBTR' },
-          { country_code: 'CO', country_name: 'Colombia', currency: 'COP', banking_system: 'CUD' },
-          { country_code: 'PE', country_name: 'Peru', currency: 'PEN', banking_system: 'LBTR' },
-          
-          // Middle East & Africa
+
+          // European Union + EEA (SEPA) - Fully Supported
+          { country_code: 'AT', country_name: 'Austria', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'BE', country_name: 'Belgium', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'BG', country_name: 'Bulgaria', currency: 'BGN', banking_system: 'SEPA' },
+          { country_code: 'HR', country_name: 'Croatia', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'CY', country_name: 'Cyprus', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'CZ', country_name: 'Czech Republic', currency: 'CZK', banking_system: 'SEPA' },
+          { country_code: 'DK', country_name: 'Denmark', currency: 'DKK', banking_system: 'SEPA' },
+          { country_code: 'EE', country_name: 'Estonia', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'FI', country_name: 'Finland', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'FR', country_name: 'France', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'DE', country_name: 'Germany', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'GR', country_name: 'Greece', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'HU', country_name: 'Hungary', currency: 'HUF', banking_system: 'SEPA' },
+          { country_code: 'IE', country_name: 'Ireland', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'IT', country_name: 'Italy', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'LV', country_name: 'Latvia', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'LT', country_name: 'Lithuania', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'LU', country_name: 'Luxembourg', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'MT', country_name: 'Malta', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'NL', country_name: 'Netherlands', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'NO', country_name: 'Norway', currency: 'NOK', banking_system: 'SEPA' },
+          { country_code: 'PL', country_name: 'Poland', currency: 'PLN', banking_system: 'SEPA' },
+          { country_code: 'PT', country_name: 'Portugal', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'RO', country_name: 'Romania', currency: 'RON', banking_system: 'SEPA' },
+          { country_code: 'SK', country_name: 'Slovakia', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'SI', country_name: 'Slovenia', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'ES', country_name: 'Spain', currency: 'EUR', banking_system: 'SEPA' },
+          { country_code: 'SE', country_name: 'Sweden', currency: 'SEK', banking_system: 'SEPA' },
+          { country_code: 'CH', country_name: 'Switzerland', currency: 'CHF', banking_system: 'SEPA' },
+
+          // United Arab Emirates
           { country_code: 'AE', country_name: 'United Arab Emirates', currency: 'AED', banking_system: 'UAEFTS' },
-          { country_code: 'SA', country_name: 'Saudi Arabia', currency: 'SAR', banking_system: 'SARIE' },
-          { country_code: 'ZA', country_name: 'South Africa', currency: 'ZAR', banking_system: 'RTC' },
-          { country_code: 'NG', country_name: 'Nigeria', currency: 'NGN', banking_system: 'NIP' },
-          { country_code: 'KE', country_name: 'Kenya', currency: 'KES', banking_system: 'RTGS' },
-          { country_code: 'EG', country_name: 'Egypt', currency: 'EGP', banking_system: 'RTGS' },
-          
-          // Additional
-          { country_code: 'NZ', country_name: 'New Zealand', currency: 'NZD', banking_system: 'ESAS' },
-          { country_code: 'CZ', country_name: 'Czech Republic', currency: 'CZK', banking_system: 'CERTIS' },
-          { country_code: 'PL', country_name: 'Poland', currency: 'PLN', banking_system: 'SORBNET' },
+
+          // ⚠️ NOTE: The following countries are NOT currently supported by Stripe Connect
+          // but may be added in future. Users in these countries should use alternative methods:
+          // - Nigeria (NG) - Use Wise or alternative payout providers
+          // - Ghana (GH) - Use Wise or alternative payout providers
+          // - Kenya (KE) - Use Wise or alternative payout providers
+          // - Egypt (EG) - Use Wise or alternative payout providers
+          // - India (IN) - Limited Stripe support, check requirements
+          // - Brazil (BR), Mexico (MX), and other LatAm - Check Stripe docs
+          // - China (CN) - Not supported for Connect payouts
         ]);
       }
     } catch (error) {
@@ -267,19 +269,7 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         },
         field_validation: { transit_number: '^\\d{5}$', institution_number: '^\\d{3}$' },
       },
-      MX: {
-        country_code: 'MX', country_name: 'Mexico', currency: 'MXN', banking_system: 'SPEI',
-        required_fields: {
-          account_holder_name: { required: true, label: 'Account Holder Name' },
-          bank_name: { required: true, label: 'Bank Name' },
-          account_number: { required: true, label: 'Account Number', placeholder: '123456789' },
-          clabe: { required: true, label: 'CLABE', placeholder: '123456789012345678' },
-          account_type: { required: true, label: 'Account Type' },
-        },
-        field_validation: { clabe: '^\\d{18}$' },
-      },
-
-      // Asian Systems
+      // Asian Pacific Systems (Stripe Connect Supported)
       JP: {
         country_code: 'JP', country_name: 'Japan', currency: 'JPY', banking_system: 'Zengin',
         required_fields: {
@@ -290,28 +280,6 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
           account_type: { required: true, label: 'Account Type' },
         },
         field_validation: { branch_code: '^\\d{3}$' },
-      },
-      CN: {
-        country_code: 'CN', country_name: 'China', currency: 'CNY', banking_system: 'CNAPS',
-        required_fields: {
-          account_holder_name: { required: true, label: 'Account Holder Name' },
-          bank_name: { required: true, label: 'Bank Name' },
-          account_number: { required: true, label: 'Account Number', placeholder: '123456789012345678' },
-          bank_code: { required: true, label: 'Bank Code', placeholder: '123456789012' },
-          account_type: { required: true, label: 'Account Type' },
-        },
-        field_validation: { bank_code: '^\\d{12}$' },
-      },
-      IN: {
-        country_code: 'IN', country_name: 'India', currency: 'INR', banking_system: 'NEFT/RTGS',
-        required_fields: {
-          account_holder_name: { required: true, label: 'Account Holder Name' },
-          bank_name: { required: true, label: 'Bank Name' },
-          account_number: { required: true, label: 'Account Number', placeholder: '123456789012' },
-          ifsc_code: { required: true, label: 'IFSC Code', placeholder: 'SBIN0001234' },
-          account_type: { required: true, label: 'Account Type' },
-        },
-        field_validation: { ifsc_code: '^[A-Z]{4}0[A-Z0-9]{6}$' },
       },
       SG: {
         country_code: 'SG', country_name: 'Singapore', currency: 'SGD', banking_system: 'FAST',
@@ -348,50 +316,35 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         },
         field_validation: { bsb_code: '^\\d{3}-\\d{3}$' },
       },
-      AR: {
-        country_code: 'AR', country_name: 'Argentina', currency: 'ARS', banking_system: 'CBU',
+      NZ: {
+        country_code: 'NZ', country_name: 'New Zealand', currency: 'NZD', banking_system: 'NPP',
         required_fields: {
           account_holder_name: { required: true, label: 'Account Holder Name' },
           bank_name: { required: true, label: 'Bank Name' },
-          account_number: { required: true, label: 'Account Number', placeholder: '123456789' },
-          cbu: { required: true, label: 'CBU', placeholder: '1234567890123456789012' },
+          account_number: { required: true, label: 'Account Number', placeholder: '12-3456-7890123-00' },
           account_type: { required: true, label: 'Account Type' },
         },
-        field_validation: { cbu: '^\\d{22}$' },
+        field_validation: { account_number: '^\\d{2}-\\d{4}-\\d{7}-\\d{2,3}$' },
       },
-      BR: {
-        country_code: 'BR', country_name: 'Brazil', currency: 'BRL', banking_system: 'PIX',
+      HK: {
+        country_code: 'HK', country_name: 'Hong Kong', currency: 'HKD', banking_system: 'CHATS',
         required_fields: {
           account_holder_name: { required: true, label: 'Account Holder Name' },
           bank_name: { required: true, label: 'Bank Name' },
-          account_number: { required: true, label: 'Account Number', placeholder: '123456-7' },
-          agency: { required: true, label: 'Agency', placeholder: '1234' },
-          account_type: { required: true, label: 'Account Type' },
-        },
-        field_validation: { agency: '^\\d{4}$' },
-      },
-      NG: {
-        country_code: 'NG', country_name: 'Nigeria', currency: 'NGN', banking_system: 'NIP',
-        required_fields: {
-          account_holder_name: { required: true, label: 'Account Holder Name' },
-          bank_name: { required: true, label: 'Bank Name' },
-          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_number: { required: true, label: 'Account Number', placeholder: '123-456789-123' },
           bank_code: { required: true, label: 'Bank Code', placeholder: '123' },
           account_type: { required: true, label: 'Account Type' },
         },
         field_validation: { bank_code: '^\\d{3}$' },
       },
-      ZA: {
-        country_code: 'ZA', country_name: 'South Africa', currency: 'ZAR', banking_system: 'RTC',
-        required_fields: {
-          account_holder_name: { required: true, label: 'Account Holder Name' },
-          bank_name: { required: true, label: 'Bank Name' },
-          account_number: { required: true, label: 'Account Number', placeholder: '123456789' },
-          branch_code: { required: true, label: 'Branch Code', placeholder: '123456' },
-          account_type: { required: true, label: 'Account Type' },
-        },
-        field_validation: { branch_code: '^\\d{6}$' },
-      },
+
+      // ⚠️ UNSUPPORTED COUNTRIES REMOVED
+      // The following countries are NOT supported by Stripe Connect:
+      // - Mexico (MX), Brazil (BR), Argentina (AR), Chile (CL), Colombia (CO)
+      // - China (CN), India (IN), Thailand (TH), Philippines (PH), Indonesia (ID), Vietnam (VN), South Korea (KR)
+      // - Nigeria (NG), Ghana (GH), Kenya (KE), Egypt (EG), South Africa (ZA)
+      // - Saudi Arabia (SA)
+      // Users in these countries should use alternative withdrawal methods (e.g., Wise, cryptocurrency, etc.)
     };
 
     return fallbackData[countryCode] || fallbackData.GB;
@@ -508,7 +461,7 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
 
   const getBankingInfoText = (countryCode: string): string => {
     const infoTexts: Record<string, string> = {
-      // IBAN Countries
+      // IBAN Countries (EU + Switzerland + UAE)
       AE: 'UAE banks use IBAN for international transfers. IBAN format: AE + 2 digits + 19 digits.',
       CH: 'Swiss banks use IBAN for international transfers. IBAN format: CH + 2 digits + 17 digits.',
       DE: 'German banks use IBAN for international transfers. IBAN format: DE + 2 digits + 18 digits.',
@@ -516,25 +469,20 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
       FR: 'French banks use IBAN for international transfers. IBAN format: FR + 2 digits + 23 characters.',
       IT: 'Italian banks use IBAN for international transfers. IBAN format: IT + 2 digits + 1 letter + 22 digits.',
       NL: 'Dutch banks use IBAN for international transfers. IBAN format: NL + 2 digits + 4 letters + 10 digits.',
-      
-      // North American Systems
+
+      // North American Systems (US, Canada only)
       US: 'US banks use Routing Number for transfers. Routing numbers are 9 digits.',
       CA: 'Canadian banks use Transit Number (5 digits) and Institution Number (3 digits).',
-      MX: 'Mexican banks use CLABE for transfers. CLABE is an 18-digit standardized banking number.',
-      
-      // Asian Systems
+
+      // Asia-Pacific Systems (Stripe Connect Supported)
       JP: 'Japanese banks use Branch Code for transfers. Branch codes are 3 digits.',
-      CN: 'Chinese banks use Bank Code for transfers. Bank codes are 12 digits.',
-      IN: 'Indian banks use IFSC Code for transfers. Format: 4 letters + 0 + 6 alphanumeric characters.',
       SG: 'Singapore banks use Bank Code for transfers. Bank codes are 4 digits.',
-      
-      // Other Regional Systems
+      HK: 'Hong Kong banks use Bank Code for transfers. Bank codes are 3 digits.',
+
+      // Other Stripe Connect Supported Systems
       GB: 'UK banks use Sort Code instead of Routing Number. Sort codes are 6 digits in XX-XX-XX format.',
       AU: 'Australian banks use BSB Code for transfers. BSB codes are 6 digits in XXX-XXX format.',
-      AR: 'Argentine banks use CBU for transfers. CBU is a 22-digit standardized banking number.',
-      BR: 'Brazilian banks use Agency for transfers. Agency codes are 4 digits.',
-      NG: 'Nigerian banks use Bank Code for transfers. Bank codes are 3 digits.',
-      ZA: 'South African banks use Branch Code for transfers. Branch codes are 6 digits.',
+      NZ: 'New Zealand banks use standardized account numbers in XX-XXXX-XXXXXXX-XX format.',
     };
     return infoTexts[countryCode] || 'Please enter your bank account details.';
   };

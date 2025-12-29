@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import BackButton from '../components/BackButton';
+import OnboardingBackButton from '../components/OnboardingBackButton';
 import {
   View,
   Text,
@@ -13,6 +14,8 @@ import {
   StatusBar,
   Animated,
   Image,
+  ImageBackground,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,10 +23,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
+import { useNetwork } from '../hooks/useNetwork';
 import CountrySelector from '../components/CountrySelector';
 import { supabase } from '../lib/supabase';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 // Types
 interface Genre {
@@ -44,6 +48,9 @@ interface CreatorProfile {
   country?: string;
   bio?: string;
   role?: string;
+  followers_count?: number;
+  tracks_count?: number;
+  events_count?: number;
 }
 
 type UserType = 'music_creator' | 'podcast_creator' | 'industry_professional' | 'music_lover' | null;
@@ -96,12 +103,15 @@ export default function OnboardingScreen() {
   const { user, userProfile, updateUserProfile, completeOnboarding, refreshUser } = useAuth();
   const { theme } = useTheme();
   const navigation = useNavigation();
+  const { sendRequest } = useNetwork();
 
   // State management
   const [currentStep, setCurrentStep] = useState<OnboardingStep>('welcome');
   const [loading, setLoading] = useState(false);
   const [userType, setUserType] = useState<UserType>(null);
   const [selectedTier, setSelectedTier] = useState<'free' | 'pro' | null>(null);
+  const [transitionDirection, setTransitionDirection] = useState<'forward' | 'back'>('forward');
+  const [selectedRole, setSelectedRole] = useState<string | null>(null);
   
   // Path routing helpers
   const getPathFirstStep = (type: UserType): OnboardingStep | null => {
@@ -296,6 +306,7 @@ export default function OnboardingScreen() {
   // Value demo creators
   const [demoCreators, setDemoCreators] = useState<CreatorProfile[]>([]);
   const [loadingCreators, setLoadingCreators] = useState(false);
+  const [connectingIds, setConnectingIds] = useState<Set<string>>(new Set());
 
   // Payment data
   const [cardNumber, setCardNumber] = useState('');
@@ -303,19 +314,34 @@ export default function OnboardingScreen() {
   const [cardCvv, setCardCvv] = useState('');
   const [cardholderName, setCardholderName] = useState('');
 
-  // Auto-advance welcome screen
+  // Animate welcome screen content on mount
   useEffect(() => {
     if (currentStep === 'welcome') {
-      const timer = setTimeout(() => {
-        setCurrentStep('userType');
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [currentStep]);
+      // Reset animation values
+      fadeAnim.setValue(0);
+      slideAnim.setValue(50);
+      scaleAnim.setValue(0.8);
+      
+      // Start animations
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(scaleAnim, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+      ]).start();
 
-  // Shimmer animation for logo
-  useEffect(() => {
-    if (currentStep === 'welcome') {
+      // Shimmer animation for logo
       const shimmerAnimation = Animated.loop(
         Animated.sequence([
           Animated.timing(shimmerAnim, {
@@ -399,23 +425,28 @@ export default function OnboardingScreen() {
     if (currentStep === 'welcome') return; // Welcome has its own animation
     
     fadeAnim.setValue(0);
-    slideAnim.setValue(50);
+    // Slide in from the opposite direction of the exit animation
+    if (transitionDirection === 'forward') {
+      slideAnim.setValue(50); // Slide from right (forward navigation)
+    } else {
+      slideAnim.setValue(-50); // Slide from left (backward navigation)
+    }
     scaleAnim.setValue(0.8);
 
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 600,
+        duration: 400,
         useNativeDriver: true,
       }),
       Animated.timing(slideAnim, {
         toValue: 0,
-        duration: 500,
+        duration: 400,
         useNativeDriver: true,
       }),
       Animated.timing(scaleAnim, {
         toValue: 1,
-        duration: 400,
+        duration: 300,
         useNativeDriver: true,
       }),
     ]).start();
@@ -559,6 +590,26 @@ export default function OnboardingScreen() {
     }
   };
 
+  // Handle connect to creator
+  const handleConnectToCreator = async (creatorId: string) => {
+    if (connectingIds.has(creatorId)) return;
+
+    setConnectingIds(prev => new Set(prev).add(creatorId));
+    try {
+      await sendRequest(creatorId);
+      // Optionally show success feedback
+    } catch (error) {
+      console.error('Failed to send connection request:', error);
+      Alert.alert('Error', 'Failed to send connection request. Please try again.');
+    } finally {
+      setConnectingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(creatorId);
+        return newSet;
+      });
+    }
+  };
+
   // Save genre preferences
   const saveGenrePreferences = async () => {
     if (!user?.id || selectedGenres.length < 3) return false;
@@ -686,20 +737,20 @@ export default function OnboardingScreen() {
     // Route to path-specific first step
     const firstStep = getPathFirstStep(type);
     if (firstStep) {
-      setCurrentStep(firstStep);
+      animateStepTransition(firstStep);
     }
   };
 
   // Handle tier selection
-  const handleTierSelection = (tier: 'free' | 'pro') => {
+  const handleTierSelection = (tier: 'free' | 'premium' | 'unlimited') => {
     setSelectedTier(tier);
-    
+
     if (tier === 'free') {
       // Skip payment, go directly to welcome confirmation
-      setCurrentStep('welcomeConfirmation');
+      animateStepTransition('welcomeConfirmation');
     } else {
-      // Go to payment collection (immediate payment with money-back guarantee)
-      setCurrentStep('payment');
+      // Navigate to UpgradeScreen for premium and unlimited tiers
+      navigation.navigate('Upgrade' as never);
     }
   };
 
@@ -738,13 +789,55 @@ export default function OnboardingScreen() {
       }
 
       console.log('✅ Pro subscription activated successfully');
-      setCurrentStep('welcomeConfirmation');
+      animateStepTransition('welcomeConfirmation');
     } catch (error) {
       console.error('❌ Error processing payment:', error);
       Alert.alert('Error', 'Failed to process payment. Please check your card details and try again.');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Helper function to animate step transitions (forward navigation)
+  const animateStepTransition = (nextStep: OnboardingStep) => {
+    setTransitionDirection('forward');
+    // Animate slide-left and fade-out
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: -50, // Slide left
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      // After animation completes, navigate to next screen
+      setCurrentStep(nextStep);
+    });
+  };
+
+  // Helper function to animate step transitions (backward navigation)
+  const animateStepTransitionBack = (previousStep: OnboardingStep) => {
+    setTransitionDirection('back');
+    // Animate slide-right and fade-out
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 50, // Slide right
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      // After animation completes, navigate to previous screen
+      setCurrentStep(previousStep);
+    });
   };
 
   // Navigate to next step - path-aware routing
@@ -773,7 +866,7 @@ export default function OnboardingScreen() {
             setLoading(false);
             return;
           }
-          setCurrentStep('musicCreator_genres');
+          animateStepTransition('musicCreator_genres');
           break;
 
         case 'musicCreator_genres':
@@ -783,7 +876,7 @@ export default function OnboardingScreen() {
             return;
           }
           await saveGenrePreferences();
-          setCurrentStep('musicCreator_role');
+          animateStepTransition('musicCreator_role');
           break;
 
         case 'musicCreator_role':
@@ -794,7 +887,7 @@ export default function OnboardingScreen() {
             return;
           }
           // TODO: Save role selection to API in future
-          setCurrentStep('musicCreator_events');
+          animateStepTransition('musicCreator_events');
           break;
 
         case 'musicCreator_events':
@@ -809,11 +902,11 @@ export default function OnboardingScreen() {
             setLoading(false);
             return;
           }
-          setCurrentStep('musicCreator_valueDemo');
+          animateStepTransition('musicCreator_valueDemo');
           break;
 
         case 'musicCreator_valueDemo':
-          setCurrentStep('tierSelection');
+          animateStepTransition('tierSelection');
           break;
 
         // ============================================
@@ -835,7 +928,7 @@ export default function OnboardingScreen() {
             setLoading(false);
             return;
           }
-          setCurrentStep('podcastCreator_categories');
+          animateStepTransition('podcastCreator_categories');
           break;
 
         case 'podcastCreator_categories':
@@ -846,7 +939,7 @@ export default function OnboardingScreen() {
             return;
           }
           // TODO: Save podcast categories to API in future
-          setCurrentStep('podcastCreator_role');
+          animateStepTransition('podcastCreator_role');
           break;
 
         case 'podcastCreator_role':
@@ -857,7 +950,7 @@ export default function OnboardingScreen() {
             return;
           }
           // TODO: Save podcast role to API in future
-          setCurrentStep('podcastCreator_events');
+          animateStepTransition('podcastCreator_events');
           break;
 
         case 'podcastCreator_events':
@@ -872,11 +965,11 @@ export default function OnboardingScreen() {
             setLoading(false);
             return;
           }
-          setCurrentStep('podcastCreator_valueDemo');
+          animateStepTransition('podcastCreator_valueDemo');
           break;
 
         case 'podcastCreator_valueDemo':
-          setCurrentStep('tierSelection');
+          animateStepTransition('tierSelection');
           break;
 
         // ============================================
@@ -899,7 +992,7 @@ export default function OnboardingScreen() {
             return;
           }
           // Company is optional, location recommended but not required
-          setCurrentStep('industryProfessional_role');
+          animateStepTransition('industryProfessional_role');
           break;
 
         case 'industryProfessional_role':
@@ -910,7 +1003,7 @@ export default function OnboardingScreen() {
             return;
           }
           // TODO: Save professional role to API in future
-          setCurrentStep('industryProfessional_genres');
+          animateStepTransition('industryProfessional_genres');
           break;
 
         case 'industryProfessional_genres':
@@ -920,7 +1013,7 @@ export default function OnboardingScreen() {
             return;
           }
           await saveGenrePreferences();
-          setCurrentStep('industryProfessional_goals');
+          animateStepTransition('industryProfessional_goals');
           break;
 
         case 'industryProfessional_goals':
@@ -931,11 +1024,11 @@ export default function OnboardingScreen() {
             return;
           }
           // TODO: Save professional goals to API in future
-          setCurrentStep('industryProfessional_valueDemo');
+          animateStepTransition('industryProfessional_valueDemo');
           break;
 
         case 'industryProfessional_valueDemo':
-          setCurrentStep('tierSelection');
+          animateStepTransition('tierSelection');
           break;
 
         // ============================================
@@ -957,7 +1050,7 @@ export default function OnboardingScreen() {
             setLoading(false);
             return;
           }
-          setCurrentStep('musicLover_genres');
+          animateStepTransition('musicLover_genres');
           break;
 
         case 'musicLover_genres':
@@ -967,7 +1060,7 @@ export default function OnboardingScreen() {
             return;
           }
           await saveGenrePreferences();
-          setCurrentStep('musicLover_events');
+          animateStepTransition('musicLover_events');
           break;
 
         case 'musicLover_events':
@@ -982,11 +1075,11 @@ export default function OnboardingScreen() {
             setLoading(false);
             return;
           }
-          setCurrentStep('musicLover_valueDemo');
+          animateStepTransition('musicLover_valueDemo');
           break;
 
         case 'musicLover_valueDemo':
-          setCurrentStep('tierSelection');
+          animateStepTransition('tierSelection');
           break;
 
         // ============================================
@@ -1077,90 +1170,90 @@ export default function OnboardingScreen() {
   const handleBack = () => {
     switch (currentStep) {
       case 'userType':
-        setCurrentStep('welcome');
+        animateStepTransitionBack('welcome');
         break;
       
       // Music Creator Path
       case 'musicCreator_profileSetup':
-        setCurrentStep('userType');
+        animateStepTransitionBack('userType');
         break;
       case 'musicCreator_genres':
-        setCurrentStep('musicCreator_profileSetup');
+        animateStepTransitionBack('musicCreator_profileSetup');
         break;
       case 'musicCreator_role':
-        setCurrentStep('musicCreator_genres');
+        animateStepTransitionBack('musicCreator_genres');
         break;
       case 'musicCreator_events':
-        setCurrentStep('musicCreator_role');
+        animateStepTransitionBack('musicCreator_role');
         break;
       case 'musicCreator_valueDemo':
-        setCurrentStep('musicCreator_events');
+        animateStepTransitionBack('musicCreator_events');
         break;
       
       // Podcast Creator Path
       case 'podcastCreator_profileSetup':
-        setCurrentStep('userType');
+        animateStepTransitionBack('userType');
         break;
       case 'podcastCreator_categories':
-        setCurrentStep('podcastCreator_profileSetup');
+        animateStepTransitionBack('podcastCreator_profileSetup');
         break;
       case 'podcastCreator_role':
-        setCurrentStep('podcastCreator_categories');
+        animateStepTransitionBack('podcastCreator_categories');
         break;
       case 'podcastCreator_events':
-        setCurrentStep('podcastCreator_role');
+        animateStepTransitionBack('podcastCreator_role');
         break;
       case 'podcastCreator_valueDemo':
-        setCurrentStep('podcastCreator_events');
+        animateStepTransitionBack('podcastCreator_events');
         break;
       
       // Industry Professional Path
       case 'industryProfessional_profileSetup':
-        setCurrentStep('userType');
+        animateStepTransitionBack('userType');
         break;
       case 'industryProfessional_role':
-        setCurrentStep('industryProfessional_profileSetup');
+        animateStepTransitionBack('industryProfessional_profileSetup');
         break;
       case 'industryProfessional_genres':
-        setCurrentStep('industryProfessional_role');
+        animateStepTransitionBack('industryProfessional_role');
         break;
       case 'industryProfessional_goals':
-        setCurrentStep('industryProfessional_genres');
+        animateStepTransitionBack('industryProfessional_genres');
         break;
       case 'industryProfessional_valueDemo':
-        setCurrentStep('industryProfessional_goals');
+        animateStepTransitionBack('industryProfessional_goals');
         break;
       
       // Music Lover Path
       case 'musicLover_profileSetup':
-        setCurrentStep('userType');
+        animateStepTransitionBack('userType');
         break;
       case 'musicLover_genres':
-        setCurrentStep('musicLover_profileSetup');
+        animateStepTransitionBack('musicLover_profileSetup');
         break;
       case 'musicLover_events':
-        setCurrentStep('musicLover_genres');
+        animateStepTransitionBack('musicLover_genres');
         break;
       case 'musicLover_valueDemo':
-        setCurrentStep('musicLover_events');
+        animateStepTransitionBack('musicLover_events');
         break;
       
       // Shared steps
       case 'tierSelection':
         // Go back to path-specific value demo
-        if (userType === 'music_creator') setCurrentStep('musicCreator_valueDemo');
-        else if (userType === 'podcast_creator') setCurrentStep('podcastCreator_valueDemo');
-        else if (userType === 'industry_professional') setCurrentStep('industryProfessional_valueDemo');
-        else if (userType === 'music_lover') setCurrentStep('musicLover_valueDemo');
+        if (userType === 'music_creator') animateStepTransitionBack('musicCreator_valueDemo');
+        else if (userType === 'podcast_creator') animateStepTransitionBack('podcastCreator_valueDemo');
+        else if (userType === 'industry_professional') animateStepTransitionBack('industryProfessional_valueDemo');
+        else if (userType === 'music_lover') animateStepTransitionBack('musicLover_valueDemo');
         break;
       case 'payment':
-        setCurrentStep('tierSelection');
+        animateStepTransitionBack('tierSelection');
         break;
       case 'welcomeConfirmation':
         if (selectedTier === 'pro') {
-          setCurrentStep('payment');
+          animateStepTransitionBack('payment');
         } else {
-          setCurrentStep('tierSelection');
+          animateStepTransitionBack('tierSelection');
         }
         break;
       default:
@@ -1258,221 +1351,311 @@ export default function OnboardingScreen() {
 
   // Render Welcome Screen
   const renderWelcome = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
-        <LinearGradient
-          colors={theme.isDark 
-          ? ['#1a1a2e', '#16213e', '#0f3460', '#533483']
-          : ['#667eea', '#764ba2', '#f093fb', '#4facfe']
-          }
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        style={styles.fullScreenGradient}
-      />
-      
-      <TouchableOpacity 
-        style={styles.fullScreenTouchable}
-        onPress={() => setCurrentStep('userType')}
-        activeOpacity={1}
+    <View style={styles.stepContainer}>
+      {/* Background Image */}
+      <ImageBackground
+        source={require('../../assets/images/logos/bg03.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
       >
-        <View style={styles.welcomeContainer}>
-          <Animated.View
-            style={[
-              styles.welcomeContent,
-              {
-                opacity: fadeAnim,
-                transform: [{ scale: scaleAnim }]
-              }
-            ]}
+        {/* Dark Overlay for Text Readability */}
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.4)' }]} />
+      </ImageBackground>
+
+      {/* Main Content Wrapper */}
+      <View style={styles.newWelcomeContainer} pointerEvents="box-none">
+        {/* Logo at Top - Centered */}
+        <Animated.View
+          style={[
+            styles.newLogoContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateX: slideAnim }, { scale: scaleAnim }]
+            }
+          ]}
+        >
+          <Image 
+            source={require('../../assets/images/logos/logo-trans-lockup.png')} 
+            style={styles.newWelcomeLogo}
+            resizeMode="contain"
+          />
+        </Animated.View>
+
+        {/* Text Content Group */}
+        <Animated.View
+          style={[
+            styles.newTextContent,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateX: slideAnim }]
+            }
+          ]}
+          pointerEvents="none"
+        >
+          {/* Main Headline */}
+          <Text style={styles.newWelcomeHeadline}>
+            LinkedIn for{'\n'}audio creators
+          </Text>
+          
+          {/* Sub-headline */}
+          <Text style={styles.newWelcomeSubheadline}>
+            Network with creators and event promoters. Upload your audio for free, earn from fans, and collaborate, all in one platform.
+          </Text>
+        </Animated.View>
+
+        {/* CTA Section */}
+        <Animated.View
+          style={[
+            styles.newCtaSection,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateX: slideAnim }]
+            }
+          ]}
+        >
+          {/* Get Started Button */}
+          <TouchableOpacity
+            style={styles.newGetStartedButton}
+            onPress={() => {
+              console.log('🎯 Get Started button pressed - animating exit');
+              // Animate slide-left and fade-out
+              Animated.parallel([
+                Animated.timing(fadeAnim, {
+                  toValue: 0,
+                  duration: 400,
+                  useNativeDriver: true,
+                }),
+                Animated.timing(slideAnim, {
+                  toValue: -50, // Slide left
+                  duration: 400,
+                  useNativeDriver: true,
+                }),
+              ]).start(() => {
+                // After animation completes, navigate to next screen
+                console.log('✅ Exit animation complete - navigating to userType');
+                setCurrentStep('userType');
+              });
+            }}
+            activeOpacity={0.7}
           >
-            <View style={styles.logoContainer}>
-              <Image 
-                source={require('../../assets/images/logos/logo-white.png')} 
-                style={styles.welcomeLogo}
-                resizeMode="contain"
-              />
-              <Animated.View
-                style={[
-                  styles.shimmerOverlay,
-                  {
-                    opacity: shimmerAnim.interpolate({
-                      inputRange: [0, 0.5, 1],
-                      outputRange: [0.3, 0.8, 0.3],
-                    }),
-                    transform: [
-                      {
-                        translateX: shimmerAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [-200, 200],
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              >
-                <LinearGradient
-                  colors={['transparent', 'rgba(255, 255, 255, 0.6)', 'transparent']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.shimmerGradient}
-                />
-              </Animated.View>
+            <Text style={styles.newGetStartedText}>Get Started</Text>
+            
+            {/* Arrow Circle Button */}
+            <View style={styles.newArrowButtonContainer}>
+              {/* Glow effect */}
+              <View style={styles.newArrowGlow} />
+              
+              {/* Button Body */}
+              <View style={styles.newArrowButton}>
+                <Ionicons name="arrow-forward" size={28} color="#FFFFFF" />
+              </View>
             </View>
-            <Text style={styles.welcomeTitle}>Welcome to SoundBridge</Text>
-            <Text style={styles.welcomeSubtitle}>
-              Where 50,000+ audio creators connect, collaborate, and build sustainable careers
-            </Text>
-            <Text style={styles.welcomeHint}>Tap anywhere to continue</Text>
-          </Animated.View>
+          </TouchableOpacity>
+
+          {/* Footer */}
+          <View style={styles.newFooter} pointerEvents="none">
+            <View style={styles.newFooterDivider} />
+            <View style={styles.newFooterContent}>
+              {/* Avatar Circles */}
+              <View style={styles.newAvatarGroup}>
+                <View style={[styles.newAvatar, { backgroundColor: '#4FD1C7', zIndex: 3 }]} />
+                <View style={[styles.newAvatar, { backgroundColor: '#FF6B6B', marginLeft: -8, zIndex: 2 }]} />
+                <View style={[styles.newAvatarPlus, { marginLeft: -8, zIndex: 1 }]}>
+                  <Text style={styles.newAvatarPlusText}>+</Text>
+                </View>
+              </View>
+              
+              {/* Footer Text */}
+              <Text style={styles.newFooterText}>
+                Free audio distribution • Join thousands of creators
+              </Text>
+            </View>
+          </View>
+        </Animated.View>
       </View>
-      </TouchableOpacity>
     </View>
   );
       
   // Render User Type Selection
   const renderUserTypeSelection = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
-      <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
-        <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
-          {getStepIndicatorText('userType', userType || 'music_creator')}
-        </Text>
-        <View style={styles.backButtonPlaceholder} />
+      <View style={styles.stepContainer}>
+        <ImageBackground
+          source={require('../../assets/images/logos/bg01.jpg')}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+        >
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.7)' }]} />
+        </ImageBackground>
+        <View style={styles.headerWithBack}>
+          <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
+          <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
+            {getStepIndicatorText('userType', userType || 'music_creator')}
+          </Text>
+          <View style={styles.backButtonPlaceholder} />
+        </View>
+
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          {/* Header Section */}
+          <Animated.View
+            style={[
+              { marginBottom: 32, marginTop: 16 },
+              {
+                opacity: fadeAnim,
+                transform: [{ translateX: slideAnim }, { scale: scaleAnim }]
+              }
+            ]}
+          >
+            <Text style={styles.newStepTitle}>
+              What brings you to SoundBridge?
+            </Text>
+            <Text style={styles.newStepSubtitle}>
+              Tell us what you are or what category you'd love to be:
+            </Text>
+          </Animated.View>
+
+          {/* Card Stack */}
+          <Animated.View
+            style={[
+              { flex: 1, gap: 12 },
+              {
+                opacity: fadeAnim,
+                transform: [{ translateX: slideAnim }]
+              }
+            ]}
+          >
+            {/* Option 1: Music Creator */}
+            <TouchableOpacity
+              style={[
+                styles.roleCard,
+                selectedRole === 'music_creator' && styles.roleCardSelected
+              ]}
+              onPress={() => {
+                setSelectedRole('music_creator');
+                handleUserTypeSelection('music_creator');
+              }}
+            >
+              <View style={[styles.roleIconBox, selectedRole === 'music_creator' && { backgroundColor: '#FF6B6B' }]}>
+                <Ionicons name="musical-notes" size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.roleTextContent}>
+                <View style={styles.roleHeader}>
+                  <Text style={styles.roleTitle}>Music Creator</Text>
+                  <View style={[styles.radioCircle, selectedRole === 'music_creator' && styles.radioCircleChecked]}>
+                    {selectedRole === 'music_creator' && <View style={styles.radioCircleInner} />}
+                  </View>
+                </View>
+                <Text style={styles.roleDescription}>
+                  Showcase your work and get discovered.
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Option 2: Podcast Creator */}
+            <TouchableOpacity
+              style={[
+                styles.roleCard,
+                selectedRole === 'podcast_creator' && styles.roleCardSelected
+              ]}
+              onPress={() => {
+                setSelectedRole('podcast_creator');
+                handleUserTypeSelection('podcast_creator');
+              }}
+            >
+              <View style={[styles.roleIconBox, selectedRole === 'podcast_creator' && { backgroundColor: '#4FD1C7' }]}>
+                <Ionicons name="mic" size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.roleTextContent}>
+                <View style={styles.roleHeader}>
+                  <Text style={styles.roleTitle}>Podcast Creator</Text>
+                  <View style={[styles.radioCircle, selectedRole === 'podcast_creator' && styles.radioCircleChecked]}>
+                    {selectedRole === 'podcast_creator' && <View style={styles.radioCircleInner} />}
+                  </View>
+                </View>
+                <Text style={styles.roleDescription}>
+                  Build your audience and monetise your content.
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Option 3: Industry Professional */}
+            <TouchableOpacity
+              style={[
+                styles.roleCard,
+                selectedRole === 'industry_professional' && styles.roleCardSelected
+              ]}
+              onPress={() => {
+                setSelectedRole('industry_professional');
+                handleUserTypeSelection('industry_professional');
+              }}
+            >
+              <View style={[styles.roleIconBox, selectedRole === 'industry_professional' && { backgroundColor: '#A78BFA' }]}>
+                <Ionicons name="briefcase" size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.roleTextContent}>
+                <View style={styles.roleHeader}>
+                  <Text style={styles.roleTitle}>Industry Professional</Text>
+                  <View style={[styles.radioCircle, selectedRole === 'industry_professional' && styles.radioCircleChecked]}>
+                    {selectedRole === 'industry_professional' && <View style={styles.radioCircleInner} />}
+                  </View>
+                </View>
+                <Text style={styles.roleDescription}>
+                  Find talent and book collaborations.
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Option 4: Music Lover */}
+            <TouchableOpacity
+              style={[
+                styles.roleCard,
+                selectedRole === 'music_lover' && styles.roleCardSelected
+              ]}
+              onPress={() => {
+                setSelectedRole('music_lover');
+                handleUserTypeSelection('music_lover');
+              }}
+            >
+              <View style={[styles.roleIconBox, selectedRole === 'music_lover' && { backgroundColor: '#F472B6' }]}>
+                <Ionicons name="headset" size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.roleTextContent}>
+                <View style={styles.roleHeader}>
+                  <Text style={styles.roleTitle}>Music Lover</Text>
+                  <View style={[styles.radioCircle, selectedRole === 'music_lover' && styles.radioCircleChecked]}>
+                    {selectedRole === 'music_lover' && <View style={styles.radioCircleInner} />}
+                  </View>
+                </View>
+                <Text style={styles.roleDescription}>
+                  Discover and support independent creators.
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
+
+          {/* Footer / Skip Action */}
+          <View style={{ marginTop: 32, alignItems: 'center' }}>
+            <TouchableOpacity onPress={() => handleUserTypeSelection(null)}>
+              <Text style={styles.skipButtonTextNew}>
+                Skip for now
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </View>
-
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Animated.View 
-          style={[
-            styles.headerContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
-            }
-          ]}
-        >
-          <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
-            What brings you to SoundBridge?
-          </Text>
-        </Animated.View>
-
-        <Animated.View 
-          style={[
-            styles.rolesContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }]
-            }
-          ]}
-        >
-          <TouchableOpacity
-            style={styles.heroRoleButton}
-            onPress={() => handleUserTypeSelection('music_creator')}
-          >
-            <LinearGradient
-              colors={['rgba(220, 38, 38, 0.2)', 'rgba(185, 28, 28, 0.15)', 'rgba(153, 27, 27, 0.1)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.heroRoleGradient}
-            >
-              <View style={styles.heroRoleIcon}>
-                <Ionicons name="mic" size={24} color="#FFFFFF" />
-              </View>
-              <View style={styles.heroRoleContent}>
-                <Text style={[styles.heroRoleTitle, { color: theme.colors.text }]}>Music Creator</Text>
-                <Text style={[styles.heroRoleDescription, { color: theme.colors.textSecondary }]}>
-                  Showcase your work and get discovered
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
-            </LinearGradient>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.heroRoleButton}
-            onPress={() => handleUserTypeSelection('podcast_creator')}
-          >
-            <LinearGradient
-              colors={['rgba(124, 58, 237, 0.2)', 'rgba(109, 40, 217, 0.15)', 'rgba(91, 33, 182, 0.1)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.heroRoleGradient}
-            >
-              <View style={styles.heroRoleIcon}>
-                <Ionicons name="radio" size={24} color="#FFFFFF" />
-              </View>
-              <View style={styles.heroRoleContent}>
-                <Text style={[styles.heroRoleTitle, { color: theme.colors.text }]}>Podcast Creator</Text>
-                <Text style={[styles.heroRoleDescription, { color: theme.colors.textSecondary }]}>
-                  Build your audience and monetize your content
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
-            </LinearGradient>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.heroRoleButton}
-            onPress={() => handleUserTypeSelection('industry_professional')}
-          >
-            <LinearGradient
-              colors={['rgba(5, 150, 105, 0.2)', 'rgba(4, 120, 87, 0.15)', 'rgba(6, 95, 70, 0.1)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.heroRoleGradient}
-            >
-              <View style={styles.heroRoleIcon}>
-                <Ionicons name="settings" size={24} color="#FFFFFF" />
-              </View>
-              <View style={styles.heroRoleContent}>
-                <Text style={[styles.heroRoleTitle, { color: theme.colors.text }]}>Industry Professional</Text>
-                <Text style={[styles.heroRoleDescription, { color: theme.colors.textSecondary }]}>
-                  Find talent and book collaborations
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
-            </LinearGradient>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.heroRoleButton}
-            onPress={() => handleUserTypeSelection('music_lover')}
-          >
-            <LinearGradient
-              colors={['rgba(234, 88, 12, 0.2)', 'rgba(220, 38, 38, 0.15)', 'rgba(185, 28, 28, 0.1)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.heroRoleGradient}
-            >
-              <View style={styles.heroRoleIcon}>
-                <Ionicons name="headset" size={24} color="#FFFFFF" />
-              </View>
-              <View style={styles.heroRoleContent}>
-                <Text style={[styles.heroRoleTitle, { color: theme.colors.text }]}>Music Lover</Text>
-                <Text style={[styles.heroRoleDescription, { color: theme.colors.textSecondary }]}>
-                  Discover and support independent creators
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
-            </LinearGradient>
-          </TouchableOpacity>
-        </Animated.View>
-
-        <TouchableOpacity
-          style={styles.skipButton}
-          onPress={() => handleUserTypeSelection(null)}
-        >
-          <Text style={[styles.skipButtonText, { color: theme.colors.textSecondary }]}>
-            Skip for now
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </View>
   );
 
   // Render Quick Setup (consolidated profile form) - Legacy function
   const renderQuickSetup = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType || 'music_creator')}
         </Text>
@@ -1656,9 +1839,16 @@ export default function OnboardingScreen() {
 
   // Render Music Creator Profile Setup
   const renderMusicCreatorProfileSetup = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -1793,9 +1983,16 @@ export default function OnboardingScreen() {
         
   // Render Music Creator Genres Selection
   const renderMusicCreatorGenres = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
         <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
           <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
           </Text>
@@ -1908,9 +2105,16 @@ export default function OnboardingScreen() {
 
   // Render Music Creator Role Selection
   const renderMusicCreatorRole = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -2014,9 +2218,16 @@ export default function OnboardingScreen() {
 
   // Render Music Creator Events
   const renderMusicCreatorEvents = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -2127,7 +2338,7 @@ export default function OnboardingScreen() {
           style={styles.skipButton}
             onPress={() => {
               setSelectedEventTypes([]);
-              setCurrentStep('musicCreator_valueDemo');
+              animateStepTransition('musicCreator_valueDemo');
             }}
         >
           <Text style={[styles.skipButtonText, { color: theme.colors.textSecondary }]}>
@@ -2141,9 +2352,16 @@ export default function OnboardingScreen() {
 
   // Render Music Creator Value Demo
   const renderMusicCreatorValueDemo = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -2173,46 +2391,73 @@ export default function OnboardingScreen() {
             </Text>
           </View>
         ) : (
-          <Animated.View 
+          <Animated.View
             style={[
-              styles.creatorsContainer,
+              styles.stackedCreatorsContainer,
               {
                 opacity: fadeAnim,
                 transform: [{ translateY: slideAnim }]
               }
             ]}
           >
-            {demoCreators.map((creator, index) => (
-              <View key={creator.id || index} style={[styles.creatorCard, { backgroundColor: theme.colors.surface }]}>
-                <View style={styles.creatorAvatar}>
-                  {creator.avatar_url ? (
-                    <Image source={{ uri: creator.avatar_url }} style={styles.creatorAvatarImage} />
-                  ) : (
-                    <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
-                  )}
-      </View>
-                <Text style={[styles.creatorName, { color: theme.colors.text }]}>
-                  {creator.display_name || creator.username || 'Creator'}
-                </Text>
-                <Text style={[styles.creatorRole, { color: theme.colors.textSecondary }]}>
-                  {creator.bio || 'Music Creator'} • {creator.location || 'Location'}
-                </Text>
-                <View style={styles.creatorStats}>
-                  <View style={styles.creatorStatItem}>
-                    <Ionicons name="people" size={16} color={theme.colors.primary} />
-                    <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
-                      {Math.floor(Math.random() * 500) + 100}+ connections
-                    </Text>
-                  </View>
-                  <View style={styles.creatorStatItem}>
-                    <Ionicons name="musical-notes" size={16} color={theme.colors.primary} />
-                    <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
-                      {Math.floor(Math.random() * 50) + 10} tracks
-                    </Text>
+            {demoCreators.map((creator, index) => {
+              const isConnecting = connectingIds.has(creator.id);
+              return (
+                <View
+                  key={creator.id || index}
+                  style={[
+                    styles.stackedCreatorCard,
+                    {
+                      backgroundColor: theme.colors.surface,
+                      marginBottom: 16,
+                    }
+                  ]}
+                >
+                  <View style={styles.creatorCardContent}>
+                    <View style={styles.creatorAvatar}>
+                      {creator.avatar_url ? (
+                        <Image source={{ uri: creator.avatar_url }} style={styles.creatorAvatarImage} />
+                      ) : (
+                        <Ionicons name="person" size={32} color={theme.colors.textSecondary} />
+                      )}
+                    </View>
+                    <View style={styles.stackedCreatorInfo}>
+                      <Text style={[styles.creatorName, { color: theme.colors.text }]} numberOfLines={1}>
+                        {creator.display_name || creator.username || 'Creator'}
+                      </Text>
+                      <Text style={[styles.creatorRole, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                        {creator.bio || 'Music Creator'}
+                      </Text>
+                      <View style={styles.creatorStats}>
+                        <View style={styles.creatorStatItem}>
+                          <Ionicons name="people" size={14} color="#DC2626" />
+                          <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
+                            {creator.followers_count || 0}
+                          </Text>
+                        </View>
+                        <View style={styles.creatorStatItem}>
+                          <Ionicons name="musical-notes" size={14} color="#DC2626" />
+                          <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
+                            {creator.tracks_count || 0}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.connectButton, isConnecting && styles.connectButtonLoading]}
+                      onPress={() => handleConnectToCreator(creator.id)}
+                      disabled={isConnecting}
+                    >
+                      {isConnecting ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.connectButtonText}>Connect</Text>
+                      )}
+                    </TouchableOpacity>
                   </View>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </Animated.View>
         )}
 
@@ -2257,9 +2502,16 @@ export default function OnboardingScreen() {
 
   // Render Podcast Creator Profile Setup
   const renderPodcastCreatorProfileSetup = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -2394,9 +2646,16 @@ export default function OnboardingScreen() {
 
   // Render Podcast Creator Categories Selection
   const renderPodcastCreatorCategories = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -2509,9 +2768,16 @@ export default function OnboardingScreen() {
 
   // Render Podcast Creator Role Selection
   const renderPodcastCreatorRole = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -2615,9 +2881,16 @@ export default function OnboardingScreen() {
 
   // Render Podcast Creator Events
   const renderPodcastCreatorEvents = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -2728,7 +3001,7 @@ export default function OnboardingScreen() {
             style={styles.skipButton}
             onPress={() => {
               setSelectedEventTypes([]);
-              setCurrentStep('podcastCreator_valueDemo');
+              animateStepTransition('podcastCreator_valueDemo');
             }}
           >
             <Text style={[styles.skipButtonText, { color: theme.colors.textSecondary }]}>
@@ -2742,9 +3015,16 @@ export default function OnboardingScreen() {
 
   // Render Podcast Creator Value Demo
   const renderPodcastCreatorValueDemo = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -2774,46 +3054,77 @@ export default function OnboardingScreen() {
             </Text>
           </View>
         ) : (
-          <Animated.View 
+          <Animated.View
             style={[
-              styles.creatorsContainer,
+              styles.stackedCreatorsContainer,
               {
                 opacity: fadeAnim,
                 transform: [{ translateY: slideAnim }]
               }
             ]}
           >
-            {demoCreators.map((creator, index) => (
-              <View key={creator.id || index} style={[styles.creatorCard, { backgroundColor: theme.colors.surface }]}>
-                <View style={styles.creatorAvatar}>
-                  {creator.avatar_url ? (
-                    <Image source={{ uri: creator.avatar_url }} style={styles.creatorAvatarImage} />
-                  ) : (
-                    <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
-                  )}
-                </View>
-                <Text style={[styles.creatorName, { color: theme.colors.text }]}>
-                  {creator.display_name || creator.username || 'Podcaster'}
-                </Text>
-                <Text style={[styles.creatorRole, { color: theme.colors.textSecondary }]}>
-                  {creator.bio || 'Podcast Creator'} • {creator.location || 'Location'}
-                </Text>
-                <View style={styles.creatorStats}>
-                  <View style={styles.creatorStatItem}>
-                    <Ionicons name="people" size={16} color={theme.colors.primary} />
-                    <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
-                      {Math.floor(Math.random() * 3000) + 1000}+ connections
-                    </Text>
+            {demoCreators.map((creator, index) => {
+              const isConnecting = connectingIds.has(creator.id);
+              return (
+                <View
+                  key={creator.id || index}
+                  style={[
+                    styles.stackedCreatorCard,
+                    {
+                      backgroundColor: theme.colors.surface,
+                      marginTop: index === 0 ? 0 : -140,
+                      zIndex: demoCreators.length - index,
+                    }
+                  ]}
+                >
+                  <View style={styles.stackedCreatorHeader}>
+                    <View style={styles.creatorAvatar}>
+                      {creator.avatar_url ? (
+                        <Image source={{ uri: creator.avatar_url }} style={styles.creatorAvatarImage} />
+                      ) : (
+                        <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
+                      )}
+                    </View>
+                    <View style={styles.stackedCreatorInfo}>
+                      <Text style={[styles.creatorName, { color: theme.colors.text }]}>
+                        {creator.display_name || creator.username || 'Creator'}
+                      </Text>
+                      <Text style={[styles.creatorRole, { color: theme.colors.textSecondary }]}>
+                        {creator.bio || 'Podcast Creator'} • {creator.location || 'Location'}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={styles.creatorStatItem}>
-                    <Ionicons name="mic" size={16} color={theme.colors.primary} />
-                    <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
-                      {Math.floor(Math.random() * 200) + 50} episodes
-                    </Text>
+                  <View style={styles.creatorStats}>
+                    <View style={styles.creatorStatItem}>
+                      <Ionicons name="people" size={16} color="#DC2626" />
+                      <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
+                        {creator.followers_count || 0}
+                      </Text>
+                    </View>
+                    <View style={styles.creatorStatItem}>
+                      <Ionicons name="mic" size={16} color="#DC2626" />
+                      <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
+                        {creator.tracks_count || Math.floor(Math.random() * 200) + 50} episodes
+                      </Text>
+                    </View>
                   </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.connectButton,
+                      isConnecting && styles.connectButtonLoading
+                    ]}
+                    onPress={() => handleConnectToCreator(creator.id)}
+                    disabled={isConnecting}
+                  >
+                    {isConnecting ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.connectButtonText}>Connect</Text>
+                    )}
+                  </TouchableOpacity>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </Animated.View>
         )}
 
@@ -2858,9 +3169,16 @@ export default function OnboardingScreen() {
 
   // Render Industry Professional Profile Setup
   const renderIndustryProfessionalProfileSetup = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -3015,9 +3333,16 @@ export default function OnboardingScreen() {
 
   // Render Industry Professional Role Selection
   const renderIndustryProfessionalRole = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -3113,9 +3438,16 @@ export default function OnboardingScreen() {
 
   // Render Industry Professional Genres
   const renderIndustryProfessionalGenres = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
           </Text>
@@ -3228,9 +3560,16 @@ export default function OnboardingScreen() {
 
   // Render Industry Professional Goals
   const renderIndustryProfessionalGoals = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -3334,9 +3673,16 @@ export default function OnboardingScreen() {
 
   // Render Industry Professional Value Demo
   const renderIndustryProfessionalValueDemo = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -3366,46 +3712,74 @@ export default function OnboardingScreen() {
             </Text>
           </View>
         ) : (
-          <Animated.View 
+          <Animated.View
             style={[
-              styles.creatorsContainer,
+              styles.stackedCreatorsContainer,
               {
                 opacity: fadeAnim,
                 transform: [{ translateY: slideAnim }]
               }
             ]}
           >
-            {demoCreators.map((creator, index) => (
-              <View key={creator.id || index} style={[styles.creatorCard, { backgroundColor: theme.colors.surface }]}>
-                <View style={styles.creatorAvatar}>
-                  {creator.avatar_url ? (
-                    <Image source={{ uri: creator.avatar_url }} style={styles.creatorAvatarImage} />
-                  ) : (
-                    <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
-                  )}
-                </View>
-                <Text style={[styles.creatorName, { color: theme.colors.text }]}>
-                  {creator.display_name || creator.username || 'Professional'}
-                </Text>
-                <Text style={[styles.creatorRole, { color: theme.colors.textSecondary }]}>
-                  {creator.bio || 'Industry Professional'} • {creator.location || 'Location'}
-                </Text>
-                <View style={styles.creatorStats}>
-                  <View style={styles.creatorStatItem}>
-                    <Ionicons name="people" size={16} color={theme.colors.primary} />
-                    <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
-                      {Math.floor(Math.random() * 1000) + 500}+ connections
-                    </Text>
+            {demoCreators.map((creator, index) => {
+              const isConnecting = connectingIds.has(creator.id);
+              return (
+                <View
+                  key={creator.id || index}
+                  style={[
+                    styles.stackedCreatorCard,
+                    {
+                      backgroundColor: theme.colors.surface,
+                      marginTop: index === 0 ? 0 : -140,
+                      zIndex: demoCreators.length - index,
+                    }
+                  ]}
+                >
+                  <View style={styles.stackedCreatorHeader}>
+                    <View style={styles.creatorAvatar}>
+                      {creator.avatar_url ? (
+                        <Image source={{ uri: creator.avatar_url }} style={styles.creatorAvatarImage} />
+                      ) : (
+                        <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
+                      )}
+                    </View>
+                    <View style={styles.stackedCreatorInfo}>
+                      <Text style={[styles.creatorName, { color: theme.colors.text }]} numberOfLines={1}>
+                        {creator.display_name || creator.username || 'Professional'}
+                      </Text>
+                      <Text style={[styles.creatorRole, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                        {creator.bio || 'Industry Professional'}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={styles.creatorStatItem}>
-                    <Ionicons name="briefcase" size={16} color={theme.colors.primary} />
-                    <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
-                      {Math.floor(Math.random() * 100) + 20} collaborations
-                    </Text>
+                  <View style={styles.creatorStats}>
+                    <View style={styles.creatorStatItem}>
+                      <Ionicons name="people" size={16} color="#DC2626" />
+                      <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
+                        {creator.connections_count || 0}
+                      </Text>
+                    </View>
+                    <View style={styles.creatorStatItem}>
+                      <Ionicons name="briefcase" size={16} color="#DC2626" />
+                      <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
+                        {creator.tracks_count || 0}
+                      </Text>
+                    </View>
                   </View>
+                  <TouchableOpacity
+                    style={[styles.connectButton, isConnecting && styles.connectButtonLoading]}
+                    onPress={() => handleConnectToCreator(creator.id)}
+                    disabled={isConnecting}
+                  >
+                    {isConnecting ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.connectButtonText}>Connect</Text>
+                    )}
+                  </TouchableOpacity>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </Animated.View>
         )}
 
@@ -3450,9 +3824,16 @@ export default function OnboardingScreen() {
 
   // Render Music Lover Profile Setup
   const renderMusicLoverProfileSetup = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -3587,9 +3968,16 @@ export default function OnboardingScreen() {
 
   // Render Music Lover Favorite Genres
   const renderMusicLoverGenres = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -3702,9 +4090,16 @@ export default function OnboardingScreen() {
 
   // Render Music Lover Events
   const renderMusicLoverEvents = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
                 </Text>
@@ -3815,7 +4210,7 @@ export default function OnboardingScreen() {
             style={styles.skipButton}
             onPress={() => {
               setSelectedEventTypes([]);
-              setCurrentStep('musicLover_valueDemo');
+              animateStepTransition('musicLover_valueDemo');
             }}
           >
             <Text style={[styles.skipButtonText, { color: theme.colors.textSecondary }]}>
@@ -3829,9 +4224,16 @@ export default function OnboardingScreen() {
 
   // Render Music Lover Value Demo
   const renderMusicLoverValueDemo = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType)}
         </Text>
@@ -3861,46 +4263,73 @@ export default function OnboardingScreen() {
             </Text>
           </View>
         ) : (
-          <Animated.View 
+          <Animated.View
             style={[
-              styles.creatorsContainer,
+              styles.stackedCreatorsContainer,
               {
                 opacity: fadeAnim,
                 transform: [{ translateY: slideAnim }]
               }
             ]}
           >
-            {demoCreators.map((creator, index) => (
-              <View key={creator.id || index} style={[styles.creatorCard, { backgroundColor: theme.colors.surface }]}>
-                <View style={styles.creatorAvatar}>
-                  {creator.avatar_url ? (
-                    <Image source={{ uri: creator.avatar_url }} style={styles.creatorAvatarImage} />
-                  ) : (
-                    <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
-                  )}
-                </View>
-                <Text style={[styles.creatorName, { color: theme.colors.text }]}>
-                  {creator.display_name || creator.username || 'Creator'}
-                </Text>
-                <Text style={[styles.creatorRole, { color: theme.colors.textSecondary }]}>
-                  {creator.bio || 'Music Creator'} • {creator.location || 'Location'}
-                </Text>
-                <View style={styles.creatorStats}>
-                  <View style={styles.creatorStatItem}>
-                    <Ionicons name="play-circle" size={16} color={theme.colors.primary} />
-                    <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
-                      {Math.floor(Math.random() * 10000) + 1000}+ streams
-                    </Text>
+            {demoCreators.map((creator, index) => {
+              const isConnecting = connectingIds.has(creator.id);
+              return (
+                <View
+                  key={creator.id || index}
+                  style={[
+                    styles.stackedCreatorCard,
+                    {
+                      backgroundColor: theme.colors.surface,
+                      marginBottom: 16,
+                    }
+                  ]}
+                >
+                  <View style={styles.creatorCardContent}>
+                    <View style={styles.creatorAvatar}>
+                      {creator.avatar_url ? (
+                        <Image source={{ uri: creator.avatar_url }} style={styles.creatorAvatarImage} />
+                      ) : (
+                        <Ionicons name="person" size={32} color={theme.colors.textSecondary} />
+                      )}
+                    </View>
+                    <View style={styles.stackedCreatorInfo}>
+                      <Text style={[styles.creatorName, { color: theme.colors.text }]} numberOfLines={1}>
+                        {creator.display_name || creator.username || 'Creator'}
+                      </Text>
+                      <Text style={[styles.creatorRole, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                        {creator.bio || 'Music Creator'}
+                      </Text>
+                      <View style={styles.creatorStats}>
+                        <View style={styles.creatorStatItem}>
+                          <Ionicons name="people" size={14} color="#DC2626" />
+                          <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
+                            {creator.followers_count || 0}
+                          </Text>
+                        </View>
+                        <View style={styles.creatorStatItem}>
+                          <Ionicons name="musical-notes" size={14} color="#DC2626" />
+                          <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
+                            {creator.tracks_count || 0}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.connectButton, isConnecting && styles.connectButtonLoading]}
+                      onPress={() => handleConnectToCreator(creator.id)}
+                      disabled={isConnecting}
+                    >
+                      {isConnecting ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.connectButtonText}>Connect</Text>
+                      )}
+                    </TouchableOpacity>
                   </View>
-                  <View style={styles.creatorStatItem}>
-                    <Ionicons name="musical-notes" size={16} color={theme.colors.primary} />
-                    <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
-                      {Math.floor(Math.random() * 50) + 10} tracks
-                    </Text>
-                  </View>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </Animated.View>
         )}
 
@@ -3941,9 +4370,16 @@ export default function OnboardingScreen() {
 
   // Render Event Preferences - Legacy function
   const renderEventPreferences = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType || 'music_creator')}
         </Text>
@@ -4054,7 +4490,7 @@ export default function OnboardingScreen() {
             style={styles.skipButton}
             onPress={() => {
               setSelectedEventTypes([]);
-              setCurrentStep('valueDemo');
+              animateStepTransition('valueDemo');
             }}
           >
             <Text style={[styles.skipButtonText, { color: theme.colors.textSecondary }]}>
@@ -4068,9 +4504,16 @@ export default function OnboardingScreen() {
 
   // Render Value Demonstration - Legacy function
   const renderValueDemo = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           {getStepIndicatorText(currentStep, userType || 'music_creator')}
         </Text>
@@ -4098,48 +4541,75 @@ export default function OnboardingScreen() {
             <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>
               Loading creators...
             </Text>
-      </View>
+          </View>
         ) : (
-          <Animated.View 
+          <Animated.View
             style={[
-              styles.creatorsContainer,
+              styles.stackedCreatorsContainer,
               {
                 opacity: fadeAnim,
                 transform: [{ translateY: slideAnim }]
               }
             ]}
           >
-            {demoCreators.map((creator, index) => (
-              <View key={creator.id || index} style={[styles.creatorCard, { backgroundColor: theme.colors.surface }]}>
-                <View style={styles.creatorAvatar}>
-                  {creator.avatar_url ? (
-                    <Image source={{ uri: creator.avatar_url }} style={styles.creatorAvatarImage} />
-                  ) : (
-                    <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
-                  )}
-                </View>
-                <Text style={[styles.creatorName, { color: theme.colors.text }]}>
-                  {creator.display_name || creator.username || 'Creator'}
-                </Text>
-                <Text style={[styles.creatorRole, { color: theme.colors.textSecondary }]}>
-                  {creator.bio || 'Music Creator'} • {creator.location || 'Location'}
-                </Text>
-                <View style={styles.creatorStats}>
-                  <View style={styles.creatorStatItem}>
-                    <Ionicons name="people" size={16} color={theme.colors.primary} />
-                    <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
-                      {Math.floor(Math.random() * 500) + 100}+ connections
-                    </Text>
+            {demoCreators.map((creator, index) => {
+              const isConnecting = connectingIds.has(creator.id);
+              return (
+                <View
+                  key={creator.id || index}
+                  style={[
+                    styles.stackedCreatorCard,
+                    {
+                      backgroundColor: theme.colors.surface,
+                      marginBottom: 16,
+                    }
+                  ]}
+                >
+                  <View style={styles.creatorCardContent}>
+                    <View style={styles.creatorAvatar}>
+                      {creator.avatar_url ? (
+                        <Image source={{ uri: creator.avatar_url }} style={styles.creatorAvatarImage} />
+                      ) : (
+                        <Ionicons name="person" size={32} color={theme.colors.textSecondary} />
+                      )}
+                    </View>
+                    <View style={styles.stackedCreatorInfo}>
+                      <Text style={[styles.creatorName, { color: theme.colors.text }]} numberOfLines={1}>
+                        {creator.display_name || creator.username || 'Creator'}
+                      </Text>
+                      <Text style={[styles.creatorRole, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                        {creator.bio || 'Music Creator'}
+                      </Text>
+                      <View style={styles.creatorStats}>
+                        <View style={styles.creatorStatItem}>
+                          <Ionicons name="people" size={14} color="#DC2626" />
+                          <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
+                            {creator.followers_count || 0}
+                          </Text>
+                        </View>
+                        <View style={styles.creatorStatItem}>
+                          <Ionicons name="musical-notes" size={14} color="#DC2626" />
+                          <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
+                            {creator.tracks_count || 0}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.connectButton, isConnecting && styles.connectButtonLoading]}
+                      onPress={() => handleConnectToCreator(creator.id)}
+                      disabled={isConnecting}
+                    >
+                      {isConnecting ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.connectButtonText}>Connect</Text>
+                      )}
+                    </TouchableOpacity>
                   </View>
-                  <View style={styles.creatorStatItem}>
-                    <Ionicons name="musical-notes" size={16} color={theme.colors.primary} />
-                    <Text style={[styles.creatorStatText, { color: theme.colors.text }]}>
-                      {Math.floor(Math.random() * 50) + 10} tracks
-                    </Text>
-                  </View>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </Animated.View>
         )}
 
@@ -4181,11 +4651,18 @@ export default function OnboardingScreen() {
   // Render Tier Selection (Free vs Pro) - Path-aware
   const renderTierSelection = () => {
     const isMusicLover = userType === 'music_lover';
-    
+
     return (
-      <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+      <View style={styles.stepContainer}>
+        <ImageBackground
+          source={require('../../assets/images/logos/bg01.jpg')}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+        >
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.7)' }]} />
+        </ImageBackground>
         <View style={styles.headerWithBack}>
-          <BackButton style={styles.backButton} onPress={handleBack} />
+          <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
           <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
             {getStepIndicatorText(currentStep, userType)}
           </Text>
@@ -4193,7 +4670,7 @@ export default function OnboardingScreen() {
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <Animated.View 
+          <Animated.View
             style={[
               styles.headerContainer,
               {
@@ -4203,7 +4680,10 @@ export default function OnboardingScreen() {
             ]}
           >
             <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
-              Choose Your Experience
+              You're All Set! 🎉
+            </Text>
+            <Text style={[styles.stepSubtitle, { color: theme.colors.textSecondary, marginTop: 8 }]}>
+              Choose how you want to start your creative journey
             </Text>
           </Animated.View>
 
@@ -4216,134 +4696,216 @@ export default function OnboardingScreen() {
               }
             ]}
           >
-            {/* Free Tier - Show first and more prominent for Music Lovers */}
+            {/* Free Tier */}
             <TouchableOpacity
               style={[
-                styles.tierCard, 
-                styles.tierCardFree, 
-                { backgroundColor: theme.colors.surface },
-                isMusicLover && { borderWidth: 2, borderColor: theme.colors.primary }
+                styles.tierCard,
+                styles.tierCardFree,
+                { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' }
               ]}
               onPress={() => handleTierSelection('free')}
             >
-              {isMusicLover && (
-                <View style={[styles.proBadge, { backgroundColor: theme.colors.primary + '20', marginBottom: 12 }]}>
-                  <Ionicons name="star" size={16} color={theme.colors.primary} />
-                  <Text style={[styles.proBadgeText, { color: theme.colors.primary }]}>RECOMMENDED</Text>
-      </View>
-              )}
-              <Text style={[styles.tierCardTitle, { color: theme.colors.text }]}>FREE</Text>
+              <View style={styles.tierHeaderSimple}>
+                <Text style={[styles.tierCardTitle, { color: theme.colors.text }]}>FREE</Text>
+              </View>
+              <Text style={[styles.tierDescription, { color: theme.colors.textSecondary, marginBottom: 16 }]}>
+                Perfect for getting started
+              </Text>
               <View style={styles.tierFeatures}>
-                {isMusicLover ? (
-                  <>
-                    <View style={styles.tierFeatureItem}>
-                      <Ionicons name="checkmark" size={16} color="#10B981" />
-                      <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Unlimited streaming</Text>
-                    </View>
-                    <View style={styles.tierFeatureItem}>
-                      <Ionicons name="checkmark" size={16} color="#10B981" />
-                      <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Discover new artists</Text>
-                    </View>
-                    <View style={styles.tierFeatureItem}>
-                      <Ionicons name="checkmark" size={16} color="#10B981" />
-                      <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Support creators</Text>
-                    </View>
-                    <View style={styles.tierFeatureItem}>
-                      <Ionicons name="checkmark" size={16} color="#10B981" />
-                      <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Event discovery</Text>
-                    </View>
-                  </>
-                ) : (
-                  <>
-                    <View style={styles.tierFeatureItem}>
-                      <Ionicons name="checkmark" size={16} color={theme.colors.textSecondary} />
-                      <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>3 track uploads (lifetime)</Text>
-                    </View>
-                    <View style={styles.tierFeatureItem}>
-                      <Ionicons name="checkmark" size={16} color={theme.colors.textSecondary} />
-                      <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>5 searches per month</Text>
-                    </View>
-                    <View style={styles.tierFeatureItem}>
-                      <Ionicons name="checkmark" size={16} color={theme.colors.textSecondary} />
-                      <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>3 messages per month</Text>
-                    </View>
-                    <View style={styles.tierFeatureItem}>
-                      <Ionicons name="checkmark" size={16} color={theme.colors.textSecondary} />
-                      <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Basic features</Text>
-                    </View>
-                  </>
-                )}
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>30MB storage (~3 tracks)</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>3 uploads total</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Basic profile & networking</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Receive tips (keep 95%)</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Create & sell event tickets</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Browse & discover music</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Basic analytics</Text>
+                </View>
               </View>
               <View style={styles.tierPricing}>
-                <Text style={[styles.tierPricingText, { color: theme.colors.text }]}>Forever FREE</Text>
+                <Text style={[styles.tierPricingText, { color: theme.colors.text, fontSize: 32, fontWeight: '700' }]}>£0</Text>
+                <Text style={[styles.tierPricingSubtext, { color: theme.colors.textSecondary }]}>Forever free</Text>
               </View>
-              <View style={[styles.tierButton, styles.tierButtonFree, isMusicLover && { backgroundColor: theme.colors.primary }]}>
-                <Text style={[styles.tierButtonText, { color: isMusicLover ? '#FFFFFF' : theme.colors.text }]}>
-                  {isMusicLover ? 'Start Exploring' : 'Start Free'}
+              <View style={[styles.tierButton, styles.tierButtonFree]}>
+                <Text style={[styles.tierButtonText, { color: theme.colors.text }]}>
+                  Start Free
                 </Text>
               </View>
             </TouchableOpacity>
 
-            {/* Pro Tier */}
+            {/* Premium Tier */}
             <TouchableOpacity
-              style={[styles.tierCard, styles.tierCardPro, { backgroundColor: theme.colors.surface }]}
-              onPress={() => handleTierSelection('pro')}
+              style={[
+                styles.tierCard,
+                styles.tierCardPro,
+                { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' }
+              ]}
+              onPress={() => handleTierSelection('premium')}
             >
-              <View style={styles.proBadge}>
-                <Ionicons name="star" size={16} color="#F59E0B" />
-                <Text style={styles.proBadgeText}>PRO</Text>
+              <View style={styles.tierHeaderSimple}>
+                <Text style={[styles.tierCardTitle, { color: theme.colors.text }]}>PREMIUM</Text>
               </View>
+              <Text style={[styles.tierDescription, { color: theme.colors.textSecondary, marginBottom: 16 }]}>
+                Everything you need to grow your career
+              </Text>
               <View style={styles.tierFeatures}>
                 <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark" size={16} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>7 uploads per month</Text>
+                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>2GB storage (~200 tracks)</Text>
                 </View>
                 <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark" size={16} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Unlimited searches</Text>
+                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Unlimited uploads*</Text>
                 </View>
                 <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark" size={16} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Unlimited messages</Text>
+                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Receive tips from fans (keep 95%)</Text>
                 </View>
                 <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark" size={16} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Advanced analytics</Text>
+                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Pro badge on profile</Text>
                 </View>
                 <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark" size={16} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Payment protection</Text>
+                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Custom profile URL</Text>
                 </View>
                 <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark" size={16} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Verified badge</Text>
+                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Boosted visibility (48hrs monthly)</Text>
                 </View>
                 <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark" size={16} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Priority placement</Text>
+                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>AI-optimized feed, audio & live</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Advanced analytics dashboard</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>AI collaboration matching</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Priority support</Text>
                 </View>
               </View>
               <View style={styles.tierPricing}>
-                <Text style={[styles.tierPricingText, { color: theme.colors.text }]}>£9.99/month</Text>
-                <View style={styles.moneyBackBadge}>
-                  <Ionicons name="shield-checkmark" size={14} color="#10B981" />
-                  <Text style={styles.moneyBackText}>7-day money-back guarantee</Text>
+                <Text style={[styles.tierPricingText, { color: theme.colors.text, fontSize: 32, fontWeight: '700' }]}>£6.99</Text>
+                <Text style={[styles.tierPricingSubtext, { color: theme.colors.textSecondary }]}>per month</Text>
+                <View style={[styles.moneyBackBadge, { marginTop: 8 }]}>
+                  <Ionicons name="gift-outline" size={14} color="#10B981" />
+                  <Text style={styles.moneyBackText}>3-day free trial</Text>
                 </View>
               </View>
               <View style={[styles.tierButton, styles.tierButtonPro]}>
                 <Text style={styles.tierButtonTextPro}>
-                  {isMusicLover ? 'Support Creators More →' : 'Upgrade to Pro →'}
+                  Start Creating
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Unlimited Tier */}
+            <TouchableOpacity
+              style={[
+                styles.tierCard,
+                styles.tierCardPro,
+                { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' }
+              ]}
+              onPress={() => handleTierSelection('unlimited')}
+            >
+              <View style={styles.tierHeaderSimple}>
+                <Text style={[styles.tierCardTitle, { color: theme.colors.text }]}>UNLIMITED</Text>
+              </View>
+              <Text style={[styles.tierDescription, { color: theme.colors.textSecondary, marginBottom: 16 }]}>
+                For serious creators and professionals
+              </Text>
+              <View style={styles.tierFeatures}>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>UNLIMITED track uploads</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Unlimited badge on profile</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Featured on Discover 2x/month</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Top priority in feed</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Fan subscriptions (earn monthly)</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Custom promo codes</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Email list export</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Lower fees (3% vs 5%)</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Highest priority support</Text>
+                </View>
+              </View>
+              <View style={styles.tierPricing}>
+                <Text style={[styles.tierPricingText, { color: theme.colors.text, fontSize: 32, fontWeight: '700' }]}>£12.99</Text>
+                <Text style={[styles.tierPricingSubtext, { color: theme.colors.textSecondary }]}>per month</Text>
+                <View style={[styles.moneyBackBadge, { marginTop: 8 }]}>
+                  <Ionicons name="gift-outline" size={14} color="#10B981" />
+                  <Text style={styles.moneyBackText}>3-day free trial</Text>
+                </View>
+              </View>
+              <View style={[styles.tierButton, styles.tierButtonUnlimited]}>
+                <Text style={styles.tierButtonTextPro}>
+                  Full Access
                 </Text>
               </View>
             </TouchableOpacity>
           </Animated.View>
 
-          <Text style={[styles.socialProofText, { color: theme.colors.textSecondary }]}>
-            {isMusicLover 
-              ? '💡 Start free and upgrade anytime to support creators more'
-              : '💡 90% of professionals choose Pro'
-            }
-          </Text>
+          <View style={{ alignItems: 'center', marginTop: 16 }}>
+            <Text style={[styles.socialProofText, { color: theme.colors.textSecondary, marginBottom: 16 }]}>
+              Start with basics, upgrade anytime
+            </Text>
+            <TouchableOpacity
+              onPress={() => handleTierSelection('free')}
+              style={{ paddingVertical: 12 }}
+            >
+              <Text style={[styles.skipButtonText, { color: theme.colors.textSecondary, textDecorationLine: 'underline' }]}>
+                Skip for now
+              </Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </View>
     );
@@ -4351,9 +4913,16 @@ export default function OnboardingScreen() {
 
   // Render Payment Collection
   const renderPayment = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <View style={styles.headerWithBack}>
-        <BackButton style={styles.backButton} onPress={handleBack} />
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
         <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
           Finalizing...
         </Text>
@@ -4524,7 +5093,14 @@ export default function OnboardingScreen() {
 
   // Render Welcome Confirmation
   const renderWelcomeConfirmation = () => (
-    <View style={[styles.stepContainer, { backgroundColor: theme.colors.background }]}>
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]} />
+      </ImageBackground>
       <ScrollView contentContainerStyle={styles.scrollContent}>
       <View style={styles.completionContainer}>
           <Animated.View
@@ -4607,23 +5183,29 @@ export default function OnboardingScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
       <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} />
       
-      {/* Progress indicator */}
+      {/* Progress indicator - Circular Dots */}
       {currentStep !== 'welcome' && currentStep !== 'welcomeConfirmation' && (
         <View style={styles.progressContainer}>
-          <View style={styles.progressBar}>
-            <View 
-              style={[
-                styles.progressFill, 
-                { 
-                  width: `${(() => {
-                    const totalSteps = getPathTotalSteps(userType);
-                    const currentStepNum = getCurrentStepNumber(currentStep, userType);
-                    if (totalSteps === 0) return 0;
-                    return Math.round((currentStepNum / totalSteps) * 100);
-                  })()}%` 
-                }
-              ]} 
-            />
+          <View style={styles.progressDotsContainer}>
+            {Array.from({ length: getPathTotalSteps(userType) }).map((_, index) => {
+              const stepNum = index + 1;
+              const currentStepNum = getCurrentStepNumber(currentStep, userType);
+              const isActive = stepNum === currentStepNum;
+              const isPassed = stepNum < currentStepNum;
+
+              return (
+                <View key={index} style={styles.dotWrapper}>
+                  {isActive && <View style={styles.dotGlow} />}
+                  <View
+                    style={[
+                      styles.progressDot,
+                      isActive && styles.progressDotActive,
+                      isPassed && styles.progressDotPassed,
+                    ]}
+                  />
+                </View>
+              );
+            })}
           </View>
         </View>
       )}
@@ -4754,9 +5336,7 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   backButton: {
-    padding: 8,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    // Empty - using OnboardingBackButton component's own styles
   },
   backButtonPlaceholder: {
     width: 40,
@@ -4770,15 +5350,45 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
   },
-  progressBar: {
-    height: 4,
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderRadius: 2,
+  progressDotsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
   },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#7C3AED',
-    borderRadius: 2,
+  dotWrapper: {
+    position: 'relative',
+    width: 12,
+    height: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dotGlow: {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#DC2626',
+    opacity: 0.4,
+    shadowColor: '#DC2626',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
+  },
+  progressDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(220, 38, 38, 0.3)',
+  },
+  progressDotActive: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#DC2626',
+  },
+  progressDotPassed: {
+    backgroundColor: 'rgba(220, 38, 38, 0.6)',
   },
   scrollContent: {
     flexGrow: 1,
@@ -4790,13 +5400,15 @@ const styles = StyleSheet.create({
     marginBottom: 30,
   },
   stepTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 28,
+    fontWeight: '600',
     textAlign: 'center',
     marginBottom: 8,
+    letterSpacing: -0.5,
   },
   stepSubtitle: {
     fontSize: 16,
+    fontWeight: '500',
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 8,
@@ -4806,8 +5418,10 @@ const styles = StyleSheet.create({
   },
   heroRoleButton: {
     marginBottom: 12,
-    borderRadius: 16,
+    borderRadius: 32,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   heroRoleGradient: {
     flexDirection: 'row',
@@ -4818,7 +5432,7 @@ const styles = StyleSheet.create({
   heroRoleIcon: {
     width: 40,
     height: 40,
-    borderRadius: 12,
+    borderRadius: 20,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -4859,14 +5473,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 8,
+    letterSpacing: -0.3,
   },
   inputHint: {
     fontSize: 14,
+    fontWeight: '500',
     marginBottom: 12,
   },
   textInput: {
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 24,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
@@ -4912,6 +5528,7 @@ const styles = StyleSheet.create({
   genreText: {
     fontSize: 14,
     fontWeight: '500',
+    letterSpacing: -0.2,
   },
   genreTextSelected: {
     color: '#FFFFFF',
@@ -4937,7 +5554,7 @@ const styles = StyleSheet.create({
   },
   modernButtonContainer: {
     marginTop: 12,
-    borderRadius: 16,
+    borderRadius: 24,
     overflow: 'hidden',
     shadowColor: '#7C3AED',
     shadowOffset: { width: 0, height: 4 },
@@ -4954,8 +5571,8 @@ const styles = StyleSheet.create({
   modernButtonText: {
     color: '#FFFFFF',
     fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: 0.5,
+    fontWeight: '600',
+    letterSpacing: -0.3,
   },
   buttonDisabled: {
     shadowOpacity: 0.1,
@@ -4976,7 +5593,7 @@ const styles = StyleSheet.create({
   },
   creatorCard: {
     padding: 20,
-    borderRadius: 16,
+    borderRadius: 24,
     marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -4985,39 +5602,93 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   creatorAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: 'rgba(124, 58, 237, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
   },
   creatorAvatarImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
   },
   creatorName: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
-    marginBottom: 4,
+    marginBottom: 2,
+    letterSpacing: -0.3,
   },
   creatorRole: {
     fontSize: 14,
-    marginBottom: 12,
+    fontWeight: '400',
+    marginBottom: 6,
+    letterSpacing: -0.2,
+    opacity: 0.7,
   },
   creatorStats: {
-    marginTop: 8,
+    flexDirection: 'row',
+    gap: 16,
+    marginTop: 2,
   },
   creatorStatItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
   },
   creatorStatText: {
     fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  stackedCreatorsContainer: {
+    paddingTop: 20,
+    paddingHorizontal: 16,
+    marginBottom: 24,
+  },
+  stackedCreatorCard: {
+    width: '100%',
+    padding: 16,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  creatorCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  stackedCreatorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  stackedCreatorInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  connectButton: {
+    backgroundColor: '#DC2626',
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
     marginLeft: 8,
+  },
+  connectButtonLoading: {
+    opacity: 0.7,
+  },
+  connectButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: -0.3,
   },
   ctaContainer: {
     alignItems: 'center',
@@ -5037,7 +5708,7 @@ const styles = StyleSheet.create({
   tierCard: {
     flex: 1,
     padding: 20,
-    borderRadius: 16,
+    borderRadius: 24,
     marginHorizontal: 6,
     borderWidth: 2,
     shadowColor: '#000',
@@ -5069,10 +5740,30 @@ const styles = StyleSheet.create({
     color: '#F59E0B',
     marginLeft: 6,
   },
+  tierHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    gap: 8,
+  },
+  tierHeaderSimple: {
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  tierEmoji: {
+    fontSize: 24,
+  },
   tierCardTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 16,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+    textAlign: 'center',
+  },
+  tierDescription: {
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
   },
   tierFeatures: {
     marginBottom: 20,
@@ -5104,25 +5795,32 @@ const styles = StyleSheet.create({
   tierButton: {
     paddingVertical: 14,
     paddingHorizontal: 20,
-    borderRadius: 12,
+    borderRadius: 24,
     alignItems: 'center',
   },
   tierButtonFree: {
-    backgroundColor: 'rgba(156, 163, 175, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(156, 163, 175, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   tierButtonPro: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  tierButtonUnlimited: {
     backgroundColor: '#7C3AED',
   },
   tierButtonText: {
     fontSize: 16,
     fontWeight: '600',
+    letterSpacing: -0.3,
   },
   tierButtonTextPro: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#FFFFFF',
+    letterSpacing: -0.3,
   },
   socialProofText: {
     fontSize: 14,
@@ -5134,7 +5832,7 @@ const styles = StyleSheet.create({
   },
   paymentForm: {
     padding: 20,
-    borderRadius: 16,
+    borderRadius: 24,
     marginBottom: 24,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -5165,6 +5863,91 @@ const styles = StyleSheet.create({
   backToFreeText: {
     fontSize: 14,
   },
+  // New role selection card styles
+  newStepTitle: {
+    fontSize: 28,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+    lineHeight: 32,
+  },
+  newStepSubtitle: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginTop: 8,
+    lineHeight: 20,
+  },
+  roleCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 16,
+    padding: 16,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  roleCardSelected: {
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 40,
+  },
+  roleIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roleTextContent: {
+    flex: 1,
+    paddingTop: 2,
+  },
+  roleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  roleTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#FFFFFF',
+    letterSpacing: -0.3,
+  },
+  roleDescription: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.6)',
+    marginTop: 4,
+    lineHeight: 20,
+  },
+  radioCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioCircleChecked: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
+  },
+  radioCircleInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#6B46C1',
+  },
+  skipButtonTextNew: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(255, 255, 255, 0.4)',
+  },
   completionContainer: {
     flex: 1,
     alignItems: 'center',
@@ -5175,16 +5958,19 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   completionTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
+    fontSize: 32,
+    fontWeight: '600',
     textAlign: 'center',
     marginBottom: 12,
+    letterSpacing: -0.5,
   },
   completionSubtitle: {
     fontSize: 16,
+    fontWeight: '500',
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 32,
+    letterSpacing: -0.3,
   },
   trialActiveContainer: {
     alignItems: 'center',
@@ -5237,5 +6023,138 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 4,
     textAlign: 'center',
+  },
+  // New Welcome Screen Styles
+  ambientOrb: {
+    position: 'absolute',
+    borderRadius: 9999,
+  },
+  newWelcomeContainer: {
+    flex: 1,
+    justifyContent: 'space-between',
+    paddingHorizontal: 32,
+    paddingTop: 70,
+    paddingBottom: 40,
+    position: 'relative',
+    zIndex: 10,
+  },
+  newLogoContainer: {
+    alignItems: 'center',
+    marginBottom: -10,
+    width: '100%',
+    marginTop: 60,
+  },
+  newWelcomeLogo: {
+    width: 800,
+    height: 240,
+  },
+  newTextContent: {
+    justifyContent: 'flex-start',
+    marginBottom: 0,
+    paddingTop: 0,
+  },
+  newWelcomeHeadline: {
+    fontSize: 48,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    lineHeight: 50,
+    marginBottom: 20,
+    letterSpacing: -0.5,
+  },
+  newWelcomeSubheadline: {
+    fontSize: 18,
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontWeight: '500',
+    lineHeight: 28,
+    maxWidth: 340,
+  },
+  newCtaSection: {
+    gap: 24,
+    marginTop: 0,
+  },
+  newGetStartedButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+  },
+  newGetStartedText: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    letterSpacing: -0.3,
+  },
+  newArrowButtonContainer: {
+    position: 'relative',
+  },
+  newArrowGlow: {
+    position: 'absolute',
+    inset: 0,
+    backgroundColor: '#FF6B6B',
+    borderRadius: 9999,
+    opacity: 0.4,
+    shadowColor: '#FF6B6B',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 24,
+  },
+  newArrowButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  newFooter: {
+    gap: 24,
+  },
+  newFooterDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  newFooterContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  newAvatarGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  newAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#6B46C1',
+  },
+  newAvatarPlus: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#6B46C1',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  newAvatarPlusText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  newFooterText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255, 255, 255, 0.6)',
+    letterSpacing: 0.3,
   },
 });

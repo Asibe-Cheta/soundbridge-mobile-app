@@ -6,10 +6,12 @@ import {
   FlatList,
   RefreshControl,
   StatusBar,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
+import { walkthroughable, useCopilot } from 'react-native-copilot';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import type { Post } from '../types/feed.types';
@@ -19,18 +21,25 @@ import LiveAudioBanner from '../components/LiveAudioBanner';
 import PostCard from '../components/PostCard';
 import CreatePostModal from '../components/CreatePostModal';
 import CommentsModal from '../modals/CommentsModal';
+import TipModal from '../components/TipModal';
 import { feedService } from '../services/api/feedService';
 import { deepLinkingService } from '../services/DeepLinkingService';
 import { socialService } from '../services/api/socialService';
 import { imageSaveService } from '../services/ImageSaveService';
 import { Alert } from 'react-native';
 import { useToast } from '../contexts/ToastContext';
+import { checkShouldShowTour } from '../services/tourService';
+
+// Create walkthroughable components
+const WalkthroughableView = walkthroughable(View);
+const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
 
 export default function FeedScreen() {
   const navigation = useNavigation();
   const { theme } = useTheme();
   const { user } = useAuth();
   const { showToast } = useToast();
+  const { start: startTour } = useCopilot();
   const {
     posts,
     loading,
@@ -46,6 +55,24 @@ export default function FeedScreen() {
   const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [savedPosts, setSavedPosts] = useState<Set<string>>(new Set());
+  const [showTipModal, setShowTipModal] = useState(false);
+  const [tipAuthorId, setTipAuthorId] = useState<string>('');
+  const [tipAuthorName, setTipAuthorName] = useState<string>('');
+
+  // Initialize app tour for new users
+  useEffect(() => {
+    const initializeTour = async () => {
+      const shouldShow = await checkShouldShowTour();
+      if (shouldShow && posts.length > 0) {
+        // Small delay to let screen fully render
+        setTimeout(() => {
+          startTour();
+        }, 1000);
+      }
+    };
+
+    initializeTour();
+  }, [posts.length]); // Start tour once posts are loaded
 
   // Load bookmark status for posts
   useEffect(() => {
@@ -125,7 +152,7 @@ export default function FeedScreen() {
       await deletePost(postId);
     } catch (error) {
       console.error('Failed to delete post:', error);
-      Alert.alert('Error', 'Failed to delete post. Please try again.');
+      Alert.alert('Error', 'Failed to delete drop. Please try again.');
     }
   };
 
@@ -134,7 +161,7 @@ export default function FeedScreen() {
       await deepLinkingService.sharePost(post.id, post.content.substring(0, 100));
     } catch (error) {
       console.error('Failed to share post:', error);
-      Alert.alert('Error', 'Failed to share post. Please try again.');
+      Alert.alert('Error', 'Failed to share drop. Please try again.');
     }
   };
 
@@ -200,7 +227,7 @@ export default function FeedScreen() {
       }
     } catch (error) {
       console.error('Failed to save post:', error);
-      Alert.alert('Error', 'Failed to save post. Please try again.');
+      Alert.alert('Error', 'Failed to save drop. Please try again.');
     }
   };
 
@@ -227,6 +254,12 @@ export default function FeedScreen() {
   const handleAuthorPress = (authorId: string) => {
     console.log('👤 Navigating to author profile:', authorId);
     navigation.navigate('CreatorProfile' as never, { creatorId: authorId } as never);
+  };
+
+  const handleTip = (authorId: string, authorName: string) => {
+    setTipAuthorId(authorId);
+    setTipAuthorName(authorName);
+    setShowTipModal(true);
   };
 
   return (
@@ -268,6 +301,7 @@ export default function FeedScreen() {
                   onSaveImage={handleSaveImage}
                   onAuthorPress={handleAuthorPress}
                   onRepost={handleRepost}
+                  onTip={handleTip}
                   onBlocked={async () => {
                     // Refresh feed to remove blocked user's posts
                     await refresh();
@@ -300,7 +334,14 @@ export default function FeedScreen() {
               windowSize={10}
               ListHeaderComponent={
                 <>
-                  <CreatePostPrompt onPress={handleCreatePost} />
+                  {/* Step 1: Drop Content & Get Tipped */}
+                  <WalkthroughableView
+                    order={1}
+                    name="create_drop_earn"
+                    text="Tap here to drop content and GET TIPPED! Share music, updates, or studio sessions. Unlike Spotify's £0.003/stream, fans tip you directly - you keep 95%. Build your network and grow your profile while earning real money."
+                  >
+                    <CreatePostPrompt onPress={handleCreatePost} />
+                  </WalkthroughableView>
                   <LiveAudioBanner />
                 </>
               }
@@ -356,7 +397,7 @@ export default function FeedScreen() {
               setIsCreateModalVisible(false);
             } catch (error) {
               console.error('Failed to update post:', error);
-              Alert.alert('Error', 'Failed to update post. Please try again.');
+              Alert.alert('Error', 'Failed to update drop. Please try again.');
             }
           } else {
             // Create new post
@@ -378,6 +419,17 @@ export default function FeedScreen() {
           }}
         />
       )}
+
+      {/* Tip Modal */}
+      <TipModal
+        visible={showTipModal}
+        creatorId={tipAuthorId}
+        creatorName={tipAuthorName}
+        onClose={() => setShowTipModal(false)}
+        onTipSuccess={(amount, message) => {
+          console.log('Tip sent successfully:', amount, message);
+        }}
+      />
     </View>
   );
 }

@@ -1,0 +1,3664 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  Dimensions,
+  Image,
+  StatusBar,
+  RefreshControl,
+  Alert,
+  ActivityIndicator,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useAuth } from '../contexts/AuthContext';
+import { useAudioPlayer } from '../contexts/AudioPlayerContext';
+import { useTheme } from '../contexts/ThemeContext';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { supabase, dbHelpers } from '../lib/supabase';
+import { config } from '../config/environment';
+import { 
+  loadQueriesInParallel, 
+  waitForValidSession,
+  LoadingStateManager,
+  CancellableQuery,
+  withQueryTimeout
+} from '../utils/dataLoading';
+import AdvancedSearchFilters, { SearchFilters } from '../components/AdvancedSearchFilters';
+import { useSearch } from '../hooks/useSearch';
+import { fetchDiscoverServiceProviders } from '../services/creatorExpansionService';
+import { contentCacheService } from '../services/contentCacheService';
+import { getServiceCategoryLabel } from '../utils/serviceCategoryLabels';
+import subscriptionService from '../services/SubscriptionService';
+import RevenueCatService from '../services/RevenueCatService';
+import type { PublicProfile } from '../types/database';
+import { ModerationBadge } from '../components/ModerationBadge';
+
+const { width } = Dimensions.get('window');
+
+interface AudioTrack {
+  id: string;
+  title: string;
+  description?: string;
+  audio_url?: string;
+  file_url?: string;
+  cover_art_url?: string;
+  artwork_url?: string;
+  duration?: number;
+  play_count?: number;
+  plays_count?: number;
+  likes_count?: number;
+  genre?: string;
+  created_at: string;
+  creator?: {
+    id: string;
+    username: string;
+    display_name: string;
+    avatar_url?: string;
+  };
+}
+
+interface Creator {
+  id: string;
+  username: string;
+  display_name: string;
+  bio?: string;
+  avatar_url?: string;
+  followers_count?: number;
+  tracks_count?: number;
+  events_count?: number;
+  genre?: string;
+  location?: string;
+}
+
+interface Event {
+  id: string;
+  title: string;
+  description?: string;
+  event_date: string;
+  location?: string;
+  venue?: string;
+  category?: string;
+  price_gbp?: number;
+  price_ngn?: number;
+  max_attendees?: number;
+  current_attendees?: number;
+  likes_count?: number;
+  image_url?: string;
+  cover_art_url?: string;
+  creator_id?: string;
+  created_at?: string;
+  organizer: {
+    id: string;
+    username: string;
+    display_name: string;
+    avatar_url?: string;
+  };
+}
+
+interface Playlist {
+  id: string;
+  name: string;
+  description?: string;
+  cover_image_url?: string;
+  tracks_count?: number;
+  total_duration?: number;
+  followers_count?: number;
+  created_at?: string;
+  updated_at?: string;
+  creator?: {
+    id: string;
+    username: string;
+    display_name: string;
+    avatar_url?: string;
+  };
+}
+
+type TabType = 'Music' | 'Albums' | 'Artists' | 'Events' | 'Playlists' | 'Services' | 'Venues';
+
+const DISCOVER_MOCK_TRACKS: AudioTrack[] = [
+  {
+    id: 'discover-mock-track-1',
+    title: 'Electric Dreams',
+    cover_art_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+    artwork_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+    creator: { id: 'discover-artist-a', username: 'artist1', display_name: 'Artist One' },
+    duration: 188,
+    plays_count: 4400,
+    likes_count: 200,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'discover-mock-track-2',
+    title: 'Midnight City',
+    cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+    artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+    creator: { id: 'discover-artist-b', username: 'artist2', display_name: 'City Sounds' },
+    duration: 206,
+    plays_count: 3800,
+    likes_count: 160,
+    created_at: new Date().toISOString(),
+  },
+];
+
+const DISCOVER_MOCK_ARTISTS: Creator[] = [
+  {
+    id: 'discover-mock-creator-1',
+    username: 'beat_master',
+    display_name: 'Beat Master',
+    bio: 'Producer and beat maker',
+    avatar_url: 'https://images.unsplash.com/photo-1521335629791-ce4aec67dd47?w=300&h=300&fit=crop',
+    followers_count: 2500,
+    tracks_count: 120,
+    events_count: 12,
+  },
+  {
+    id: 'discover-mock-creator-2',
+    username: 'melody_queen',
+    display_name: 'Melody Queen',
+    bio: 'Singer-songwriter',
+    avatar_url: 'https://images.unsplash.com/photo-1511288591490-9c89d9a86e43?w=300&h=300&fit=crop',
+    followers_count: 4700,
+    tracks_count: 86,
+    events_count: 18,
+  },
+];
+
+const DISCOVER_MOCK_EVENTS: Event[] = [
+  {
+    id: 'discover-mock-event-1',
+    title: 'Summer Music Festival 2025',
+    description: 'Three days of incredible live music featuring top artists and emerging talents.',
+    event_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    location: 'Hyde Park, London',
+    category: 'festival',
+    image_url: 'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=800&h=400&fit=crop',
+    organizer: { id: 'discover-organizer-1', username: 'festivalorg', display_name: 'Summer Sounds Ltd', avatar_url: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=100&h=100&fit=crop' },
+    genres: ['rock', 'indie', 'electronic'],
+    distance_miles: 2.5,
+  },
+  {
+    id: 'discover-mock-event-2',
+    title: 'Jazz Night at The Blue Note',
+    description: 'An intimate evening of smooth jazz with award-winning musicians.',
+    event_date: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+    location: 'Blue Note Club, Soho',
+    category: 'concert',
+    image_url: 'https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=800&h=400&fit=crop',
+    organizer: { id: 'discover-organizer-2', username: 'bluenote', display_name: 'Blue Note Events', avatar_url: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100&h=100&fit=crop' },
+    genres: ['jazz', 'blues'],
+    distance_miles: 5.2,
+  },
+  {
+    id: 'discover-mock-event-3',
+    title: 'Electronic Underground Showcase',
+    description: 'Underground techno and house music featuring local DJs.',
+    event_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+    location: 'Fabric, Farringdon',
+    category: 'club night',
+    image_url: 'https://images.unsplash.com/photo-1571266028243-d220c6e2e71f?w=800&h=400&fit=crop',
+    organizer: { id: 'discover-organizer-3', username: 'fabricevents', display_name: 'Fabric London', avatar_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=100&h=100&fit=crop' },
+    genres: ['electronic', 'techno', 'house'],
+    distance_miles: 8.1,
+  },
+  {
+    id: 'discover-mock-event-4',
+    title: 'Open Mic Night',
+    description: 'Share your talent! Open to all musicians, poets, and performers.',
+    event_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+    location: 'The George Tavern, Wapping',
+    category: 'open mic',
+    image_url: 'https://images.unsplash.com/photo-1598387993441-a364f854c3e1?w=800&h=400&fit=crop',
+    organizer: { id: 'discover-organizer-4', username: 'georgetavern', display_name: 'The George Tavern', avatar_url: 'https://images.unsplash.com/photo-1471478331149-c72f17e33c73?w=100&h=100&fit=crop' },
+    genres: ['acoustic', 'folk', 'spoken word'],
+    distance_miles: 3.7,
+  },
+  {
+    id: 'discover-mock-event-5',
+    title: 'Hip Hop Block Party',
+    description: 'Celebrating UK hip hop culture with live performances, DJs, and street art.',
+    event_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
+    location: 'Boxpark, Shoreditch',
+    category: 'festival',
+    image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&h=400&fit=crop',
+    organizer: { id: 'discover-organizer-5', username: 'hiphopuk', display_name: 'UK Hip Hop Collective', avatar_url: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=100&h=100&fit=crop' },
+    genres: ['hip hop', 'rap', 'grime'],
+    distance_miles: 6.3,
+  },
+  {
+    id: 'discover-mock-event-6',
+    title: 'Classical Evening at Royal Albert Hall',
+    description: 'London Philharmonic Orchestra performs Beethoven & Mozart.',
+    event_date: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
+    location: 'Royal Albert Hall, Kensington',
+    category: 'concert',
+    image_url: 'https://images.unsplash.com/photo-1465847899084-d164df4dedc6?w=800&h=400&fit=crop',
+    organizer: { id: 'discover-organizer-6', username: 'royalalberthall', display_name: 'Royal Albert Hall', avatar_url: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop' },
+    genres: ['classical', 'orchestral'],
+    distance_miles: 4.8,
+  },
+];
+
+const DISCOVER_MOCK_SERVICES: PublicProfile[] = [
+  {
+    user_id: 'service-provider-1',
+    username: 'studiomix_pro',
+    display_name: 'Studio Mix Pro',
+    bio: 'Professional mixing & mastering services. Over 10 years experience working with major labels.',
+    avatar_url: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop',
+    location: 'London, UK',
+    is_verified: true,
+    services_offered: ['Mixing', 'Mastering', 'Audio Engineering'],
+    service_category: 'audio-engineering',
+    portfolio_tracks_count: 47,
+    avg_rating: 4.9,
+  },
+  {
+    user_id: 'service-provider-2',
+    username: 'beatmaker_studios',
+    display_name: 'Beatmaker Studios',
+    bio: 'Custom beat production for hip hop, R&B, and pop artists. Fast turnaround guaranteed.',
+    avatar_url: 'https://images.unsplash.com/photo-1571902943202-507ec2618e8f?w=200&h=200&fit=crop',
+    location: 'Manchester, UK',
+    is_verified: true,
+    services_offered: ['Beat Production', 'Music Production'],
+    service_category: 'production',
+    portfolio_tracks_count: 89,
+    avg_rating: 4.8,
+  },
+  {
+    user_id: 'service-provider-3',
+    username: 'vocalcoach_emma',
+    display_name: 'Emma Clarke - Vocal Coach',
+    bio: 'Certified vocal coach specializing in pop, soul, and R&B. One-on-one and group sessions available.',
+    avatar_url: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200&h=200&fit=crop',
+    location: 'Birmingham, UK',
+    is_verified: false,
+    services_offered: ['Vocal Coaching', 'Recording Sessions'],
+    service_category: 'coaching',
+    portfolio_tracks_count: 23,
+    avg_rating: 5.0,
+  },
+  {
+    user_id: 'service-provider-4',
+    username: 'session_guitar',
+    display_name: 'Session Guitarist Pro',
+    bio: 'Professional session guitarist for hire. Rock, blues, jazz, and acoustic styles.',
+    avatar_url: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200&h=200&fit=crop',
+    location: 'Leeds, UK',
+    is_verified: true,
+    services_offered: ['Session Musician', 'Guitar Lessons'],
+    service_category: 'session-musician',
+    portfolio_tracks_count: 62,
+    avg_rating: 4.7,
+  },
+  {
+    user_id: 'service-provider-5',
+    username: 'graphics_soundwave',
+    display_name: 'Soundwave Graphics',
+    bio: 'Album artwork, music video design, and branding for artists. Let\'s bring your vision to life!',
+    avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop',
+    location: 'Bristol, UK',
+    is_verified: true,
+    services_offered: ['Graphic Design', 'Album Artwork', 'Branding'],
+    service_category: 'design',
+    portfolio_tracks_count: 112,
+    avg_rating: 4.9,
+  },
+  {
+    user_id: 'service-provider-6',
+    username: 'promo_music_uk',
+    display_name: 'Music Promo UK',
+    bio: 'Social media marketing and PR for independent musicians. Grow your fanbase organically.',
+    avatar_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop',
+    location: 'London, UK',
+    is_verified: true,
+    services_offered: ['Marketing', 'Social Media Management', 'PR'],
+    service_category: 'marketing',
+    portfolio_tracks_count: 34,
+    avg_rating: 4.6,
+  },
+];
+
+const DISCOVER_MOCK_VENUES: any[] = [
+  {
+    id: 'venue-1',
+    name: 'The Roundhouse',
+    description: 'Iconic London venue hosting live music, theatre, and arts events.',
+    location: 'Camden, London',
+    capacity: 3300,
+    image_url: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800&h=400&fit=crop',
+    types: ['Concert Hall', 'Theatre'],
+    upcoming_events: 8,
+  },
+  {
+    id: 'venue-2',
+    name: 'O2 Academy Brixton',
+    description: 'Historic music venue in the heart of Brixton, featuring top international and local acts.',
+    location: 'Brixton, London',
+    capacity: 4921,
+    image_url: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&h=400&fit=crop',
+    types: ['Concert Hall', 'Live Music'],
+    upcoming_events: 12,
+  },
+  {
+    id: 'venue-3',
+    name: 'Jazz Cafe',
+    description: 'Intimate venue specializing in jazz, soul, and R&B performances.',
+    location: 'Camden Town, London',
+    capacity: 450,
+    image_url: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=800&h=400&fit=crop',
+    types: ['Jazz Club', 'Live Music'],
+    upcoming_events: 15,
+  },
+  {
+    id: 'venue-4',
+    name: 'Fabric',
+    description: 'World-renowned nightclub known for cutting-edge electronic music and DJ sets.',
+    location: 'Farringdon, London',
+    capacity: 1600,
+    image_url: 'https://images.unsplash.com/photo-1571266028243-d220c6e2e71f?w=800&h=400&fit=crop',
+    types: ['Nightclub', 'Electronic Music'],
+    upcoming_events: 6,
+  },
+  {
+    id: 'venue-5',
+    name: 'The Garage',
+    description: 'Alternative and indie music venue showcasing emerging and established artists.',
+    location: 'Highbury, London',
+    capacity: 600,
+    image_url: 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&h=400&fit=crop',
+    types: ['Live Music', 'Indie Venue'],
+    upcoming_events: 9,
+  },
+];
+
+const DISCOVER_MOCK_PLAYLISTS: Playlist[] = [
+  {
+    id: 'discover-mock-playlist-1',
+    name: 'Weekend Vibes',
+    description: 'Curated tunes to soundtrack your weekend.',
+    cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
+    tracks_count: 24,
+    followers_count: 1200,
+    created_at: new Date().toISOString(),
+    creator: { id: 'playlist-creator-1', username: 'soundbridge', display_name: 'SoundBridge' },
+  },
+];
+
+function DiscoverScreen() {
+  const { user, loading: authLoading, session } = useAuth();
+  const { play, addToQueue } = useAudioPlayer();
+  const { theme } = useTheme();
+  const navigation = useNavigation();
+  const [activeTab, setActiveTab] = useState<TabType>('Music');
+  const { searchQuery, setSearchQuery, searchResults, isSearching, searchError } = useSearch();
+  const [refreshing, setRefreshing] = useState(false);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [isPremium, setIsPremium] = useState(false);
+  const [isUnlimited, setIsUnlimited] = useState(false);
+  const [searchFilters, setSearchFilters] = useState<SearchFilters>({
+    contentType: 'all',
+    genre: [],
+    duration: { min: 0, max: 3600 },
+    dateRange: { start: null, end: null },
+    sortBy: 'relevance',
+    sortOrder: 'desc',
+    isExplicit: null,
+    language: [],
+    location: '',
+  });
+  
+  // Content states
+  const [trendingTracks, setTrendingTracks] = useState<AudioTrack[]>([]);
+  const [recentTracks, setRecentTracks] = useState<AudioTrack[]>([]);
+  const [featuredAlbums, setFeaturedAlbums] = useState<any[]>([]);
+  const [recentAlbums, setRecentAlbums] = useState<any[]>([]);
+  const [featuredArtists, setFeaturedArtists] = useState<Creator[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [serviceProviders, setServiceProviders] = useState<PublicProfile[]>([]);
+  const [venues, setVenues] = useState<any[]>([]);
+  
+  // Loading state management
+  const loadingManager = useRef(new LoadingStateManager()).current;
+  const cancellableQuery = useRef(new CancellableQuery()).current;
+  const [isLoadingAny, setIsLoadingAny] = useState(true);
+  
+  // Individual loading states for UI - start as false for instant cache display
+  const [loadingTracks, setLoadingTracks] = useState(false);
+  const [loadingAlbums, setLoadingAlbums] = useState(false);
+  const [loadingArtists, setLoadingArtists] = useState(false);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+  const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+  const [loadingServices, setLoadingServices] = useState(false);
+  const [loadingVenues, setLoadingVenues] = useState(false);
+  
+  // Track if initial cache load has happened
+  const initialCacheLoadRef = useRef(false);
+
+  const tabs: TabType[] = ['Music', 'Albums', 'Artists', 'Events', 'Playlists', 'Services', 'Venues'];
+
+  // Track tier check attempts to prevent repeated failed requests
+  const tierCheckAttemptedRef = useRef(false);
+  const tierCheckCooldownRef = useRef<number>(0);
+  const TIER_CHECK_COOLDOWN = 60000; // 1 minute cooldown after failed request
+
+  // Check Premium/Unlimited subscription status using RevenueCat (source of truth)
+  useEffect(() => {
+    const checkTierStatus = async () => {
+      if (!session) {
+        return;
+      }
+
+      // Check cooldown period
+      const now = Date.now();
+      if (tierCheckCooldownRef.current > now) {
+        console.log('⏳ Tier check in cooldown, skipping...');
+        return;
+      }
+
+      // Prevent multiple simultaneous checks
+      if (tierCheckAttemptedRef.current) {
+        return;
+      }
+
+      tierCheckAttemptedRef.current = true;
+
+      try {
+        console.log('🔍 Discover Screen - Checking tier status via RevenueCat...');
+
+        // Development bypass: Use hardcoded tier
+        if (config.bypassRevenueCat && config.developmentTier) {
+          console.log('🔧 DEVELOPMENT MODE: Using hardcoded tier');
+          console.log(`🔧 Hardcoded tier: ${config.developmentTier.toUpperCase()}`);
+          setIsPremium(config.developmentTier === 'premium' || config.developmentTier === 'unlimited');
+          setIsUnlimited(config.developmentTier === 'unlimited');
+          tierCheckCooldownRef.current = 0;
+          return;
+        }
+
+        // Wait for RevenueCat to be ready
+        let attempts = 0;
+        while (!RevenueCatService.isReady() && attempts < 10) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          attempts++;
+        }
+
+        if (!RevenueCatService.isReady()) {
+          console.warn('⚠️ RevenueCat not ready, falling back to backend check');
+          // Fallback to backend subscription check with timeout handling
+          try {
+            const subscription = await subscriptionService.getSubscriptionStatus(session);
+            const hasPremiumAccess = subscriptionService.hasPremiumAccess(subscription);
+            const hasUnlimitedAccess = subscriptionService.hasUnlimitedAccess(subscription);
+            setIsPremium(hasPremiumAccess);
+            setIsUnlimited(hasUnlimitedAccess);
+            console.log('🔍 Discover Screen - Tier access (backend):', { premium: hasPremiumAccess, unlimited: hasUnlimitedAccess });
+            // Reset cooldown on success
+            tierCheckCooldownRef.current = 0;
+          } catch (backendError) {
+            // Handle timeout or network errors gracefully
+            const errorMessage = backendError instanceof Error ? backendError.message : String(backendError);
+            if (errorMessage.includes('timeout') || errorMessage.includes('connection')) {
+              console.warn('⚠️ Backend subscription check timed out, defaulting to FREE tier');
+              // Set cooldown to prevent repeated failed requests
+              tierCheckCooldownRef.current = now + TIER_CHECK_COOLDOWN;
+            } else {
+              console.error('❌ Error checking subscription status:', backendError);
+            }
+            // Default to free tier on any error
+            setIsPremium(false);
+            setIsUnlimited(false);
+          }
+          return;
+        }
+
+        // Use RevenueCat as source of truth
+        const customerInfo = await RevenueCatService.getCustomerInfo();
+        if (customerInfo) {
+          const tier = RevenueCatService.getUserTier(customerInfo);
+          setIsPremium(tier === 'premium' || tier === 'unlimited');
+          setIsUnlimited(tier === 'unlimited');
+          console.log('🔍 Discover Screen - Tier access (RevenueCat):', { tier, premium: tier === 'premium' || tier === 'unlimited', unlimited: tier === 'unlimited' });
+          // Reset cooldown on success
+          tierCheckCooldownRef.current = 0;
+        } else {
+          console.warn('⚠️ No customer info from RevenueCat, defaulting to FREE');
+          setIsPremium(false);
+          setIsUnlimited(false);
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes('timeout') || errorMessage.includes('connection')) {
+          console.warn('⚠️ Tier check timed out, defaulting to FREE tier');
+          // Set cooldown to prevent repeated failed requests
+          tierCheckCooldownRef.current = Date.now() + TIER_CHECK_COOLDOWN;
+        } else {
+          console.error('❌ Error checking tier status:', error);
+        }
+        setIsPremium(false);
+        setIsUnlimited(false);
+      } finally {
+        // Reset attempt flag after a delay to allow retry on session change
+        setTimeout(() => {
+          tierCheckAttemptedRef.current = false;
+        }, 1000);
+      }
+    };
+    checkTierStatus();
+  }, [session]);
+
+  // Handle search limit exceeded error
+  useEffect(() => {
+    if (searchError?.isLimitExceeded) {
+      Alert.alert(
+        'Search Limit Reached',
+        searchError.message || 'You have reached your monthly search limit. Upgrade to Premium for unlimited searches.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Upgrade to Premium',
+            onPress: () => navigation.navigate('Upgrade' as never),
+          },
+        ]
+      );
+    }
+  }, [searchError]);
+
+  // Subscribe to loading state changes
+  useEffect(() => {
+    const unsubscribe = loadingManager.onChange(() => {
+      const anyLoading = loadingManager.isAnyLoading();
+      setIsLoadingAny(anyLoading);
+      // Update individual loading states
+      setLoadingTracks(loadingManager.isLoading('tracks'));
+      setLoadingArtists(loadingManager.isLoading('artists'));
+      setLoadingEvents(loadingManager.isLoading('events'));
+      setLoadingPlaylists(loadingManager.isLoading('playlists'));
+    });
+    return unsubscribe;
+  }, []);
+
+  // Initial cache load - show cached data immediately
+  useEffect(() => {
+    // Don't wait for authLoading - start loading immediately
+    // Load cached data immediately for instant display
+    const loadCachedData = async () => {
+      if (!initialCacheLoadRef.current) {
+        const cacheKey = user?.id ? `trending_${user.id}` : 'trending_anonymous';
+        const cachedTracks = await contentCacheService.getCached('TRACKS', cacheKey);
+        if (cachedTracks && Array.isArray(cachedTracks) && cachedTracks.length > 0) {
+          console.log('⚡ Instant load: Showing cached tracks');
+          setTrendingTracks(cachedTracks);
+        }
+
+        const cachedArtists = await contentCacheService.getCached('ARTISTS', 'featured_artists');
+        if (cachedArtists && Array.isArray(cachedArtists) && cachedArtists.length > 0) {
+          console.log('⚡ Instant load: Showing cached artists');
+          setFeaturedArtists(cachedArtists);
+        }
+
+        const eventsCacheKey = user?.id ? `events_${user.id}` : 'events_anonymous';
+        const cachedEvents = await contentCacheService.getCached('EVENTS', eventsCacheKey);
+        if (cachedEvents && Array.isArray(cachedEvents) && cachedEvents.length > 0) {
+          console.log('⚡ Instant load: Showing cached events');
+          setEvents(cachedEvents);
+        }
+
+        const cachedPlaylists = await contentCacheService.getCached('PLAYLISTS', 'public_playlists');
+        if (cachedPlaylists && Array.isArray(cachedPlaylists) && cachedPlaylists.length > 0) {
+          console.log('⚡ Instant load: Showing cached playlists');
+          setPlaylists(cachedPlaylists);
+        }
+
+        const cachedServices = await contentCacheService.getCached('SERVICES', 'service_providers');
+        if (cachedServices && Array.isArray(cachedServices) && cachedServices.length > 0) {
+          console.log('⚡ Instant load: Showing cached services');
+          setServiceProviders(cachedServices);
+        }
+      }
+    };
+
+    loadCachedData();
+
+    // Then load fresh data
+    loadDiscoverContent();
+
+    return () => {
+      cancellableQuery.cancel();
+      loadingManager.reset();
+    };
+  }, [activeTab, user?.id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      // Don't wait for authLoading - load immediately when screen focuses
+      const missingContent =
+        trendingTracks.length === 0 ||
+        recentTracks.length === 0 ||
+        featuredArtists.length === 0 ||
+        events.length === 0 ||
+        playlists.length === 0;
+
+      if (missingContent) {
+        loadDiscoverContent();
+      }
+    }, [trendingTracks.length, recentTracks.length, featuredAlbums.length, recentAlbums.length, featuredArtists.length, events.length, playlists.length, activeTab])
+  );
+
+  const loadDiscoverContent = async () => {
+    console.log('🔍 DiscoverScreen: Loading discover content...');
+    loadingManager.setLoading('discover', true, 12000);
+
+    try {
+      // Wait for valid session if user is logged in
+      if (user?.id) {
+        await waitForValidSession(supabase, 3000);
+      }
+
+      switch (activeTab) {
+        case 'Music':
+          loadingManager.setLoading('tracks', true, 8000);
+          const musicResults = await loadQueriesInParallel({
+            trending: {
+              name: 'trending',
+              query: () => user?.id
+                ? dbHelpers.getPersonalizedTracks(user.id, 20)
+                : dbHelpers.getTrendingTracks(20),
+              timeout: 8000,
+              fallback: [],
+            },
+            recent: {
+              name: 'recent',
+              query: () => withQueryTimeout(
+                supabase
+                  .from('audio_tracks')
+                  .select(`
+                    id, title, description, audio_url, file_url,
+                    cover_art_url, artwork_url, duration, play_count,
+                    likes_count, created_at, creator_id,
+                    moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
+                    creator:profiles!creator_id(id, username, display_name, avatar_url)
+                  `)
+                  .eq('is_public', true)
+                  .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
+                  .order('created_at', { ascending: false })
+                  .limit(10),
+                { timeout: 5000, fallback: [] }
+              ),
+              timeout: 5000,
+              fallback: [],
+            },
+          });
+          setTrendingTracks(musicResults.trending?.data || musicResults.trending || DISCOVER_MOCK_TRACKS);
+          setRecentTracks(musicResults.recent?.data || musicResults.recent || DISCOVER_MOCK_TRACKS);
+          loadingManager.setLoading('tracks', false, 0);
+          break;
+
+        case 'Albums':
+          loadingManager.setLoading('albums', true, 8000);
+          const albumsResult = await loadQueriesInParallel({
+            featured: {
+              name: 'featuredAlbums',
+              query: () => dbHelpers.getAlbumsWithStats(10),
+              timeout: 8000,
+              fallback: [],
+            },
+            recent: {
+              name: 'recentAlbums',
+              query: () => dbHelpers.getPublicAlbums(10),
+              timeout: 8000,
+              fallback: [],
+            },
+          });
+          setFeaturedAlbums(albumsResult.featured?.data || albumsResult.featured || []);
+          setRecentAlbums(albumsResult.recent?.data || albumsResult.recent || []);
+          loadingManager.setLoading('albums', false, 0);
+          break;
+
+        case 'Artists':
+          loadingManager.setLoading('artists', true, 8000);
+          const artistsResult = await loadQueriesInParallel({
+            artists: {
+              name: 'artists',
+              query: () => dbHelpers.getCreatorsWithStats(10),
+              timeout: 8000,
+              fallback: [],
+            },
+          });
+          setFeaturedArtists(artistsResult.artists?.data || artistsResult.artists || DISCOVER_MOCK_ARTISTS);
+          loadingManager.setLoading('artists', false, 0);
+          break;
+
+        case 'Events':
+          loadingManager.setLoading('events', true, 6000);
+          const eventsResult = await loadQueriesInParallel({
+            events: {
+              name: 'events',
+              query: () => user?.id
+                ? dbHelpers.getPersonalizedEvents(user.id, 10)
+                : dbHelpers.getEvents(10),
+              timeout: 6000,
+              fallback: [],
+            },
+          });
+          setEvents(eventsResult.events?.data || eventsResult.events || DISCOVER_MOCK_EVENTS);
+          loadingManager.setLoading('events', false, 0);
+          break;
+
+        case 'Playlists':
+          loadingManager.setLoading('playlists', true, 5000);
+          const playlistsResult = await loadQueriesInParallel({
+            playlists: {
+              name: 'playlists',
+              query: () => dbHelpers.getPublicPlaylists(10),
+              timeout: 5000,
+              fallback: [],
+            },
+          });
+          setPlaylists(playlistsResult.playlists?.data || playlistsResult.playlists || DISCOVER_MOCK_PLAYLISTS);
+          loadingManager.setLoading('playlists', false, 0);
+          break;
+
+        case 'Services':
+          loadingManager.setLoading('services', true, 5000);
+          // Services tab - using mock data until API is ready
+          setServiceProviders(DISCOVER_MOCK_SERVICES);
+          loadingManager.setLoading('services', false, 0);
+          break;
+
+        case 'Venues':
+          // Venues tab - using mock data until API is ready
+          setVenues(DISCOVER_MOCK_VENUES);
+          break;
+
+        default:
+          // Load all content for main discover page
+          const allResults = await loadQueriesInParallel({
+            trending: {
+              name: 'trending',
+              query: () => user?.id
+                ? dbHelpers.getPersonalizedTracks(user.id, 20)
+                : dbHelpers.getTrendingTracks(20),
+              timeout: 8000,
+              fallback: DISCOVER_MOCK_TRACKS,
+            },
+            recent: {
+              name: 'recent',
+              query: () => withQueryTimeout(
+                supabase
+                  .from('audio_tracks')
+                  .select(`
+                    id, title, description, audio_url, file_url,
+                    cover_art_url, artwork_url, duration, play_count,
+                    likes_count, created_at, creator_id,
+                    moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
+                    creator:profiles!creator_id(id, username, display_name, avatar_url)
+                  `)
+                  .eq('is_public', true)
+                  .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
+                  .order('created_at', { ascending: false })
+                  .limit(10),
+                { timeout: 5000, fallback: [] }
+              ),
+              timeout: 5000,
+              fallback: DISCOVER_MOCK_TRACKS,
+            },
+            artists: {
+              name: 'artists',
+              query: () => dbHelpers.getCreatorsWithStats(10),
+              timeout: 8000,
+              fallback: DISCOVER_MOCK_ARTISTS,
+            },
+            events: {
+              name: 'events',
+              query: () => user?.id
+                ? dbHelpers.getPersonalizedEvents(user.id, 10)
+                : dbHelpers.getEvents(10),
+              timeout: 6000,
+              fallback: DISCOVER_MOCK_EVENTS,
+            },
+            playlists: {
+              name: 'playlists',
+              query: () => dbHelpers.getPublicPlaylists(10),
+              timeout: 5000,
+              fallback: DISCOVER_MOCK_PLAYLISTS,
+            },
+          });
+          setTrendingTracks(allResults.trending?.data || allResults.trending || DISCOVER_MOCK_TRACKS);
+          setRecentTracks(allResults.recent?.data || allResults.recent || DISCOVER_MOCK_TRACKS);
+          setFeaturedArtists(allResults.artists?.data || allResults.artists || DISCOVER_MOCK_ARTISTS);
+          setEvents(allResults.events?.data || allResults.events || DISCOVER_MOCK_EVENTS);
+          setPlaylists(allResults.playlists?.data || allResults.playlists || DISCOVER_MOCK_PLAYLISTS);
+          break;
+      }
+
+      console.log('✅ DiscoverScreen: Content loaded');
+    } catch (error) {
+      console.error('❌ DiscoverScreen: Error loading content:', error);
+      // Set fallback data
+      setTrendingTracks(DISCOVER_MOCK_TRACKS);
+      setRecentTracks(DISCOVER_MOCK_TRACKS);
+      setFeaturedArtists(DISCOVER_MOCK_ARTISTS);
+      setEvents(DISCOVER_MOCK_EVENTS);
+      setPlaylists(DISCOVER_MOCK_PLAYLISTS);
+    } finally {
+      loadingManager.setLoading('discover', false, 0);
+    }
+  };
+
+  const loadTrendingTracks = async (forceRefresh = false) => {
+    const cacheKey = user?.id ? `trending_${user.id}` : 'trending_anonymous';
+    
+    // Try cache first (unless force refresh)
+    if (!forceRefresh && !initialCacheLoadRef.current) {
+      const cached = await contentCacheService.getCached('TRACKS', cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        console.log('⚡ Instant load: Showing cached trending tracks');
+        setTrendingTracks(cached);
+        initialCacheLoadRef.current = true;
+        
+        // Fetch fresh data in background
+        setTimeout(() => loadTrendingTracks(true), 100);
+        return;
+      }
+    }
+    
+    // Only show loading if we don't have cached data
+    if (trendingTracks.length === 0 || forceRefresh) {
+      setLoadingTracks(true);
+    }
+    
+    try {
+      console.log('🔥 DiscoverScreen: Loading tracks...');
+      
+      // Use personalized tracks if user is logged in, otherwise use general trending
+      const { data, error } = user?.id 
+        ? await dbHelpers.getPersonalizedTracks(user.id, 20)
+        : await dbHelpers.getTrendingTracks(20);
+      
+      if (error || !data || data.length === 0) {
+        console.log('⚠️ Using fallback mock data. Error:', error?.message);
+        const fallback = DISCOVER_MOCK_TRACKS;
+        setTrendingTracks(fallback);
+        await contentCacheService.saveCache('TRACKS', cacheKey, fallback);
+        console.log('✅ DiscoverScreen: Trending tracks loaded (mock data):', fallback.length);
+      } else {
+        console.log('✅ DiscoverScreen: Loaded tracks:', data.length, user?.id ? '(personalized)' : '(general)');
+        console.log('🔍 DiscoverScreen trending track creator data:', data[0]?.creator);
+        setTrendingTracks(data);
+        await contentCacheService.saveCache('TRACKS', cacheKey, data);
+      }
+    } catch (error) {
+      console.error('❌ DiscoverScreen: Error loading trending tracks:', error);
+      const fallback = DISCOVER_MOCK_TRACKS;
+      setTrendingTracks(fallback);
+      // Only update cache if we don't have data
+      if (trendingTracks.length === 0) {
+        await contentCacheService.saveCache('TRACKS', cacheKey, fallback);
+      }
+    } finally {
+      setLoadingTracks(false);
+      initialCacheLoadRef.current = true;
+    }
+  };
+
+  const loadRecentTracks = async (forceRefresh = false) => {
+    const cacheKey = 'recent_tracks';
+    
+    // Try cache first (unless force refresh)
+    if (!forceRefresh && !initialCacheLoadRef.current) {
+      const cached = await contentCacheService.getCached('TRACKS', cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        console.log('⚡ Instant load: Showing cached recent tracks');
+        setRecentTracks(cached);
+        // Fetch fresh data in background
+        setTimeout(() => loadRecentTracks(true), 100);
+        return;
+      }
+    }
+    
+    try {
+      console.log('🔧 DiscoverScreen: Loading recent tracks...');
+      // Try to load real tracks from Supabase - get all columns to find artwork
+      const { data, error } = await supabase
+        .from('audio_tracks')
+        .select(`
+          *,
+          creator:profiles!creator_id (
+            id,
+            username,
+            display_name,
+            avatar_url
+          )
+        `)
+        .eq('is_public', true)
+        .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (error) {
+        console.error('❌ DiscoverScreen: Supabase error loading recent tracks:', error);
+        // Fallback to mock data
+        setRecentTracks(DISCOVER_MOCK_TRACKS);
+        console.log('✅ DiscoverScreen: Recent tracks loaded (fallback mock data):', DISCOVER_MOCK_TRACKS.length);
+      } else if (data && data.length > 0) {
+        const fallbackImages = [
+          'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
+          'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
+          'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+          'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop',
+          'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=center',
+        ];
+        
+        const transformedTracks: AudioTrack[] = data.map((track, index) => {
+          // Try multiple possible column names for artwork
+          const imageUrl = track.cover_art_url || 
+                           track.cover_url || 
+                           track.artwork_url || 
+                           track.image_url ||
+                           track.thumbnail_url ||
+                           track.cover ||
+                           track.artwork ||
+                           track.image ||
+                           fallbackImages[index % fallbackImages.length];
+          
+          // Debug artwork sources (removed to prevent render errors)
+          if (__DEV__) {
+            console.log('DiscoverScreen Track artwork check:', track.title, imageUrl);
+          }
+          
+          return {
+            id: track.id,
+            title: track.title || 'Untitled Track',
+            description: track.description,
+            audio_url: track.audio_url || track.file_url,
+            file_url: track.file_url,
+            cover_art_url: imageUrl,
+            artwork_url: imageUrl,
+            duration: track.duration || 180,
+            play_count: track.play_count || 0,
+            plays_count: track.plays_count || 0,
+            likes_count: track.likes_count || track.like_count || 0,
+            created_at: track.created_at,
+            creator: {
+              id: track.creator?.id || track.creator_id || 'unknown',
+              username: track.creator?.username || 'unknown',
+              display_name: track.creator?.display_name || 'Unknown Artist',
+              avatar_url: track.creator?.avatar_url,
+            },
+          };
+        });
+        
+        setRecentTracks(transformedTracks);
+        await contentCacheService.saveCache('TRACKS', cacheKey, transformedTracks);
+        console.log('✅ DiscoverScreen: Recent tracks loaded from Supabase:', transformedTracks.length);
+        console.log('🔍 DiscoverScreen sample track creator data:', transformedTracks[0]?.creator);
+      } else {
+        console.log('ℹ️ DiscoverScreen: No recent tracks found, using mock data');
+        // Mock data fallback
+        const mockTracks: AudioTrack[] = [
+          {
+            id: 'discover-empty-1',
+            title: 'Demo Track',
+            cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
+            artwork_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop&crop=face',
+            creator: {
+              id: 'demo-creator',
+              username: 'demo_artist',
+              display_name: 'Demo Artist',
+            },
+            duration: 180,
+            play_count: 0,
+            plays_count: 0,
+            likes_count: 0,
+            created_at: new Date().toISOString(),
+          },
+        ];
+        setRecentTracks(mockTracks);
+        if (recentTracks.length === 0) {
+          await contentCacheService.saveCache('TRACKS', cacheKey, mockTracks);
+        }
+      }
+    } catch (error) {
+      console.error('❌ DiscoverScreen: Error loading recent tracks:', error);
+      const fallback = DISCOVER_MOCK_TRACKS;
+      setRecentTracks(fallback);
+      if (recentTracks.length === 0) {
+        await contentCacheService.saveCache('TRACKS', cacheKey, fallback);
+      }
+    }
+  };
+
+  const loadFeaturedArtists = async (forceRefresh = false) => {
+    const cacheKey = 'featured_artists';
+    
+    // Try cache first (unless force refresh)
+    if (!forceRefresh && !initialCacheLoadRef.current) {
+      const cached = await contentCacheService.getCached('ARTISTS', cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        console.log('⚡ Instant load: Showing cached featured artists');
+        setFeaturedArtists(cached);
+        // Fetch fresh data in background
+        setTimeout(() => loadFeaturedArtists(true), 100);
+        return;
+      }
+    }
+    
+    // Only show loading if we don't have cached data
+    if (featuredArtists.length === 0 || forceRefresh) {
+      setLoadingArtists(true);
+    }
+    
+    try {
+      console.log('🔧 DiscoverScreen: Loading featured artists with real stats...');
+      
+      // Use the new function that gets real stats
+      const { data, error } = await dbHelpers.getCreatorsWithStats(10);
+      
+      console.log('🔍 DiscoverScreen: Featured artists data:', data?.length || 0, 'artists');
+      console.log('🔍 DiscoverScreen: Featured artists error:', error);
+      
+      if (data && data.length > 0 && !error) {
+        console.log('✅ DiscoverScreen: Featured artists loaded with real stats:', data.length);
+        
+        // Transform the data to match our Creator interface
+        const transformedArtists: Creator[] = data.map(artist => ({
+          id: artist.id,
+          username: artist.username,
+          display_name: artist.display_name || artist.username,
+          bio: artist.bio || 'Music creator',
+          avatar_url: artist.avatar_url,
+          followers_count: artist.followers_count || 0, // Real data from database
+          tracks_count: artist.tracks_count || 0, // Real data from database
+          events_count: artist.events_count || 0, // Real data from database
+        }));
+        
+        setFeaturedArtists(transformedArtists);
+        await contentCacheService.saveCache('ARTISTS', cacheKey, transformedArtists);
+        console.log('✅ DiscoverScreen: Successfully set featured artists with real stats:', transformedArtists.length);
+      } else if (error) {
+        console.log('❌ DiscoverScreen: Database error, using mock data:', error.message);
+        // Use mock data on error
+        const fallback = DISCOVER_MOCK_ARTISTS;
+        setFeaturedArtists(fallback);
+        if (featuredArtists.length === 0) {
+          await contentCacheService.saveCache('ARTISTS', cacheKey, fallback);
+        }
+        console.log('✅ DiscoverScreen: Using mock artists data');
+      } else {
+        console.log('ℹ️ DiscoverScreen: No creators found, using mock data');
+        // Use mock data if no creators found
+        const fallback = DISCOVER_MOCK_ARTISTS;
+        setFeaturedArtists(fallback);
+        if (featuredArtists.length === 0) {
+          await contentCacheService.saveCache('ARTISTS', cacheKey, fallback);
+        }
+        console.log('✅ DiscoverScreen: Using fallback mock data');
+      }
+    } catch (error) {
+      console.error('❌ DiscoverScreen: Error loading featured artists:', error);
+      // Always provide fallback data
+      const fallbackArtists: Creator[] = [
+        {
+          id: 'fallback-artist-1',
+          username: 'soundbridge_artist',
+          display_name: 'SoundBridge Artist',
+          bio: 'Featured creator on SoundBridge',
+          avatar_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=150&h=150&fit=crop&crop=face',
+          followers_count: 1000,
+          tracks_count: 20,
+        },
+      ];
+      setFeaturedArtists(fallbackArtists);
+      console.log('✅ DiscoverScreen: Using fallback data due to error');
+    } finally {
+      setLoadingArtists(false);
+      console.log('🏁 DiscoverScreen: Featured artists loading completed');
+    }
+  };
+
+  const loadEvents = async (forceRefresh = false) => {
+    const cacheKey = user?.id ? `events_${user.id}` : 'events_anonymous';
+    
+    // Try cache first (unless force refresh)
+    if (!forceRefresh && !initialCacheLoadRef.current) {
+      const cached = await contentCacheService.getCached('EVENTS', cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        console.log('⚡ Instant load: Showing cached events');
+        setEvents(cached);
+        // Fetch fresh data in background
+        setTimeout(() => loadEvents(true), 100);
+        return;
+      }
+    }
+    
+    // Only show loading if we don't have cached data
+    if (events.length === 0 || forceRefresh) {
+      setLoadingEvents(true);
+    }
+    
+    try {
+      console.log('🎪 DiscoverScreen: Loading events...');
+      
+      // Use personalized events if user is logged in, otherwise use general events
+      const { data, error } = user?.id 
+        ? await dbHelpers.getPersonalizedEvents(user.id, 10)
+        : await dbHelpers.getEvents(10);
+
+      console.log('🔍 DiscoverScreen: Events data:', data?.length || 0, 'events');
+      console.log('🔍 DiscoverScreen: Events error:', error);
+
+      if (data && data.length > 0 && !error) {
+        console.log('✅ DiscoverScreen: Events loaded from Supabase:', data.length);
+        
+        // Transform the data to match our Event interface
+        const transformedEvents: Event[] = data.map(event => ({
+          id: event.id,
+          title: event.title,
+          description: event.description,
+          event_date: event.event_date,
+          location: event.location,
+          image_url: event.image_url,
+          organizer: {
+            id: 'event-organizer',
+            username: 'event_organizer',
+            display_name: 'Event Organizer',
+            avatar_url: undefined,
+          }
+        }));
+        
+        setEvents(transformedEvents);
+        await contentCacheService.saveCache('EVENTS', cacheKey, transformedEvents);
+        console.log('✅ DiscoverScreen: Successfully set events:', transformedEvents.length);
+      } else if (error) {
+        console.log('❌ DiscoverScreen: Database error, using mock events:', error.message);
+        // Use mock data on error
+        const fallback = DISCOVER_MOCK_EVENTS;
+        setEvents(fallback);
+        if (events.length === 0) {
+          await contentCacheService.saveCache('EVENTS', cacheKey, fallback);
+        }
+        console.log('✅ DiscoverScreen: Using mock events data');
+      } else {
+        console.log('ℹ️ DiscoverScreen: No events found, using mock data');
+        // Use mock data if no events found
+        const fallback = DISCOVER_MOCK_EVENTS;
+        setEvents(fallback);
+        if (events.length === 0) {
+          await contentCacheService.saveCache('EVENTS', cacheKey, fallback);
+        }
+        console.log('✅ DiscoverScreen: Using fallback mock events');
+      }
+    } catch (error) {
+      console.error('❌ DiscoverScreen: Error loading events:', error);
+      // Always provide fallback data
+      const fallbackEvents: Event[] = [
+        {
+          id: 'fallback-event-1',
+          title: 'Music Discovery Event',
+          description: 'Explore new sounds and connect with artists',
+          event_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          location: 'SoundBridge Platform',
+          image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+          organizer: {
+            id: 'fallback-organizer',
+            username: 'soundbridge_events',
+            display_name: 'SoundBridge Events',
+            avatar_url: undefined,
+          },
+        },
+      ];
+      setEvents(fallbackEvents);
+      if (events.length === 0) {
+        await contentCacheService.saveCache('EVENTS', cacheKey, fallbackEvents);
+      }
+      console.log('✅ DiscoverScreen: Using fallback events due to error');
+    } finally {
+      setLoadingEvents(false);
+      console.log('🏁 DiscoverScreen: Events loading completed');
+    }
+  };
+
+  const loadPlaylists = async (forceRefresh = false) => {
+    const cacheKey = 'public_playlists';
+    
+    // Try cache first (unless force refresh)
+    if (!forceRefresh && !initialCacheLoadRef.current) {
+      const cached = await contentCacheService.getCached('PLAYLISTS', cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        console.log('⚡ Instant load: Showing cached playlists');
+        setPlaylists(cached);
+        // Fetch fresh data in background
+        setTimeout(() => loadPlaylists(true), 100);
+        return;
+      }
+    }
+    
+    // Only show loading if we don't have cached data
+    if (playlists.length === 0 || forceRefresh) {
+      setLoadingPlaylists(true);
+    }
+    
+    try {
+      console.log('🔧 DiscoverScreen: Loading playlists...');
+      
+      const { data, error } = await dbHelpers.getPublicPlaylists(20);
+      
+      if (error) throw error;
+      
+      console.log('✅ DiscoverScreen: Playlists loaded:', data?.length || 0);
+      
+      // Transform data to handle creator relationship (might come as array)
+      const transformedPlaylists = data?.map(playlist => ({
+        ...playlist,
+        creator: Array.isArray(playlist.creator) ? playlist.creator[0] : playlist.creator
+      })) || [];
+      
+      setPlaylists(transformedPlaylists);
+      await contentCacheService.saveCache('PLAYLISTS', cacheKey, transformedPlaylists);
+    } catch (error) {
+      console.error('❌ DiscoverScreen: Error loading playlists:', error);
+      const fallback = DISCOVER_MOCK_PLAYLISTS;
+      setPlaylists(fallback);
+      if (playlists.length === 0) {
+        await contentCacheService.saveCache('PLAYLISTS', cacheKey, fallback);
+      }
+    } finally {
+      setLoadingPlaylists(false);
+      console.log('🏁 DiscoverScreen: Playlists loading completed');
+    }
+  };
+
+  const loadServiceProviders = async (forceRefresh = false) => {
+    const cacheKey = 'service_providers';
+    
+    // Try cache first (unless force refresh)
+    if (!forceRefresh && !initialCacheLoadRef.current) {
+      const cached = await contentCacheService.getCached('SERVICES', cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        console.log('⚡ Instant load: Showing cached service providers');
+        setServiceProviders(cached);
+        // Fetch fresh data in background
+        setTimeout(() => loadServiceProviders(true), 100);
+        return;
+      }
+    }
+    
+    // Only show loading if we don't have cached data
+    if (serviceProviders.length === 0 || forceRefresh) {
+      setLoadingServices(true);
+    }
+    
+    try {
+      console.log('💼 DiscoverScreen: Loading service providers...');
+      
+      const providers = await fetchDiscoverServiceProviders();
+      
+      if (providers && providers.length > 0) {
+        console.log('✅ DiscoverScreen: Service providers loaded:', providers.length);
+        setServiceProviders(providers);
+        await contentCacheService.saveCache('SERVICES', cacheKey, providers);
+      } else {
+        console.log('ℹ️ DiscoverScreen: No service providers found');
+        setServiceProviders([]);
+      }
+    } catch (error) {
+      console.error('❌ DiscoverScreen: Error loading service providers:', error);
+      setServiceProviders([]);
+    } finally {
+      setLoadingServices(false);
+      console.log('🏁 DiscoverScreen: Service providers loading completed');
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    // Load all main content on refresh, regardless of active tab (force refresh)
+    await Promise.all([
+      loadFeaturedArtists(true),
+      loadEvents(true),
+      loadTrendingTracks(true),
+      loadRecentTracks(true),
+      loadPlaylists(true),
+      loadServiceProviders(true)
+    ]);
+    setRefreshing(false);
+  };
+
+  // Search is now handled by useSearch hook
+
+  const handleTrackPress = async (track: AudioTrack) => {
+    (navigation as any).navigate('TrackDetails', { trackId: track.id, track: track });
+  };
+
+  const handleTrackPlay = async (track: AudioTrack) => {
+    try {
+      console.log('🎵 Playing track from Discover:', track.title);
+      await play(track);
+      
+      // Add other tracks from current view to queue
+      if (recentTracks.length > 0) {
+        const otherRecentTracks = recentTracks.filter(t => t.id !== track.id);
+        otherRecentTracks.forEach(t => addToQueue(t));
+      }
+      
+      // Mini player will now handle showing the currently playing track
+      // Navigation to full player is handled by mini player expand button
+    } catch (error) {
+      console.error('Error playing track:', error);
+      Alert.alert('Playback Error', 'Failed to play the track. Please try again.');
+    }
+  };
+
+  const handleCreatorPress = (creator: Creator) => {
+    (navigation as any).navigate('CreatorProfile', { creatorId: creator.id, creator: creator });
+  };
+
+  const handleEventPress = (event: Event) => {
+    (navigation as any).navigate('EventDetails', { eventId: event.id, event: event });
+  };
+
+  const formatNumber = (num?: number | null) => {
+    if (!num && num !== 0) return '0';
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num.toString();
+  };
+
+  const formatDuration = (seconds?: number | null): string | null => {
+    // Return null if duration is missing/invalid so we can conditionally render
+    if (!seconds || seconds === 0 || isNaN(seconds)) return null;
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Helper to check if track is new (uploaded < 7 days ago)
+  const isNewTrack = (createdAt: string): boolean => {
+    const trackDate = new Date(createdAt);
+    const daysAgo = (Date.now() - trackDate.getTime()) / (1000 * 60 * 60 * 24);
+    return daysAgo < 7;
+  };
+
+  // Helper to check if track is trending (high play count recently)
+  const isTrendingTrack = (track: AudioTrack): boolean => {
+    const playCount = track.play_count || track.plays_count || 0;
+    const isRecent = isNewTrack(track.created_at);
+    return playCount > 100 && isRecent;
+  };
+
+  // ✅ NEW: Test search data availability
+  const testSearchData = async () => {
+    try {
+      console.log('🔍 Testing search data availability...');
+      
+      // Test 1: Check if public tracks exist
+      const { data: tracks, error: tracksError } = await supabase
+        .from('audio_tracks')
+        .select('id, title, is_public, creator_id')
+        .eq('is_public', true)
+        .limit(5);
+      
+      console.log('✅ Public tracks found:', tracks?.length || 0);
+      if (tracks && tracks.length > 0) {
+        console.log('Sample tracks:', tracks.map(t => t.title));
+      }
+      
+      // Test 2: Check if creators exist
+      const { data: creators, error: creatorsError } = await supabase
+        .from('profiles')
+        .select('id, username, display_name, role')
+        .eq('role', 'creator')
+        .limit(5);
+      
+      console.log('✅ Creators found:', creators?.length || 0);
+      if (creators && creators.length > 0) {
+        console.log('Sample creators:', creators.map(c => c.display_name));
+      }
+      
+      // Test 3: Check if events exist
+      const { data: events, error: eventsError } = await supabase
+        .from('events')
+        .select('id, title, event_date')
+        .limit(5);
+      
+      console.log('✅ Events found:', events?.length || 0);
+      if (events && events.length > 0) {
+        console.log('Sample events:', events.map(e => e.title));
+      }
+      
+      return {
+        tracks: tracks?.length || 0,
+        creators: creators?.length || 0,
+        events: events?.length || 0
+      };
+    } catch (error) {
+      console.error('❌ Error testing search data:', error);
+      return null;
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      {/* Main Background Gradient - Uses theme colors */}
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
+      
+      <SafeAreaView style={styles.safeArea} edges={[]}>
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        
+        {/* Header */}
+        <View style={styles.header}>
+        <TouchableOpacity style={styles.menuButton}>
+          <Ionicons name="menu" size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+        <View style={styles.headerTextGroup}>
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Discover</Text>
+          <Text style={[styles.headerSubtitle, { color: theme.colors.textSecondary }]}>
+            Find music, events, and creators based on YOUR preferences
+          </Text>
+        </View>
+      </View>
+
+      {/* Search Header */}
+      <View style={styles.searchHeader}>
+        <View style={[styles.searchInputContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+          <Ionicons name="search" size={20} color={theme.colors.textSecondary} style={styles.searchIcon} />
+          <TextInput
+            style={[styles.searchInput, { color: theme.colors.text }]}
+            placeholder="Search for creators, music, events..."
+            placeholderTextColor={theme.colors.textSecondary}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCorrect={false}
+            autoCapitalize="none"
+          />
+          <TouchableOpacity
+            onPress={() => {
+              if (!isPremium && !isUnlimited) {
+                Alert.alert(
+                  'Premium Feature',
+                  'Advanced filters are available for Premium and Unlimited users. Upgrade to unlock advanced search capabilities.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Upgrade', onPress: () => navigation.navigate('Upgrade' as never) },
+                  ]
+                );
+                return;
+              }
+              setShowAdvancedFilters(true);
+            }}
+            style={styles.filterButton}
+          >
+            <Ionicons name="options-outline" size={20} color={theme.colors.textSecondary} />
+            {!isPremium && !isUnlimited && (
+              <View style={styles.proIndicator}>
+                <Ionicons name="diamond" size={10} color="#10B981" />
+              </View>
+            )}
+          </TouchableOpacity>
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
+              <Ionicons name="close-circle" size={20} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Content based on active tab */}
+      <ScrollView 
+        style={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Show search results when searching */}
+        {searchQuery.length > 0 ? (
+          <View style={styles.searchResultsContainer}>
+            {/* Search Results Header */}
+            <View style={styles.searchResultsHeader}>
+              <Text style={[styles.searchResultsTitle, { color: theme.colors.text }]}>
+                {isSearching ? 'Searching...' : `Results for "${searchQuery}"`}
+              </Text>
+              {!isSearching && (
+                <Text style={[styles.searchResultsCount, { color: theme.colors.textSecondary }]}>
+                  {searchResults.tracks.length + searchResults.artists.length} results
+                </Text>
+              )}
+            </View>
+
+            {isSearching ? (
+              <View style={styles.searchLoadingContainer}>
+                <ActivityIndicator size="large" color={theme.colors.primary} />
+                <Text style={[styles.searchLoadingText, { color: theme.colors.textSecondary }]}>Searching...</Text>
+              </View>
+            ) : (
+              <>
+                {/* Search Results Content */}
+                {searchResults.tracks.length === 0 && searchResults.artists.length === 0 ? (
+                  <View style={styles.noResultsContainer}>
+                    <Ionicons name="search" size={48} color={theme.colors.textSecondary} />
+                    <Text style={[styles.noResultsTitle, { color: theme.colors.text }]}>No results found</Text>
+                    <Text style={[styles.noResultsText, { color: theme.colors.textSecondary }]}>
+                      Try searching for different keywords
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    {/* Artists Results */}
+                    {searchResults.artists.length > 0 && (
+                      <View style={styles.searchSection}>
+                        <Text style={[styles.searchSectionTitle, { color: theme.colors.text }]}>Artists</Text>
+                        {searchResults.artists.map((artist) => (
+                          <TouchableOpacity
+                            key={artist.id}
+                            style={styles.searchArtistItem}
+                            onPress={() => handleCreatorPress(artist)}
+                          >
+                            <View style={styles.searchArtistAvatar}>
+                              {artist.avatar_url ? (
+                                <Image source={{ uri: artist.avatar_url }} style={styles.searchArtistImage} />
+                              ) : (
+                                <View style={styles.defaultSearchArtistImage}>
+                                  <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
+                                </View>
+                              )}
+                            </View>
+                            <View style={styles.searchArtistInfo}>
+                              <Text style={[styles.searchArtistName, { color: theme.colors.text }]} numberOfLines={1}>
+                                {artist.display_name || artist.username}
+                              </Text>
+                              <Text style={[styles.searchArtistUsername, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                                @{artist.username}
+                              </Text>
+                              <Text style={[styles.searchArtistStats, { color: theme.colors.textSecondary }]}>
+                                {formatNumber(artist.followers_count)} followers • {formatNumber(artist.tracks_count)} tracks
+                              </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* Tracks Results */}
+                    {searchResults.tracks.length > 0 && (
+                      <View style={styles.searchSection}>
+                        <Text style={[styles.searchSectionTitle, { color: theme.colors.text }]}>Tracks</Text>
+                        {searchResults.tracks.map((track) => (
+                          <TouchableOpacity
+                            key={track.id}
+                            style={styles.searchTrackItem}
+                            onPress={() => handleTrackPress(track)}
+                          >
+                            <View style={styles.searchTrackCover}>
+                              {track.cover_art_url ? (
+                                <Image source={{ uri: track.cover_art_url }} style={styles.searchTrackImage} />
+                              ) : (
+                                <View style={styles.defaultSearchTrackImage}>
+                                  <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />
+                                </View>
+                              )}
+                            </View>
+                            <View style={styles.searchTrackInfo}>
+                              <Text style={[styles.searchTrackTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                                {track.title}
+                              </Text>
+                              <Text style={[styles.searchTrackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                                {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
+                              </Text>
+                              <View style={styles.searchTrackMeta}>
+                                {track.genre && (
+                                  <>
+                                    <Text style={[styles.searchTrackGenre, { color: theme.colors.primary }]}>
+                                      {track.genre}
+                                    </Text>
+                                    {(formatDuration(track.duration) || formatNumber(track.play_count || track.plays_count || 0) !== '0') && (
+                                      <Text style={[styles.searchTrackStats, { color: theme.colors.textSecondary }]}> • </Text>
+                                    )}
+                                  </>
+                                )}
+                                {formatDuration(track.duration) && (
+                                  <>
+                                    <Text style={[styles.searchTrackStats, { color: theme.colors.textSecondary }]}>
+                                      {formatDuration(track.duration)}
+                                    </Text>
+                                    <Text style={[styles.searchTrackStats, { color: theme.colors.textSecondary }]}> • </Text>
+                                  </>
+                                )}
+                                <Text style={[styles.searchTrackStats, { color: theme.colors.textSecondary }]}>
+                                  {formatNumber(track.play_count || track.plays_count || 0)} plays
+                                </Text>
+                              </View>
+                            </View>
+                            <TouchableOpacity style={styles.searchTrackPlayButton} onPress={() => handleTrackPlay(track)}>
+                              <Ionicons name="play" size={16} color={theme.colors.primary} />
+                            </TouchableOpacity>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </View>
+        ) : (
+          <>
+            {/* Navigation Tabs - Now inside main ScrollView */}
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              style={styles.inlineTabsScrollView}
+              contentContainerStyle={styles.inlineTabsContainer}
+            >
+              {tabs.map((tab) => {
+                const tabIcons: Record<TabType, string> = {
+                  'Music': 'musical-notes',
+                  'Albums': 'albums',
+                  'Artists': 'people',
+                  'Events': 'calendar',
+                  'Playlists': 'list',
+                  'Services': 'briefcase',
+                  'Venues': 'location',
+                };
+                return (
+                  <TouchableOpacity
+                    key={tab}
+                    style={[
+                      styles.inlineTabButton,
+                      activeTab === tab && styles.activeInlineTabButton
+                    ]}
+                    onPress={() => setActiveTab(tab)}
+                  >
+                    <Ionicons
+                      name={tabIcons[tab] as any}
+                      size={16}
+                      color={activeTab === tab ? '#DC2626' : theme.colors.textSecondary}
+                      style={styles.inlineTabIcon}
+                    />
+                    <Text
+                      style={[
+                        styles.inlineTabText,
+                        { color: activeTab === tab ? '#DC2626' : theme.colors.textSecondary },
+                        activeTab === tab && styles.activeInlineTabText
+                      ]}
+                    >
+                      {tab}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+        {activeTab === 'Music' && (
+          <>
+            {/* Trending Now */}
+            <View style={[styles.section, styles.firstSection]}>
+              <View style={styles.sectionHeader}>
+                <View>
+                  <View style={styles.sectionTitleRow}>
+                    <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>🔥 Trending This Week</Text>
+                  </View>
+                  <Text style={[styles.sectionSubtitle, { color: theme.colors.textSecondary }]}>
+                    Top tracks on SoundBridge
+                  </Text>
+                </View>
+                <TouchableOpacity>
+                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </TouchableOpacity>
+              </View>
+              
+        {loadingTracks ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                </View>
+        ) : trendingTracks.length > 0 ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+                  {trendingTracks.map((track, index) => (
+                    <TouchableOpacity
+                      key={track.id}
+                      style={[styles.trendingCard, { marginLeft: index === 0 ? 16 : 12 }]}
+                      onPress={() => handleTrackPress(track)}
+                    >
+                      <View style={styles.trendingCover}>
+                        {track.cover_art_url ? (
+                          <Image source={{ uri: track.cover_art_url }} style={styles.trendingImage} />
+                        ) : (
+                          <View style={styles.defaultTrendingImage}>
+                            <Ionicons name="musical-notes" size={40} color={theme.colors.textSecondary} />
+                      </View>
+                    )}
+                    <TouchableOpacity 
+                      style={styles.playOverlay}
+                      onPress={() => handleTrackPlay(track)}
+                    >
+                          <Ionicons name="play" size={20} color="#FFFFFF" />
+                    </TouchableOpacity>
+                  </View>
+                      <View style={styles.trendingCardHeader}>
+                        {isTrendingTrack(track) && (
+                          <View style={styles.trendingBadge}>
+                            <Text style={styles.trendingBadgeText}>🔥</Text>
+                          </View>
+                        )}
+                        {isNewTrack(track.created_at) && (
+                          <View style={styles.newBadge}>
+                            <Text style={styles.newBadgeText}>🆕</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.trendingTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                        {track.title}
+                      </Text>
+                      <Text style={[styles.trendingArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                        by {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
+                      </Text>
+                      <View style={styles.trendingCardMeta}>
+                        {track.genre && (
+                          <Text style={[styles.trendingGenre, { color: theme.colors.primary }]}>
+                            {track.genre}
+                          </Text>
+                        )}
+                        {formatDuration(track.duration) && (
+                          <>
+                            <Text style={[styles.trendingDuration, { color: theme.colors.textSecondary }]}>
+                              {formatDuration(track.duration)}
+                            </Text>
+                            <Text style={[styles.trendingPlays, { color: theme.colors.textSecondary }]}> • </Text>
+                          </>
+                        )}
+                        <Text style={[styles.trendingPlays, { color: theme.colors.textSecondary }]}>
+                          {formatNumber(track.play_count || track.plays_count || 0)} plays
+                        </Text>
+                      </View>
+                </TouchableOpacity>
+              ))}
+          </ScrollView>
+        ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="trending-up" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>No trending tracks yet</Text>
+                </View>
+        )}
+            </View>
+
+      {/* Featured Artists */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Featured Artists</Text>
+                <TouchableOpacity>
+                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </TouchableOpacity>
+              </View>
+              
+        {loadingArtists ? (
+                <View style={styles.loadingContainer}>
+                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading artists...</Text>
+                </View>
+        ) : featuredArtists.length > 0 ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+                  {featuredArtists.map((artist, index) => (
+                    <TouchableOpacity
+                      key={artist.id}
+                      style={[styles.artistCard, { marginLeft: index === 0 ? 16 : 12 }]}
+                      onPress={() => handleCreatorPress(artist)}
+                    >
+                      <View style={styles.artistCardAvatar}>
+                    {artist.avatar_url ? (
+                          <Image source={{ uri: artist.avatar_url }} style={styles.artistCardImage} />
+                    ) : (
+                          <View style={styles.defaultArtistCardImage}>
+                            <Ionicons name="person" size={32} color={theme.colors.textSecondary} />
+                      </View>
+                    )}
+                  </View>
+                      <Text style={[styles.artistCardName, { color: theme.colors.text }]} numberOfLines={1}>
+                        {artist.display_name || artist.username}
+                      </Text>
+                      <View style={styles.artistCardMeta}>
+                        {artist.genre && (
+                          <Text style={[styles.artistCardGenre, { color: theme.colors.primary }]} numberOfLines={1}>
+                            {artist.genre}
+                          </Text>
+                        )}
+                        {artist.location && (
+                          <Text style={[styles.artistCardLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            {artist.location}
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={[styles.artistCardStats, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                        {formatNumber(artist.followers_count)} followers • {formatNumber(artist.tracks_count)} tracks
+                      </Text>
+                </TouchableOpacity>
+              ))}
+          </ScrollView>
+        ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="mic" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>🎤 No Featured Artists Yet</Text>
+                  <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
+                    Be among the first to get featured!
+                  </Text>
+                  <Text style={[styles.emptyStateNote, { color: theme.colors.textSecondary, marginTop: 8 }]}>
+                    Premium users are featured 1x/month
+                  </Text>
+                  <Text style={[styles.emptyStateNote, { color: theme.colors.textSecondary }]}>
+                    Unlimited users are featured 2x/month
+                  </Text>
+                  <View style={styles.emptyStateButtons}>
+                    <TouchableOpacity
+                      style={[styles.emptyStateButton, styles.emptyStateButtonPrimary, { backgroundColor: theme.colors.primary }]}
+                      onPress={() => (navigation as any).navigate('Upgrade')}
+                    >
+                      <Ionicons name="rocket" size={16} color="#FFFFFF" />
+                      <Text style={styles.emptyStateButtonText}>Upgrade</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.emptyStateButton, { 
+                        borderColor: theme.colors.border,
+                        backgroundColor: theme.colors.card,
+                      }]}
+                      onPress={() => Alert.alert('Learn More', 'Featured artists are selected based on engagement, quality, and subscription tier. Premium users get featured once per month, while Unlimited users get featured twice per month.')}
+                    >
+                      <Ionicons name="information-circle-outline" size={16} color={theme.colors.textSecondary} />
+                      <Text style={[styles.emptyStateButtonText, { color: theme.colors.text }]}>Learn More</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </View>
+
+            {/* Recent Music */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Music</Text>
+                <TouchableOpacity>
+                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </TouchableOpacity>
+              </View>
+              
+        {loadingTracks ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color={theme.colors.primary} />
+                </View>
+        ) : recentTracks.length > 0 ? (
+                <View style={styles.recentMusicContainer}>
+            {recentTracks.slice(0, 5).map((track) => (
+                    <TouchableOpacity
+                      key={track.id}
+                      style={styles.recentTrackItem}
+                      onPress={() => handleTrackPress(track)}
+                    >
+                      <View style={styles.recentTrackCover}>
+                        {track.cover_art_url ? (
+                          <Image source={{ uri: track.cover_art_url }} style={styles.recentTrackImage} />
+                        ) : (
+                          <View style={styles.defaultRecentTrackImage}>
+                            <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />
+                    </View>
+                  )}
+                </View>
+                      <View style={styles.recentTrackInfo}>
+                        <View style={styles.recentTrackHeader}>
+                          <Text style={[styles.recentTrackTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                            {track.title}
+                          </Text>
+                          {isNewTrack(track.created_at) && (
+                            <View style={styles.newBadgeSmall}>
+                              <Text style={styles.newBadgeTextSmall}>🆕</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={[styles.recentTrackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                          by {track.creator?.display_name || track.creator?.username || 'Music Creator'}
+                        </Text>
+                        <ModerationBadge
+                          status={track.moderation_status}
+                          confidence={track.moderation_confidence}
+                          isOwner={user?.id === track.creator_id}
+                        />
+                        <View style={styles.recentTrackMeta}>
+                          {track.genre && (
+                            <>
+                              <Text style={[styles.recentTrackGenre, { color: theme.colors.primary }]}>
+                                {track.genre}
+                              </Text>
+                              {(formatDuration(track.duration) || formatNumber(track.play_count || track.plays_count || 0) !== '0') && (
+                                <Text style={[styles.recentTrackPlays, { color: theme.colors.textSecondary }]}> • </Text>
+                              )}
+                            </>
+                          )}
+                          {formatDuration(track.duration) && (
+                            <>
+                              <Text style={[styles.recentTrackPlays, { color: theme.colors.textSecondary }]}>
+                                {formatDuration(track.duration)}
+                              </Text>
+                              {formatNumber(track.play_count || track.plays_count || 0) !== '0' && (
+                                <Text style={[styles.recentTrackPlays, { color: theme.colors.textSecondary }]}> • </Text>
+                              )}
+                            </>
+                          )}
+                          <Text style={[styles.recentTrackPlays, { color: theme.colors.textSecondary }]}>
+                            {formatNumber(track.play_count || track.plays_count || 0)} plays
+                          </Text>
+                        </View>
+                </View>
+                      <View style={styles.recentTrackActions}>
+                  <TouchableOpacity 
+                    style={styles.playButton}
+                    onPress={() => handleTrackPlay(track)}
+                  >
+                    <Ionicons name="play" size={16} color="#DC2626" />
+                  </TouchableOpacity>
+                        <Text style={[styles.recentTrackDuration, { color: theme.colors.textSecondary }]}>
+                          {formatDuration(track.duration)}
+                        </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="musical-notes" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>No recent music yet</Text>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+
+        {activeTab === 'Albums' && (
+          <>
+            {/* Featured Albums */}
+            <View style={[styles.section, styles.firstSection]}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Featured Albums</Text>
+              </View>
+              
+              {loadingAlbums ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading albums...</Text>
+                </View>
+              ) : featuredAlbums.length > 0 ? (
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.horizontalScrollContent}
+                >
+                  {featuredAlbums.map((album) => (
+                    <TouchableOpacity
+                      key={album.id}
+                      style={styles.albumCard}
+                      onPress={() => navigation.navigate('AlbumDetails', { albumId: album.id })}
+                    >
+                      {album.cover_image_url ? (
+                        <Image
+                          source={{ uri: album.cover_image_url }}
+                          style={styles.albumCover}
+                        />
+                      ) : (
+                        <View style={[styles.albumCoverPlaceholder, { backgroundColor: theme.colors.surface }]}>
+                          <Ionicons name="albums" size={40} color={theme.colors.textSecondary} />
+                        </View>
+                      )}
+                      <View style={styles.albumInfo}>
+                        <Text style={[styles.albumTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                          {album.title}
+                        </Text>
+                        <Text style={[styles.albumArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                          {album.creator?.display_name || album.creator?.username}
+                        </Text>
+                        <View style={styles.albumStats}>
+                          <View style={styles.albumStat}>
+                            <Ionicons name="musical-notes-outline" size={12} color={theme.colors.textSecondary} />
+                            <Text style={[styles.albumStatText, { color: theme.colors.textSecondary }]}>
+                              {album.tracks_count || 0} tracks
+                            </Text>
+                          </View>
+                          <View style={styles.albumStat}>
+                            <Ionicons name="play-circle-outline" size={12} color={theme.colors.textSecondary} />
+                            <Text style={[styles.albumStatText, { color: theme.colors.textSecondary }]}>
+                              {formatNumber(album.total_plays || 0)}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="albums" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
+                    No featured albums yet
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Recent Albums */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Releases</Text>
+              </View>
+              
+              {loadingAlbums ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                </View>
+              ) : recentAlbums.length > 0 ? (
+                <View style={styles.recentTracksContainer}>
+                  {recentAlbums.map((album, index) => (
+                    <TouchableOpacity
+                      key={album.id}
+                      style={[styles.recentTrackItem, { backgroundColor: theme.colors.surface }]}
+                      onPress={() => navigation.navigate('AlbumDetails', { albumId: album.id })}
+                    >
+                      <View style={styles.recentTrackLeft}>
+                        <Text style={[styles.trackNumber, { color: theme.colors.textSecondary }]}>
+                          {index + 1}
+                        </Text>
+                        {album.cover_image_url ? (
+                          <Image
+                            source={{ uri: album.cover_image_url }}
+                            style={styles.recentTrackCover}
+                          />
+                        ) : (
+                          <View style={[styles.recentTrackCoverPlaceholder, { backgroundColor: theme.colors.border }]}>
+                            <Ionicons name="albums" size={20} color={theme.colors.textSecondary} />
+                          </View>
+                        )}
+                        <View style={styles.recentTrackInfo}>
+                          <Text style={[styles.recentTrackTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                            {album.title}
+                          </Text>
+                          <Text style={[styles.recentTrackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            {album.creator?.display_name || album.creator?.username} • {album.tracks_count || 0} tracks
+                          </Text>
+                          <View style={styles.recentTrackMeta}>
+                            <Text style={[styles.recentTrackMetaText, { color: theme.colors.textSecondary }]}>
+                              {formatNumber(album.total_plays || 0)} plays
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                      <View style={styles.recentTrackActions}>
+                        <TouchableOpacity 
+                          style={styles.playButton}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            navigation.navigate('AlbumDetails', { albumId: album.id });
+                          }}
+                        >
+                          <Ionicons name="play" size={16} color="#DC2626" />
+                        </TouchableOpacity>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="albums" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
+                    No recent albums yet
+                  </Text>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+
+        {activeTab === 'Artists' && (
+          <>
+            {/* Featured Artists */}
+            <View style={[styles.section, styles.firstSection]}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>All Artists</Text>
+                <TouchableOpacity>
+                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </TouchableOpacity>
+              </View>
+              
+        {loadingArtists ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading artists...</Text>
+                </View>
+        ) : featuredArtists.length > 0 ? (
+                <View style={styles.artistsGridContainer}>
+            {featuredArtists.map((artist) => (
+                    <TouchableOpacity
+                      key={artist.id}
+                      style={styles.artistGridCard}
+                      onPress={() => handleCreatorPress(artist)}
+                    >
+                      <View style={styles.artistGridAvatar}>
+                  {artist.avatar_url ? (
+                          <Image source={{ uri: artist.avatar_url }} style={styles.artistGridImage} />
+                  ) : (
+                          <View style={styles.defaultArtistGridImage}>
+                            <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
+                    </View>
+                  )}
+                </View>
+                      <Text style={[styles.artistGridName, { color: theme.colors.text }]} numberOfLines={1}>
+                        {artist.display_name || artist.username}
+                      </Text>
+                      <Text style={[styles.artistGridUsername, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                        @{artist.username}
+                      </Text>
+                      <View style={styles.artistGridMeta}>
+                        {artist.genre && (
+                          <Text style={[styles.artistGridGenre, { color: theme.colors.primary }]} numberOfLines={1}>
+                            {artist.genre}
+                          </Text>
+                        )}
+                        {artist.location && (
+                          <Text style={[styles.artistGridLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            {artist.location}
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={[styles.artistGridStats, { color: theme.colors.textSecondary }]}>
+                        {formatNumber(artist.followers_count)} followers • {formatNumber(artist.tracks_count)} tracks
+                      </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="people" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>No artists found</Text>
+                    </View>
+                  )}
+                </View>
+
+            {/* Top Artists by Followers */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Top Artists</Text>
+                <TouchableOpacity>
+                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+              </TouchableOpacity>
+          </View>
+              
+              {loadingArtists ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color={theme.colors.primary} />
+                </View>
+              ) : featuredArtists.length > 0 ? (
+                <View style={styles.topArtistsContainer}>
+                  {featuredArtists
+                    .sort((a, b) => (b.followers_count || 0) - (a.followers_count || 0))
+                    .slice(0, 5)
+                    .map((artist, index) => (
+                    <TouchableOpacity
+                      key={artist.id}
+                      style={styles.topArtistItem}
+                      onPress={() => handleCreatorPress(artist)}
+                    >
+                      <View style={styles.topArtistRank}>
+                        <Text style={[styles.topArtistRankText, { color: theme.colors.primary }]}>
+                          #{index + 1}
+                        </Text>
+                      </View>
+                      <View style={styles.topArtistAvatar}>
+                        {artist.avatar_url ? (
+                          <Image source={{ uri: artist.avatar_url }} style={styles.topArtistImage} />
+                        ) : (
+                          <View style={styles.defaultTopArtistImage}>
+                            <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
+                    </View>
+                  )}
+                  </View>
+                      <View style={styles.topArtistInfo}>
+                        <Text style={[styles.topArtistName, { color: theme.colors.text }]} numberOfLines={1}>
+                          {artist.display_name || artist.username}
+                        </Text>
+                        <Text style={[styles.topArtistUsername, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                          @{artist.username}
+                        </Text>
+                </View>
+                      <View style={styles.topArtistStats}>
+                        <Text style={[styles.topArtistFollowers, { color: theme.colors.text }]}>
+                          {formatNumber(artist.followers_count)}
+                        </Text>
+                        <Text style={[styles.topArtistFollowersLabel, { color: theme.colors.textSecondary }]}>
+                          followers
+                        </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="trending-up" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>No top artists yet</Text>
+                </View>
+              )}
+      </View>
+          </>
+        )}
+
+        {activeTab === 'Events' && (
+          <>
+            {/* Upcoming Events */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Upcoming Events</Text>
+                <TouchableOpacity>
+                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </TouchableOpacity>
+              </View>
+              
+              {loadingEvents ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading events...</Text>
+                </View>
+              ) : events.length > 0 ? (
+                <View style={styles.eventsContainer}>
+                  {events.map((event) => (
+                    <TouchableOpacity
+                      key={event.id}
+                      style={styles.eventCard}
+                      onPress={() => handleEventPress(event)}
+                    >
+                      <View style={styles.eventImageContainer}>
+                        {event.image_url ? (
+                          <Image source={{ uri: event.image_url }} style={styles.eventImage} />
+                        ) : (
+                          <View style={styles.defaultEventImage}>
+                            <Ionicons name="calendar" size={32} color={theme.colors.textSecondary} />
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.eventInfo}>
+                        <Text style={[styles.eventTitle, { color: theme.colors.text }]} numberOfLines={2}>
+                          {event.title}
+                        </Text>
+                        <Text style={[styles.eventDate, { color: theme.colors.primary }]}>
+                          {new Date(event.event_date).toLocaleDateString('en-US', {
+                            weekday: 'short',
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric'
+                          })}
+                        </Text>
+                        {event.location && (
+                          <Text style={[styles.eventLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            📍 {event.location}
+                          </Text>
+                        )}
+                        {event.venue && (
+                          <Text style={[styles.eventVenue, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            🏢 {event.venue}
+                          </Text>
+                        )}
+                        <Text style={[styles.eventOrganizer, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                          by {event.organizer?.display_name || event.organizer?.username || 'Unknown Organizer'}
+                        </Text>
+                        {(event.price_gbp || event.price_ngn) && (
+                          <Text style={[styles.eventPrice, { color: theme.colors.primary }]}>
+                            {event.price_gbp ? `£${event.price_gbp}` : event.price_ngn ? `₦${event.price_ngn}` : 'Free'}
+                          </Text>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="calendar" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>No events found</Text>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+
+        {activeTab === 'Playlists' && (
+          <>
+            {/* Public Playlists */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Public Playlists</Text>
+                <TouchableOpacity>
+                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </TouchableOpacity>
+              </View>
+              
+              {loadingPlaylists ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading playlists...</Text>
+                </View>
+              ) : playlists.length > 0 ? (
+                <View style={styles.playlistsContainer}>
+                  {playlists.map((playlist) => (
+                    <TouchableOpacity
+                      key={playlist.id}
+                      style={styles.playlistCard}
+                      onPress={() => (navigation as any).navigate('PlaylistDetails', { playlistId: playlist.id })}
+                    >
+                      <View style={styles.playlistCover}>
+                        {playlist.cover_image_url ? (
+                          <Image source={{ uri: playlist.cover_image_url }} style={styles.playlistImage} />
+                        ) : (
+                          <View style={styles.defaultPlaylistImage}>
+                            <Ionicons name="musical-notes" size={32} color={theme.colors.textSecondary} />
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.playlistInfo}>
+                        <Text style={[styles.playlistName, { color: theme.colors.text }]} numberOfLines={1}>
+                          {playlist.name}
+                        </Text>
+                        <Text style={[styles.playlistCreator, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                          by {playlist.creator?.display_name || playlist.creator?.username || 'Unknown Creator'}
+                        </Text>
+                        <View style={styles.playlistStats}>
+                          <Text style={[styles.playlistStat, { color: theme.colors.textSecondary }]}>
+                            {playlist.tracks_count || 0} tracks
+                          </Text>
+                          <Text style={[styles.playlistStat, { color: theme.colors.textSecondary }]}>•</Text>
+                          <Text style={[styles.playlistStat, { color: theme.colors.textSecondary }]}>
+                            {formatDuration(playlist.total_duration || 0)}
+                          </Text>
+                          <Text style={[styles.playlistStat, { color: theme.colors.textSecondary }]}>•</Text>
+                          <Text style={[styles.playlistStat, { color: theme.colors.textSecondary }]}>
+                            {playlist.followers_count || 0} followers
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="musical-notes" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>🎵 No Public Playlists Yet</Text>
+                  <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
+                    Be the first to create a playlist!
+                  </Text>
+                  <Text style={[styles.emptyStateNote, { color: theme.colors.textSecondary, marginTop: 8 }]}>
+                    Curate music, share with the community,
+                  </Text>
+                  <Text style={[styles.emptyStateNote, { color: theme.colors.textSecondary }]}>
+                    and grow your followers
+                  </Text>
+                  <View style={styles.emptyStateButtons}>
+                    <TouchableOpacity
+                      style={[styles.emptyStateButton, styles.emptyStateButtonPrimary, { backgroundColor: theme.colors.primary }]}
+                      onPress={() => (navigation as any).navigate('CreatePlaylist')}
+                    >
+                      <Text style={styles.emptyStateButtonText}>Create Playlist</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.emptyStateButton, { 
+                        borderColor: theme.colors.border,
+                        backgroundColor: theme.colors.card,
+                      }]}
+                      onPress={() => Alert.alert('How It Works', 'Create playlists to organize your favorite tracks. Share them publicly to grow your audience and help others discover great music!')}
+                    >
+                      <Text style={[styles.emptyStateButtonText, { color: theme.colors.text }]}>How It Works</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+
+        {activeTab === 'Services' && (
+          <>
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Service Providers</Text>
+              </View>
+              
+              {loadingServices ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading services...</Text>
+                </View>
+              ) : serviceProviders.length > 0 ? (
+                <View style={styles.servicesContainer}>
+                  {serviceProviders.map((provider) => (
+                    <TouchableOpacity
+                      key={provider.user_id}
+                      style={[styles.serviceCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                      onPress={() => (navigation as any).navigate('CreatorProfile', { userId: provider.user_id })}
+                    >
+                      <View style={styles.serviceHeader}>
+                        {provider.avatar_url ? (
+                          <Image source={{ uri: provider.avatar_url }} style={styles.serviceAvatar} />
+                        ) : (
+                          <View style={[styles.serviceAvatarPlaceholder, { backgroundColor: theme.colors.surface }]}>
+                            <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
+                          </View>
+                        )}
+                        <View style={styles.serviceInfo}>
+                          <Text style={[styles.serviceName, { color: theme.colors.text }]} numberOfLines={1}>
+                            {provider.display_name || provider.username || 'Service Provider'}
+                          </Text>
+                          {provider.headline && (
+                            <Text style={[styles.serviceHeadline, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                              {provider.headline}
+                            </Text>
+                          )}
+                          {provider.average_rating && (
+                            <View style={styles.serviceRating}>
+                              <Ionicons name="star" size={14} color="#FCD34D" />
+                              <Text style={[styles.serviceRatingText, { color: theme.colors.textSecondary }]}>
+                                {provider.average_rating.toFixed(1)} ({provider.review_count || 0} reviews)
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                      {provider.categories && provider.categories.length > 0 && (
+                        <View style={styles.serviceCategories}>
+                          {provider.categories.slice(0, 3).map((cat, idx) => (
+                            <View key={idx} style={[styles.categoryChip, { backgroundColor: theme.colors.surface }]}>
+                              <Text style={[styles.categoryText, { color: theme.colors.textSecondary }]}>
+                                {getServiceCategoryLabel(cat)}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                      {provider.price_band && (
+                        <Text style={[styles.servicePrice, { color: theme.colors.primary }]}>
+                          From {provider.price_band}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="briefcase-outline" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No service providers available yet</Text>
+                  <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
+                    Service providers will appear here once they start offering services!
+                  </Text>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+
+        {activeTab === 'Venues' && (
+          <>
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Popular Venues</Text>
+              </View>
+              {venues.length > 0 ? (
+                <View style={styles.venuesContainer}>
+                  {venues.map((venue) => (
+                    <TouchableOpacity
+                      key={venue.id}
+                      style={[styles.venueCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                      activeOpacity={0.7}
+                    >
+                      <Image
+                        source={{ uri: venue.image_url }}
+                        style={styles.venueImage}
+                        resizeMode="cover"
+                      />
+                      <View style={styles.venueInfo}>
+                        <Text style={[styles.venueName, { color: theme.colors.text }]} numberOfLines={1}>
+                          {venue.name}
+                        </Text>
+                        <View style={styles.venueMetaRow}>
+                          <Ionicons name="location" size={14} color={theme.colors.textSecondary} />
+                          <Text style={[styles.venueLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                            {venue.location}
+                          </Text>
+                        </View>
+                        <View style={styles.venueMetaRow}>
+                          <Ionicons name="people" size={14} color={theme.colors.textSecondary} />
+                          <Text style={[styles.venueCapacity, { color: theme.colors.textSecondary }]}>
+                            Capacity: {venue.capacity.toLocaleString()}
+                          </Text>
+                        </View>
+                        <View style={styles.venueMetaRow}>
+                          <Ionicons name="calendar" size={14} color={theme.colors.primary} />
+                          <Text style={[styles.venueEvents, { color: theme.colors.primary }]}>
+                            {venue.upcoming_events} upcoming events
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="location-outline" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No Venues Found</Text>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+          </>
+        )}
+      </ScrollView>
+
+      {/* Advanced Search Filters */}
+      {showAdvancedFilters && (
+        <AdvancedSearchFilters
+          visible={showAdvancedFilters}
+          filters={searchFilters}
+          onFiltersChange={setSearchFilters}
+          onClose={() => setShowAdvancedFilters(false)}
+          onApply={() => {
+            // Apply filters logic here
+            setShowAdvancedFilters(false);
+          }}
+          onReset={() => {
+            setSearchFilters({
+              contentType: 'all',
+              genre: [],
+              duration: { min: 0, max: 600 },
+              dateRange: { start: null, end: null },
+              sortBy: 'relevance',
+              sortOrder: 'desc',
+              isExplicit: null,
+              language: [],
+              location: ''
+            });
+          }}
+        />
+      )}
+      </SafeAreaView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingTop: 8,
+  },
+  menuButton: {
+    padding: 8,
+  },
+  headerTextGroup: {
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  headerSubtitle: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  searchHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    height: 44,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    height: '100%',
+  },
+  filterButton: {
+    padding: 8,
+    marginLeft: 8,
+    position: 'relative',
+  },
+  proIndicator: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#10B981',
+    borderRadius: 8,
+    width: 14,
+    height: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  clearButton: {
+    marginLeft: 8,
+  },
+  tabsScrollView: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    marginBottom: -10,
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+  },
+  tabButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginRight: 24,
+  },
+  activeTabButton: {
+    borderBottomWidth: 2,
+    borderBottomColor: '#DC2626',
+  },
+  tabText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  activeTabText: {
+    fontWeight: '700',
+  },
+  content: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  // Inline Tabs (inside main ScrollView)
+  inlineTabsScrollView: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    marginBottom: 0,
+  },
+  inlineTabsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  inlineTabButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginRight: 24,
+  },
+  activeInlineTabButton: {
+    borderBottomWidth: 2,
+    borderBottomColor: '#DC2626',
+  },
+  inlineTabText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  activeInlineTabText: {
+    fontWeight: '700',
+  },
+  section: {
+    marginBottom: 24,
+  },
+  firstSection: {
+    marginTop: 8,
+    paddingTop: 0,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  horizontalScroll: {
+    paddingLeft: 16,
+  },
+  trendingCard: {
+    width: 200,
+    marginRight: 12,
+  },
+  trendingCover: {
+    width: 200,
+    height: 120,
+    borderRadius: 12,
+    marginBottom: 8,
+    position: 'relative',
+  },
+  trendingImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
+  },
+  defaultTrendingImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playOverlay: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 20,
+    padding: 8,
+  },
+  trendingTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  trendingArtist: {
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  trendingDuration: {
+    fontSize: 12,
+  },
+  recentMusicContainer: {
+    paddingHorizontal: 16,
+  },
+  recentTrackItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  recentTrackCover: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  recentTrackImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  defaultRecentTrackImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  recentTrackInfo: {
+    flex: 1,
+  },
+  recentTrackTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  recentTrackArtist: {
+    fontSize: 14,
+  },
+  recentTrackActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  playButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(220, 38, 38, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  recentTrackDuration: {
+    fontSize: 12,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 50,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  tabContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 100,
+  },
+  tabContentText: {
+    fontSize: 18,
+    fontWeight: '500',
+  },
+  artistCard: {
+    width: 120,
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  artistCardAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginBottom: 8,
+  },
+  artistCardImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 40,
+  },
+  defaultArtistCardImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  artistCardName: {
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  artistCardStats: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  // Artists Tab Styles
+  artistsGridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    justifyContent: 'space-between',
+  },
+  artistGridCard: {
+    width: '48%',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  artistGridAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginBottom: 8,
+  },
+  artistGridImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 30,
+  },
+  defaultArtistGridImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  artistGridName: {
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  artistGridUsername: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  artistGridStats: {
+    fontSize: 11,
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  artistGridTracks: {
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  // Top Artists Styles
+  topArtistsContainer: {
+    paddingHorizontal: 16,
+  },
+  topArtistItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  topArtistRank: {
+    width: 32,
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  topArtistRankText: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  topArtistAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 12,
+  },
+  topArtistImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
+  },
+  defaultTopArtistImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  topArtistInfo: {
+    flex: 1,
+  },
+  topArtistName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  topArtistUsername: {
+    fontSize: 14,
+  },
+  topArtistStats: {
+    alignItems: 'flex-end',
+  },
+  topArtistFollowers: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  topArtistFollowersLabel: {
+    fontSize: 12,
+  },
+  // Search Results Styles
+  searchResultsContainer: {
+    flex: 1,
+    paddingTop: 16,
+  },
+  searchResultsHeader: {
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  searchResultsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  searchResultsCount: {
+    fontSize: 14,
+  },
+  searchLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 100,
+  },
+  searchLoadingText: {
+    fontSize: 16,
+    marginTop: 12,
+  },
+  searchTabsScrollView: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    marginBottom: 16,
+  },
+  searchTabsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  searchTabButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginRight: 24,
+  },
+  activeSearchTabButton: {
+    borderBottomWidth: 2,
+    borderBottomColor: '#DC2626',
+  },
+  searchTabText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  activeSearchTabText: {
+    fontWeight: '700',
+  },
+  noResultsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 100,
+  },
+  noResultsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  noResultsText: {
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  searchSection: {
+    marginBottom: 24,
+  },
+  searchSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  // Search Artist Item Styles
+  searchArtistItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  searchArtistAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 12,
+  },
+  searchArtistImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
+  },
+  defaultSearchArtistImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchArtistInfo: {
+    flex: 1,
+  },
+  searchArtistName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  searchArtistUsername: {
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  searchArtistStats: {
+    fontSize: 12,
+  },
+  // Search Track Item Styles
+  searchTrackItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  searchTrackCover: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  searchTrackImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  defaultSearchTrackImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchTrackInfo: {
+    flex: 1,
+  },
+  searchTrackTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  searchTrackArtist: {
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  searchTrackMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  searchTrackGenre: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  searchTrackStats: {
+    fontSize: 12,
+  },
+  searchTrackPlayButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(220, 38, 38, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 12,
+  },
+  // Events Tab Styles
+  eventsContainer: {
+    paddingHorizontal: 16,
+  },
+  eventCard: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  eventImageContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  eventImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  defaultEventImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  eventInfo: {
+    flex: 1,
+  },
+  eventTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  eventDate: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  eventLocation: {
+    fontSize: 12,
+    marginBottom: 2,
+  },
+  eventVenue: {
+    fontSize: 12,
+    marginBottom: 2,
+  },
+  eventOrganizer: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  eventPrice: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // Playlists Not Implemented Styles
+  playlistsNotImplemented: {
+    flex: 1,
+    paddingTop: 32,
+  },
+  notImplementedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 64,
+  },
+  notImplementedTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    marginTop: 24,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  notImplementedText: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 32,
+    lineHeight: 24,
+  },
+  notImplementedFeatures: {
+    alignSelf: 'stretch',
+    marginBottom: 32,
+  },
+  featureTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  featureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 16,
+  },
+  featureText: {
+    fontSize: 16,
+    marginLeft: 12,
+  },
+  notImplementedNote: {
+    fontSize: 14,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  // Playlists Styles
+  playlistsContainer: {
+    paddingHorizontal: 16,
+  },
+  playlistCard: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  playlistCover: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  playlistImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  defaultPlaylistImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playlistInfo: {
+    flex: 1,
+  },
+  playlistName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  playlistCreator: {
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  playlistStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  playlistStat: {
+    fontSize: 12,
+    marginRight: 6,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  emptyStateNote: {
+    fontSize: 12,
+    marginTop: 8,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  emptyStateButtons: {
+    flexDirection: 'row',
+    marginTop: 20,
+    gap: 8,
+    paddingHorizontal: 32,
+    justifyContent: 'center',
+  },
+  emptyStateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 4,
+  },
+  emptyStateButtonPrimary: {
+    borderWidth: 0,
+  },
+  emptyStateButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  trendingCardHeader: {
+    flexDirection: 'row',
+    gap: 4,
+    marginBottom: 4,
+  },
+  trendingBadge: {
+    backgroundColor: 'rgba(255, 87, 34, 0.2)',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  trendingBadgeText: {
+    fontSize: 10,
+  },
+  newBadge: {
+    backgroundColor: 'rgba(76, 175, 80, 0.2)',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  newBadgeText: {
+    fontSize: 10,
+  },
+  newBadgeSmall: {
+    backgroundColor: 'rgba(76, 175, 80, 0.2)',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    marginLeft: 6,
+  },
+  newBadgeTextSmall: {
+    fontSize: 8,
+  },
+  trendingCardMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+    flexWrap: 'wrap',
+  },
+  trendingGenre: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  trendingPlays: {
+    fontSize: 12,
+  },
+  recentTrackHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  recentTrackMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  recentTrackGenre: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  recentTrackPlays: {
+    fontSize: 12,
+  },
+  artistCardMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+    marginBottom: 2,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  artistCardGenre: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  artistCardLocation: {
+    fontSize: 11,
+  },
+  artistGridMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+    marginBottom: 2,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  artistGridGenre: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  artistGridLocation: {
+    fontSize: 11,
+  },
+  inlineTabIcon: {
+    marginRight: 4,
+  },
+  // Service Provider Styles
+  servicesContainer: {
+    paddingHorizontal: 16,
+  },
+  serviceCard: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  serviceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  serviceAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    marginRight: 12,
+  },
+  serviceAvatarPlaceholder: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  serviceInfo: {
+    flex: 1,
+  },
+  serviceName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  serviceHeadline: {
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  serviceRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  serviceRatingText: {
+    fontSize: 12,
+  },
+  serviceCategories: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  categoryChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  categoryText: {
+    fontSize: 12,
+  },
+  servicePrice: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  venuesContainer: {
+    gap: 16,
+    paddingHorizontal: 16,
+  },
+  venueCard: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+  },
+  venueImage: {
+    width: '100%',
+    height: 160,
+  },
+  venueInfo: {
+    padding: 12,
+  },
+  venueName: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  venueMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  venueLocation: {
+    fontSize: 14,
+    flex: 1,
+  },
+  venueCapacity: {
+    fontSize: 14,
+  },
+  venueEvents: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  albumCard: {
+    width: 160,
+    marginRight: 16,
+  },
+  albumCover: {
+    width: 160,
+    height: 160,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  albumCoverPlaceholder: {
+    width: 160,
+    height: 160,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  albumInfo: {
+    gap: 4,
+  },
+  albumTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  albumArtist: {
+    fontSize: 12,
+  },
+  albumStats: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 4,
+  },
+  albumStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  albumStatText: {
+    fontSize: 11,
+  },
+});
+
+export default DiscoverScreen;

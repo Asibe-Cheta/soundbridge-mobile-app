@@ -7,10 +7,15 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StripeProvider } from '@stripe/stripe-react-native';
+import { CopilotProvider, walkthroughable } from 'react-native-copilot';
 import { useTheme } from './src/contexts/ThemeContext';
 import GlassmorphicTabBar from './src/components/GlassmorphicTabBar';
 import { useUnreadMessages } from './src/hooks/useUnreadMessages';
 import GlobalSearchBar from './src/components/GlobalSearchBar';
+import TourTooltip from './src/components/TourTooltip';
+
+// Create walkthroughable components for tour
+const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
 
 // Import screens
 import SplashScreen from './src/screens/SplashScreen';
@@ -55,6 +60,7 @@ import AllCreatorsScreen from './src/screens/AllCreatorsScreen';
 import AllEventsScreen from './src/screens/AllEventsScreen';
 import EventDetailsScreen from './src/screens/EventDetailsScreen';
 import TrackDetailsScreen from './src/screens/TrackDetailsScreen';
+import AppealFormScreen from './src/screens/AppealFormScreen';
 import PlaylistDetailsScreen from './src/screens/PlaylistDetailsScreen';
 import OfflineDownloadScreen from './src/screens/OfflineDownloadScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
@@ -77,6 +83,7 @@ import FollowersListScreen from './src/screens/FollowersListScreen';
 import FollowingListScreen from './src/screens/FollowingListScreen';
 import AlbumDetailsScreen from './src/screens/AlbumDetailsScreen';
 import SavedPostsScreen from './src/screens/SavedPostsScreen';
+import StorageManagementScreen from './src/screens/StorageManagementScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -111,9 +118,13 @@ function MainTabs() {
   const { unreadCount } = useUnreadMessages();
   const { userProfile } = useAuth();
   
+  // Track current tab to hide header on Discover screen
+  const [currentTab, setCurrentTab] = React.useState('Feed');
+  
   return (
     <>
-      {/* CUSTOM HEADER - Above tabs, visible on all screens */}
+      {/* CUSTOM HEADER - Hidden on Discover screen */}
+      {currentTab !== 'Discover' && (
       <View style={{
         backgroundColor: theme.colors.surface,
         borderBottomWidth: 1,
@@ -127,32 +138,38 @@ function MainTabs() {
           paddingHorizontal: 16,
           paddingVertical: 12,
         }}>
-          {/* Profile Pic / Logo - Left */}
-          <TouchableOpacity onPress={() => navigation.navigate('Profile' as never)}>
-            <View style={{
-              width: 36,
-              height: 36,
-              borderRadius: 18,
-              backgroundColor: theme.colors.primary,
-              justifyContent: 'center',
-              alignItems: 'center',
-              overflow: 'hidden',
-            }}>
-              {userProfile?.avatar_url ? (
-                <Image
-                  source={{ uri: userProfile.avatar_url }}
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                  }}
-                  resizeMode="cover"
-                />
-              ) : (
-                <Ionicons name="person" size={20} color="#FFFFFF" />
-              )}
-            </View>
-          </TouchableOpacity>
+          {/* Profile Pic / Logo - Left - Step 3 */}
+          <WalkthroughableTouchable
+            order={3}
+            name="profile_hub"
+            text="Your profile is your professional hub. Tap to access: Digital wallet setup (get paid!), Earnings & analytics, Create events & sell tickets, Privacy settings, and grow your network. Build your professional presence here."
+          >
+            <TouchableOpacity onPress={() => navigation.navigate('Profile' as never)}>
+              <View style={{
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                backgroundColor: theme.colors.primary,
+                justifyContent: 'center',
+                alignItems: 'center',
+                overflow: 'hidden',
+              }}>
+                {userProfile?.avatar_url ? (
+                  <Image
+                    source={{ uri: userProfile.avatar_url }}
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 18,
+                    }}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <Ionicons name="person" size={20} color="#FFFFFF" />
+                )}
+              </View>
+            </TouchableOpacity>
+          </WalkthroughableTouchable>
 
           {/* Search Bar - Center */}
           <View style={{ flex: 1, marginHorizontal: 12 }}>
@@ -187,9 +204,19 @@ function MainTabs() {
           </TouchableOpacity>
         </View>
       </View>
+      )}
 
       {/* TAB NAVIGATOR */}
       <Tab.Navigator
+        screenListeners={({ navigation: tabNavigation }) => ({
+          state: () => {
+            const state = tabNavigation.getState();
+            if (state?.routes?.[state.index]) {
+              const tabName = state.routes[state.index].name;
+              setCurrentTab(tabName);
+            }
+          },
+        })}
         tabBar={(props) => (
           <View style={{ paddingBottom: insets.bottom }}>
             <GlassmorphicTabBar {...props} />
@@ -506,9 +533,11 @@ function AppNavigator() {
             <Stack.Screen name="CreateEvent" component={CreateEventScreen} />
             <Stack.Screen name="CreatePlaylist" component={CreatePlaylistScreen} />
             <Stack.Screen name="TrackDetails" component={TrackDetailsScreen} />
+            <Stack.Screen name="AppealForm" component={AppealFormScreen} options={{ headerShown: false }} />
             <Stack.Screen name="PlaylistDetails" component={PlaylistDetailsScreen} />
             <Stack.Screen name="AlbumDetails" component={AlbumDetailsScreen} />
             <Stack.Screen name="SavedPosts" component={SavedPostsScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="StorageManagement" component={StorageManagementScreen} options={{ headerShown: false }} />
             <Stack.Screen name="OfflineDownloads" component={OfflineDownloadScreen} />
             <Stack.Screen name="AvailabilityCalendar" component={AvailabilityCalendarScreen} />
             <Stack.Screen name="CollaborationRequests" component={CollaborationRequestsScreen} />
@@ -605,7 +634,16 @@ export default function App() {
             <CollaborationProvider>
               <AudioPlayerProvider>
                 <ToastProvider>
-                  {renderWithStripe()}
+                  <CopilotProvider
+                    overlay="svg"
+                    androidStatusBarVisible={false}
+                    backdropColor="rgba(19, 7, 34, 0.9)"
+                    verticalOffset={24}
+                    arrowColor="#EC4899"
+                    tooltipComponent={TourTooltip}
+                  >
+                    {renderWithStripe()}
+                  </CopilotProvider>
                 </ToastProvider>
               </AudioPlayerProvider>
             </CollaborationProvider>

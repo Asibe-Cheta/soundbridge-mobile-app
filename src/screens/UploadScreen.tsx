@@ -23,9 +23,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { supabase, dbHelpers } from '../lib/supabase';
 import UploadLimitCard from '../components/UploadLimitCard';
+import StorageIndicator from '../components/StorageIndicator';
 import { getUploadQuota, UploadQuota } from '../services/UploadQuotaService';
 import { uploadAudioFile, uploadImage, createAudioTrack } from '../services/UploadService';
 import subscriptionService from '../services/SubscriptionService';
+import { walkthroughable } from 'react-native-copilot';
+import { useServiceProviderPrompt } from '../hooks/useServiceProviderPrompt';
+import ServiceProviderPromptModal from '../components/ServiceProviderPromptModal';
 // Temporarily disabled for Expo Go compatibility
 // import DraggableFlatList, { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
 // import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -76,6 +80,10 @@ interface AlbumFormData {
   tracks: AlbumTrack[];
 }
 
+// Create walkthroughable components for tour
+const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
+const WalkthroughableView = walkthroughable(View);
+
 export default function UploadScreen() {
   const navigation = useNavigation<any>();
   const { user, session } = useAuth();
@@ -85,6 +93,15 @@ export default function UploadScreen() {
   const [uploadQuota, setUploadQuota] = useState<UploadQuota | null>(null);
   const [quotaLoading, setQuotaLoading] = useState(true);
   const [uploadMode, setUploadMode] = useState<UploadMode>('single');
+
+  // Service Provider Prompt Modal
+  const {
+    shouldShow: showServiceProviderPrompt,
+    handleSetupProfile,
+    handleRemindLater,
+    handleDontShowAgain,
+    triggerAfterFirstUpload,
+  } = useServiceProviderPrompt();
   const [formData, setFormData] = useState<UploadFormData>({
     contentType: 'music',
     title: '',
@@ -708,6 +725,15 @@ export default function UploadScreen() {
         [{ text: 'OK' }]
       );
 
+      // Trigger service provider prompt after first upload
+      const currentUploadCount = uploadQuota?.uploads_this_month ?? 0;
+      if (currentUploadCount === 0) {
+        // This was their first upload - trigger prompt after short delay
+        setTimeout(() => {
+          triggerAfterFirstUpload();
+        }, 2000);
+      }
+
       setUploadQuota((prev) => {
         if (!prev) {
           return prev;
@@ -954,46 +980,57 @@ export default function UploadScreen() {
     </View>
   );
 
-  const renderFileUpload = (type: 'coverImage' | 'audioFile', title: string, fileUri?: { uri: string; name: string } | null) => (
-    <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>{title}</Text>
-      {fileUri ? (
-        <View style={[styles.filePreview, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-          <View style={styles.fileInfo}>
-            <Ionicons 
-              name={type === 'coverImage' ? 'image' : 'musical-notes'} 
-              size={24} 
-              color={theme.colors.success} 
-            />
-            <Text style={[styles.fileName, { color: theme.colors.text }]}>{fileUri.name}</Text>
+  const renderFileUpload = (type: 'coverImage' | 'audioFile', title: string, fileUri?: { uri: string; name: string } | null) => {
+    // Add Step 14 tour to audio file upload
+    const UploadButton = type === 'audioFile' ? WalkthroughableTouchable : TouchableOpacity;
+    const tourProps = type === 'audioFile' ? {
+      order: 14,
+      name: 'upload_reach_audience',
+      text: 'Select your audio file here to begin uploading. Your track reaches YOUR followers FIRST (targeted, not random like Spotify). Free: 3 tracks, Premium: 10, Unlimited: ∞. Start distributing FREE and earning 95% from tips now!',
+    } : {};
+
+    return (
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>{title}</Text>
+        {fileUri ? (
+          <View style={[styles.filePreview, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <View style={styles.fileInfo}>
+              <Ionicons
+                name={type === 'coverImage' ? 'image' : 'musical-notes'}
+                size={24}
+                color={theme.colors.success}
+              />
+              <Text style={[styles.fileName, { color: theme.colors.text }]}>{fileUri.name}</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.removeButton}
+              onPress={() => setFormData(prev => ({ ...prev, [type]: null }))}
+            >
+              <Ionicons name="close" size={20} color={theme.colors.error} />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity
-            style={styles.removeButton}
-            onPress={() => setFormData(prev => ({ ...prev, [type]: null }))}
+        ) : (
+          <UploadButton
+            {...tourProps}
+            style={[styles.uploadButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+            onPress={type === 'coverImage' ? pickCoverImage : pickAudioFile}
           >
-            <Ionicons name="close" size={20} color={theme.colors.error} />
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <TouchableOpacity
-          style={[styles.uploadButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-          onPress={type === 'coverImage' ? pickCoverImage : pickAudioFile}
-        >
-          <Ionicons 
-            name={type === 'coverImage' ? 'camera' : 'document'} 
-            size={32} 
-            color={theme.colors.textSecondary} 
-          />
-          <Text style={[styles.uploadButtonText, { color: theme.colors.text }]}>
-            {type === 'coverImage' ? 'Select Cover Image' : 'Select Audio File'}
-          </Text>
-          <Text style={[styles.uploadButtonSubtext, { color: theme.colors.textSecondary }]}>
-            {type === 'coverImage' ? 'JPG, PNG (Max 10MB)' : 'MP3, WAV, M4A, AAC, OGG, FLAC (Max 100MB)'}
-          </Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
+            <Ionicons
+              name={type === 'coverImage' ? 'camera' : 'document'}
+              size={32}
+              color={theme.colors.textSecondary}
+            />
+            <Text style={[styles.uploadButtonText, { color: theme.colors.text }]}>
+              {type === 'coverImage' ? 'Select Cover Image' : 'Select Audio File'}
+            </Text>
+            <Text style={[styles.uploadButtonSubtext, { color: theme.colors.textSecondary }]}>
+              {type === 'coverImage' ? 'JPG, PNG (Max 10MB)' : 'MP3, WAV, M4A, AAC, OGG, FLAC (Max 100MB)'}
+            </Text>
+          </UploadButton>
+        )}
+      </View>
+    );
+  };
 
   // Upload Mode Selector Component
   const UploadModeSelector = () => (
@@ -1477,7 +1514,11 @@ export default function UploadScreen() {
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
           <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Upload Content</Text>
-          <TouchableOpacity
+          {/* Step 15: You're Ready to EARN (Final Step) */}
+          <WalkthroughableTouchable
+            order={15}
+            name="ready_to_earn"
+            text="Tap Publish when ready! Your music goes LIVE instantly. Followers see it FIRST in their feed. You earn from: Tips (95% yours), Event tickets (95%), Paid collaborations, Services marketplace. You're ready to EARN. Welcome to SoundBridge! 🎉"
             style={[styles.publishButton, isUploading && styles.publishButtonDisabled]}
             onPress={handleUpload}
             disabled={isUploading}
@@ -1492,7 +1533,7 @@ export default function UploadScreen() {
                 {isUploading ? 'Uploading...' : `Publish ${formData.contentType === 'music' ? 'Track' : 'Episode'}`}
               </Text>
             </LinearGradient>
-          </TouchableOpacity>
+          </WalkthroughableTouchable>
         </View>
 
         {/* Upload Progress */}
@@ -1515,6 +1556,11 @@ export default function UploadScreen() {
             loading={quotaLoading}
             onUpgrade={handleUpgradePress}
           />
+
+          {/* Storage Indicator - NEW */}
+          {uploadQuota?.storage && (
+            <StorageIndicator storageQuota={uploadQuota.storage} />
+          )}
 
           {/* Upload Mode Selector */}
           <UploadModeSelector />
@@ -1769,6 +1815,14 @@ export default function UploadScreen() {
       </ScrollView>
         </View>
       </SafeAreaView>
+
+      {/* Service Provider Prompt Modal */}
+      <ServiceProviderPromptModal
+        visible={showServiceProviderPrompt}
+        onSetupProfile={handleSetupProfile}
+        onRemindLater={handleRemindLater}
+        onDontShowAgain={handleDontShowAgain}
+      />
     </View>
   );
 }

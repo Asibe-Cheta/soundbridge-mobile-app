@@ -26,7 +26,8 @@
         "NSMicrophoneUsageDescription": "SoundBridge needs access to your microphone for live audio sessions, voice recording, and communication.",
         "NSCameraUsageDescription": "SoundBridge needs access to your camera to upload profile pictures and post images.",
         "NSPhotoLibraryUsageDescription": "SoundBridge needs access to your photo library to upload images for posts and profile pictures.",
-        "NSPhotoLibraryAddUsageDescription": "SoundBridge needs permission to save images to your photo library."
+        "NSPhotoLibraryAddUsageDescription": "SoundBridge needs permission to save images to your photo library.",
+        "NSFaceIDUsageDescription": "SoundBridge uses Face ID or Touch ID to securely log you in without typing your password."
       },
       "associatedDomains": [
         "applinks:soundbridge.live",

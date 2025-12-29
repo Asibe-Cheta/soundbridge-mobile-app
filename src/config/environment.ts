@@ -21,10 +21,9 @@ const configs: Record<Environment, EnvironmentConfig> = {
     supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1bnhkYnF1a2J4eXlpdXNhZXFpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI2OTA2MTUsImV4cCI6MjA2ODI2NjYxNX0.IP-c4_S7Fkbq6F2UkgzL-TibkoBN49yQ1Cqz4CkMzB0',
     sentryDsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
     revenueCatApiKey: process.env.EXPO_PUBLIC_REVENUECAT_API_KEY || 'appl_QQannJQTfGORGekvyojIgJoyTlt',
-    // Development bypass: Skip RevenueCat and use hardcoded tier for testing
-    // Set to true when RevenueCat is not available (Expo Go, test environment, etc.)
-    bypassRevenueCat: true,
-    developmentTier: 'premium', // 'free' | 'premium' | 'unlimited'
+    // Use real RevenueCat data in development (for testing with actual subscriptions)
+    bypassRevenueCat: false,
+    // developmentTier is ignored when bypassRevenueCat is false
     analyticsEnabled: false,
     debugMode: true,
   },

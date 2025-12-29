@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -214,7 +215,17 @@ Platform fee: $${platformFee.toFixed(2)}`,
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 72 : 0}
       >
-        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <LinearGradient
+          colors={[
+            theme.colors.backgroundGradient.start,
+            theme.colors.backgroundGradient.middle,
+            theme.colors.backgroundGradient.end,
+          ]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          locations={[0, 0.5, 1]}
+          style={styles.container}
+        >
           {/* Header */}
           <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
             <TouchableOpacity style={styles.closeButton} onPress={onClose}>
@@ -394,9 +405,9 @@ Platform fee: $${platformFee.toFixed(2)}`,
                       cvc: 'CVC',
                     }}
                     cardStyle={{
-                      backgroundColor: theme.colors.surface,
-                      textColor: theme.colors.text,
-                      placeholderColor: theme.colors.textSecondary,
+                      backgroundColor: theme.isDark ? '#1F1F1F' : '#FFFFFF',
+                      textColor: theme.isDark ? '#FFFFFF' : '#000000',
+                      placeholderColor: theme.isDark ? '#9CA3AF' : '#6B7280',
                       borderColor: 'transparent',
                       fontSize: 16,
                       textErrorColor: '#EF4444',
@@ -459,7 +470,7 @@ Platform fee: $${platformFee.toFixed(2)}`,
               )}
             </TouchableOpacity>
           </View>
-        </View>
+        </LinearGradient>
       </KeyboardAvoidingView>
     </Modal>
   );

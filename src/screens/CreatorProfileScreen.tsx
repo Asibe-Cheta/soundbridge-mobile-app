@@ -10,6 +10,7 @@ import {
   Alert,
   RefreshControl,
   StatusBar,
+  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,6 +29,11 @@ import type { BookingStatus, CreatorAvailability } from '../types/collaboration'
 import FirstTimeTooltip from '../components/FirstTimeTooltip';
 import BackButton from '../components/BackButton';
 import { Modal, Switch } from 'react-native';
+import PostCard from '../components/PostCard';
+import { feedService } from '../services/api/feedService';
+import type { Post } from '../types/feed.types';
+import { useServiceProviderPrompt } from '../hooks/useServiceProviderPrompt';
+import ServiceProviderPromptModal from '../components/ServiceProviderPromptModal';
 
 interface Creator {
   id: string;
@@ -69,6 +75,15 @@ export default function CreatorProfileScreen() {
   const { user } = useAuth();
   const { play, addToQueue } = useAudioPlayer();
   const { getBookingStatus } = useCollaboration();
+
+  // Service Provider Prompt Modal
+  const {
+    shouldShow: showServiceProviderPrompt,
+    handleSetupProfile,
+    handleRemindLater,
+    handleDontShowAgain,
+    triggerAfterViewingServiceProvider,
+  } = useServiceProviderPrompt();
 
   // Debug route params
   console.log('🔍 Route params:', route.params);
@@ -128,6 +143,13 @@ export default function CreatorProfileScreen() {
   const [notifyOnCollabAvailability, setNotifyOnCollabAvailability] = useState(false);
   const [showFullScreenAvatar, setShowFullScreenAvatar] = useState(false);
 
+  // Tab and posts state
+  const [activeTab, setActiveTab] = useState<'drops' | 'tracks' | 'about'>('drops');
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loadingPosts, setLoadingPosts] = useState(false);
+  const [postsPage, setPostsPage] = useState(1);
+  const [hasMorePosts, setHasMorePosts] = useState(true);
+
   const canRequestCollaboration = useMemo(() => {
     if (bookingStatus) {
       return collaborationUtils.isCreatorAvailable(bookingStatus);
@@ -141,6 +163,7 @@ export default function CreatorProfileScreen() {
     checkFollowStatus();
     loadBookingStatus();
     loadCreatorAvailability();
+    loadUserPosts(1);
   }, [creatorId]);
 
   useEffect(() => {
@@ -174,6 +197,26 @@ export default function CreatorProfileScreen() {
       })();
     }
   }, [availability, loading, showTipTooltip]);
+
+  // Trigger service provider prompt when viewing a service provider profile
+  useEffect(() => {
+    if (!loading && !user || user.id === creatorId) {
+      // Don't trigger if viewing own profile or not logged in
+      return;
+    }
+
+    // Check if this creator is a service provider (has availability or booking status)
+    const isServiceProvider = availability.length > 0 || bookingStatus !== null;
+
+    if (isServiceProvider) {
+      // Trigger after short delay to let UI load
+      const timer = setTimeout(() => {
+        triggerAfterViewingServiceProvider();
+      }, 3000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [loading, availability, bookingStatus, creatorId, user]);
 
   const markTooltipSeen = async (key: string) => {
     try {
@@ -510,14 +553,48 @@ export default function CreatorProfileScreen() {
     // await loadCreatorProfile();
   };
 
+  const loadUserPosts = async (page: number = 1) => {
+    if (!creatorId) return;
+
+    try {
+      setLoadingPosts(true);
+      const { posts: newPosts, hasMore } = await feedService.getUserPosts(creatorId, page, 10);
+
+      if (page === 1) {
+        setPosts(newPosts);
+      } else {
+        setPosts(prev => [...prev, ...newPosts]);
+      }
+
+      setHasMorePosts(hasMore);
+      setPostsPage(page);
+    } catch (error) {
+      console.error('❌ Error loading user posts:', error);
+    } finally {
+      setLoadingPosts(false);
+    }
+  };
+
+  const handleLoadMorePosts = () => {
+    if (!loadingPosts && hasMorePosts) {
+      loadUserPosts(postsPage + 1);
+    }
+  };
+
+  const handleTipFromPost = (authorId: string, authorName: string) => {
+    // If tipping the profile owner, use their info, otherwise use the post author
+    setShowTipModal(true);
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([
-      loadCreatorProfile(), 
-      loadCreatorTracks(), 
+      loadCreatorProfile(),
+      loadCreatorTracks(),
       checkFollowStatus(),
       loadBookingStatus(),
-      loadCreatorAvailability()
+      loadCreatorAvailability(),
+      loadUserPosts(1)
     ]);
     setRefreshing(false);
   };
@@ -793,25 +870,28 @@ export default function CreatorProfileScreen() {
 
         {/* Action Buttons */}
         <View style={styles.actionButtons}>
-          <TouchableOpacity 
-              style={[
-                styles.followButton,
-                {
-                  backgroundColor: isFollowing ? theme.colors.surface : theme.colors.primary,
-                  borderColor: theme.colors.primary,
-                }
-              ]}
-            onPress={handleFollow}
-            >
-              <Text
+          {/* Follow Button - Only show if NOT viewing own profile */}
+          {user?.id !== creatorId && (
+            <TouchableOpacity
                 style={[
-                  styles.followButtonText,
-                  { color: isFollowing ? theme.colors.primary : '#FFFFFF' }
+                  styles.followButton,
+                  {
+                    backgroundColor: isFollowing ? theme.colors.surface : theme.colors.primary,
+                    borderColor: theme.colors.primary,
+                  }
                 ]}
+              onPress={handleFollow}
               >
-                {isFollowing ? 'Following' : 'Follow'}
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={[
+                    styles.followButtonText,
+                    { color: isFollowing ? theme.colors.primary : '#FFFFFF' }
+                  ]}
+                >
+                  {isFollowing ? 'Following' : 'Follow'}
+                </Text>
+              </TouchableOpacity>
+          )}
 
             {/* Collaboration Button */}
             {user?.id !== creatorId && (
@@ -904,7 +984,102 @@ export default function CreatorProfileScreen() {
         </View>
         </View>
 
-        {/* Tracks Section */}
+        {/* Tabs */}
+        <View style={[styles.tabsContainer, { borderBottomColor: theme.colors.border }]}>
+          <TouchableOpacity
+            style={[
+              styles.tab,
+              activeTab === 'drops' && styles.activeTab,
+              activeTab === 'drops' && { borderBottomColor: theme.colors.primary }
+            ]}
+            onPress={() => setActiveTab('drops')}
+          >
+            <Text style={[
+              styles.tabText,
+              { color: activeTab === 'drops' ? theme.colors.primary : theme.colors.textSecondary }
+            ]}>
+              Drops
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.tab,
+              activeTab === 'tracks' && styles.activeTab,
+              activeTab === 'tracks' && { borderBottomColor: theme.colors.primary }
+            ]}
+            onPress={() => setActiveTab('tracks')}
+          >
+            <Text style={[
+              styles.tabText,
+              { color: activeTab === 'tracks' ? theme.colors.primary : theme.colors.textSecondary }
+            ]}>
+              Tracks
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.tab,
+              activeTab === 'about' && styles.activeTab,
+              activeTab === 'about' && { borderBottomColor: theme.colors.primary }
+            ]}
+            onPress={() => setActiveTab('about')}
+          >
+            <Text style={[
+              styles.tabText,
+              { color: activeTab === 'about' ? theme.colors.primary : theme.colors.textSecondary }
+            ]}>
+              About
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Drops Tab - Posts */}
+        {activeTab === 'drops' && (
+          <View style={styles.tabContent}>
+            {loadingPosts && posts.length === 0 ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={theme.colors.primary} />
+                <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading posts...</Text>
+              </View>
+            ) : posts.length > 0 ? (
+              <FlatList
+                data={posts}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <PostCard
+                    post={item}
+                    onPress={() => {}}
+                    onReactionPress={() => {}}
+                    onCommentPress={() => {}}
+                    onShare={() => {}}
+                    onTip={handleTipFromPost}
+                  />
+                )}
+                onEndReached={handleLoadMorePosts}
+                onEndReachedThreshold={0.5}
+                ListFooterComponent={
+                  loadingPosts && posts.length > 0 ? (
+                    <ActivityIndicator size="small" color={theme.colors.primary} style={{ padding: 20 }} />
+                  ) : null
+                }
+                scrollEnabled={false}
+                nestedScrollEnabled
+              />
+            ) : (
+              <View style={styles.emptyState}>
+                <Ionicons name="newspaper-outline" size={64} color={theme.colors.textSecondary} />
+                <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
+                  No posts yet
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Tracks Tab */}
+        {activeTab === 'tracks' && (
         <View style={styles.tracksSection}>
           <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Tracks</Text>
           
@@ -959,6 +1134,41 @@ export default function CreatorProfileScreen() {
             </View>
           )}
         </View>
+        )}
+
+        {/* About Tab */}
+        {activeTab === 'about' && (
+          <View style={styles.aboutSection}>
+            {creator.bio && (
+              <View style={[styles.aboutCard, { backgroundColor: theme.colors.surface }]}>
+                <Text style={[styles.aboutTitle, { color: theme.colors.text }]}>Bio</Text>
+                <Text style={[styles.aboutText, { color: theme.colors.textSecondary }]}>{creator.bio}</Text>
+              </View>
+            )}
+
+            <View style={[styles.aboutCard, { backgroundColor: theme.colors.surface }]}>
+              <Text style={[styles.aboutTitle, { color: theme.colors.text }]}>Information</Text>
+              {creator.location && (
+                <View style={styles.aboutRow}>
+                  <Ionicons name="location-outline" size={20} color={theme.colors.textSecondary} />
+                  <Text style={[styles.aboutText, { color: theme.colors.textSecondary }]}>{creator.location}</Text>
+                </View>
+              )}
+              {creator.genre && (
+                <View style={styles.aboutRow}>
+                  <Ionicons name="musical-note-outline" size={20} color={theme.colors.textSecondary} />
+                  <Text style={[styles.aboutText, { color: theme.colors.textSecondary }]}>{creator.genre}</Text>
+                </View>
+              )}
+              <View style={styles.aboutRow}>
+                <Ionicons name="calendar-outline" size={20} color={theme.colors.textSecondary} />
+                <Text style={[styles.aboutText, { color: theme.colors.textSecondary }]}>
+                  Joined {new Date(creator.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
       </ScrollView>
 
       {/* Tip Modal */}
@@ -1175,6 +1385,14 @@ export default function CreatorProfileScreen() {
           </TouchableOpacity>
         </View>
       </Modal>
+
+      {/* Service Provider Prompt Modal */}
+      <ServiceProviderPromptModal
+        visible={showServiceProviderPrompt}
+        onSetupProfile={handleSetupProfile}
+        onRemindLater={handleRemindLater}
+        onDontShowAgain={handleDontShowAgain}
+      />
 
       </SafeAreaView>
     </View>
@@ -1665,5 +1883,68 @@ const styles = StyleSheet.create({
   fullScreenAvatarUsername: {
     color: 'rgba(255, 255, 255, 0.7)',
     fontSize: 16,
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    marginBottom: 0,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  activeTab: {
+    borderBottomWidth: 2,
+  },
+  tabText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  tabContent: {
+    flex: 1,
+  },
+  loadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+  },
+  emptyState: {
+    padding: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyStateText: {
+    marginTop: 16,
+    fontSize: 16,
+  },
+  aboutSection: {
+    padding: 16,
+  },
+  aboutCard: {
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  aboutTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  aboutText: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  aboutRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 12,
   },
 });

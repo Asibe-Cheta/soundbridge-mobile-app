@@ -68,7 +68,7 @@ export default function PostSaveButton({
         setIsSaved(!newSavedState);
         
         console.error('Error toggling bookmark:', result.error);
-        Alert.alert('Error', 'Failed to save post. Please try again.');
+        Alert.alert('Error', 'Failed to save drop. Please try again.');
         return;
       }
 
@@ -83,7 +83,7 @@ export default function PostSaveButton({
       // Revert optimistic update
       setIsSaved(!newSavedState);
       console.error('Error toggling save:', error);
-      Alert.alert('Error', 'Failed to save post. Please try again.');
+      Alert.alert('Error', 'Failed to save drop. Please try again.');
     } finally {
       setIsLoading(false);
     }

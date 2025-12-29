@@ -21,7 +21,6 @@ import { verifyCodeDuringLogin, verifyBackupCodeDuringLogin, parseTwoFactorError
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { debugLog, debugError, debugWarn } from '../utils/logStore';
-import LoginDebugPanel from '../components/LoginDebugPanel';
 
 type RouteParams = {
   TwoFactorVerification: {
@@ -52,7 +51,6 @@ export default function TwoFactorVerificationScreen() {
   const [attemptsRemaining, setAttemptsRemaining] = useState<number | null>(null);
   const [lockoutTime, setLockoutTime] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number>(0);
-  const [showDebugPanel, setShowDebugPanel] = useState(false);
 
   const codeInputs = useRef<Array<TextInput | null>>([]);
   
@@ -549,12 +547,6 @@ export default function TwoFactorVerificationScreen() {
               >
                 <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.debugButton}
-                onPress={() => setShowDebugPanel(true)}
-              >
-                <Ionicons name="bug" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
             </View>
 
             {/* Icon */}
@@ -716,12 +708,6 @@ export default function TwoFactorVerificationScreen() {
           </Text>
         </View>
       </LinearGradient>
-      
-      {/* Debug Panel */}
-      <LoginDebugPanel
-        visible={showDebugPanel}
-        onClose={() => setShowDebugPanel(false)}
-      />
     </SafeAreaView>
   );
 }

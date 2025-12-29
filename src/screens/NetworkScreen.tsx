@@ -23,8 +23,15 @@ import ConnectionCard from '../components/ConnectionCard';
 import ConnectionRequestCard from '../components/ConnectionRequestCard';
 import OpportunityCard from '../components/OpportunityCard';
 import * as Haptics from 'expo-haptics';
+import { walkthroughable } from 'react-native-copilot';
+import { useServiceProviderPrompt } from '../hooks/useServiceProviderPrompt';
+import ServiceProviderPromptModal from '../components/ServiceProviderPromptModal';
 
 type NetworkTab = 'connections' | 'invitations' | 'opportunities';
+
+// Create walkthroughable components for tour
+const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
+const WalkthroughableView = walkthroughable(View);
 
 export default function NetworkScreen() {
   const { theme } = useTheme();
@@ -44,6 +51,20 @@ export default function NetworkScreen() {
   const [activeTab, setActiveTab] = useState<NetworkTab>('connections');
   const [refreshing, setRefreshing] = useState(false);
   const [opportunities] = useState(mockOpportunities);
+
+  // Service Provider Prompt Modal
+  const {
+    shouldShow: showServiceProviderPrompt,
+    handleSetupProfile,
+    handleRemindLater,
+    handleDontShowAgain,
+    checkConnectScreenTrigger,
+  } = useServiceProviderPrompt();
+
+  // Track Connect screen visits and trigger prompt on 3rd visit
+  useEffect(() => {
+    checkConnectScreenTrigger();
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -201,7 +222,11 @@ export default function NetworkScreen() {
               </View>
             </TouchableOpacity>
 
-            <TouchableOpacity
+            {/* Step 8: Find PAID Collaboration Opportunities */}
+            <WalkthroughableTouchable
+              order={8}
+              name="paid_collaborations"
+              text="Find PAID collaboration opportunities here. Studios, producers, and labels post gigs looking for talent like YOU. Apply directly, negotiate rates, and land paying work. This tab is your professional gig board - grow your network and income simultaneously."
               style={[
                 styles.tabButton,
                 activeTab === 'opportunities' && {
@@ -225,7 +250,7 @@ export default function NetworkScreen() {
               >
                 Opportunities
               </Text>
-            </TouchableOpacity>
+            </WalkthroughableTouchable>
           </View>
         </View>
 
@@ -274,9 +299,15 @@ export default function NetworkScreen() {
                       {connections.length} connections
                     </Text>
                   </View>
-                  <TouchableOpacity style={styles.searchButton}>
+                  {/* Step 10: Search Specific Collaborators */}
+                  <WalkthroughableTouchable
+                    order={10}
+                    name="search_collaborators"
+                    text="Search for SPECIFIC collaborators by name, location, skills, or instrument. Filter by: Genre expertise, Equipment owned, Budget range, Availability. Build targeted connections with professionals who match YOUR project needs."
+                    style={styles.searchButton}
+                  >
                     <Ionicons name="search" size={20} color={theme.colors.text} />
-                  </TouchableOpacity>
+                  </WalkthroughableTouchable>
                 </View>
                 {connections.map((connection) => (
                   <ConnectionCard
@@ -322,7 +353,13 @@ export default function NetworkScreen() {
 
           {/* Tab 3: Opportunities */}
           {activeTab === 'opportunities' && (
-            <View style={styles.section}>
+            /* Step 9: Opportunities Feed - Apply for Gigs */
+            <WalkthroughableView
+              order={9}
+              name="apply_for_gigs"
+              text="Browse and apply for PAID gigs here. Each card shows: Budget range, Project type, Location, Required skills. Tap to see full details and submit your application. Premium/Unlimited members get priority visibility - your profile shows first to employers."
+              style={styles.section}
+            >
               {opportunities.map((opportunity) => (
                 <OpportunityCard
                   key={opportunity.id}
@@ -331,10 +368,18 @@ export default function NetworkScreen() {
                   onApply={handleApply}
                 />
               ))}
-            </View>
+            </WalkthroughableView>
           )}
         </ScrollView>
       </SafeAreaView>
+
+      {/* Service Provider Prompt Modal */}
+      <ServiceProviderPromptModal
+        visible={showServiceProviderPrompt}
+        onSetupProfile={handleSetupProfile}
+        onRemindLater={handleRemindLater}
+        onDontShowAgain={handleDontShowAgain}
+      />
     </View>
   );
 }

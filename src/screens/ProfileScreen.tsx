@@ -20,8 +20,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { walkthroughable, useCopilot } from 'react-native-copilot';
 import { useAuth } from '../contexts/AuthContext';
+
+// Create walkthroughable component for tour
+const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
 import { supabase, dbHelpers } from '../lib/supabase';
+import { resetTour } from '../services/tourService';
 import { 
   loadQueriesInParallel, 
   waitForValidSession,
@@ -97,10 +102,11 @@ interface UserTrack {
 }
 
 export default function ProfileScreen() {
-  const { user, userProfile, signOut, updatePassword, refreshUser, session, loading: authLoading } = useAuth();
+  const { user, userProfile, signOut, updatePassword, refreshUser, updateUserProfile, session, loading: authLoading } = useAuth();
   const { autoPlay, toggleAutoPlay } = useAudioPlayer();
   const { theme } = useTheme();
   const navigation = useNavigation();
+  const { start: startTour } = useCopilot();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
@@ -289,18 +295,18 @@ export default function ProfileScreen() {
 
             try {
               console.log('💰 Fetching tips with fresh session...');
-              // Get all transactions and filter for tip_received
+              // Get all transactions and filter for tip_received (including pending)
               const transactionsResult = await walletService.getWalletTransactionsSafe(freshSession, 100, 0);
               const tipTransactions = transactionsResult.transactions.filter(
-                (t) => t.transaction_type === 'tip_received' && t.status === 'completed'
+                (t) => t.transaction_type === 'tip_received' && (t.status === 'completed' || t.status === 'pending')
               );
 
-              // Sum up all tip amounts
+              // Sum up all tip amounts (including pending tips)
               const totalTips = tipTransactions.reduce((sum: number, transaction) => {
                 return sum + (transaction.amount || 0);
               }, 0);
 
-              console.log(`💰 Total tips from wallet: $${totalTips.toFixed(2)} (${tipTransactions.length} transactions)`);
+              console.log(`💰 Total tips from wallet: $${totalTips.toFixed(2)} (${tipTransactions.length} transactions - completed + pending)`);
               return { data: totalTips, error: null };
             } catch (error) {
               console.warn('Error fetching tips from wallet:', error);
@@ -349,11 +355,17 @@ export default function ProfileScreen() {
       const playlistsData = results.playlists?.data || results.playlists || [];
       const totalTipsReceived = results.tips?.data ?? results.tips ?? 0;
       const creatorRevenue = results.creatorRevenue?.data ?? null;
-      
+
       // Use creator revenue for total earnings (same as WalletScreen)
       // Falls back to tips if creator revenue not available
       const totalEarnings = creatorRevenue?.total_earned ?? totalTipsReceived ?? 0;
 
+      console.log('💰 ProfileScreen Earnings Data:', {
+        totalTipsReceived,
+        creatorRevenueTotal: creatorRevenue?.total_earned,
+        totalEarningsCalculated: totalEarnings,
+        pendingBalance: creatorRevenue?.pending_balance,
+      });
       console.log('📊 Profile counts - Followers:', followersCount, 'Following:', followingCount, 'Tracks:', tracksCount);
 
       let profileObj: UserProfile | null = null;
@@ -714,13 +726,16 @@ export default function ProfileScreen() {
         
         if (uploadResult.success && uploadResult.avatarUrl) {
           console.log('✅ Avatar uploaded successfully:', uploadResult.avatarUrl);
-          
+
           // Update local profile state
           setProfile(prev => prev ? { ...prev, avatar_url: uploadResult.avatarUrl } : null);
-          
+
+          // Immediately update AuthContext userProfile for instant UI updates
+          await updateUserProfile({ avatar_url: uploadResult.avatarUrl });
+
           // Refresh user data across the app
           await refreshUser();
-          
+
           Alert.alert('Success', 'Profile picture updated successfully!');
         } else {
           console.error('❌ Avatar upload failed:', uploadResult.error);
@@ -995,6 +1010,27 @@ export default function ProfileScreen() {
     navigation.navigate('About' as never);
   };
 
+  const handleRestartTour = async () => {
+    Alert.alert(
+      'Restart App Tour',
+      'This will restart the app tour from the beginning. The tour will start when you navigate to the Feed screen.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Restart',
+          onPress: async () => {
+            await resetTour();
+            Alert.alert(
+              'Tour Reset!',
+              'Navigate to the Feed screen to start the tour again.',
+              [{ text: 'OK' }]
+            );
+          },
+        },
+      ]
+    );
+  };
+
   // Payout Settings handlers
   const handlePaymentMethods = () => {
     navigation.navigate('PaymentMethods' as never);
@@ -1083,10 +1119,17 @@ export default function ProfileScreen() {
           <Ionicons name="add-circle" size={24} color={theme.colors.primary} />
           <Text style={[styles.actionText, { color: theme.colors.text }]}>Upload New Track</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleCreateEvent}>
-          <Ionicons name="calendar" size={24} color={theme.colors.primary} />
-          <Text style={[styles.actionText, { color: theme.colors.text }]}>Create Event</Text>
-        </TouchableOpacity>
+        {/* Step 5: Create Events - Targeted Audience */}
+        <WalkthroughableTouchable
+          order={5}
+          name="create_events_targeted"
+          text="Create events and sell tickets directly to YOUR followers. Your events appear in their feeds FIRST - targeted audience, not random. Keep 95% of ticket sales (97% for Unlimited). Build your network through live events."
+        >
+          <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleCreateEvent}>
+            <Ionicons name="calendar" size={24} color={theme.colors.primary} />
+            <Text style={[styles.actionText, { color: theme.colors.text }]}>Create Event</Text>
+          </TouchableOpacity>
+        </WalkthroughableTouchable>
         <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleManageAvailability}>
           <Ionicons name="time" size={24} color={theme.colors.primary} />
           <Text style={[styles.actionText, { color: theme.colors.text }]}>Manage Availability</Text>
@@ -1339,11 +1382,18 @@ export default function ProfileScreen() {
       {/* Payout Settings */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Payout Settings</Text>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleWallet}>
-          <Ionicons name="wallet" size={20} color="#8B5CF6" />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Digital Wallet</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
+        {/* Step 4: Digital Wallet - Get Paid */}
+        <WalkthroughableTouchable
+          order={4}
+          name="wallet_setup"
+          text="Set up your digital wallet HERE to receive tips and event ticket payments. Withdraw earnings anytime (minimum £20 for Premium, £10 for Unlimited). This is how money reaches YOU and funds your professional growth."
+        >
+          <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleWallet}>
+            <Ionicons name="wallet" size={20} color="#8B5CF6" />
+            <Text style={[styles.settingText, { color: theme.colors.text }]}>Digital Wallet</Text>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </WalkthroughableTouchable>
         <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handlePaymentMethods}>
           <Ionicons name="card" size={20} color={theme.colors.textSecondary} />
           <Text style={[styles.settingText, { color: theme.colors.text }]}>Payment Methods</Text>
@@ -1392,14 +1442,21 @@ export default function ProfileScreen() {
           <Text style={[styles.settingText, { color: theme.colors.text }]}>Instruments</Text>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
-          onPress={() => navigation.navigate('AnalyticsDashboard' as never)}
+        {/* Step 6: Analytics - Track Your Growth */}
+        <WalkthroughableTouchable
+          order={6}
+          name="analytics_insights"
+          text="See who's engaging with your drops, where your audience is, top-performing content, and earnings over time. Use this data to grow your network strategically and book more paid work."
         >
-          <Ionicons name="bar-chart-outline" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Analytics</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+            onPress={() => navigation.navigate('AnalyticsDashboard' as never)}
+          >
+            <Ionicons name="bar-chart-outline" size={20} color={theme.colors.primary} />
+            <Text style={[styles.settingText, { color: theme.colors.text }]}>Analytics</Text>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </WalkthroughableTouchable>
         <TouchableOpacity 
           style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
           onPress={() => navigation.navigate('BrandingCustomization' as never)}
@@ -1514,11 +1571,18 @@ export default function ProfileScreen() {
             style={{ marginLeft: 8 }}
           />
         </View>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => navigation.navigate('ThemeSettings' as never)}>
-          <Ionicons name="moon" size={20} color={theme.colors.textSecondary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Theme Settings</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
+        {/* Step 7: Settings - Wallet, Privacy, Themes */}
+        <WalkthroughableTouchable
+          order={7}
+          name="profile_settings_control"
+          text="Control everything: Manage privacy (who sees your drops), customize theme colors, notification preferences, and wallet settings. Your platform, your rules, your professional brand."
+        >
+          <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => navigation.navigate('ThemeSettings' as never)}>
+            <Ionicons name="moon" size={20} color={theme.colors.textSecondary} />
+            <Text style={[styles.settingText, { color: theme.colors.text }]}>Theme Settings</Text>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </WalkthroughableTouchable>
         <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => (navigation as any).navigate('AudioEnhancementExpo')}>
           <Ionicons name="musical-notes" size={20} color={theme.colors.primary} />
           <Text style={[styles.settingText, { color: theme.colors.text }]}>Audio Enhancement</Text>
@@ -1555,6 +1619,11 @@ export default function ProfileScreen() {
       {/* Support & About */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Support & About</Text>
+        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleRestartTour}>
+          <Ionicons name="footsteps" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Restart App Tour</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
         <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleHelpSupport}>
           <Ionicons name="help-circle" size={20} color={theme.colors.textSecondary} />
           <Text style={[styles.settingText, { color: theme.colors.text }]}>Help & Support</Text>

@@ -105,7 +105,7 @@ export const RepostModal: React.FC<RepostModalProps> = ({
                 <Ionicons name="close" size={28} color={theme.colors.text} />
               </TouchableOpacity>
               <Text style={[styles.title, { color: theme.colors.text }]}>
-                {showCommentInput ? 'Repost with your thoughts' : isReposted ? 'Undo Repost' : 'Repost'}
+                {showCommentInput ? 'Redrop with your thoughts' : isReposted ? 'Undo Redrop' : 'Redrop'}
               </Text>
               <View style={styles.placeholder} />
             </View>
@@ -128,10 +128,10 @@ export const RepostModal: React.FC<RepostModalProps> = ({
                     </View>
                     <View style={styles.optionText}>
                       <Text style={[styles.optionTitle, { color: '#EF4444' }]}>
-                        Undo Repost
+                        Undo Redrop
                       </Text>
                       <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
-                        Remove your repost from your feed
+                        Remove your redrop from your feed
                       </Text>
                     </View>
                     {isReposting && <ActivityIndicator size="small" color="#EF4444" />}
@@ -149,7 +149,7 @@ export const RepostModal: React.FC<RepostModalProps> = ({
                       </View>
                       <View style={styles.optionText}>
                         <Text style={[styles.optionTitle, { color: theme.colors.text }]}>
-                          Repost
+                          Redrop
                         </Text>
                         <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
                           Share instantly to your feed
@@ -172,10 +172,10 @@ export const RepostModal: React.FC<RepostModalProps> = ({
                       </View>
                       <View style={styles.optionText}>
                         <Text style={[styles.optionTitle, { color: theme.colors.text }]}>
-                          Repost with your thoughts
+                          Redrop with your thoughts
                         </Text>
                         <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
-                          Add a comment to this repost
+                          Add a comment to this redrop
                         </Text>
                       </View>
                     </TouchableOpacity>
@@ -235,7 +235,7 @@ export const RepostModal: React.FC<RepostModalProps> = ({
                   <View style={styles.repostIndicator}>
                     <Ionicons name="repeat" size={14} color={theme.colors.textSecondary} />
                     <Text style={[styles.repostText, { color: theme.colors.textSecondary }]}>
-                      Reposting
+                      Redropping
                     </Text>
                   </View>
 
@@ -287,7 +287,7 @@ export const RepostModal: React.FC<RepostModalProps> = ({
                   ) : (
                     <>
                       <Ionicons name="repeat" size={20} color="#FFFFFF" />
-                      <Text style={styles.repostButtonText}>Repost</Text>
+                      <Text style={styles.repostButtonText}>Redrop</Text>
                     </>
                   )}
                 </TouchableOpacity>

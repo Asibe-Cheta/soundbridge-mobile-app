@@ -21,8 +21,6 @@ import { useAuth } from '../contexts/AuthContext';
 import PasswordStrengthIndicator from '../components/PasswordStrengthIndicator';
 import * as BiometricAuth from '../services/biometricAuth';
 import { loginWithTwoFactorCheck } from '../services/twoFactorAuthConfig';
-import LoginDebugPanel from '../components/LoginDebugPanel';
-import { debugLog, debugError } from '../utils/logStore';
 
 const { width, height } = Dimensions.get('window');
 
@@ -44,8 +42,16 @@ export default function AuthScreen() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricType, setBiometricType] = useState('');
-  const [showDebugPanel, setShowDebugPanel] = useState(false);
   const { signIn, signUp, signInWithGoogle, resetPassword, resendConfirmation, error, refreshUser, session } = useAuth();
+
+  // Debug logging functions
+  const debugLog = (...args: any[]) => {
+    console.log('[AuthScreen]', ...args);
+  };
+
+  const debugError = (...args: any[]) => {
+    console.error('[AuthScreen]', ...args);
+  };
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -77,9 +83,9 @@ export default function AuthScreen() {
     ]).start();
   }, [isSignUp, isForgotPassword]);
 
-  // Check biometric availability on mount
+  // Check biometric availability on mount and auto-trigger if enabled
   useEffect(() => {
-    const checkBiometric = async () => {
+    const checkAndAutoBiometric = async () => {
       const capability = await BiometricAuth.checkBiometricAvailability();
       setBiometricAvailable(capability.available && capability.enrolled);
       
@@ -90,11 +96,20 @@ export default function AuthScreen() {
         const enabled = await BiometricAuth.isBiometricLoginEnabled();
         setBiometricEnabled(enabled);
         console.log(`✅ ${typeName} available and ${enabled ? 'enabled' : 'not enabled'}`);
+        
+        // Auto-trigger biometric login if enabled (only on login screen)
+        if (enabled && !isSignUp && !isForgotPassword) {
+          console.log('🔐 Auto-triggering biometric login...');
+          // Small delay to ensure UI is ready
+          setTimeout(() => {
+            handleBiometricLogin(true); // Pass true to indicate auto-trigger
+          }, 500);
+        }
       }
     };
     
-    checkBiometric();
-  }, []);
+    checkAndAutoBiometric();
+  }, [isSignUp, isForgotPassword]); // Re-run when switching between login/signup/forgot
 
   const hasNeonEffect = (inputName: string) => {
     return focusedInput === inputName;
@@ -127,29 +142,100 @@ export default function AuthScreen() {
     }
   };
 
-  const handleBiometricLogin = async () => {
+  const handleBiometricLogin = async (isAutoTrigger = false) => {
+    debugLog('🔐 handleBiometricLogin called, isAutoTrigger:', isAutoTrigger);
     setIsLoading(true);
     
     try {
+      debugLog('📱 Prompting for biometric authentication...');
       const credentials = await BiometricAuth.getBiometricCredentials();
       
       if (!credentials) {
-        Alert.alert('Biometric Login Failed', 'Could not retrieve stored credentials');
+        // If this was an auto-trigger on app launch, fail silently
+        // If user manually triggered it, show an error
+        if (!isAutoTrigger) {
+          Alert.alert('Biometric Login Failed', 'Could not retrieve stored credentials. Please enable biometric login from your profile settings after logging in.');
+        }
+        debugLog('⚠️ Biometric login skipped - no stored credentials or authentication cancelled');
         setIsLoading(false);
         return;
       }
 
-      console.log('🔐 Attempting biometric login...');
+      debugLog('✅ Biometric authentication successful, credentials retrieved for:', credentials.email);
+      
+      // Fill the form fields so user can see what's happening
+      setEmail(credentials.email);
+      setPassword(credentials.password);
+      
+      // Auto-accept terms when biometric succeeds (user already agreed when enabling biometric)
+      setTermsAccepted(true);
+
+      debugLog('🔐 Attempting to sign in with biometric credentials...');
+      debugLog('📧 Email:', credentials.email);
+      debugLog('🔑 Password length:', credentials.password.length);
+      
       const { success, error } = await signIn(credentials.email, credentials.password);
       
+      debugLog('📊 Sign in result:', { success, error: error?.message });
+      
       if (!success) {
-        Alert.alert('Login Failed', error?.message || 'An error occurred during login');
+        debugError('❌ Biometric login failed:', error?.message);
+        // Show error with option to disable biometric login
+        Alert.alert(
+          'Biometric Login Failed', 
+          error?.message || 'Could not log in with stored credentials. Your password may have changed.',
+          [
+            { 
+              text: 'Disable Biometric Login', 
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  // Force disable without requiring biometric auth since credentials are invalid
+                  await BiometricAuth.disableBiometricLogin(true);
+                  setBiometricEnabled(false);
+                  setEmail('');
+                  setPassword('');
+                  setTermsAccepted(false);
+                  Alert.alert('Biometric Login Disabled', 'Please log in manually with your correct credentials. You can re-enable biometric login after logging in.');
+                } catch (err) {
+                  debugError('Failed to disable biometric login:', err);
+                }
+                setIsLoading(false);
+              }
+            },
+            { 
+              text: 'Try Again Manually', 
+              onPress: () => {
+                // Keep email, clear password so user can try again
+                setPassword('');
+                setIsLoading(false);
+              }
+            }
+          ]
+        );
+        return; // Don't clear loading in finally block if we already handled it
+      } else {
+        debugLog('✅ Biometric login successful!');
+        // Success is handled by auth state change
       }
-      // Success is handled by auth state change
-    } catch (err) {
-      Alert.alert('Biometric Login Error', 'An unexpected error occurred');
+    } catch (err: any) {
+      debugError('❌ Biometric login error:', err);
+      debugError('Error details:', err.message, err.stack);
+      // Show error even on auto-trigger
+      Alert.alert(
+        'Biometric Login Error', 
+        'An unexpected error occurred. Please try logging in manually.',
+        [{ text: 'OK', onPress: () => {
+          setPassword('');
+          setIsLoading(false);
+        }}]
+      );
+      return; // Don't clear loading in finally block if we already handled it
     } finally {
-      setIsLoading(false);
+      // Only clear loading if we didn't handle it in error cases above
+      if (setIsLoading) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -226,29 +312,54 @@ export default function AuthScreen() {
         // User state should already be set by onAuthStateChange
         // No need to manually set it
         
-        // Offer to enable biometric login (optional)
-        if (biometricAvailable && !biometricEnabled) {
-          setTimeout(() => {
-            Alert.alert(
-              `Enable ${biometricType} Login?`,
-              'Would you like to enable biometric login for faster access next time?',
-              [
-                { text: 'Not Now', style: 'cancel' },
-                {
-                  text: 'Enable',
-                  onPress: async () => {
-                    const result = await BiometricAuth.enableBiometricLogin(email, password);
-                    if (result.success) {
-                      setBiometricEnabled(true);
-                      Alert.alert('Success', `${biometricType} login enabled!`);
-                    } else {
-                      Alert.alert('Error', result.error || 'Failed to enable biometric login');
-                    }
+        // Offer to enable or update biometric login (optional)
+        if (biometricAvailable) {
+          if (!biometricEnabled) {
+            // Offer to enable biometric login for the first time
+            setTimeout(() => {
+              Alert.alert(
+                `Enable ${biometricType} Login?`,
+                'Would you like to enable biometric login for faster access next time?',
+                [
+                  { text: 'Not Now', style: 'cancel' },
+                  {
+                    text: 'Enable',
+                    onPress: async () => {
+                      const result = await BiometricAuth.enableBiometricLogin(email, password);
+                      if (result.success) {
+                        setBiometricEnabled(true);
+                        Alert.alert('Success', `${biometricType} login enabled!`);
+                      } else {
+                        Alert.alert('Error', result.error || 'Failed to enable biometric login');
+                      }
+                    },
                   },
-                },
-              ]
-            );
-          }, 500);
+                ]
+              );
+            }, 500);
+          } else {
+            // Biometric is enabled - offer to update stored credentials
+            setTimeout(() => {
+              Alert.alert(
+                `Update ${biometricType} Login?`,
+                'Would you like to update your stored credentials for biometric login?',
+                [
+                  { text: 'Not Now', style: 'cancel' },
+                  {
+                    text: 'Update',
+                    onPress: async () => {
+                      const result = await BiometricAuth.updateBiometricCredentials(email, password);
+                      if (result.success) {
+                        Alert.alert('Success', `${biometricType} login credentials updated!`);
+                      } else {
+                        Alert.alert('Error', result.error || 'Failed to update biometric login');
+                      }
+                    },
+                  },
+                ]
+              );
+            }, 500);
+          }
         }
         
         // User is logged in - AppNavigator will handle navigation based on user state
@@ -711,26 +822,6 @@ export default function AuthScreen() {
               </LinearGradient>
             </TouchableOpacity>
 
-            {/* Biometric Login Button (only on login screen when enabled) */}
-            {!isSignUp && !isForgotPassword && biometricEnabled && (
-              <TouchableOpacity
-                style={[styles.biometricButton, isLoading && styles.buttonDisabled]}
-                onPress={handleBiometricLogin}
-                disabled={isLoading}
-              >
-                <BlurView intensity={20} tint="dark" style={styles.biometricButtonBlur}>
-                  <Ionicons 
-                    name={Platform.OS === 'ios' ? 'finger-print' : 'fingerprint'} 
-                    size={22} 
-                    color="#10B981" 
-                  />
-                  <Text style={styles.biometricButtonText}>
-                    Login with {biometricType}
-                  </Text>
-                </BlurView>
-              </TouchableOpacity>
-            )}
-
             {/* Google Login Button (not shown for forgot password) */}
             {!isForgotPassword && (
               <>
@@ -785,21 +876,6 @@ export default function AuthScreen() {
           </View>
         </View>
       </Animated.View>
-
-      {/* Debug Panel Button - Tap 5 times on logo to open */}
-      <TouchableOpacity
-        style={styles.debugButton}
-        onPress={() => setShowDebugPanel(true)}
-        onLongPress={() => setShowDebugPanel(true)}
-      >
-        <Ionicons name="bug-outline" size={20} color="rgba(255, 255, 255, 0.5)" />
-      </TouchableOpacity>
-
-      {/* Debug Panel */}
-      <LoginDebugPanel
-        visible={showDebugPanel}
-        onClose={() => setShowDebugPanel(false)}
-      />
     </LinearGradient>
   );
 }
@@ -847,27 +923,16 @@ const styles = StyleSheet.create({
   formContainer: {
     width: '100%',
     maxWidth: 400,
-    backgroundColor: 'rgba(59, 130, 246, 0.08)',
-    borderRadius: 24,
     padding: 32,
-    borderWidth: 1,
-    borderColor: 'rgba(147, 197, 253, 0.2)',
-    shadowColor: '#3B82F6',
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 8,
   },
   iconContainer: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 4,
+    marginTop: -40,
   },
   logo: {
-    width: 360,
-    height: 108,
+    width: 420,
+    height: 126,
   },
   title: {
     fontSize: 24,
@@ -888,19 +953,19 @@ const styles = StyleSheet.create({
   },
   // Glassmorphic Input Styles - ElevenLabs-inspired
   glassInput: {
-    borderRadius: 10,
+    borderRadius: 24,
     overflow: 'hidden',
     backgroundColor: 'rgba(26, 35, 50, 0.4)',
     borderWidth: 1,
     borderColor: 'rgba(147, 197, 253, 0.2)',
   },
   glassInputNeon: {
-    borderRadius: 8,
+    borderRadius: 24,
     overflow: 'hidden',
     backgroundColor: 'rgba(26, 35, 50, 0.5)',
   },
   neonBorderContainer: {
-    borderRadius: 10,
+    borderRadius: 24,
     padding: 2,
     shadowColor: '#EC4899',
     shadowOffset: { width: 0, height: 0 },
@@ -974,7 +1039,7 @@ const styles = StyleSheet.create({
   // Button Styles
   loginButton: {
     height: 48,
-    borderRadius: 10,
+    borderRadius: 24,
     overflow: 'hidden',
     shadowColor: '#DC2626',
     shadowOffset: {
@@ -1016,7 +1081,7 @@ const styles = StyleSheet.create({
   },
   googleButton: {
     height: 48,
-    borderRadius: 10,
+    borderRadius: 24,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(147, 197, 253, 0.3)',
@@ -1035,29 +1100,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
-  // Biometric Button Styles
-  biometricButton: {
-    height: 48,
-    borderRadius: 10,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.4)',
-    marginTop: 16,
-  },
-  biometricButtonBlur: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    gap: 10,
-    paddingHorizontal: 16,
-  },
-  biometricButtonText: {
-    color: '#10B981',
-    fontSize: 16,
-    fontWeight: '600',
-  },
   signUpContainer: {
     marginTop: 32,
     alignItems: 'center',
@@ -1069,19 +1111,6 @@ const styles = StyleSheet.create({
   signUpLink: {
     color: '#FFFFFF',
     fontWeight: 'bold',
-  },
-  // Debug Button
-  debugButton: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
   },
   // Email Verification Styles
   verificationNotice: {

@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
 import { getRelativeTime } from '../utils/collaborationUtils';
 import * as Haptics from 'expo-haptics';
+import ExpressInterestModal from './ExpressInterestModal';
 
 interface Opportunity {
   id: string;
@@ -33,10 +35,49 @@ export default function OpportunityCard({
   onApply,
 }: OpportunityCardProps) {
   const { theme } = useTheme();
+  const { user } = useAuth();
+  const [modalVisible, setModalVisible] = useState(false);
 
-  const handleApply = () => {
+  // Check if user is a service provider
+  const [isServiceProvider, setIsServiceProvider] = useState(false);
+
+  // TODO: Fetch service provider status from database
+  // For now, assume all authenticated users are service providers
+  React.useEffect(() => {
+    // This will be replaced with actual check:
+    // const checkServiceProvider = async () => {
+    //   const { data } = await supabase
+    //     .from('service_provider_profiles')
+    //     .select('user_id')
+    //     .eq('user_id', user?.id)
+    //     .single();
+    //   setIsServiceProvider(!!data);
+    // };
+    // checkServiceProvider();
+    setIsServiceProvider(!!user);
+  }, [user]);
+
+  const handleApplyPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    onApply?.(opportunity.id);
+    if (isServiceProvider) {
+      setModalVisible(true);
+    } else {
+      // Show message that only service providers can express interest
+      alert('Only service providers can express interest in opportunities. Become a service provider to apply!');
+    }
+  };
+
+  const handleSubmitInterest = async (data: {
+    opportunityId: string;
+    reason: string;
+    message: string;
+    enableAlerts: boolean;
+  }) => {
+    // Call the parent's onApply with the data
+    console.log('Submitting interest:', data);
+    // TODO: Implement database insert
+    // await supabase.from('opportunity_interests').insert({...})
+    onApply?.(data.opportunityId);
   };
 
   return (
@@ -103,7 +144,7 @@ export default function OpportunityCard({
         {/* Apply Button */}
         <TouchableOpacity
           style={styles.applyButton}
-          onPress={handleApply}
+          onPress={handleApplyPress}
         >
           <LinearGradient
             colors={['#7C3AED', '#8B5CF6']}
@@ -116,6 +157,14 @@ export default function OpportunityCard({
           </LinearGradient>
         </TouchableOpacity>
       </LinearGradient>
+
+      {/* Express Interest Modal */}
+      <ExpressInterestModal
+        visible={modalVisible}
+        opportunity={opportunity}
+        onClose={() => setModalVisible(false)}
+        onSubmit={handleSubmitInterest}
+      />
     </TouchableOpacity>
   );
 }

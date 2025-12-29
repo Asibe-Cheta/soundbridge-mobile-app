@@ -103,9 +103,9 @@ export const authenticateWithBiometrics = async (
     // Authenticate
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: promptMessage || `Authenticate with ${biometricName}`,
-      fallbackLabel: 'Use Passcode',
+      fallbackLabel: 'Cancel',
       cancelLabel: 'Cancel',
-      disableDeviceFallback: false,
+      disableDeviceFallback: true, // Only use biometrics, no PIN fallback
     });
 
     if (result.success) {
@@ -186,16 +186,19 @@ export const enableBiometricLogin = async (
 
 /**
  * Disable biometric login and clear stored credentials
+ * @param force - If true, skip biometric authentication (useful when credentials are invalid)
  */
-export const disableBiometricLogin = async (): Promise<{ success: boolean; error?: string }> => {
+export const disableBiometricLogin = async (force = false): Promise<{ success: boolean; error?: string }> => {
   try {
-    // Authenticate before disabling
-    const authResult = await authenticateWithBiometrics(
-      'Authenticate to disable biometric login'
-    );
+    // Authenticate before disabling (unless forced)
+    if (!force) {
+      const authResult = await authenticateWithBiometrics(
+        'Authenticate to disable biometric login'
+      );
 
-    if (!authResult.success) {
-      return authResult;
+      if (!authResult.success) {
+        return authResult;
+      }
     }
 
     // Clear all stored credentials
@@ -219,32 +222,35 @@ export const disableBiometricLogin = async (): Promise<{ success: boolean; error
  */
 export const getBiometricCredentials = async (): Promise<BiometricCredentials | null> => {
   try {
+    console.log('🔍 Checking if biometric login is enabled...');
     // Check if biometric login is enabled
     const enabled = await isBiometricLoginEnabled();
     if (!enabled) {
-      console.log('⚠️ Biometric login not enabled');
+      console.log('⚠️ Biometric login not enabled - user needs to enable it first after manual login');
       return null;
     }
 
+    console.log('✅ Biometric login is enabled, prompting for authentication...');
     // Authenticate user
     const authResult = await authenticateWithBiometrics('Login with biometrics');
     if (!authResult.success) {
-      console.log('❌ Biometric authentication failed');
+      console.log('❌ Biometric authentication failed or cancelled:', authResult.error);
       return null;
     }
 
+    console.log('🔐 Biometric authentication successful, retrieving stored credentials...');
     // Retrieve stored credentials
     const email = await SecureStore.getItemAsync(STORED_EMAIL_KEY);
     const password = await SecureStore.getItemAsync(STORED_PASSWORD_KEY);
 
     if (!email || !password) {
-      console.error('❌ Stored credentials not found');
+      console.error('❌ Stored credentials not found - clearing biometric setting');
       // Clear biometric setting if credentials are missing
       await SecureStore.deleteItemAsync(BIOMETRIC_ENABLED_KEY);
       return null;
     }
 
-    console.log('✅ Biometric credentials retrieved successfully');
+    console.log('✅ Biometric credentials retrieved successfully for:', email);
     return { email, password };
   } catch (error) {
     console.error('❌ Error retrieving biometric credentials:', error);

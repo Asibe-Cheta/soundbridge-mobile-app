@@ -55,7 +55,7 @@ export default function SavedPostsScreen() {
 
       if (result.error) {
         console.error('Error loading saved posts:', result.error);
-        setError('Failed to load saved posts');
+        setError('Failed to load saved drops');
         return;
       }
 
@@ -72,7 +72,7 @@ export default function SavedPostsScreen() {
       console.log(`✅ Loaded ${result.posts.length} saved posts (hasMore: ${result.hasMore})`);
     } catch (error) {
       console.error('Exception loading saved posts:', error);
-      setError('Failed to load saved posts');
+      setError('Failed to load saved drops');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -118,16 +118,16 @@ export default function SavedPostsScreen() {
         <Ionicons name="bookmark-outline" size={64} color={theme.colors.textSecondary} />
       </View>
       <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
-        No Saved Posts
+        No Saved Drops
       </Text>
       <Text style={[styles.emptyDescription, { color: theme.colors.textSecondary }]}>
-        Posts you save will appear here. Tap the bookmark icon on any post to save it for later.
+        Drops you save will appear here. Tap the bookmark icon on any drop to save it for later.
       </Text>
       <TouchableOpacity
         style={[styles.emptyButton, { backgroundColor: theme.colors.primary }]}
         onPress={() => navigation.goBack()}
       >
-        <Text style={styles.emptyButtonText}>Explore Posts</Text>
+        <Text style={styles.emptyButtonText}>Explore Drops</Text>
       </TouchableOpacity>
     </View>
   );
@@ -173,7 +173,7 @@ export default function SavedPostsScreen() {
               <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
             </TouchableOpacity>
             <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
-              Saved Posts
+              Saved Drops
             </Text>
             <View style={styles.backButton} />
           </View>
@@ -181,7 +181,7 @@ export default function SavedPostsScreen() {
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={theme.colors.primary} />
             <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>
-              Loading saved posts...
+              Loading saved drops...
             </Text>
           </View>
         </SafeAreaView>
@@ -202,7 +202,7 @@ export default function SavedPostsScreen() {
               <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
             </TouchableOpacity>
             <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
-              Saved Posts
+              Saved Drops
             </Text>
             <View style={styles.backButton} />
           </View>
@@ -225,7 +225,7 @@ export default function SavedPostsScreen() {
             <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
-            Saved Posts
+            Saved Drops
           </Text>
           <View style={styles.backButton} />
         </View>

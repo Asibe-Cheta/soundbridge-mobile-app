@@ -12,18 +12,22 @@ import {
   RefreshControl,
   Alert,
   ActivityIndicator,
+  Modal,
+  FlatList,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { useAuth } from '../contexts/AuthContext';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { supabase, dbHelpers } from '../lib/supabase';
 import { config } from '../config/environment';
-import { 
-  loadQueriesInParallel, 
+import {
+  loadQueriesInParallel,
   waitForValidSession,
   LoadingStateManager,
   CancellableQuery,
@@ -38,6 +42,7 @@ import subscriptionService from '../services/SubscriptionService';
 import RevenueCatService from '../services/RevenueCatService';
 import type { PublicProfile } from '../types/database';
 import { ModerationBadge } from '../components/ModerationBadge';
+import { walkthroughable } from 'react-native-copilot';
 
 const { width } = Dimensions.get('window');
 
@@ -391,8 +396,11 @@ const DISCOVER_MOCK_PLAYLISTS: Playlist[] = [
   },
 ];
 
+// Create walkthroughable components for tour
+const WalkthroughableView = walkthroughable(View);
+
 function DiscoverScreen() {
-  const { user, loading: authLoading, session } = useAuth();
+  const { user, userProfile, loading: authLoading, session } = useAuth();
   const { play, addToQueue } = useAudioPlayer();
   const { theme } = useTheme();
   const navigation = useNavigation();
@@ -413,6 +421,7 @@ function DiscoverScreen() {
     language: [],
     location: '',
   });
+  const [searchModalVisible, setSearchModalVisible] = useState(false);
   
   // Content states
   const [trendingTracks, setTrendingTracks] = useState<AudioTrack[]>([]);
@@ -665,6 +674,7 @@ function DiscoverScreen() {
       switch (activeTab) {
         case 'Music':
           loadingManager.setLoading('tracks', true, 8000);
+          loadingManager.setLoading('artists', true, 8000);
           const musicResults = await loadQueriesInParallel({
             trending: {
               name: 'trending',
@@ -695,10 +705,18 @@ function DiscoverScreen() {
               timeout: 5000,
               fallback: [],
             },
+            artists: {
+              name: 'artists',
+              query: () => dbHelpers.getCreatorsWithStats(10),
+              timeout: 8000,
+              fallback: [],
+            },
           });
           setTrendingTracks(musicResults.trending?.data || musicResults.trending || DISCOVER_MOCK_TRACKS);
           setRecentTracks(musicResults.recent?.data || musicResults.recent || DISCOVER_MOCK_TRACKS);
+          setFeaturedArtists(musicResults.artists?.data || musicResults.artists || DISCOVER_MOCK_ARTISTS);
           loadingManager.setLoading('tracks', false, 0);
+          loadingManager.setLoading('artists', false, 0);
           break;
 
         case 'Albums':
@@ -1450,84 +1468,97 @@ function DiscoverScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      {/* Main Background Gradient - Uses theme colors */}
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      {/* Main Background Gradient */}
       <LinearGradient
-        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        locations={[0, 0.5, 1]}
+        colors={theme.isDark ? ['#130722', '#240c3e', '#2e1065'] : [theme.colors.background, theme.colors.surface, theme.colors.background]}
         style={styles.mainGradient}
       />
       
       <SafeAreaView style={styles.safeArea} edges={[]}>
-        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} translucent={false} />
         
-        {/* Header */}
-        <View style={styles.header}>
-        <TouchableOpacity style={styles.menuButton}>
-          <Ionicons name="menu" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-        <View style={styles.headerTextGroup}>
-          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Discover</Text>
-          <Text style={[styles.headerSubtitle, { color: theme.colors.textSecondary }]}>
-            Find music, events, and creators based on YOUR preferences
-          </Text>
+        {/* Top Navigation */}
+        <View style={styles.topNav}>
+          <TouchableOpacity onPress={() => navigation.navigate('Profile' as never)}>
+            {userProfile?.avatar_url ? (
+              <Image source={{ uri: userProfile.avatar_url }} style={styles.profileAvatar} />
+            ) : (
+              <View style={styles.defaultAvatar}>
+                <Ionicons name="person" size={20} color={theme.isDark ? "white" : theme.colors.text} />
         </View>
-      </View>
-
-      {/* Search Header */}
-      <View style={styles.searchHeader}>
-        <View style={[styles.searchInputContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-          <Ionicons name="search" size={20} color={theme.colors.textSecondary} style={styles.searchIcon} />
-          <TextInput
-            style={[styles.searchInput, { color: theme.colors.text }]}
-            placeholder="Search for creators, music, events..."
-            placeholderTextColor={theme.colors.textSecondary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoCorrect={false}
-            autoCapitalize="none"
-          />
-          <TouchableOpacity
-            onPress={() => {
-              if (!isPremium && !isUnlimited) {
-                Alert.alert(
-                  'Premium Feature',
-                  'Advanced filters are available for Premium and Unlimited users. Upgrade to unlock advanced search capabilities.',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Upgrade', onPress: () => navigation.navigate('Upgrade' as never) },
-                  ]
-                );
-                return;
-              }
-              setShowAdvancedFilters(true);
-            }}
-            style={styles.filterButton}
-          >
-            <Ionicons name="options-outline" size={20} color={theme.colors.textSecondary} />
-            {!isPremium && !isUnlimited && (
-              <View style={styles.proIndicator}>
-                <Ionicons name="diamond" size={10} color="#10B981" />
-              </View>
             )}
           </TouchableOpacity>
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
-              <Ionicons name="close-circle" size={20} color={theme.colors.textSecondary} />
+          <View style={{ flex: 1, alignItems: 'center', paddingHorizontal: 16 }}>
+          <TouchableOpacity
+              onPress={() => setSearchModalVisible(true)}
+              style={[
+                styles.pillSearchButton,
+                {
+                  backgroundColor: theme.isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
+                  borderColor: theme.isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                }
+              ]}
+          >
+              <Ionicons name="search" size={18} color={theme.isDark ? "white" : theme.colors.textSecondary} style={{ marginRight: 8 }} />
+              <Text style={[styles.pillSearchText, { color: theme.isDark ? 'rgba(255,255,255,0.6)' : theme.colors.textSecondary }]}>Search</Text>
+              <Ionicons name="options-outline" size={18} color={theme.colors.primary} style={{ marginLeft: 8 }} />
             </TouchableOpacity>
-          )}
+              </View>
+          <TouchableOpacity onPress={() => navigation.navigate('Messages' as never)}>
+            <Ionicons name="chatbubbles-outline" size={24} color={theme.isDark ? "white" : theme.colors.text} />
+          </TouchableOpacity>
         </View>
+
+        {/* Main Header - HTML: px-6 mt-8 mb-6 */}
+        <View style={styles.mainHeader}>
+          <Text style={[styles.mainTitle, { color: theme.colors.text }]}>Discover</Text>
+          <Text style={[styles.mainSubtitle, { color: theme.isDark ? 'rgba(255,255,255,0.6)' : theme.colors.textSecondary }]}>
+            Find music, podcasts, events, venues, services, and creators
+          </Text>
       </View>
 
-      {/* Content based on active tab */}
+        {/* Text-only Tab Navigation - HTML: px-6 mb-8 pb-2 */}
+        <View style={styles.tabsWrapper}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tabsContentContainer}
+          >
+            {tabs.map((tab) => (
+              <TouchableOpacity
+                key={tab}
+                onPress={() => setActiveTab(tab)}
+                style={styles.textTab}
+              >
+                <Text
+                  style={[
+                    styles.textTabLabel,
+                    { color: theme.isDark ? 'rgba(255,255,255,0.4)' : theme.colors.textSecondary },
+                    activeTab === tab && { fontWeight: '600', color: theme.colors.text }
+                  ]}
+                >
+                  {tab}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+
+      {/* Content */}
       <ScrollView 
         style={styles.content}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isLoadingAny}
+            onRefresh={loadDiscoverContent}
+            tintColor={theme.colors.primary}
+          />
+        }
       >
-        {/* Show search results when searching */}
-        {searchQuery.length > 0 ? (
+        {/* Show search results when searching - HIDE THIS, use modal instead */}
+        {false && searchQuery.length > 0 ? (
           <View style={styles.searchResultsContainer}>
             {/* Search Results Header */}
             <View style={styles.searchResultsHeader}>
@@ -1659,66 +1690,18 @@ function DiscoverScreen() {
           </View>
         ) : (
           <>
-            {/* Navigation Tabs - Now inside main ScrollView */}
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              style={styles.inlineTabsScrollView}
-              contentContainerStyle={styles.inlineTabsContainer}
-            >
-              {tabs.map((tab) => {
-                const tabIcons: Record<TabType, string> = {
-                  'Music': 'musical-notes',
-                  'Albums': 'albums',
-                  'Artists': 'people',
-                  'Events': 'calendar',
-                  'Playlists': 'list',
-                  'Services': 'briefcase',
-                  'Venues': 'location',
-                };
-                return (
-                  <TouchableOpacity
-                    key={tab}
-                    style={[
-                      styles.inlineTabButton,
-                      activeTab === tab && styles.activeInlineTabButton
-                    ]}
-                    onPress={() => setActiveTab(tab)}
-                  >
-                    <Ionicons
-                      name={tabIcons[tab] as any}
-                      size={16}
-                      color={activeTab === tab ? '#DC2626' : theme.colors.textSecondary}
-                      style={styles.inlineTabIcon}
-                    />
-                    <Text
-                      style={[
-                        styles.inlineTabText,
-                        { color: activeTab === tab ? '#DC2626' : theme.colors.textSecondary },
-                        activeTab === tab && styles.activeInlineTabText
-                      ]}
-                    >
-                      {tab}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
         {activeTab === 'Music' && (
           <>
-            {/* Trending Now */}
+            {/* Trending This Week */}
             <View style={[styles.section, styles.firstSection]}>
               <View style={styles.sectionHeader}>
-                <View>
-                  <View style={styles.sectionTitleRow}>
-                    <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>🔥 Trending This Week</Text>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="flame" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
+                  <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Trending This Week</Text>
                   </View>
-                  <Text style={[styles.sectionSubtitle, { color: theme.colors.textSecondary }]}>
-                    Top tracks on SoundBridge
-                  </Text>
-                </View>
-                <TouchableOpacity>
-                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
@@ -1727,126 +1710,226 @@ function DiscoverScreen() {
                   <ActivityIndicator size="large" color={theme.colors.primary} />
                 </View>
         ) : trendingTracks.length > 0 ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
-                  {trendingTracks.map((track, index) => (
+                <FlatList
+                  horizontal
+                  data={trendingTracks}
+                  renderItem={({ item: track, index }) => (
                     <TouchableOpacity
                       key={track.id}
-                      style={[styles.trendingCard, { marginLeft: index === 0 ? 16 : 12 }]}
+                      style={[styles.htmlCard, index === 0 && { marginLeft: 24 }]}
                       onPress={() => handleTrackPress(track)}
+                      activeOpacity={0.9}
                     >
-                      <View style={styles.trendingCover}>
+                      {/* Badge */}
+                      {isNewTrack(track.created_at) && (
+                        <View style={styles.htmlBadge}>
+                          <Text style={styles.htmlBadgeText}>NEW</Text>
+                        </View>
+                      )}
+
+                      {/* Image with Gradient */}
+                      <View style={[StyleSheet.absoluteFill, { overflow: 'hidden', borderRadius: 24 }]}>
                         {track.cover_art_url ? (
-                          <Image source={{ uri: track.cover_art_url }} style={styles.trendingImage} />
+                          <Image 
+                            source={{ uri: track.cover_art_url }} 
+                            style={styles.htmlCardImage}
+                          />
                         ) : (
-                          <View style={styles.defaultTrendingImage}>
-                            <Ionicons name="musical-notes" size={40} color={theme.colors.textSecondary} />
+                          <View style={[styles.htmlCardImage, { backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' }]}>
+                            <Ionicons name="musical-notes" size={60} color="rgba(255,255,255,0.3)" />
                       </View>
                     )}
-                    <TouchableOpacity 
-                      style={styles.playOverlay}
-                      onPress={() => handleTrackPlay(track)}
-                    >
-                          <Ionicons name="play" size={20} color="#FFFFFF" />
-                    </TouchableOpacity>
+                        <LinearGradient
+                          colors={['transparent', 'rgba(0, 0, 0, 0.4)', 'rgba(0, 0, 0, 0.9)']}
+                          style={styles.htmlCardGradient}
+                        />
                   </View>
-                      <View style={styles.trendingCardHeader}>
-                        {isTrendingTrack(track) && (
-                          <View style={styles.trendingBadge}>
-                            <Text style={styles.trendingBadgeText}>🔥</Text>
-                          </View>
-                        )}
-                        {isNewTrack(track.created_at) && (
-                          <View style={styles.newBadge}>
-                            <Text style={styles.newBadgeText}>🆕</Text>
-                          </View>
-                        )}
-                      </View>
-                      <Text style={[styles.trendingTitle, { color: theme.colors.text }]} numberOfLines={1}>
+
+                      {/* Play Button Overlay */}
+                      <Pressable 
+                        style={styles.htmlPlayButton}
+                        onPress={(e: any) => {
+                          e.stopPropagation();
+                          handleTrackPlay(track);
+                        }}
+                      >
+                        <BlurView intensity={20} tint={theme.isDark ? "dark" : "light"} style={styles.htmlPlayButtonBlur}>
+                          <Ionicons name="play-circle-outline" size={36} color={theme.isDark ? "#FFFFFF" : theme.colors.text} />
+                        </BlurView>
+                      </Pressable>
+
+                      {/* Card Content */}
+                      <View style={styles.htmlCardContent}>
+                        <Text style={styles.htmlCardTitle} numberOfLines={2}>
                         {track.title}
                       </Text>
-                      <Text style={[styles.trendingArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                        by {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
+                        <Text style={styles.htmlCardArtist} numberOfLines={1}>
+                          {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
                       </Text>
-                      <View style={styles.trendingCardMeta}>
-                        {track.genre && (
-                          <Text style={[styles.trendingGenre, { color: theme.colors.primary }]}>
-                            {track.genre}
+                        <View style={styles.htmlCardMeta}>
+                          <Ionicons name="headset-outline" size={12} color="rgba(255,255,255,0.4)" />
+                          <Text style={styles.htmlCardMetaText}>
+                            {formatNumber(track.play_count || track.plays_count || 0)}
                           </Text>
-                        )}
-                        {formatDuration(track.duration) && (
-                          <>
-                            <Text style={[styles.trendingDuration, { color: theme.colors.textSecondary }]}>
-                              {formatDuration(track.duration)}
-                            </Text>
-                            <Text style={[styles.trendingPlays, { color: theme.colors.textSecondary }]}> • </Text>
-                          </>
-                        )}
-                        <Text style={[styles.trendingPlays, { color: theme.colors.textSecondary }]}>
-                          {formatNumber(track.play_count || track.plays_count || 0)} plays
+                          <View style={styles.htmlDot} />
+                          <Text style={styles.htmlCardMetaText}>
+                            {track.genre || 'Music'}
                         </Text>
+                        </View>
                       </View>
                 </TouchableOpacity>
-              ))}
-          </ScrollView>
+                  )}
+                  keyExtractor={(item) => item.id}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingRight: 24 }}
+                  ItemSeparatorComponent={() => <View style={{ width: 16 }} />}
+                />
         ) : (
-                <View style={styles.emptyState}>
-                  <Ionicons name="trending-up" size={48} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>No trending tracks yet</Text>
+                <View style={styles.htmlEmptyState}>
+                  <Ionicons name="musical-notes-outline" size={64} color="rgba(255,255,255,0.2)" />
+                  <Text style={styles.htmlEmptyStateTitle}>No trending tracks yet</Text>
+                  <Text style={styles.htmlEmptyStateText}>Check back soon for hot new music!</Text>
+                  <TouchableOpacity>
+                    <Text style={styles.htmlLearnMoreLink}>Learn More</Text>
+                  </TouchableOpacity>
                 </View>
         )}
             </View>
 
+            {/* Step 13: Upload Music - 3 FREE Tracks Call-to-Action */}
+            <WalkthroughableView
+              order={13}
+              name="upload_music_prompt"
+              text="Tap here to upload your first track! Free users get 3 uploads, Premium 10, Unlimited UNLIMITED. Upload now, distribute FREE (unlike DistroKid's £20/year), and keep 95% of tips. Your music goes live instantly on SoundBridge."
+              style={[styles.section, { marginTop: 16 }]}
+            >
+              <TouchableOpacity
+                style={[styles.uploadPromptCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.primary }]}
+                onPress={() => navigation.navigate('Upload' as never)}
+              >
+                <View style={styles.uploadPromptIcon}>
+                  <Ionicons name="cloud-upload-outline" size={40} color={theme.colors.primary} />
+                </View>
+                <View style={styles.uploadPromptContent}>
+                  <Text style={[styles.uploadPromptTitle, { color: theme.colors.text }]}>
+                    Upload Your Music
+                  </Text>
+                  <Text style={[styles.uploadPromptSubtitle, { color: theme.colors.textSecondary }]}>
+                    Free: 30MB • Premium: 2GB • Unlimited: 10GB
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={24} color={theme.colors.primary} />
+              </TouchableOpacity>
+            </WalkthroughableView>
+
       {/* Featured Artists */}
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="people" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                 <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Featured Artists</Text>
-                <TouchableOpacity>
-                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </View>
+                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
         {loadingArtists ? (
                 <View style={styles.loadingContainer}>
-                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading artists...</Text>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
                 </View>
         ) : featuredArtists.length > 0 ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
-                  {featuredArtists.map((artist, index) => (
+                <FlatList
+                  horizontal
+                  data={featuredArtists}
+                  renderItem={({ item: artist, index }) => (
                     <TouchableOpacity
                       key={artist.id}
-                      style={[styles.artistCard, { marginLeft: index === 0 ? 16 : 12 }]}
+                      style={[styles.htmlCard, index === 0 && { marginLeft: 24 }]}
                       onPress={() => handleCreatorPress(artist)}
+                      activeOpacity={0.9}
                     >
-                      <View style={styles.artistCardAvatar}>
+                      {/* Badge */}
+                      <View style={[styles.htmlBadge]}>
+                        <Text style={[styles.htmlBadgeText, { color: theme.colors.primary }]}>RISING</Text>
+                      </View>
+
+                      {/* Background Image with Gradient */}
+                      <View style={[StyleSheet.absoluteFill, { overflow: 'hidden', borderRadius: 24 }]}>
                     {artist.avatar_url ? (
-                          <Image source={{ uri: artist.avatar_url }} style={styles.artistCardImage} />
+                          <Image 
+                            source={{ uri: artist.avatar_url }} 
+                            style={[styles.htmlCardImage, { opacity: 0.8 }]}
+                          />
                     ) : (
-                          <View style={styles.defaultArtistCardImage}>
-                            <Ionicons name="person" size={32} color={theme.colors.textSecondary} />
+                          <View style={[styles.htmlCardImage, { backgroundColor: theme.isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)', justifyContent: 'center', alignItems: 'center' }]}>
+                            <Ionicons name="person" size={80} color={theme.isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.2)"} />
                       </View>
                     )}
+                        <LinearGradient
+                          colors={theme.isDark ? ['transparent', 'rgba(19, 7, 34, 0.5)', '#130722'] : ['transparent', `${theme.colors.background}80`, theme.colors.background]}
+                          style={styles.htmlCardGradient}
+                        />
                   </View>
-                      <Text style={[styles.artistCardName, { color: theme.colors.text }]} numberOfLines={1}>
+
+                      {/* Artist Content - Centered */}
+                      <View style={[styles.htmlCardContent, { alignItems: 'center', paddingBottom: 32 }]}>
+                        {/* Circular Avatar with Red Border */}
+                        <View style={{
+                          width: 80,
+                          height: 80,
+                          borderRadius: 40,
+                          borderWidth: 2,
+                          borderColor: theme.colors.primary,
+                          padding: 4,
+                          marginBottom: 16,
+                          backgroundColor: theme.isDark ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)',
+                        }}>
+                          {artist.avatar_url ? (
+                            <Image 
+                              source={{ uri: artist.avatar_url }} 
+                              style={{ width: '100%', height: '100%', borderRadius: 36 }}
+                            />
+                          ) : (
+                            <View style={{ width: '100%', height: '100%', borderRadius: 36, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' }}>
+                              <Ionicons name="person" size={32} color="rgba(255,255,255,0.4)" />
+                            </View>
+                          )}
+                        </View>
+
+                        <Text style={[styles.htmlCardTitle, { textAlign: 'center' }]} numberOfLines={1}>
                         {artist.display_name || artist.username}
                       </Text>
-                      <View style={styles.artistCardMeta}>
-                        {artist.genre && (
-                          <Text style={[styles.artistCardGenre, { color: theme.colors.primary }]} numberOfLines={1}>
-                            {artist.genre}
+                        <Text style={[styles.htmlCardArtist, { marginBottom: 16 }]} numberOfLines={1}>
+                          {formatNumber(artist.followers_count || 0)} Followers
                           </Text>
-                        )}
-                        {artist.location && (
-                          <Text style={[styles.artistCardLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                            {artist.location}
-                          </Text>
-                        )}
+                        
+                        {/* Follow Button */}
+                        <TouchableOpacity 
+                          style={{
+                            width: '100%',
+                            paddingVertical: 8,
+                            paddingHorizontal: 24,
+                            backgroundColor: theme.colors.primary,
+                            borderRadius: 999,
+                            alignItems: 'center',
+                          }}
+                          onPress={(e: any) => {
+                            e.stopPropagation();
+                            // Follow logic here
+                          }}
+                        >
+                          <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>Follow</Text>
+                        </TouchableOpacity>
                       </View>
-                      <Text style={[styles.artistCardStats, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                        {formatNumber(artist.followers_count)} followers • {formatNumber(artist.tracks_count)} tracks
-                      </Text>
                 </TouchableOpacity>
-              ))}
-          </ScrollView>
+                  )}
+                  keyExtractor={(item) => item.id}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingRight: 24 }}
+                  ItemSeparatorComponent={() => <View style={{ width: 16 }} />}
+                />
         ) : (
                 <View style={styles.emptyState}>
                   <Ionicons name="mic" size={48} color={theme.colors.textSecondary} />
@@ -1886,9 +1969,13 @@ function DiscoverScreen() {
             {/* Recent Music */}
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="musical-notes" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                 <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Music</Text>
-                <TouchableOpacity>
-                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </View>
+                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
@@ -1963,7 +2050,7 @@ function DiscoverScreen() {
                     style={styles.playButton}
                     onPress={() => handleTrackPlay(track)}
                   >
-                    <Ionicons name="play" size={16} color="#DC2626" />
+                    <Ionicons name="play" size={16} color={theme.colors.primary} />
                   </TouchableOpacity>
                         <Text style={[styles.recentTrackDuration, { color: theme.colors.textSecondary }]}>
                           {formatDuration(track.duration)}
@@ -1987,7 +2074,14 @@ function DiscoverScreen() {
             {/* Featured Albums */}
             <View style={[styles.section, styles.firstSection]}>
               <View style={styles.sectionHeader}>
-                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Featured Albums</Text>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="albums" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
+                  <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Featured Albums</Text>
+                </View>
+                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
+                </TouchableOpacity>
               </View>
               
               {loadingAlbums ? (
@@ -2055,7 +2149,14 @@ function DiscoverScreen() {
             {/* Recent Albums */}
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Releases</Text>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="time" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
+                  <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Releases</Text>
+                </View>
+                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
+                </TouchableOpacity>
               </View>
               
               {loadingAlbums ? (
@@ -2106,7 +2207,7 @@ function DiscoverScreen() {
                             navigation.navigate('AlbumDetails', { albumId: album.id });
                           }}
                         >
-                          <Ionicons name="play" size={16} color="#DC2626" />
+                          <Ionicons name="play" size={16} color={theme.colors.primary} />
                         </TouchableOpacity>
                       </View>
                     </TouchableOpacity>
@@ -2129,9 +2230,13 @@ function DiscoverScreen() {
             {/* Featured Artists */}
             <View style={[styles.section, styles.firstSection]}>
               <View style={styles.sectionHeader}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="people" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                 <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>All Artists</Text>
-                <TouchableOpacity>
-                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </View>
+                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
@@ -2192,9 +2297,13 @@ function DiscoverScreen() {
             {/* Top Artists by Followers */}
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="trophy" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                 <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Top Artists</Text>
-                <TouchableOpacity>
-                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </View>
+                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
               </TouchableOpacity>
           </View>
               
@@ -2258,12 +2367,21 @@ function DiscoverScreen() {
 
         {activeTab === 'Events' && (
           <>
-            {/* Upcoming Events */}
-            <View style={styles.section}>
+            {/* Step 11: Events Near You - Perform or Attend */}
+            <WalkthroughableView
+              order={11}
+              name="discover_events"
+              text="Find events near YOU - music festivals, open mics, jam sessions. Attend to network with other creatives, or CREATE your own event and sell tickets directly to your followers. Perform live, book paid gigs, expand your reach."
+              style={[styles.section, styles.firstSection]}
+            >
               <View style={styles.sectionHeader}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="calendar" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                 <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Upcoming Events</Text>
-                <TouchableOpacity>
-                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </View>
+                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
@@ -2329,18 +2447,22 @@ function DiscoverScreen() {
                   <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>No events found</Text>
                 </View>
               )}
-            </View>
+            </WalkthroughableView>
           </>
         )}
 
         {activeTab === 'Playlists' && (
           <>
             {/* Public Playlists */}
-            <View style={styles.section}>
+            <View style={[styles.section, styles.firstSection]}>
               <View style={styles.sectionHeader}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="list" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                 <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Public Playlists</Text>
-                <TouchableOpacity>
-                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
+                </View>
+                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
@@ -2428,9 +2550,22 @@ function DiscoverScreen() {
 
         {activeTab === 'Services' && (
           <>
-            <View style={styles.section}>
+            {/* Step 12: Service Providers Marketplace */}
+            <WalkthroughableView
+              order={12}
+              name="service_providers"
+              text="Find professional services here: Mixing engineers, producers, studio spaces, photographers, videographers. Browse portfolios, read reviews, and hire directly. Post YOUR services to earn money from your skills - even non-music skills pay here!"
+              style={[styles.section, styles.firstSection]}
+            >
               <View style={styles.sectionHeader}>
-                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Service Providers</Text>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="briefcase" size={20} color="#DC2626" style={{ marginRight: 8 }} />
+                  <Text style={[styles.sectionTitle, { color: '#FFFFFF' }]}>Service Providers</Text>
+                </View>
+                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: '#DC2626', fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
+                </TouchableOpacity>
               </View>
               
               {loadingServices ? (
@@ -2501,15 +2636,22 @@ function DiscoverScreen() {
                   </Text>
                 </View>
               )}
-            </View>
+            </WalkthroughableView>
           </>
         )}
 
         {activeTab === 'Venues' && (
           <>
-            <View style={styles.section}>
+            <View style={[styles.section, styles.firstSection]}>
               <View style={styles.sectionHeader}>
-                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Popular Venues</Text>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="location" size={20} color="#DC2626" style={{ marginRight: 8 }} />
+                  <Text style={[styles.sectionTitle, { color: '#FFFFFF' }]}>Popular Venues</Text>
+                </View>
+                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: '#DC2626', fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
+                </TouchableOpacity>
               </View>
               {venues.length > 0 ? (
                 <View style={styles.venuesContainer}>
@@ -2589,6 +2731,39 @@ function DiscoverScreen() {
           }}
         />
       )}
+
+      {/* Search Modal */}
+      <Modal
+        visible={searchModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSearchModalVisible(false)}
+      >
+        <BlurView intensity={90} tint={theme.isDark ? "dark" : "light"} style={StyleSheet.absoluteFill}>
+          <SafeAreaView style={{ flex: 1 }}>
+            <View style={{ padding: 24 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 32 }}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: theme.isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)', borderRadius: 16, paddingHorizontal: 16 }}>
+                  <Ionicons name="search" size={20} color={theme.isDark ? "rgba(255,255,255,0.6)" : theme.colors.textSecondary} />
+                  <TextInput
+                    style={{ flex: 1, color: theme.colors.text, fontSize: 18, paddingVertical: 16, marginLeft: 12 }}
+                    placeholder="Search creators, music, events..."
+                    placeholderTextColor={theme.isDark ? "rgba(255,255,255,0.4)" : theme.colors.textSecondary}
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    autoFocus
+                  />
+                </View>
+                <TouchableOpacity onPress={() => setSearchModalVisible(false)} style={{ marginLeft: 16 }}>
+                  <Ionicons name="close" size={28} color={theme.colors.text} />
+                </TouchableOpacity>
+              </View>
+              {/* Search results would go here */}
+            </View>
+          </SafeAreaView>
+        </BlurView>
+      </Modal>
+
       </SafeAreaView>
     </View>
   );
@@ -2671,10 +2846,9 @@ const styles = StyleSheet.create({
   clearButton: {
     marginLeft: 8,
   },
-  tabsScrollView: {
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-    marginBottom: -10,
+  tabsWrapper: {
+    paddingHorizontal: 24,  // px-6
+    marginBottom: 32,       // mb-8
   },
   tabsContainer: {
     flexDirection: 'row',
@@ -2734,15 +2908,15 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   firstSection: {
-    marginTop: 8,
+    marginTop: 0,
     paddingTop: 0,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 12,
+    paddingHorizontal: 24,  // px-6
+    marginBottom: 16,        // mb-4
   },
   sectionTitle: {
     fontSize: 18,
@@ -3658,6 +3832,217 @@ const styles = StyleSheet.create({
   },
   albumStatText: {
     fontSize: 11,
+  },
+
+  // NEW MODERN HTML-BASED STYLES
+  topNav: {
+    paddingTop: 70,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingBottom: 16,
+  },
+  profileAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+  },
+  defaultAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pillSearchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 24,
+    borderWidth: 1,
+  },
+  pillSearchText: {
+    fontSize: 15,
+    flex: 1,
+  },
+  mainHeader: {
+    paddingHorizontal: 24,  // px-6
+    marginTop: 16,          // Reduced from 32 to bring closer to top nav
+    marginBottom: 24,       // mb-6
+  },
+  mainTitle: {
+    fontSize: 52,
+    fontWeight: '300',
+    letterSpacing: -1,
+    marginBottom: 8,
+  },
+  mainSubtitle: {
+    fontSize: 15,
+    letterSpacing: 0.5,
+  },
+  tabsContentContainer: {
+    paddingBottom: 8,  // pb-2
+    alignItems: 'baseline',
+  },
+  textTab: {
+    marginRight: 48,  // Increased spacing between tabs
+  },
+  textTabLabel: {
+    fontSize: 28,
+    fontWeight: '400',
+    letterSpacing: -0.5,
+  },
+  textTabLabelActive: {
+    fontWeight: '600',
+  },
+  htmlCard: {
+    width: 280,
+    height: 380,
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginRight: 16,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  htmlCardImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
+  },
+  htmlCardGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '60%',
+  },
+  htmlBadge: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    zIndex: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  htmlBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'white',
+    letterSpacing: 1.2,
+  },
+  htmlPlayButton: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -32 }, { translateY: -32 }],
+    zIndex: 20,
+  },
+  htmlPlayButtonBlur: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  htmlCardContent: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 20,
+    zIndex: 10,
+  },
+  htmlCardTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: 'white',
+    marginBottom: 4,
+    letterSpacing: -0.5,
+  },
+  htmlCardArtist: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.7)',
+    marginBottom: 12,
+  },
+  htmlCardMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  htmlCardMetaText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.4)',
+    fontWeight: '500',
+    marginLeft: 8,
+  },
+  htmlDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    marginLeft: 8,
+  },
+  htmlEmptyState: {
+    padding: 48,
+    alignItems: 'center',
+  },
+  htmlEmptyStateTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: 'white',
+    marginBottom: 8,
+    marginTop: 16,
+  },
+  htmlEmptyStateText: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.5)',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  htmlLearnMoreLink: {
+    fontSize: 14,
+    color: '#DC2626',
+    fontWeight: '600',
+  },
+  // Upload Prompt Card Styles
+  uploadPromptCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 2,
+    gap: 16,
+  },
+  uploadPromptIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(236, 72, 153, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uploadPromptContent: {
+    flex: 1,
+  },
+  uploadPromptTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  uploadPromptSubtitle: {
+    fontSize: 13,
+    fontWeight: '500',
   },
 });
 

@@ -3,7 +3,18 @@
     "allow": [
       "Bash(xargs basename:*)",
       "Bash(npm install:*)",
-      "Bash(npm start)"
+      "Bash(npm start)",
+      "Bash(tree:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(npx eas-cli:*)",
+      "Bash(npx expo:*)",
+      "Bash(grep:*)",
+      "Bash(node backfill-accurate-file-sizes.js:*)",
+      "Bash(cat:*)",
+      "Bash(curl:*)",
+      "Bash(chmod:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

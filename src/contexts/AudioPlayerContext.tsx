@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { setAudioModeAsync, AudioPlayer } from 'expo-audio';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { backgroundAudioService, BackgroundAudioTrack } from '../services/BackgroundAudioService';
 // import { realAudioProcessor } from '../services/RealAudioProcessor';
@@ -26,6 +26,8 @@ interface AudioTrack {
   lyrics?: string;
   lyrics_language?: string;
   has_lyrics?: boolean;
+  // Moderation fields
+  moderation_status?: 'pending_check' | 'checking' | 'clean' | 'flagged' | 'approved' | 'rejected' | 'appealed';
 }
 
 interface AudioPlayerContextType {
@@ -60,6 +62,20 @@ interface AudioPlayerContextType {
 }
 
 const AudioPlayerContext = createContext<AudioPlayerContextType | undefined>(undefined);
+
+// Helper function to get moderation error messages
+const getModerationErrorMessage = (status: string): string => {
+  switch (status) {
+    case 'flagged':
+      return 'This track is under review by our moderation team.';
+    case 'rejected':
+      return 'This track was not approved. You can appeal this decision.';
+    case 'appealed':
+      return 'Your appeal is being reviewed. We\'ll notify you soon.';
+    default:
+      return 'This track is currently unavailable.';
+  }
+};
 
 interface AudioPlayerProviderProps {
   children: ReactNode;
@@ -188,6 +204,21 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
 
   const play = async (track: AudioTrack) => {
     try {
+      // PHASE 2: Moderation Playability Check
+      // Block playback for tracks that are flagged, rejected, or appealed
+      const unplayableStatuses = ['flagged', 'rejected', 'appealed'];
+      const moderationStatus = (track as any).moderation_status;
+      
+      if (moderationStatus && unplayableStatuses.includes(moderationStatus)) {
+        const errorMessage = getModerationErrorMessage(moderationStatus);
+        setError(errorMessage);
+        setIsLoading(false);
+        
+        // Show user-friendly alert
+        Alert.alert('Track Unavailable', errorMessage, [{ text: 'OK' }]);
+        return; // Exit early without throwing
+      }
+      
       setIsLoading(true);
       setError(null);
       

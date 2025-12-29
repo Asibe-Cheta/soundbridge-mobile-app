@@ -67,30 +67,46 @@ export default function UploadLimitCard({ quota, loading, onUpgrade }: UploadLim
     return null;
   }
 
-  const remaining = quota.remaining ?? (quota.upload_limit != null ? quota.upload_limit - quota.uploads_this_month : null);
   const tierLabel = formatTierLabel(quota.tier);
-  const resetDate = quota.reset_date ? new Date(quota.reset_date) : null;
   const tier = (quota.tier ?? 'free').toLowerCase();
+  const storage = quota.storage;
+
+  // Show upgrade if: Free tier OR storage full and not on unlimited tier
   const showUpgrade = onUpgrade && (tier === 'free' || (tier === 'premium' && !quota.can_upload));
 
   return (
     <GlassContainer>
       <View style={styles.headerRow}>
-        <Ionicons name="musical-notes" size={22} color={theme.colors.primary} />
-        <Text style={[styles.title, { color: theme.colors.text }]}>{tierLabel}</Text>
+        <Ionicons name="cloud" size={22} color={theme.colors.primary} />
+        <Text style={[styles.title, { color: theme.colors.text }]}>{tierLabel} Tier</Text>
       </View>
 
-      {quota.is_unlimited ? (
-        <Text style={[styles.description, { color: theme.colors.textSecondary }]}>Unlimited uploads available.</Text>
+      {/* Storage-based information */}
+      {storage ? (
+        <>
+          <Text style={[styles.description, { color: theme.colors.textSecondary }]}>
+            {storage.storage_limit_formatted} storage · {storage.approximate_tracks}
+          </Text>
+          <Text style={[styles.description, { color: theme.colors.textSecondary, marginTop: 4 }]}>
+            {storage.is_unlimited_tier ? 'Unlimited uploads*' : tier === 'free' ? '3 uploads total' : 'Unlimited uploads*'}
+          </Text>
+          {!storage.is_unlimited_tier && tier === 'premium' && (
+            <Text style={[styles.resetText, { color: theme.colors.textSecondary, fontSize: 11 }]}>
+              *Limited by storage capacity
+            </Text>
+          )}
+        </>
       ) : (
-        <Text style={[styles.description, { color: theme.colors.textSecondary }]}>
-          {quota.upload_limit ?? 'N/A'} {quota.tier?.toLowerCase() === 'free' ? 'lifetime' : quota.tier?.toLowerCase() === 'premium' ? 'uploads per month' : 'uploads'} · {remaining ?? 0} remaining
-        </Text>
-      )}
-
-      {/* Show reset date for Premium tier (monthly reset) */}
-      {resetDate && !quota.is_unlimited && tier === 'premium' && (
-        <Text style={[styles.resetText, { color: theme.colors.textSecondary }]}>Resets {resetDate.toLocaleDateString()}</Text>
+        // Fallback to old upload count display if storage not available
+        <>
+          {quota.is_unlimited ? (
+            <Text style={[styles.description, { color: theme.colors.textSecondary }]}>Unlimited uploads available.</Text>
+          ) : (
+            <Text style={[styles.description, { color: theme.colors.textSecondary }]}>
+              {quota.upload_limit ?? 'N/A'} {tier === 'free' ? 'uploads total' : 'uploads/month'} · {quota.remaining ?? 0} remaining
+            </Text>
+          )}
+        </>
       )}
 
       {showUpgrade && (
@@ -100,11 +116,13 @@ export default function UploadLimitCard({ quota, loading, onUpgrade }: UploadLim
           accessibilityRole="button"
         >
           <Ionicons name="arrow-up-circle" size={18} color="#FFFFFF" style={styles.upgradeIcon} />
-          <Text style={styles.upgradeText}>Need more uploads? Upgrade</Text>
+          <Text style={styles.upgradeText}>
+            {tier === 'free' ? 'Upgrade for 2GB (66× more!)' : 'Upgrade for 10GB storage'}
+          </Text>
         </TouchableOpacity>
       )}
 
-      {!quota.can_upload && (
+      {!quota.can_upload && storage && (
         <View
           style={[
             styles.warning,
@@ -116,7 +134,9 @@ export default function UploadLimitCard({ quota, loading, onUpgrade }: UploadLim
           accessibilityRole="alert"
         >
           <Ionicons name="alert-circle" size={18} color="#B91C1C" style={styles.warningIcon} />
-          <Text style={[styles.warningText, { color: '#B91C1C' }]}>Upload limit reached. Upgrade or wait for reset.</Text>
+          <Text style={[styles.warningText, { color: '#B91C1C' }]}>
+            Storage limit reached ({storage.storage_percent_used.toFixed(0)}% used). Delete files or upgrade.
+          </Text>
         </View>
       )}
     </GlassContainer>
