@@ -88,17 +88,18 @@ const BANK_CODE_TO_COUNTRY: Record<string, string> = {
 export async function detectCreatorCountry(
   creatorId: string
 ): Promise<CountryInfo> {
-  const { createClient } = await import('@/lib/supabase/server');
-  const supabase = createClient();
+  // ✅ CORRECTED: Use existing service client
+  const { createServiceClient } = await import('@/src/lib/supabase');
+  const supabase = createServiceClient();
 
   // Try 1: Check profiles.country_code
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('country_code')
-    .eq('id', creatorId)
+    .eq('id', creatorId)  // ✅ CORRECTED: profiles uses 'id'
     .single();
 
-  if (profile?.country_code) {
+  if (!profileError && profile?.country_code) {
     const payoutMethod = WISE_COUNTRIES.includes(profile.country_code)
       ? 'wise'
       : 'stripe_connect';
@@ -111,16 +112,16 @@ export async function detectCreatorCountry(
   }
 
   // Try 2: Infer from bank account currency
-  const { data: bankAccount } = await supabase
+  const { data: bankAccount, error: bankError } = await supabase
     .from('creator_bank_accounts')
     .select('currency, routing_number_encrypted')
-    .eq('creator_id', creatorId)
+    .eq('user_id', creatorId)  // ✅ CORRECTED: creator_bank_accounts uses 'user_id'
     .eq('is_verified', true)
     .order('created_at', { ascending: false })
     .limit(1)
     .single();
 
-  if (bankAccount?.currency) {
+  if (!bankError && bankAccount?.currency) {
     const countryCode = CURRENCY_TO_COUNTRY[bankAccount.currency] || 'US';
     const payoutMethod = WISE_COUNTRIES.includes(countryCode)
       ? 'wise'
@@ -209,14 +210,15 @@ export interface CreatorBankAccount {
 export async function getCreatorBankAccount(
   creatorId: string
 ): Promise<CreatorBankAccount | null> {
-  const { createClient } = await import('@/lib/supabase/server');
-  const supabase = createClient();
+  // ✅ CORRECTED: Use existing service client
+  const { createServiceClient } = await import('@/src/lib/supabase');
+  const supabase = createServiceClient();
 
   // Fetch verified bank account
   const { data: bankAccount, error } = await supabase
     .from('creator_bank_accounts')
     .select('*')
-    .eq('creator_id', creatorId)
+    .eq('user_id', creatorId)  // ✅ CORRECTED: creator_bank_accounts uses 'user_id'
     .eq('is_verified', true)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -226,7 +228,12 @@ export async function getCreatorBankAccount(
     return null;
   }
 
-  // Decrypt sensitive fields
+  // ✅ CORRECTED: Add null checks
+  if (!bankAccount.account_number_encrypted || !bankAccount.routing_number_encrypted) {
+    return null;
+  }
+
+  // Decrypt sensitive fields (or use as-is if not encrypted yet)
   const accountNumber = await decryptField(
     bankAccount.account_number_encrypted
   );
@@ -237,15 +244,16 @@ export async function getCreatorBankAccount(
     bankAccount.routing_number_encrypted
   );
 
-  // Determine identifier type from country/currency
-  const identifierType = getIdentifierType(bankAccount.currency);
+  if (!accountNumber || !routingIdentifier) {
+    return null;
+  }
 
   return {
     accountNumber,
-    bankCode: identifierType === 'bank_code' ? routingIdentifier : '',
-    accountHolderName: bankAccount.account_holder_name,
-    currency: bankAccount.currency,
-    country: getCountryFromCurrency(bankAccount.currency),
+    bankCode: routingIdentifier,  // ✅ CORRECTED: Works for all countries
+    accountHolderName: bankAccount.account_holder_name || '',
+    currency: bankAccount.currency || 'USD',
+    country: getCountryFromCurrency(bankAccount.currency || 'USD'),
   };
 }
 
@@ -283,14 +291,19 @@ function getCountryFromCurrency(currency: string): string {
 
 /**
  * Decrypt encrypted field
+ * ✅ CORRECTED: Handle case where encryption may not be implemented yet
  */
 async function decryptField(encryptedValue: string): Promise<string> {
-  // TODO: Implement decryption
+  // TODO: Implement proper decryption when encryption is added
+  // Check your actual implementation in apps/web/app/api/user/revenue/bank-account/route.ts
+  //
   // If using Supabase Vault:
+  // const supabase = createServiceClient();
   // const { data } = await supabase.rpc('decrypt_field', { encrypted_value: encryptedValue });
   // return data;
-
-  return encryptedValue; // Placeholder
+  //
+  // For now, if values are stored unencrypted, return as-is
+  return encryptedValue;
 }
 ```
 
@@ -302,10 +315,11 @@ async function decryptField(encryptedValue: string): Promise<string> {
 
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { payoutToCreator } from '@/lib/wise/payout';
-import { detectCreatorCountry } from '@/lib/wise/country-detection';
-import { getCreatorBankAccount } from '@/lib/wise/bank-account-fetcher';
+import { getSupabaseRouteClient } from '@/src/lib/api-auth';  // ✅ CORRECTED
+import { createServiceClient } from '@/src/lib/supabase';  // ✅ CORRECTED
+import { payoutToCreator } from '@/src/lib/wise/payout';  // ✅ CORRECTED
+import { detectCreatorCountry } from '@/src/lib/wise/country-detection';
+import { getCreatorBankAccount } from '@/src/lib/wise/bank-account-fetcher';
 
 /**
  * POST /api/creator/payouts/request
@@ -314,13 +328,8 @@ import { getCreatorBankAccount } from '@/lib/wise/bank-account-fetcher';
  */
 export async function POST(req: NextRequest) {
   try {
-    const supabase = createClient();
-
-    // 1. Authenticate creator
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
+    // ✅ CORRECTED: Use getSupabaseRouteClient for authentication
+    const { supabase, user, error: authError } = await getSupabaseRouteClient(req, true);
 
     if (authError || !user) {
       return NextResponse.json(
@@ -344,10 +353,13 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Check creator balance
-    const { data: revenue, error: revenueError } = await supabase
+    // ✅ CORRECTED: Use service client for database queries
+    const serviceSupabase = createServiceClient();
+
+    const { data: revenue, error: revenueError } = await serviceSupabase
       .from('creator_revenue')
       .select('available_balance, currency')
-      .eq('creator_id', creatorId)
+      .eq('user_id', creatorId)  // ✅ CORRECTED: creator_revenue uses 'user_id'
       .single();
 
     if (revenueError || !revenue) {
