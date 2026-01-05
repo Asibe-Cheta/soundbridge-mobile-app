@@ -295,12 +295,12 @@ class InAppPurchaseService {
           // Defensive: Use optional chaining - subscription might be null for free users
           const tier = data?.data?.subscription?.tier;
           const status = data?.data?.subscription?.status;
-          
-          if (tier === 'pro' && status === 'active') {
-            console.log(`✅ Subscription confirmed as Pro (attempt ${i + 1}/${maxAttempts})`);
+
+          if ((tier === 'premium' || tier === 'unlimited') && status === 'active') {
+            console.log(`✅ Subscription confirmed as ${tier} (attempt ${i + 1}/${maxAttempts})`);
             return true; // Success!
           }
-          
+
           console.log(`⏳ Subscription not yet active (attempt ${i + 1}/${maxAttempts}), tier: ${tier}, status: ${status}`);
         } else {
           console.warn(`⚠️ Polling attempt ${i + 1} failed with status: ${response.status}`);

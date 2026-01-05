@@ -22,6 +22,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { currencyService } from '../services/CurrencyService';
 import BackButton from '../components/BackButton';
+import { revenueService } from '../services/revenueService';
 import {
   fetchServiceProviderProfile,
   fetchProviderBookings,
@@ -91,6 +92,15 @@ export default function ServiceProviderDashboardScreen() {
   const [availability, setAvailability] = useState<ServiceProviderAvailability[]>([]);
   const [reviews, setReviews] = useState<ServiceReview[]>([]);
 
+  // Earnings state
+  const [earnings, setEarnings] = useState<{
+    totalEarnings: number;
+    availableBalance: number;
+    pendingBalance: number;
+    currency: string;
+  } | null>(null);
+  const [loadingEarnings, setLoadingEarnings] = useState(false);
+
   // Offerings state
   const [showOfferingForm, setShowOfferingForm] = useState(false);
   const [editingOffering, setEditingOffering] = useState<ServiceOffering | null>(null);
@@ -120,6 +130,7 @@ export default function ServiceProviderDashboardScreen() {
 
   useEffect(() => {
     loadDashboardData();
+    loadEarnings();
   }, [userId]);
 
   const loadDashboardData = async () => {
@@ -303,9 +314,113 @@ export default function ServiceProviderDashboardScreen() {
     }
   };
 
+  const loadEarnings = async () => {
+    if (!userId) return;
+
+    setLoadingEarnings(true);
+    try {
+      const earningsData = await revenueService.getEarnings(userId);
+      setEarnings(earningsData);
+    } catch (error) {
+      console.error('Error loading earnings:', error);
+      // Don't show alert, just fail silently for earnings
+      setEarnings(null);
+    } finally {
+      setLoadingEarnings(false);
+    }
+  };
+
   const onRefresh = () => {
     setRefreshing(true);
     loadDashboardData();
+    loadEarnings();
+  };
+
+  // ============================================================================
+  // EARNINGS SECTION (Section 0 - First)
+  // ============================================================================
+
+  const renderEarningsSection = () => {
+    return (
+      <View style={[styles.sectionCard, { backgroundColor: theme.colors.cardBackground, borderColor: theme.colors.borderCard }]}>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Earnings & Payouts</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('PaymentMethods' as never)}>
+            <Text style={[styles.editButton, { color: theme.colors.primary }]}>Payment Setup</Text>
+          </TouchableOpacity>
+        </View>
+
+        {loadingEarnings ? (
+          <View style={styles.earningsLoading}>
+            <ActivityIndicator size="small" color={theme.colors.primary} />
+            <Text style={[styles.earningsLoadingText, { color: theme.colors.textSecondary }]}>Loading earnings...</Text>
+          </View>
+        ) : earnings ? (
+          <>
+            <View style={styles.earningsCards}>
+              {/* Total Earnings Card */}
+              <View style={[styles.earningsCard, { backgroundColor: theme.colors.accentPurple + '15', borderColor: theme.colors.accentPurple + '40' }]}>
+                <Ionicons name="trophy" size={24} color={theme.colors.accentPurple} />
+                <Text style={[styles.earningsLabel, { color: theme.colors.textSecondary }]}>Total Earnings</Text>
+                <Text style={[styles.earningsValue, { color: theme.colors.text }]}>
+                  {earnings.currency} {earnings.totalEarnings.toFixed(2)}
+                </Text>
+              </View>
+
+              {/* Available Balance Card */}
+              <View style={[styles.earningsCard, { backgroundColor: '#34d399' + '15', borderColor: '#34d399' + '40' }]}>
+                <Ionicons name="wallet" size={24} color="#34d399" />
+                <Text style={[styles.earningsLabel, { color: theme.colors.textSecondary }]}>Available</Text>
+                <Text style={[styles.earningsValue, { color: theme.colors.text }]}>
+                  {earnings.currency} {earnings.availableBalance.toFixed(2)}
+                </Text>
+              </View>
+
+              {/* Pending Balance Card */}
+              <View style={[styles.earningsCard, { backgroundColor: '#facc15' + '15', borderColor: '#facc15' + '40' }]}>
+                <Ionicons name="time" size={24} color="#facc15" />
+                <Text style={[styles.earningsLabel, { color: theme.colors.textSecondary }]}>Pending</Text>
+                <Text style={[styles.earningsValue, { color: theme.colors.text }]}>
+                  {earnings.currency} {earnings.pendingBalance.toFixed(2)}
+                </Text>
+              </View>
+            </View>
+
+            {/* Request Payout Button */}
+            <TouchableOpacity
+              style={styles.payoutButton}
+              onPress={() => navigation.navigate('RequestPayout' as never)}
+              disabled={earnings.availableBalance <= 0}
+            >
+              <LinearGradient
+                colors={earnings.availableBalance > 0 ? ['#34d399', '#10b981'] : ['#6b7280', '#6b7280']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.payoutButtonGradient}
+              >
+                <Ionicons name="cash" size={20} color="#FFFFFF" />
+                <Text style={styles.payoutButtonText}>
+                  {earnings.availableBalance > 0 ? 'Request Payout' : 'No Balance to Withdraw'}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {/* Info Text */}
+            <Text style={[styles.earningsInfo, { color: theme.colors.textMuted }]}>
+              Available balance can be withdrawn anytime. Pending balance includes funds from recent bookings that are still processing.
+            </Text>
+          </>
+        ) : (
+          <View style={[styles.emptyState, { borderColor: theme.colors.borderCard }]}>
+            <Ionicons name="cash-outline" size={48} color={theme.colors.textMuted} />
+            <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>No earnings yet</Text>
+            <Text style={[styles.emptySubtext, { color: theme.colors.textMuted }]}>
+              Complete bookings to start earning. Your earnings will appear here.
+            </Text>
+          </View>
+        )}
+      </View>
+    );
   };
 
   // ============================================================================
@@ -428,29 +543,42 @@ export default function ServiceProviderDashboardScreen() {
 
         {/* Prerequisites Checklist */}
         <View style={styles.prerequisitesList}>
-          {prerequisitesArray.map((prereq) => (
-            <View
-              key={prereq.key}
-              style={[
-                styles.prerequisiteCard,
-                { backgroundColor: prereq.satisfied ? '#bbf7d0' + '20' : '#fca5a5' + '20', borderColor: prereq.satisfied ? '#bbf7d0' : '#fca5a5' },
-              ]}
-            >
-              <Ionicons
-                name={prereq.satisfied ? 'checkmark-circle' : 'alert-circle'}
-                size={24}
-                color={prereq.satisfied ? '#34d399' : '#f87171'}
-              />
-              <View style={styles.prerequisiteContent}>
-                <Text style={[styles.prerequisiteLabel, { color: prereq.satisfied ? '#bbf7d0' : '#fca5a5' }]}>
-                  {prereq.label}
-                </Text>
-                {prereq.details && (
-                  <Text style={[styles.prerequisiteDetails, { color: theme.colors.textSecondary }]}>{prereq.details}</Text>
+          {prerequisitesArray.map((prereq) => {
+            // Check if this prerequisite requires navigation
+            const requiresNavigation = prereq.key === 'connectAccount' && !prereq.satisfied;
+            const PrereqContainer = requiresNavigation ? TouchableOpacity : View;
+
+            return (
+              <PrereqContainer
+                key={prereq.key}
+                style={[
+                  styles.prerequisiteCard,
+                  { backgroundColor: prereq.satisfied ? '#bbf7d0' + '20' : '#fca5a5' + '20', borderColor: prereq.satisfied ? '#bbf7d0' : '#fca5a5' },
+                ]}
+                onPress={requiresNavigation ? () => navigation.navigate('PaymentMethods' as never) : undefined}
+              >
+                <Ionicons
+                  name={prereq.satisfied ? 'checkmark-circle' : 'alert-circle'}
+                  size={24}
+                  color={prereq.satisfied ? '#34d399' : '#f87171'}
+                />
+                <View style={styles.prerequisiteContent}>
+                  <Text style={[styles.prerequisiteLabel, { color: prereq.satisfied ? '#bbf7d0' : '#fca5a5' }]}>
+                    {prereq.label}
+                  </Text>
+                  {prereq.details && (
+                    <Text style={[styles.prerequisiteDetails, { color: theme.colors.textSecondary }]}>
+                      {prereq.details}
+                      {requiresNavigation && ' - Tap to set up'}
+                    </Text>
+                  )}
+                </View>
+                {requiresNavigation && (
+                  <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
                 )}
-              </View>
-            </View>
-          ))}
+              </PrereqContainer>
+            );
+          })}
         </View>
 
         {/* Last Submission Info */}
@@ -1494,6 +1622,9 @@ export default function ServiceProviderDashboardScreen() {
         contentContainerStyle={styles.contentContainer}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
       >
+        {/* Section 0: Earnings & Payouts */}
+        {renderEarningsSection()}
+
         {/* Section 1: Badges */}
         {renderBadgesSection()}
 
@@ -2263,5 +2394,61 @@ const styles = StyleSheet.create({
   },
   reviewBookingRef: {
     fontSize: 12,
+  },
+  // Earnings Section
+  earningsLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingVertical: 24,
+  },
+  earningsLoadingText: {
+    fontSize: 14,
+  },
+  earningsCards: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  earningsCard: {
+    flex: 1,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    gap: 8,
+  },
+  earningsLabel: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  earningsValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  payoutButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  payoutButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    gap: 8,
+  },
+  payoutButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  earningsInfo: {
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });

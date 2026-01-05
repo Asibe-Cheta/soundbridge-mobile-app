@@ -7,6 +7,10 @@ import {
   ActivityIndicator,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
+  Modal,
+  FlatList,
+  Platform,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Session } from '@supabase/supabase-js';
@@ -35,6 +39,8 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [locationDetection, setLocationDetection] = useState<LocationDetectionResult | null>(null);
   const [detectingLocation, setDetectingLocation] = useState(true);
+  const [showCountryModal, setShowCountryModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     loadSupportedCountries();
@@ -102,18 +108,58 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
           { country_code: 'SE', country_name: 'Sweden', currency: 'SEK', banking_system: 'SEPA' },
           { country_code: 'CH', country_name: 'Switzerland', currency: 'CHF', banking_system: 'SEPA' },
 
-          // United Arab Emirates
-          { country_code: 'AE', country_name: 'United Arab Emirates', currency: 'AED', banking_system: 'UAEFTS' },
+          // ✅ ALL WISE-SUPPORTED COUNTRIES (50 currencies, 160+ countries)
+          // Wise handles payouts for countries not supported by Stripe Connect
 
-          // ⚠️ NOTE: The following countries are NOT currently supported by Stripe Connect
-          // but may be added in future. Users in these countries should use alternative methods:
-          // - Nigeria (NG) - Use Wise or alternative payout providers
-          // - Ghana (GH) - Use Wise or alternative payout providers
-          // - Kenya (KE) - Use Wise or alternative payout providers
-          // - Egypt (EG) - Use Wise or alternative payout providers
-          // - India (IN) - Limited Stripe support, check requirements
-          // - Brazil (BR), Mexico (MX), and other LatAm - Check Stripe docs
-          // - China (CN) - Not supported for Connect payouts
+          // Middle East & North Africa
+          { country_code: 'AE', country_name: 'United Arab Emirates', currency: 'AED', banking_system: 'UAEFTS' },
+          { country_code: 'EG', country_name: 'Egypt', currency: 'EGP', banking_system: 'Egyptian Banks' },
+          { country_code: 'IL', country_name: 'Israel', currency: 'ILS', banking_system: 'Israeli Banks' },
+          { country_code: 'MA', country_name: 'Morocco', currency: 'MAD', banking_system: 'Moroccan Banks' },
+          { country_code: 'TR', country_name: 'Turkey', currency: 'TRY', banking_system: 'Turkish Banks' },
+
+          // Sub-Saharan Africa
+          { country_code: 'GH', country_name: 'Ghana', currency: 'GHS', banking_system: 'GhIPSS' },
+          { country_code: 'KE', country_name: 'Kenya', currency: 'KES', banking_system: 'KEPSS' },
+          { country_code: 'NG', country_name: 'Nigeria', currency: 'NGN', banking_system: 'NIBSS' },
+          { country_code: 'TZ', country_name: 'Tanzania', currency: 'TZS', banking_system: 'Tanzanian Banks' },
+          { country_code: 'UG', country_name: 'Uganda', currency: 'UGX', banking_system: 'Ugandan Banks' },
+          { country_code: 'ZA', country_name: 'South Africa', currency: 'ZAR', banking_system: 'SAMOS' },
+
+          // Asia (East & Southeast)
+          { country_code: 'BD', country_name: 'Bangladesh', currency: 'BDT', banking_system: 'Bangladeshi Banks' },
+          { country_code: 'CN', country_name: 'China', currency: 'CNY', banking_system: 'Chinese Banks' },
+          { country_code: 'ID', country_name: 'Indonesia', currency: 'IDR', banking_system: 'Indonesian Banks' },
+          { country_code: 'IN', country_name: 'India', currency: 'INR', banking_system: 'NEFT/RTGS' },
+          { country_code: 'KR', country_name: 'South Korea', currency: 'KRW', banking_system: 'Korean Banks' },
+          { country_code: 'LK', country_name: 'Sri Lanka', currency: 'LKR', banking_system: 'Sri Lankan Banks' },
+          { country_code: 'MY', country_name: 'Malaysia', currency: 'MYR', banking_system: 'Malaysian Banks' },
+          { country_code: 'NP', country_name: 'Nepal', currency: 'NPR', banking_system: 'Nepalese Banks' },
+          { country_code: 'PH', country_name: 'Philippines', currency: 'PHP', banking_system: 'Philippine Banks' },
+          { country_code: 'PK', country_name: 'Pakistan', currency: 'PKR', banking_system: 'Pakistani Banks' },
+          { country_code: 'TH', country_name: 'Thailand', currency: 'THB', banking_system: 'Thai Banks' },
+          { country_code: 'VN', country_name: 'Vietnam', currency: 'VND', banking_system: 'Vietnamese Banks' },
+
+          // Asia (Caucasus & Central)
+          { country_code: 'GE', country_name: 'Georgia', currency: 'GEL', banking_system: 'Georgian Banks' },
+
+          // Latin America & Caribbean
+          { country_code: 'AR', country_name: 'Argentina', currency: 'ARS', banking_system: 'Argentine Banks' },
+          { country_code: 'BR', country_name: 'Brazil', currency: 'BRL', banking_system: 'PIX' },
+          { country_code: 'CL', country_name: 'Chile', currency: 'CLP', banking_system: 'Chilean Banks' },
+          { country_code: 'CO', country_name: 'Colombia', currency: 'COP', banking_system: 'Colombian Banks' },
+          { country_code: 'CR', country_name: 'Costa Rica', currency: 'CRC', banking_system: 'Costa Rican Banks' },
+          { country_code: 'MX', country_name: 'Mexico', currency: 'MXN', banking_system: 'SPEI' },
+          { country_code: 'UY', country_name: 'Uruguay', currency: 'UYU', banking_system: 'Uruguayan Banks' },
+
+          // Europe (Non-EU/EEA - already covered above)
+          { country_code: 'UA', country_name: 'Ukraine', currency: 'UAH', banking_system: 'Ukrainian Banks' },
+
+          // ⚠️ NOTE: Dual payment provider system
+          // - Stripe Connect: US, UK, EU, Canada, Australia, Singapore, Japan, Hong Kong, NZ, UAE, etc.
+          // - Wise API: All countries listed above (50 currencies, 160+ destinations)
+          // Backend automatically routes to correct provider based on creator location
+          // See PAYOUT_SYSTEM_DECISIONS.md for full details
         ]);
       }
     } catch (error) {
@@ -338,13 +384,328 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         field_validation: { bank_code: '^\\d{3}$' },
       },
 
-      // ⚠️ UNSUPPORTED COUNTRIES REMOVED
-      // The following countries are NOT supported by Stripe Connect:
-      // - Mexico (MX), Brazil (BR), Argentina (AR), Chile (CL), Colombia (CO)
-      // - China (CN), India (IN), Thailand (TH), Philippines (PH), Indonesia (ID), Vietnam (VN), South Korea (KR)
-      // - Nigeria (NG), Ghana (GH), Kenya (KE), Egypt (EG), South Africa (ZA)
-      // - Saudi Arabia (SA)
-      // Users in these countries should use alternative withdrawal methods (e.g., Wise, cryptocurrency, etc.)
+      // ✅ WISE-SUPPORTED AFRICAN COUNTRIES (Payouts via Wise API)
+      NG: {
+        country_code: 'NG', country_name: 'Nigeria', currency: 'NGN', banking_system: 'NIBSS',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number (NUBAN)', placeholder: '0123456789' },
+          bank_code: { required: true, label: 'Bank Code', placeholder: '044' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: { account_number: '^\\d{10}$', bank_code: '^\\d{3}$' },
+      },
+      GH: {
+        country_code: 'GH', country_name: 'Ghana', currency: 'GHS', banking_system: 'GhIPSS',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '123456789012' },
+          swift_code: { required: true, label: 'SWIFT/BIC Code', placeholder: 'ABCDGHAC' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: { swift_code: '^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$' },
+      },
+      KE: {
+        country_code: 'KE', country_name: 'Kenya', currency: 'KES', banking_system: 'KEPSS',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          swift_code: { required: true, label: 'SWIFT/BIC Code', placeholder: 'ABCDKENA' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: { swift_code: '^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$' },
+      },
+      ZA: {
+        country_code: 'ZA', country_name: 'South Africa', currency: 'ZAR', banking_system: 'SAMOS',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '12345678' },
+          branch_code: { required: true, label: 'Branch Code', placeholder: '123456' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: { branch_code: '^\\d{6}$' },
+      },
+
+      // ✅ WISE-SUPPORTED COUNTRIES - Asia
+      IN: {
+        country_code: 'IN', country_name: 'India', currency: 'INR', banking_system: 'NEFT/RTGS',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          ifsc_code: { required: true, label: 'IFSC Code', placeholder: 'ABCD0123456' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: { ifsc_code: '^[A-Z]{4}0[A-Z0-9]{6}$' },
+      },
+      ID: {
+        country_code: 'ID', country_name: 'Indonesia', currency: 'IDR', banking_system: 'Indonesian Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      MY: {
+        country_code: 'MY', country_name: 'Malaysia', currency: 'MYR', banking_system: 'Malaysian Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      PH: {
+        country_code: 'PH', country_name: 'Philippines', currency: 'PHP', banking_system: 'Philippine Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      TH: {
+        country_code: 'TH', country_name: 'Thailand', currency: 'THB', banking_system: 'Thai Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      VN: {
+        country_code: 'VN', country_name: 'Vietnam', currency: 'VND', banking_system: 'Vietnamese Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      BD: {
+        country_code: 'BD', country_name: 'Bangladesh', currency: 'BDT', banking_system: 'Bangladeshi Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      PK: {
+        country_code: 'PK', country_name: 'Pakistan', currency: 'PKR', banking_system: 'Pakistani Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      LK: {
+        country_code: 'LK', country_name: 'Sri Lanka', currency: 'LKR', banking_system: 'Sri Lankan Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      NP: {
+        country_code: 'NP', country_name: 'Nepal', currency: 'NPR', banking_system: 'Nepalese Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      CN: {
+        country_code: 'CN', country_name: 'China', currency: 'CNY', banking_system: 'Chinese Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      KR: {
+        country_code: 'KR', country_name: 'South Korea', currency: 'KRW', banking_system: 'Korean Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+
+      // ✅ WISE-SUPPORTED COUNTRIES - Latin America
+      BR: {
+        country_code: 'BR', country_name: 'Brazil', currency: 'BRL', banking_system: 'PIX',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '12345678' },
+          branch_code: { required: true, label: 'Agency/Branch Code', placeholder: '1234' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: { branch_code: '^\\d{4}$' },
+      },
+      MX: {
+        country_code: 'MX', country_name: 'Mexico', currency: 'MXN', banking_system: 'SPEI',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'CLABE Number', placeholder: '012345678901234567' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: { account_number: '^\\d{18}$' },
+      },
+      AR: {
+        country_code: 'AR', country_name: 'Argentina', currency: 'ARS', banking_system: 'Argentine Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      CL: {
+        country_code: 'CL', country_name: 'Chile', currency: 'CLP', banking_system: 'Chilean Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      CO: {
+        country_code: 'CO', country_name: 'Colombia', currency: 'COP', banking_system: 'Colombian Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      CR: {
+        country_code: 'CR', country_name: 'Costa Rica', currency: 'CRC', banking_system: 'Costa Rican Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      UY: {
+        country_code: 'UY', country_name: 'Uruguay', currency: 'UYU', banking_system: 'Uruguayan Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+
+      // ✅ WISE-SUPPORTED COUNTRIES - Middle East & Africa
+      EG: {
+        country_code: 'EG', country_name: 'Egypt', currency: 'EGP', banking_system: 'Egyptian Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      MA: {
+        country_code: 'MA', country_name: 'Morocco', currency: 'MAD', banking_system: 'Moroccan Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      TZ: {
+        country_code: 'TZ', country_name: 'Tanzania', currency: 'TZS', banking_system: 'Tanzanian Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      UG: {
+        country_code: 'UG', country_name: 'Uganda', currency: 'UGX', banking_system: 'Ugandan Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+
+      // ✅ WISE-SUPPORTED COUNTRIES - Europe & Caucasus
+      TR: {
+        country_code: 'TR', country_name: 'Turkey', currency: 'TRY', banking_system: 'Turkish Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          iban: { required: true, label: 'IBAN', placeholder: 'TR330006100519786457841326' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: { iban: '^TR\\d{2}\\d{22}$' },
+      },
+      UA: {
+        country_code: 'UA', country_name: 'Ukraine', currency: 'UAH', banking_system: 'Ukrainian Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+      GE: {
+        country_code: 'GE', country_name: 'Georgia', currency: 'GEL', banking_system: 'Georgian Banks',
+        required_fields: {
+          account_holder_name: { required: true, label: 'Account Holder Name' },
+          bank_name: { required: true, label: 'Bank Name' },
+          account_number: { required: true, label: 'Account Number', placeholder: '1234567890' },
+          account_type: { required: true, label: 'Account Type' },
+        },
+        field_validation: {},
+      },
+
+      // ⚠️ NOTE: Dual payment provider system (Stripe Connect + Wise API)
+      // Stripe Connect: US, UK, EU, Canada, Australia, Singapore, Japan, Hong Kong, NZ, etc.
+      // Wise API: All countries added above (50 currencies, 160+ destinations worldwide)
+      // Backend automatically determines provider based on creator location
+      // See PAYOUT_SYSTEM_DECISIONS.md and CREATOR_PAYOUT_AUTOMATION_IMPLEMENTATION.md
     };
 
     return fallbackData[countryCode] || fallbackData.GB;
@@ -533,22 +894,75 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         <Text style={[styles.fieldLabel, { color: theme.colors.text }]}>
           Country <Text style={styles.required}>*</Text>
         </Text>
-        <View style={[styles.pickerContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-          <Picker
-            selectedValue={selectedCountry}
-            onValueChange={handleCountryChange}
-            style={[styles.picker, { color: theme.colors.text }]}
-          >
-            {countries.map((country) => (
-              <Picker.Item 
-                key={country.country_code} 
-                label={`${country.country_name} (${country.currency})`} 
-                value={country.country_code} 
-              />
-            ))}
-          </Picker>
-        </View>
+        <TouchableOpacity
+          style={[styles.pickerContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+          onPress={() => setShowCountryModal(true)}
+        >
+          <Text style={[styles.pickerText, { color: theme.colors.text }]}>
+            {countries.find(c => c.country_code === selectedCountry)?.country_name || 'Select Country'}
+            {selectedCountry && ` (${countries.find(c => c.country_code === selectedCountry)?.currency})`}
+          </Text>
+        </TouchableOpacity>
       </View>
+
+      {/* Country Selection Modal - SAFE REPLACEMENT FOR PICKER */}
+      <Modal
+        visible={showCountryModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowCountryModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Select Country</Text>
+              <TouchableOpacity onPress={() => setShowCountryModal(false)}>
+                <Text style={[styles.modalClose, { color: theme.colors.primary }]}>Done</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={[styles.searchInput, {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.border,
+                color: theme.colors.text
+              }]}
+              placeholder="Search countries..."
+              placeholderTextColor={theme.colors.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+
+            <FlatList
+              data={countries.filter(c =>
+                c.country_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                c.currency.toLowerCase().includes(searchQuery.toLowerCase())
+              )}
+              keyExtractor={(item) => item.country_code}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.countryItem,
+                    selectedCountry === item.country_code && { backgroundColor: theme.colors.surface }
+                  ]}
+                  onPress={() => {
+                    setSelectedCountry(item.country_code);
+                    setShowCountryModal(false);
+                    setSearchQuery('');
+                  }}
+                >
+                  <Text style={[styles.countryName, { color: theme.colors.text }]}>
+                    {item.country_name}
+                  </Text>
+                  <Text style={[styles.countryCurrency, { color: theme.colors.textSecondary }]}>
+                    {item.currency}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
 
       {/* Country-specific banking info */}
       {countryInfo && (
@@ -691,6 +1105,62 @@ const styles = StyleSheet.create({
   detectionSubtext: {
     fontSize: 14,
     lineHeight: 18,
+  },
+  pickerText: {
+    fontSize: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    maxHeight: '80%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  modalClose: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  searchInput: {
+    margin: 20,
+    marginTop: 15,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderRadius: 8,
+    fontSize: 16,
+  },
+  countryItem: {
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  countryName: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  countryCurrency: {
+    fontSize: 14,
   },
 });
 

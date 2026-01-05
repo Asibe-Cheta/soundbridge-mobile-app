@@ -6,8 +6,10 @@ export interface PostAuthor {
   username: string;
   display_name: string;
   avatar_url?: string;
-  headline?: string;
   role?: string;
+  headline?: string;
+  bio?: string;
+  subscription_tier?: 'free' | 'premium' | 'unlimited' | null;
 }
 
 export interface Post {

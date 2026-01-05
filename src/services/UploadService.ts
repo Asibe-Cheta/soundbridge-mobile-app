@@ -322,7 +322,7 @@ export async function uploadImage(
 }
 
 /**
- * Create audio track record in database
+ * Create audio track record in database with copyright attestation
  */
 export async function createAudioTrack(
   userId: string,
@@ -338,6 +338,17 @@ export async function createAudioTrack(
     lyrics?: string | null;
     lyrics_language?: string;
     has_lyrics?: boolean;
+    // Copyright attestation fields
+    copyright_attested?: boolean;
+    attestation_timestamp?: string;
+    attestation_user_agent?: string;
+    attestation_device_info?: {
+      platform: string;
+      os: string;
+      appVersion: string;
+      model?: string;
+    };
+    terms_version?: string;
   }
 ): Promise<UploadResult & { data?: { id: string } }> {
   try {
@@ -349,7 +360,7 @@ export async function createAudioTrack(
       };
     }
 
-    // Insert track into database
+    // Insert track into database with attestation data
     const { data, error } = await supabase
       .from('audio_tracks')
       .insert({
@@ -366,6 +377,12 @@ export async function createAudioTrack(
         lyrics: trackData.lyrics || null,
         lyrics_language: trackData.lyrics_language || null,
         has_lyrics: trackData.has_lyrics || false,
+        // Copyright attestation fields
+        copyright_attested: trackData.copyright_attested || false,
+        attestation_timestamp: trackData.attestation_timestamp || null,
+        attestation_user_agent: trackData.attestation_user_agent || null,
+        attestation_device_info: trackData.attestation_device_info || null,
+        terms_version: trackData.terms_version || 'v1.0.0',
       })
       .select('id')
       .single();
@@ -379,6 +396,27 @@ export async function createAudioTrack(
     }
 
     console.log('✅ Audio track created successfully:', data.id);
+
+    // If copyright was attested, record in audit trail
+    if (trackData.copyright_attested && trackData.attestation_device_info) {
+      try {
+        await supabase.rpc('record_upload_attestation', {
+          p_track_id: data.id,
+          p_user_id: userId,
+          p_ip_address: null, // Backend will capture this
+          p_user_agent: trackData.attestation_user_agent || null,
+          p_device_platform: trackData.attestation_device_info.platform || 'unknown',
+          p_device_os: trackData.attestation_device_info.os || 'unknown',
+          p_app_version: trackData.attestation_device_info.appVersion || '1.0.0',
+          p_device_model: trackData.attestation_device_info.model || null,
+          p_terms_version: trackData.terms_version || 'v1.0.0',
+        });
+        console.log('✅ Copyright attestation recorded in audit trail');
+      } catch (attestationError) {
+        console.warn('⚠️ Failed to record attestation in audit trail:', attestationError);
+        // Don't fail the upload if attestation recording fails
+      }
+    }
 
     return {
       success: true,

@@ -138,8 +138,9 @@ export default function FeedScreen() {
   };
 
   const handlePostPress = (postId: string) => {
-    // TODO: Navigate to post details in future phase
-    console.log('Post pressed:', postId);
+    // Navigate to post detail screen
+    console.log('📍 Navigating to post detail:', postId);
+    navigation.navigate('PostDetail' as never, { postId } as never);
   };
 
   const handleEditPost = (post: Post) => {

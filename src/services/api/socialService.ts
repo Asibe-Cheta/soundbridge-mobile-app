@@ -234,7 +234,7 @@ export class SocialService {
       const userIds = [...new Set(postsData.map(p => p.user_id))];
       const { data: authorsData } = await supabase
         .from('profiles')
-        .select('id, username, display_name, avatar_url, role')
+        .select('id, username, display_name, avatar_url, role, bio, professional_headline, subscription_tier')
         .in('id', userIds);
 
       const authorsMap = new Map();
@@ -291,6 +291,9 @@ export class SocialService {
             display_name: author.display_name || author.username,
             avatar_url: author.avatar_url,
             role: author.role,
+            headline: author.professional_headline,
+            bio: author.bio,
+            subscription_tier: author.subscription_tier,
           },
           reactions_count: { support: 0, love: 0, fire: 0, congrats: 0 },
           comments_count: 0,

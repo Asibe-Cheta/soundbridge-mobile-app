@@ -30,6 +30,7 @@ import subscriptionService from '../services/SubscriptionService';
 import { walkthroughable } from 'react-native-copilot';
 import { useServiceProviderPrompt } from '../hooks/useServiceProviderPrompt';
 import ServiceProviderPromptModal from '../components/ServiceProviderPromptModal';
+import { collectDeviceInfo } from '../utils/deviceInfo';
 // Temporarily disabled for Expo Go compatibility
 // import DraggableFlatList, { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
 // import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -38,6 +39,43 @@ const { width } = Dimensions.get('window');
 
 type ContentType = 'music' | 'podcast';
 type UploadMode = 'single' | 'album';
+
+// ACRCloud TypeScript Interfaces
+interface AcrcloudMatchResult {
+  success: boolean;
+  matchFound: true;
+  requiresISRC: true;
+  detectedArtist: string;
+  detectedTitle: string;
+  detectedAlbum?: string;
+  detectedLabel?: string;
+  detectedISRC?: string;
+  artistMatch: {
+    match: boolean;
+    confidence: number;
+  };
+  artistMatchConfidence: number;
+  detectedISRCVerified?: boolean;
+  detectedISRCRecording?: any;
+}
+
+interface AcrcloudNoMatchResult {
+  success: boolean;
+  matchFound: false;
+  requiresISRC: false;
+  isUnreleased: true;
+}
+
+interface AcrcloudErrorResult {
+  success: false;
+  matchFound: false;
+  error: string;
+  errorCode: 'QUOTA_EXCEEDED' | 'TIMEOUT' | 'API_ERROR' | 'INVALID_FILE';
+  requiresManualReview: true;
+}
+
+type AcrcloudResult = AcrcloudMatchResult | AcrcloudNoMatchResult | AcrcloudErrorResult;
+type AcrcloudStatus = 'idle' | 'checking' | 'match' | 'no_match' | 'error';
 
 interface UploadFormData {
   contentType: ContentType;
@@ -93,6 +131,23 @@ export default function UploadScreen() {
   const [uploadQuota, setUploadQuota] = useState<UploadQuota | null>(null);
   const [quotaLoading, setQuotaLoading] = useState(true);
   const [uploadMode, setUploadMode] = useState<UploadMode>('single');
+  const [agreedToCopyright, setAgreedToCopyright] = useState(false);
+
+  // Cover song ISRC verification state
+  const [isCover, setIsCover] = useState(false);
+  const [isrcCode, setIsrcCode] = useState('');
+  const [isrcVerificationStatus, setIsrcVerificationStatus] = useState<
+    'idle' | 'loading' | 'success' | 'error'
+  >('idle');
+  const [isrcVerificationError, setIsrcVerificationError] = useState<string | null>(null);
+  const [isrcVerificationData, setIsrcVerificationData] = useState<any>(null);
+  const isrcVerificationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ACRCloud fingerprinting state
+  const [acrcloudStatus, setAcrcloudStatus] = useState<AcrcloudStatus>('idle');
+  const [acrcloudData, setAcrcloudData] = useState<AcrcloudResult | null>(null);
+  const [acrcloudError, setAcrcloudError] = useState<string | null>(null);
+  const [isOriginalConfirmed, setIsOriginalConfirmed] = useState(false);
 
   // Service Provider Prompt Modal
   const {
@@ -133,8 +188,9 @@ export default function UploadScreen() {
   const [albumStep, setAlbumStep] = useState<1 | 2 | 3>(1);
 
   const genres = [
-    'Electronic', 'Hip Hop', 'Rock', 'Pop', 'Jazz', 'Classical', 
-    'Country', 'R&B', 'Reggae', 'Blues', 'Folk', 'Alternative', 'Other'
+    'Gospel', 'Afrobeats', 'UK Drill', 'Hip Hop', 'R&B', 'Pop',
+    'Rock', 'Electronic', 'Jazz', 'Classical', 'Country', 'Reggae',
+    'Folk', 'Blues', 'Funk', 'Soul', 'Alternative', 'Indie', 'Other'
   ];
 
   const podcastCategories = [
@@ -220,21 +276,319 @@ export default function UploadScreen() {
     return { isValid: errors.length === 0, errors };
   };
 
+  // ISRC Format Validation (Client-Side)
+  const validateISRCFormat = (isrc: string): { valid: boolean; normalized?: string; error?: string } => {
+    if (!isrc || typeof isrc !== 'string') {
+      return { valid: false, error: 'ISRC code is required' };
+    }
+
+    // Remove hyphens and spaces, convert to uppercase
+    const normalized = isrc.replace(/[-\s]/g, '').toUpperCase();
+
+    // Must be exactly 12 characters
+    if (normalized.length !== 12) {
+      return {
+        valid: false,
+        error: 'Invalid ISRC format. Should be 12 characters (XX-XXX-YY-NNNNN)'
+      };
+    }
+
+    // Must be alphanumeric (last 5 must be digits)
+    if (!/^[A-Z0-9]{2}[A-Z0-9]{3}[A-Z0-9]{2}[0-9]{5}$/.test(normalized)) {
+      return {
+        valid: false,
+        error: 'Invalid ISRC format. Should be XX-XXX-YY-NNNNN (alphanumeric, last 5 digits)'
+      };
+    }
+
+    return { valid: true, normalized };
+  };
+
+  // Verify ISRC Code via API
+  const verifyISRCCode = async (isrc: string) => {
+    if (!isrc || !isrc.trim()) {
+      setIsrcVerificationStatus('idle');
+      setIsrcVerificationError(null);
+      setIsrcVerificationData(null);
+      return;
+    }
+
+    setIsrcVerificationStatus('loading');
+    setIsrcVerificationError(null);
+
+    try {
+      // Normalize ISRC (remove hyphens, uppercase)
+      const normalizedInput = isrc.trim().replace(/-/g, '').toUpperCase();
+
+      // If ACRCloud detected a match, verify the typed ISRC matches the detected one
+      if (acrcloudStatus === 'match' && acrcloudData && 'detectedISRC' in acrcloudData && acrcloudData.detectedISRC) {
+        const normalizedDetected = acrcloudData.detectedISRC.replace(/-/g, '').toUpperCase();
+
+        if (normalizedInput !== normalizedDetected) {
+          setIsrcVerificationStatus('error');
+          setIsrcVerificationError('ISRC code does not match the detected track. Please enter the correct ISRC for this song.');
+          setIsrcVerificationData(null);
+          return;
+        }
+
+        // ISRC matches ACRCloud detection - verification complete!
+        // No need to check MusicBrainz since ACRCloud already confirmed it's valid
+        console.log('✅ ISRC verified via ACRCloud match');
+        setIsrcVerificationStatus('success');
+        setIsrcVerificationError(null);
+        setIsrcVerificationData({
+          title: acrcloudData.detectedTitle || 'Verified Track',
+          'artist-credit': acrcloudData.detectedArtist
+            ? [{ name: acrcloudData.detectedArtist }]
+            : []
+        });
+        return;
+      }
+
+      // For manual cover songs (no ACRCloud match), verify ISRC via MusicBrainz API
+      const response = await fetch('https://www.soundbridge.live/api/upload/verify-isrc', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ isrc: isrc.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.verified) {
+        setIsrcVerificationStatus('success');
+        setIsrcVerificationError(null);
+        setIsrcVerificationData(data.recording);
+      } else {
+        setIsrcVerificationStatus('error');
+        setIsrcVerificationError(data.error || 'ISRC verification failed');
+        setIsrcVerificationData(null);
+      }
+    } catch (error: any) {
+      setIsrcVerificationStatus('error');
+      setIsrcVerificationError(error.message || 'Failed to verify ISRC. Please try again.');
+      setIsrcVerificationData(null);
+    }
+  };
+
+  // Debounced ISRC Input Handler
+  const handleISRCChange = (value: string) => {
+    setIsrcCode(value);
+    setIsrcVerificationStatus('idle');
+    setIsrcVerificationError(null);
+    setIsrcVerificationData(null);
+
+    // Clear existing timeout
+    if (isrcVerificationTimeoutRef.current) {
+      clearTimeout(isrcVerificationTimeoutRef.current);
+    }
+
+    // Debounce verification (500ms delay)
+    if (value.trim()) {
+      isrcVerificationTimeoutRef.current = setTimeout(() => {
+        verifyISRCCode(value);
+      }, 500);
+    }
+  };
+
+  // Reset ISRC When Cover Toggle is Off
+  useEffect(() => {
+    if (!isCover) {
+      setIsrcCode('');
+      setIsrcVerificationStatus('idle');
+      setIsrcVerificationError(null);
+      setIsrcVerificationData(null);
+      if (isrcVerificationTimeoutRef.current) {
+        clearTimeout(isrcVerificationTimeoutRef.current);
+      }
+    }
+  }, [isCover]);
+
+  // ACRCloud: Fingerprint Audio File (Storage-first approach to bypass Vercel 4.5MB limit)
+  const fingerprintAudio = async (file: { uri: string; name: string; type: string; size?: number }) => {
+    setAcrcloudStatus('checking');
+    setAcrcloudError(null);
+
+    try {
+      console.log('🎵 Starting ACRCloud fingerprinting...');
+      console.log('📁 File details:', {
+        name: file.name,
+        type: file.type,
+        size: file.size ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : 'unknown'
+      });
+
+      // Step 1: Upload file to Supabase Storage (bypasses Vercel 4.5MB payload limit)
+      console.log('📤 Uploading to Supabase Storage for fingerprinting...');
+
+      const fileExtension = file.name.split('.').pop() || 'mp3';
+      const fileName = `fingerprint_${user.id}_${Date.now()}.${fileExtension}`;
+
+      // React Native: Read file as ArrayBuffer (blob() doesn't exist in RN)
+      const fileResponse = await fetch(file.uri);
+      const arrayBuffer = await fileResponse.arrayBuffer();
+      const fileBuffer = new Uint8Array(arrayBuffer);
+
+      // Upload to Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('audio-tracks')
+        .upload(`temp/${fileName}`, fileBuffer, {
+          contentType: file.type || 'audio/mpeg',
+          upsert: false
+        });
+
+      if (uploadError) {
+        console.error('❌ Supabase upload error:', uploadError);
+        throw new Error(`Failed to upload file for fingerprinting: ${uploadError.message}`);
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('audio-tracks')
+        .getPublicUrl(uploadData.path);
+
+      const storageUrl = urlData.publicUrl;
+      console.log('✅ File uploaded to storage:', storageUrl);
+
+      // Step 2: Send URL to fingerprint API (small JSON payload - no size limit)
+      console.log('📤 Sending URL to fingerprint API...');
+
+      const response = await fetch('https://www.soundbridge.live/api/upload/fingerprint', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': session ? `Bearer ${session.access_token}` : '',
+        },
+        body: JSON.stringify({
+          audioFileUrl: storageUrl, // Send URL instead of file
+          artistName: formData.artistName || undefined,
+        }),
+      });
+
+      // Debug response before parsing
+      console.log('🔍 Response status:', response.status);
+      console.log('🔍 Response ok:', response.ok);
+      console.log('🔍 Content-Type:', response.headers.get('Content-Type'));
+
+      // Check if response is OK
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ API returned error status:', response.status);
+        console.error('❌ Error response:', errorText.substring(0, 500));
+        throw new Error(`API error ${response.status}: ${errorText}`);
+      }
+
+      // Try to read as text first to see what we're getting
+      const responseText = await response.text();
+      console.log('🔍 Raw response (first 200 chars):', responseText.substring(0, 200));
+
+      // Then parse JSON
+      let data;
+      try {
+        data = JSON.parse(responseText);
+        console.log('🎵 ACRCloud response:', data);
+      } catch (parseError: any) {
+        console.error('❌ JSON parse failed. Full response:', responseText);
+        throw new Error(`Invalid JSON response: ${parseError.message}`);
+      }
+
+      if (!data.success) {
+        // Handle error
+        handleAcrcloudError(data);
+
+        // Cleanup temp file from storage
+        if (uploadData?.path) {
+          await cleanupTempFile(uploadData.path);
+        }
+        return;
+      }
+
+      if (data.matchFound) {
+        // Match found - require ISRC
+        handleMatchFound(data);
+      } else {
+        // No match - original music
+        handleNoMatch(data);
+      }
+
+      // Cleanup temp file from storage (fingerprinting complete)
+      if (uploadData?.path) {
+        await cleanupTempFile(uploadData.path);
+      }
+
+    } catch (error: any) {
+      console.error('❌ ACRCloud error:', error);
+      handleAcrcloudError({ error: error.message, errorCode: 'API_ERROR' });
+    }
+  };
+
+  // Cleanup temporary file from storage after fingerprinting
+  const cleanupTempFile = async (filePath: string) => {
+    try {
+      const { error } = await supabase.storage
+        .from('audio-tracks')
+        .remove([filePath]);
+
+      if (error) {
+        console.warn('⚠️ Failed to cleanup temp file:', error.message);
+      } else {
+        console.log('🗑️ Temp file cleaned up:', filePath);
+      }
+    } catch (error: any) {
+      console.warn('⚠️ Cleanup error:', error.message);
+    }
+  };
+
+  // Handle Match Found
+  const handleMatchFound = (data: AcrcloudMatchResult) => {
+    console.log('✅ ACRCloud match found:', data.detectedTitle, 'by', data.detectedArtist);
+    setAcrcloudStatus('match');
+    setAcrcloudData(data);
+
+    // DO NOT auto-fill ISRC - user must manually input it to prove ownership
+    // DO NOT auto-check "cover song" - user must consciously decide
+    // The detected ISRC will be shown as a hint/reference in the UI
+  };
+
+  // Handle No Match
+  const handleNoMatch = (data: AcrcloudNoMatchResult) => {
+    console.log('✅ ACRCloud no match - appears to be original music');
+    setAcrcloudStatus('no_match');
+    setAcrcloudData(data);
+    setIsOriginalConfirmed(false);
+  };
+
+  // Handle ACRCloud Errors
+  const handleAcrcloudError = (error: any) => {
+    console.log('⚠️ ACRCloud error:', error.error || 'Fingerprinting failed');
+    setAcrcloudStatus('error');
+    setAcrcloudError(error.error || 'Fingerprinting failed');
+
+    // Allow upload to proceed but flag for review
+    setAcrcloudData({
+      success: false,
+      matchFound: false,
+      error: error.error || 'Fingerprinting failed',
+      errorCode: error.errorCode || 'API_ERROR',
+      requiresManualReview: true,
+    });
+  };
+
   // Comprehensive form validation (mirroring web app logic)
   const validateUploadForm = () => {
     const errors = [];
-    
+
     // Audio file validation
     if (!formData.audioFile) {
       errors.push('Please select an audio file to upload');
       return { isValid: false, errors };
     }
-    
+
     const audioValidation = validateAudioFile(formData.audioFile);
     if (!audioValidation.isValid) {
       errors.push(...audioValidation.errors);
     }
-    
+
     // Basic metadata validation
     if (!formData.title.trim()) {
       errors.push('Track title is required');
@@ -243,7 +597,7 @@ export default function UploadScreen() {
     } else if (formData.title.trim().length > 100) {
       errors.push('Track title must be less than 100 characters');
     }
-    
+
     // Content-specific validation
     if (formData.contentType === 'music') {
       if (!formData.artistName.trim()) {
@@ -251,9 +605,45 @@ export default function UploadScreen() {
       } else if (formData.artistName.trim().length < 2) {
         errors.push('Artist name must be at least 2 characters long');
       }
-      
+
       if (!formData.genre) {
         errors.push('Genre is required for music tracks');
+      }
+
+      // ACRCloud validation (for music tracks)
+      if (acrcloudStatus === 'checking') {
+        errors.push('Please wait for audio verification to complete');
+      }
+
+      if (acrcloudStatus === 'match') {
+        // Match found - require ISRC verification
+        if (!isrcCode || isrcCode.trim() === '') {
+          errors.push('ISRC code is required. This track appears to be a released song.');
+        }
+
+        if (isrcVerificationStatus !== 'success') {
+          errors.push('ISRC code must be verified before uploading');
+        }
+
+        // Check artist name match
+        if (acrcloudData?.matchFound &&
+            'artistMatch' in acrcloudData &&
+            acrcloudData.artistMatch &&
+            !acrcloudData.artistMatch.match) {
+          errors.push(`This track belongs to "${acrcloudData.detectedArtist}". If this is you, ensure your profile name matches.`);
+        }
+      }
+
+      if (acrcloudStatus === 'no_match' && !isOriginalConfirmed) {
+        errors.push('Please confirm this is your original/unreleased music');
+      }
+
+      // Cover song validation (manual cover song marking)
+      if (isCover && !isrcCode.trim()) {
+        errors.push('ISRC code is required for cover songs');
+      }
+      if (isCover && isrcVerificationStatus !== 'success') {
+        errors.push('ISRC code must be verified before uploading a cover song');
       }
     } else if (formData.contentType === 'podcast') {
       if (!formData.episodeNumber) {
@@ -261,24 +651,24 @@ export default function UploadScreen() {
       } else if (parseInt(formData.episodeNumber) < 1) {
         errors.push('Episode number must be a positive number');
       }
-      
+
       if (!formData.podcastCategory) {
         errors.push('Podcast category is required');
       }
     }
-    
+
     // Description validation
     if (formData.description.length > 2000) {
       errors.push('Description must be less than 2000 characters');
     }
-    
+
     // Tags validation
     if (formData.tags.trim()) {
       const tags = formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
       if (tags.length > 10) {
         errors.push('Maximum 10 tags allowed');
       }
-      
+
       for (const tag of tags) {
         if (tag.length < 2) {
           errors.push('Each tag must be at least 2 characters long');
@@ -288,7 +678,7 @@ export default function UploadScreen() {
         }
       }
     }
-    
+
     return { isValid: errors.length === 0, errors };
   };
 
@@ -531,31 +921,40 @@ export default function UploadScreen() {
 
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
-        
+
         // Validate the file
         const validation = validateAudioFile({
           name: asset.name || 'audio_file',
           size: asset.size,
           mimeType: asset.mimeType
         });
-        
+
         if (!validation.isValid) {
           Alert.alert('Invalid File', validation.errors.join('\n'));
           return;
         }
-        
+
         // Auto-fill title from filename if empty
         const fileName = (asset.name || 'audio_file').replace(/\.[^/.]+$/, '');
-        
-        setFormData(prev => ({ 
-          ...prev, 
-          audioFile: {
-            uri: asset.uri,
-            name: asset.name || `audio_${Date.now()}.${asset.mimeType?.split('/')[1] || 'mp3'}`,
-            type: asset.mimeType || 'audio/mpeg'
-          },
+
+        const audioFileData = {
+          uri: asset.uri,
+          name: asset.name || `audio_${Date.now()}.${asset.mimeType?.split('/')[1] || 'mp3'}`,
+          type: asset.mimeType || 'audio/mpeg',
+          size: asset.size // Include file size for ACRCloud validation
+        };
+
+        setFormData(prev => ({
+          ...prev,
+          audioFile: audioFileData,
           title: prev.title || fileName // Only set if title is empty
         }));
+
+        // Automatically trigger ACRCloud fingerprinting for music tracks
+        if (formData.contentType === 'music') {
+          console.log('🎵 Auto-triggering ACRCloud fingerprinting for music track');
+          await fingerprintAudio(audioFileData);
+        }
       }
     } catch (error) {
       console.error('Error picking audio file:', error);
@@ -569,6 +968,15 @@ export default function UploadScreen() {
     const validation = validateUploadForm();
     if (!validation.isValid) {
       Alert.alert('Validation Error', validation.errors.join('\n'));
+      return;
+    }
+
+    // Copyright attestation validation
+    if (!agreedToCopyright) {
+      Alert.alert(
+        'Copyright Confirmation Required',
+        'You must agree to the copyright terms to upload content.'
+      );
       return;
     }
 
@@ -662,13 +1070,14 @@ export default function UploadScreen() {
       
       setUploadProgress(80);
 
-      // Step 3: Create track record in database (10% of progress)
+      // Step 3: Collect device info and create track record in database (10% of progress)
+      const deviceInfo = collectDeviceInfo();
       const tagsArray = formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
-      
+
       // Prepare description with content-specific information
       let enhancedDescription = formData.description.trim();
       if (formData.contentType === 'music' && formData.artistName.trim()) {
-        enhancedDescription = enhancedDescription 
+        enhancedDescription = enhancedDescription
           ? `Artist: ${formData.artistName.trim()}\n\n${enhancedDescription}`
           : `Artist: ${formData.artistName.trim()}`;
       } else if (formData.contentType === 'podcast' && formData.episodeNumber.trim()) {
@@ -676,7 +1085,7 @@ export default function UploadScreen() {
           ? `Episode ${formData.episodeNumber.trim()}\n\n${enhancedDescription}`
           : `Episode ${formData.episodeNumber.trim()}`;
       }
-      
+
       const trackData = {
         title: formData.title.trim(),
         description: enhancedDescription || null,
@@ -688,9 +1097,25 @@ export default function UploadScreen() {
         genre: formData.contentType === 'music' ? formData.genre : formData.podcastCategory,
         lyrics: formData.lyrics.trim() || null,
         lyrics_language: formData.lyricsLanguage,
-        has_lyrics: formData.lyrics.trim().length > 0
+        has_lyrics: formData.lyrics.trim().length > 0,
+        // Cover song ISRC fields
+        is_cover: formData.contentType === 'music' ? (isCover || acrcloudStatus === 'match') : false,
+        isrc_code: (formData.contentType === 'music' && (isCover || acrcloudStatus === 'match')) ? isrcCode.trim() : null,
+        // ACRCloud fingerprinting data
+        acrcloudData: formData.contentType === 'music' ? acrcloudData : null,
+        // Copyright attestation data
+        copyright_attested: agreedToCopyright,
+        attestation_timestamp: deviceInfo.agreedAt,
+        attestation_user_agent: deviceInfo.userAgent,
+        attestation_device_info: {
+          platform: deviceInfo.devicePlatform,
+          os: deviceInfo.deviceOS,
+          appVersion: deviceInfo.appVersion,
+          model: deviceInfo.deviceModel,
+        },
+        terms_version: deviceInfo.termsVersion,
       };
-      
+
       const trackResult = await createAudioTrack(user.id, trackData);
       
       if (!trackResult.success) {
@@ -718,6 +1143,20 @@ export default function UploadScreen() {
         coverImage: null,
         audioFile: null,
       });
+      setAgreedToCopyright(false);
+
+      // Reset cover song ISRC state
+      setIsCover(false);
+      setIsrcCode('');
+      setIsrcVerificationStatus('idle');
+      setIsrcVerificationError(null);
+      setIsrcVerificationData(null);
+
+      // Reset ACRCloud state
+      setAcrcloudStatus('idle');
+      setAcrcloudData(null);
+      setAcrcloudError(null);
+      setIsOriginalConfirmed(false);
 
       Alert.alert(
         'Upload Successful!',
@@ -1748,6 +2187,223 @@ export default function UploadScreen() {
           )}
         </View>
 
+        {/* ACRCloud Audio Fingerprinting (for music only) */}
+        {formData.contentType === 'music' && formData.audioFile && (
+          <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Audio Verification</Text>
+
+            {/* Loading State */}
+            {acrcloudStatus === 'checking' && (
+              <View style={[styles.acrcloudStatus, styles.acrcloudChecking, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+                <ActivityIndicator size="small" color={theme.colors.primary} />
+                <View style={styles.acrcloudContent}>
+                  <Text style={[styles.acrcloudTitle, { color: theme.colors.primary }]}>Verifying audio content...</Text>
+                  <Text style={[styles.acrcloudDetails, { color: theme.colors.textSecondary }]}>
+                    Checking if this track exists on streaming platforms
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Match Found State */}
+            {acrcloudStatus === 'match' && acrcloudData && 'detectedTitle' in acrcloudData && (
+              <View style={[styles.acrcloudStatus, styles.acrcloudMatch, { borderColor: '#FFA500', backgroundColor: '#FFF8E1' }]}>
+                <Ionicons name="alert-circle" size={24} color="#FFA500" />
+                <View style={styles.acrcloudContent}>
+                  <Text style={[styles.acrcloudTitle, { color: '#1a1a1a' }]}>This song appears to be a released track</Text>
+                  <Text style={[styles.acrcloudDetails, { color: '#4a4a4a', marginTop: 8 }]}>
+                    <Text style={{ fontWeight: '600' }}>Title:</Text> {acrcloudData.detectedTitle}
+                  </Text>
+                  <Text style={[styles.acrcloudDetails, { color: '#4a4a4a' }]}>
+                    <Text style={{ fontWeight: '600' }}>Artist:</Text> {acrcloudData.detectedArtist}
+                  </Text>
+                  {acrcloudData.detectedAlbum && (
+                    <Text style={[styles.acrcloudDetails, { color: '#4a4a4a' }]}>
+                      <Text style={{ fontWeight: '600' }}>Album:</Text> {acrcloudData.detectedAlbum}
+                    </Text>
+                  )}
+                  <Text style={[styles.acrcloudMessage, { color: '#666666', marginTop: 8 }]}>
+                    To upload this track, please provide a valid ISRC code for verification.
+                  </Text>
+
+                  {/* Artist Mismatch Warning */}
+                  {acrcloudData.artistMatch && !acrcloudData.artistMatch.match && (
+                    <View style={[styles.artistMismatchWarning, { backgroundColor: '#FFEBEE', borderColor: '#DC2626' }]}>
+                      <Ionicons name="warning" size={18} color="#DC2626" />
+                      <Text style={[styles.artistMismatchText, { color: '#DC2626' }]}>
+                        Artist name mismatch. This track belongs to "{acrcloudData.detectedArtist}". Please verify ownership with ISRC.
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* No Match State */}
+            {acrcloudStatus === 'no_match' && (
+              <View style={[styles.acrcloudStatus, styles.acrcloudNoMatch, { borderColor: theme.colors.success }]}>
+                <Ionicons name="checkmark-circle" size={24} color={theme.colors.success} />
+                <View style={styles.acrcloudContent}>
+                  <Text style={[styles.acrcloudTitle, { color: theme.colors.text }]}>This appears to be original/unreleased music</Text>
+                  <Text style={[styles.acrcloudDetails, { color: theme.colors.textSecondary, marginTop: 4 }]}>
+                    No match found in music databases. You can proceed with upload.
+                  </Text>
+
+                  <TouchableOpacity
+                    onPress={() => setIsOriginalConfirmed(!isOriginalConfirmed)}
+                    style={[styles.originalMusicCheckbox, { borderColor: theme.colors.border, marginTop: 12 }]}
+                  >
+                    <View style={[
+                      styles.checkbox,
+                      { borderColor: theme.colors.border },
+                      isOriginalConfirmed && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }
+                    ]}>
+                      {isOriginalConfirmed && <Ionicons name="checkmark" size={18} color="#fff" />}
+                    </View>
+                    <Text style={[styles.checkboxLabel, { color: theme.colors.text }]}>
+                      I confirm this is my original/unreleased music and I own all rights to it
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Error State */}
+            {acrcloudStatus === 'error' && (
+              <View style={[styles.acrcloudStatus, styles.acrcloudError, { borderColor: '#FFA500', backgroundColor: '#FFF8E1' }]}>
+                <Ionicons name="information-circle" size={24} color="#FFA500" />
+                <View style={styles.acrcloudContent}>
+                  <Text style={[styles.acrcloudTitle, { color: '#1a1a1a' }]}>Audio verification unavailable</Text>
+                  <Text style={[styles.acrcloudDetails, { color: '#4a4a4a', marginTop: 4 }]}>
+                    {acrcloudError}
+                  </Text>
+                  <Text style={[styles.acrcloudMessage, { color: '#666666', marginTop: 8 }]}>
+                    Fingerprinting failed. You can still proceed with upload. Your track will be flagged for manual review.
+                  </Text>
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ISRC Verification Section */}
+        {formData.contentType === 'music' && (
+          <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            {/* Show different titles based on ACRCloud status */}
+            {acrcloudStatus === 'match' ? (
+              <View>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>ISRC Verification Required *</Text>
+                <Text style={[styles.hintText, { color: theme.colors.textSecondary, marginBottom: 16 }]}>
+                  This track was detected as a released song. Please provide the ISRC code to verify ownership.
+                </Text>
+              </View>
+            ) : (
+              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Cover Song Verification</Text>
+            )}
+
+            {/* Cover Song Toggle - Only show if ACRCloud didn't detect a match */}
+            {acrcloudStatus !== 'match' && (
+              <TouchableOpacity
+                onPress={() => setIsCover(!isCover)}
+                style={[styles.coverSongCheckbox, { borderColor: theme.colors.border }]}
+              >
+                <View style={[
+                  styles.checkbox,
+                  { borderColor: theme.colors.border },
+                  isCover && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }
+                ]}>
+                  {isCover && <Ionicons name="checkmark" size={18} color="#fff" />}
+                </View>
+                <Text style={[styles.checkboxLabel, { color: theme.colors.text }]}>
+                  This is a cover song
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* ISRC Input - Show if ACRCloud match OR user checked "cover song" */}
+            {(acrcloudStatus === 'match' || isCover) && (
+              <View style={styles.isrcContainer}>
+                {/* Warning for detected matches - DO NOT show the ISRC */}
+                {acrcloudStatus === 'match' && (
+                  <View style={[styles.detectedIsrcHint, { backgroundColor: '#FFF3E0', borderColor: '#FF9800', marginBottom: 12, padding: 12, borderRadius: 8, borderWidth: 1 }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Ionicons name="shield-checkmark" size={20} color="#FF9800" style={{ marginRight: 8 }} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: '#E65100', fontWeight: '600', fontSize: 14, marginBottom: 4 }}>
+                          Ownership Verification Required
+                        </Text>
+                        <Text style={{ color: '#EF6C00', fontSize: 13, lineHeight: 18 }}>
+                          To upload this track, please enter the ISRC code from your music distributor (DistroKid, TuneCore, CD Baby, etc.). The ISRC must match the detected track.
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>
+                    ISRC Code *
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.textInput,
+                      { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text },
+                      isrcVerificationStatus === 'error' && { borderColor: theme.colors.error },
+                      isrcVerificationStatus === 'success' && { borderColor: theme.colors.success },
+                    ]}
+                    placeholder="Type the ISRC code (e.g., GBUM71502800)"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={isrcCode}
+                    onChangeText={handleISRCChange}
+                    maxLength={14}
+                    autoCapitalize="characters"
+                  />
+                  <Text style={[styles.hintText, { color: theme.colors.textSecondary }]}>
+                    Format: XX-XXX-YY-NNNNN (12 characters, hyphens optional)
+                  </Text>
+                </View>
+
+                {/* Verification Status Display */}
+                {isrcVerificationStatus === 'loading' && (
+                  <View style={[styles.verificationStatus, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                    <ActivityIndicator size="small" color={theme.colors.primary} />
+                    <Text style={[styles.verificationText, { color: theme.colors.primary }]}>
+                      Verifying ISRC code...
+                    </Text>
+                  </View>
+                )}
+
+                {isrcVerificationStatus === 'success' && isrcVerificationData && (
+                  <View style={[styles.verificationSuccess, { borderColor: '#10B981', backgroundColor: '#D1FAE5' }]}>
+                    <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                    <View style={styles.verificationContent}>
+                      <Text style={[styles.verificationTitle, { color: '#065F46' }]}>Verified</Text>
+                      <Text style={[styles.verificationDetails, { color: '#047857' }]}>
+                        {isrcVerificationData.title}
+                        {isrcVerificationData['artist-credit']?.length > 0 &&
+                          ` by ${isrcVerificationData['artist-credit'].map((a: any) => a.name || a.artist?.name).join(', ')}`
+                        }
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                {isrcVerificationStatus === 'error' && isrcVerificationError && (
+                  <View style={[styles.verificationError, { borderColor: theme.colors.error, backgroundColor: '#FFEBEE' }]}>
+                    <Ionicons name="alert-circle" size={20} color={theme.colors.error} />
+                    <View style={styles.verificationContent}>
+                      <Text style={[styles.verificationTitle, { color: '#DC2626' }]}>Verification Failed</Text>
+                      <Text style={[styles.verificationDetails, { color: '#991B1B' }]}>
+                        {isrcVerificationError}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+        )}
+
         {/* Privacy Settings */}
         <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Privacy Settings</Text>
@@ -1776,6 +2432,41 @@ export default function UploadScreen() {
           </TouchableOpacity>
               ))}
             </View>
+          </View>
+
+          {/* Copyright Verification */}
+          <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Copyright Confirmation *</Text>
+            <View style={[styles.copyrightContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <Ionicons name="shield-checkmark-outline" size={24} color={theme.colors.primary} style={styles.copyrightIcon} />
+              <View style={styles.copyrightTextContainer}>
+                <Text style={[styles.copyrightText, { color: theme.colors.text }]}>
+                  I confirm that I own all rights to this music and it does not infringe any third-party copyrights. I understand that uploading copyrighted content without permission may result in account suspension or termination.
+                </Text>
+                <TouchableOpacity onPress={() => {
+                  navigation.navigate('CopyrightPolicy' as never);
+                }}>
+                  <Text style={[styles.copyrightLearnMore, { color: theme.colors.primary }]}>
+                    Learn more about our copyright policy
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.copyrightCheckbox, { borderColor: theme.colors.border }]}
+              onPress={() => setAgreedToCopyright(!agreedToCopyright)}
+            >
+              <View style={[
+                styles.checkbox,
+                { borderColor: theme.colors.border },
+                agreedToCopyright && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }
+              ]}>
+                {agreedToCopyright && <Ionicons name="checkmark" size={18} color="#fff" />}
+              </View>
+              <Text style={[styles.checkboxLabel, { color: theme.colors.text }]}>
+                I agree to the copyright terms above
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {/* Cover Art */}
@@ -2290,5 +2981,168 @@ const styles = StyleSheet.create({
   reviewTrackTitle: {
     flex: 1,
     fontSize: 14,
+  },
+  // Copyright Verification Styles
+  copyrightContainer: {
+    flexDirection: 'row',
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  copyrightIcon: {
+    marginRight: 12,
+    marginTop: 2,
+  },
+  copyrightTextContainer: {
+    flex: 1,
+  },
+  copyrightText: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  copyrightLearnMore: {
+    fontSize: 14,
+    fontWeight: '500',
+    textDecorationLine: 'underline',
+  },
+  copyrightCheckbox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxLabel: {
+    fontSize: 15,
+    flex: 1,
+    fontWeight: '500',
+  },
+  // ACRCloud Audio Fingerprinting Styles
+  acrcloudStatus: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  acrcloudChecking: {
+    alignItems: 'center',
+  },
+  acrcloudMatch: {
+    backgroundColor: '#FFF8E1',
+  },
+  acrcloudNoMatch: {
+    backgroundColor: '#E8F5E9',
+  },
+  acrcloudError: {
+    // backgroundColor defined inline
+  },
+  acrcloudContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  acrcloudTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  acrcloudDetails: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  acrcloudMessage: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  artistMismatchWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 12,
+  },
+  artistMismatchText: {
+    fontSize: 13,
+    marginLeft: 8,
+    flex: 1,
+    fontWeight: '500',
+  },
+  originalMusicCheckbox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  // Cover Song ISRC Verification Styles
+  coverSongCheckbox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  isrcContainer: {
+    marginTop: 8,
+  },
+  hintText: {
+    fontSize: 12,
+    marginTop: 4,
+  },
+  verificationStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  verificationText: {
+    marginLeft: 8,
+    fontSize: 14,
+  },
+  verificationSuccess: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 8,
+    padding: 12,
+    backgroundColor: '#E8F5E9',
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  verificationError: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 8,
+    padding: 12,
+    backgroundColor: '#FFEBEE',
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  verificationContent: {
+    flex: 1,
+    marginLeft: 8,
+  },
+  verificationTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  verificationDetails: {
+    fontSize: 12,
   },
 });

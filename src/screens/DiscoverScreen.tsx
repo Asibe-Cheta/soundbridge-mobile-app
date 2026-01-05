@@ -1699,7 +1699,10 @@ function DiscoverScreen() {
                   <Ionicons name="flame" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                   <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Trending This Week</Text>
                   </View>
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center' }}
+                  onPress={() => navigation.navigate('AllTracks', { category: 'trending', title: 'Trending This Week' })}
+                >
                   <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
@@ -1829,7 +1832,10 @@ function DiscoverScreen() {
                   <Ionicons name="people" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                 <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Featured Artists</Text>
                 </View>
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center' }}
+                  onPress={() => navigation.navigate('AllCreators', { category: 'featured', title: 'Featured Artists' })}
+                >
                   <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
@@ -1973,7 +1979,10 @@ function DiscoverScreen() {
                   <Ionicons name="musical-notes" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                 <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Music</Text>
                 </View>
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center' }}
+                  onPress={() => navigation.navigate('AllTracks', { category: 'recent', title: 'Recent Music' })}
+                >
                   <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
@@ -2078,7 +2087,10 @@ function DiscoverScreen() {
                   <Ionicons name="albums" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                   <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Featured Albums</Text>
                 </View>
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center' }}
+                  onPress={() => navigation.navigate('AllAlbums', { category: 'featured', title: 'Featured Albums' })}
+                >
                   <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
@@ -2153,7 +2165,10 @@ function DiscoverScreen() {
                   <Ionicons name="time" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                   <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Releases</Text>
                 </View>
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center' }}
+                  onPress={() => navigation.navigate('AllAlbums', { category: 'recent', title: 'Recent Releases' })}
+                >
                   <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
@@ -2234,7 +2249,10 @@ function DiscoverScreen() {
                   <Ionicons name="people" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                 <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>All Artists</Text>
                 </View>
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center' }}
+                  onPress={() => navigation.navigate('AllCreators', { category: 'all', title: 'All Artists' })}
+                >
                   <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
@@ -2301,7 +2319,10 @@ function DiscoverScreen() {
                   <Ionicons name="trophy" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                 <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Top Artists</Text>
                 </View>
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center' }}
+                  onPress={() => navigation.navigate('AllCreators', { category: 'top', title: 'Top Artists' })}
+                >
                   <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
               </TouchableOpacity>
@@ -2379,7 +2400,10 @@ function DiscoverScreen() {
                   <Ionicons name="calendar" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                 <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Upcoming Events</Text>
                 </View>
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center' }}
+                  onPress={() => navigation.navigate('AllEvents', { title: 'Upcoming Events' })}
+                >
                   <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
@@ -2460,7 +2484,10 @@ function DiscoverScreen() {
                   <Ionicons name="list" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
                 <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Public Playlists</Text>
                 </View>
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center' }}
+                  onPress={() => navigation.navigate('AllPlaylists', { title: 'Public Playlists' })}
+                >
                   <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
@@ -2562,7 +2589,10 @@ function DiscoverScreen() {
                   <Ionicons name="briefcase" size={20} color="#DC2626" style={{ marginRight: 8 }} />
                   <Text style={[styles.sectionTitle, { color: '#FFFFFF' }]}>Service Providers</Text>
                 </View>
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center' }}
+                  onPress={() => navigation.navigate('AllServices', { title: 'Service Providers' })}
+                >
                   <Text style={{ color: '#DC2626', fontSize: 14, marginRight: 4 }}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
@@ -2648,7 +2678,10 @@ function DiscoverScreen() {
                   <Ionicons name="location" size={20} color="#DC2626" style={{ marginRight: 8 }} />
                   <Text style={[styles.sectionTitle, { color: '#FFFFFF' }]}>Popular Venues</Text>
                 </View>
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center' }}
+                  onPress={() => navigation.navigate('AllVenues', { title: 'Popular Venues' })}
+                >
                   <Text style={{ color: '#DC2626', fontSize: 14, marginRight: 4 }}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>

@@ -1,4 +1,28 @@
-# SoundBridge Pricing Tier Update Specification
+# ⚠️ DEPRECATED - SoundBridge Pricing Tier Update Specification
+
+**STATUS:** ⚠️ **OUTDATED - DO NOT USE**
+**Deprecated Date:** January 1, 2026
+**Superseded By:** [PRICING_UPDATE_JANUARY_2026.md](PRICING_UPDATE_JANUARY_2026.md)
+
+---
+
+## ⚠️ THIS DOCUMENT CONTAINS OUTDATED PRICING
+
+This specification was created before the current 3-tier model was implemented.
+
+**Current Pricing (As of January 2026):**
+- Free: £0
+- Premium: £6.99/month or £69.99/year
+- Unlimited: £12.99/month or £129.99/year
+
+**For current pricing details, see:**
+- [PRICING_UPDATE_JANUARY_2026.md](PRICING_UPDATE_JANUARY_2026.md)
+- [TIER_CORRECTIONS.md](TIER_CORRECTIONS.md)
+- [src/screens/UpgradeScreen.tsx](src/screens/UpgradeScreen.tsx) (source of truth)
+
+---
+
+## Original Document Below (Historical Reference Only)
 
 ## Overview
 This document outlines the complete restructure of SoundBridge's pricing tiers from the old model to the new three-tier system. This applies to both web and mobile applications. All features, permissions, and UI elements must be updated to reflect the new pricing structure.

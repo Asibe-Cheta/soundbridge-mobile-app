@@ -91,6 +91,8 @@ export class FeedService {
             display_name: apiPost.author?.name || apiPost.author?.display_name || apiPost.author?.username || 'Unknown',
             avatar_url: apiPost.author?.avatar_url,
             role: apiPost.author?.role,
+            headline: apiPost.author?.headline,
+            bio: apiPost.author?.bio,
           },
           content: apiPost.content || '',
           post_type: apiPost.post_type || 'update',
@@ -180,7 +182,7 @@ export class FeedService {
       const userIds = [...new Set(postsData.map(p => p.user_id))];
       const { data: authorsData, error: authorsError} = await supabase
         .from('profiles')
-        .select('id, username, display_name, avatar_url, role')
+        .select('id, username, display_name, avatar_url, role, bio, professional_headline, subscription_tier')
         .in('id', userIds);
 
       if (authorsError) {
@@ -218,7 +220,7 @@ export class FeedService {
           const repostedUserIds = [...new Set(repostedPostsData.map(p => p.user_id))];
           const { data: repostedAuthorsData } = await supabase
             .from('profiles')
-            .select('id, username, display_name, avatar_url')
+            .select('id, username, display_name, avatar_url, role, bio, professional_headline, subscription_tier')
             .in('id', repostedUserIds);
 
           const repostedAuthorsMap = new Map();
@@ -339,6 +341,9 @@ export class FeedService {
             display_name: author.display_name || author.username || 'Unknown User',
             avatar_url: author.avatar_url || undefined,
             role: author.role || undefined,
+            headline: author.professional_headline || undefined,
+            bio: author.bio || undefined,
+            subscription_tier: author.subscription_tier || undefined,
           },
           content: post.content || '',
           post_type: post.post_type || 'update',
@@ -976,6 +981,10 @@ export class FeedService {
                 display_name: apiPost.author.name || apiPost.author.display_name,
                 username: apiPost.author.username,
                 avatar_url: apiPost.author.avatar_url,
+                role: apiPost.author.role,
+                headline: apiPost.author.headline,
+                bio: apiPost.author.bio,
+                subscription_tier: apiPost.author.subscription_tier,
               },
               content: apiPost.content,
               post_type: apiPost.post_type,
@@ -986,6 +995,7 @@ export class FeedService {
               user_reaction: userReaction,
               comments_count: apiPost.comments_count || 0,
               created_at: apiPost.created_at,
+              reposted_from_id: apiPost.reposted_from_id || null,
               reposted_from: apiPost.reposted_from ? {
                 id: apiPost.reposted_from.id,
                 author: {
@@ -993,6 +1003,9 @@ export class FeedService {
                   display_name: apiPost.reposted_from.author.name || apiPost.reposted_from.author.display_name,
                   username: apiPost.reposted_from.author.username,
                   avatar_url: apiPost.reposted_from.author.avatar_url,
+                  role: apiPost.reposted_from.author.role,
+                  headline: apiPost.reposted_from.author.headline,
+                  bio: apiPost.reposted_from.author.bio,
                 },
                 content: apiPost.reposted_from.content,
                 post_type: apiPost.reposted_from.post_type,
@@ -1035,10 +1048,19 @@ export class FeedService {
 
       console.log(`✅ Found ${postsData.length} posts for user:`, userId);
 
+      // DEBUG: Log reposted_from_id values
+      postsData.forEach((post, idx) => {
+        console.log(`📝 getUserPosts - Post ${idx + 1} (${post.id}):`, {
+          hasContent: !!post.content,
+          contentLength: post.content?.length || 0,
+          reposted_from_id: post.reposted_from_id || 'null',
+        });
+      });
+
       // Step 2: Get author information
       const { data: authorData, error: authorError } = await supabase
         .from('profiles')
-        .select('id, username, display_name, avatar_url')
+        .select('id, username, display_name, avatar_url, role, bio, professional_headline, subscription_tier')
         .eq('id', userId)
         .single();
 
@@ -1066,7 +1088,7 @@ export class FeedService {
           const repostedUserIds = [...new Set(repostedPostsData.map(p => p.user_id))];
           const { data: repostedAuthorsData } = await supabase
             .from('profiles')
-            .select('id, username, display_name, avatar_url')
+            .select('id, username, display_name, avatar_url, role, bio, professional_headline, subscription_tier')
             .in('id', repostedUserIds);
 
           const repostedAuthorsMap = new Map();
@@ -1080,6 +1102,11 @@ export class FeedService {
               author: repostedAuthorsMap.get(post.user_id),
             });
           });
+
+          // DEBUG: Log repostedPostsMap
+          console.log(`📦 getUserPosts - Built repostedPostsMap with ${repostedPostsMap.size} entries:`,
+            Array.from(repostedPostsMap.keys())
+          );
         }
       }
 
@@ -1128,6 +1155,10 @@ export class FeedService {
             display_name: authorData.display_name,
             username: authorData.username,
             avatar_url: authorData.avatar_url,
+            role: authorData.role,
+            headline: authorData.professional_headline,
+            bio: authorData.bio,
+            subscription_tier: authorData.subscription_tier,
           } : {
             id: userId,
             display_name: 'Unknown',
@@ -1149,6 +1180,19 @@ export class FeedService {
         };
       });
 
+      // DEBUG: Log final transformed posts with repost data
+      transformedPosts.forEach((post, idx) => {
+        if (post.reposted_from_id) {
+          console.log(`🔄 getUserPosts - Transformed Post ${idx + 1}:`, {
+            id: post.id,
+            reposted_from_id: post.reposted_from_id,
+            hasRepostedFrom: !!post.reposted_from,
+            repostedFromContent: post.reposted_from?.content?.substring(0, 30),
+            mapHasKey: repostedPostsMap.has(post.reposted_from_id),
+          });
+        }
+      });
+
       return {
         posts: transformedPosts,
         hasMore: postsData.length === limit,
@@ -1156,6 +1200,224 @@ export class FeedService {
     } catch (error: any) {
       console.error('❌ FeedService.getUserPosts:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get a single post by ID
+   * Tries API endpoint first, falls back to direct Supabase query
+   * @param postId - The ID of the post to fetch
+   * @returns The post data
+   */
+  async getPostById(postId: string): Promise<Post> {
+    try {
+      console.log(`📡 FeedService: Getting post by ID (${postId})`);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        console.error('❌ FeedService: Not authenticated');
+        throw new Error('Not authenticated');
+      }
+
+      // Try API endpoint first, fall back to Supabase if it fails
+      try {
+        console.log('✅ FeedService: Trying API endpoint...');
+        const response = await apiFetch<{ success: boolean; data: { post: any } }>(
+          `/api/posts/${postId}`,
+          {
+            method: 'GET',
+            session,
+          }
+        );
+
+        console.log('📦 API Response structure:', JSON.stringify(response).substring(0, 200));
+
+        // Handle different response formats
+        let postData;
+        if (response.success && response.data) {
+          // New format: { success: true, data: { post: {...} } } or { success: true, data: {...} }
+          postData = response.data.post || response.data;
+        } else if (response.data) {
+          // Old format: { data: {...} }
+          postData = response.data;
+        } else {
+          // Direct format: { id, author, ... }
+          postData = response;
+        }
+
+        console.log('📦 Extracted postData:', postData ? `id: ${postData.id}` : 'null');
+
+        if (postData && postData.id) {
+          const imageAttachment = postData.attachments?.find((a: any) => a.attachment_type === 'image');
+          const audioAttachment = postData.attachments?.find((a: any) => a.attachment_type === 'audio');
+
+          const reactions = postData.reactions || {};
+          const reactionsCount = {
+            support: reactions.support || 0,
+            love: reactions.love || 0,
+            fire: reactions.fire || 0,
+            congrats: reactions.congrats || 0,
+          };
+
+          console.log('✅ FeedService: Post fetched from API');
+          return {
+            id: postData.id,
+            author: {
+              id: postData.author?.id || '',
+              username: postData.author?.username || '',
+              display_name: postData.author?.name || postData.author?.display_name || 'Unknown',
+              avatar_url: postData.author?.avatar_url,
+              role: postData.author?.role,
+              headline: postData.author?.headline,
+              bio: postData.author?.bio,
+            },
+            content: postData.content || '',
+            post_type: postData.post_type || 'update',
+            visibility: postData.visibility || 'public',
+            image_url: imageAttachment?.file_url,
+            audio_url: audioAttachment?.file_url,
+            event_id: postData.event_id,
+            reactions_count: reactionsCount,
+            user_reaction: reactions.user_reaction || null,
+            comments_count: postData.comment_count || postData.comments_count || 0,
+            shares_count: postData.shares_count || postData.repost_count || 0,
+            created_at: postData.created_at,
+            is_reposted: postData.is_reposted || false,
+            is_saved: postData.is_saved || false,
+            reposted_from_id: postData.reposted_from_id || null,
+            reposted_from: postData.reposted_from || undefined,
+          };
+        }
+      } catch (apiError: any) {
+        console.warn('⚠️ FeedService: API endpoint failed:', apiError.message);
+        console.warn('⚠️ Using Supabase fallback...');
+      }
+
+      // Fallback: Direct Supabase query
+      console.log('📡 FeedService: Fetching from Supabase directly...');
+
+      const { data: postData, error: postError } = await supabase
+        .from('posts')
+        .select(`
+          *,
+          profiles:user_id (
+            id,
+            username,
+            display_name,
+            avatar_url,
+            role,
+            bio,
+            professional_headline,
+            subscription_tier
+          )
+        `)
+        .eq('id', postId)
+        .single();
+
+      if (postError) {
+        console.error('❌ Supabase query error:', postError);
+        throw new Error(`Post not found: ${postError.message}`);
+      }
+
+      if (!postData) {
+        console.error('❌ No post data returned');
+        throw new Error('Post not found');
+      }
+
+      console.log('📦 Supabase post data received:', postData.id);
+
+      // Fetch attachments
+      const { data: attachments } = await supabase
+        .from('post_attachments')
+        .select('*')
+        .eq('post_id', postId);
+
+      // Fetch reactions
+      const { data: reactions } = await supabase
+        .from('post_reactions')
+        .select('reaction_type, user_id')
+        .eq('post_id', postId);
+
+      const reactionsCount = {
+        support: reactions?.filter(r => r.reaction_type === 'support').length || 0,
+        love: reactions?.filter(r => r.reaction_type === 'love').length || 0,
+        fire: reactions?.filter(r => r.reaction_type === 'fire').length || 0,
+        congrats: reactions?.filter(r => r.reaction_type === 'congrats').length || 0,
+      };
+
+      const userReaction = reactions?.find(r => r.user_id === session.user.id)?.reaction_type || null;
+
+      // Fetch counts
+      const { count: commentsCount } = await supabase
+        .from('post_comments')
+        .select('*', { count: 'exact', head: true })
+        .eq('post_id', postId);
+
+      const { count: sharesCount } = await supabase
+        .from('post_reposts')
+        .select('*', { count: 'exact', head: true })
+        .eq('post_id', postId);
+
+      const { data: userRepost } = await supabase
+        .from('post_reposts')
+        .select('id')
+        .eq('post_id', postId)
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+
+      const { data: savedPost } = await supabase
+        .from('saved_posts')
+        .select('id')
+        .eq('post_id', postId)
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+
+      // Handle reposted_from (if this is a repost)
+      let repostedFrom = undefined;
+      if (postData.reposted_from_id) {
+        try {
+          // Recursively fetch the original post
+          repostedFrom = await this.getPostById(postData.reposted_from_id);
+        } catch (err) {
+          console.warn('⚠️ Failed to fetch reposted_from post:', err);
+        }
+      }
+
+      const imageAttachment = attachments?.find((a: any) => a.file_type?.startsWith('image/'));
+      const audioAttachment = attachments?.find((a: any) => a.file_type?.startsWith('audio/'));
+
+      console.log('✅ FeedService: Post fetched from Supabase');
+      return {
+        id: postData.id,
+        author: {
+          id: postData.profiles?.id || postData.user_id,
+          username: postData.profiles?.username || 'unknown',
+          display_name: postData.profiles?.display_name || 'Unknown',
+          avatar_url: postData.profiles?.avatar_url || null,
+          role: postData.profiles?.role,
+          headline: postData.profiles?.professional_headline,
+          bio: postData.profiles?.bio,
+          subscription_tier: postData.profiles?.subscription_tier,
+        },
+        content: postData.content || '',
+        post_type: postData.post_type || 'update',
+        visibility: postData.visibility || 'public',
+        image_url: imageAttachment?.file_url || null,
+        audio_url: audioAttachment?.file_url || null,
+        event_id: postData.event_id || null,
+        reactions_count: reactionsCount,
+        user_reaction: userReaction,
+        comments_count: commentsCount || 0,
+        shares_count: sharesCount || 0,
+        created_at: postData.created_at,
+        is_reposted: !!userRepost,
+        is_saved: !!savedPost,
+        reposted_from_id: postData.reposted_from_id || null,
+        reposted_from: repostedFrom,
+      };
+    } catch (error: any) {
+      console.error('❌ FeedService.getPostById:', error);
+      throw new Error(error.message || 'Failed to fetch post');
     }
   }
 }

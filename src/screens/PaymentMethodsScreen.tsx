@@ -21,6 +21,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService } from '../services/WalletService';
 import { currencyService } from '../services/CurrencyService';
+import { revenueService } from '../services/revenueService';
 import CountryAwareBankForm from '../components/CountryAwareBankForm';
 
 interface BankAccount {
@@ -82,17 +83,16 @@ export default function PaymentMethodsScreen() {
     try {
       setLoading(true);
       console.log('🔄 Loading bank account data...');
-      
-      // Load bank account data (mock for now)
-      // In a real app, this would call an API
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Mock data - replace with actual API call
-      setBankAccount(null); // No bank account initially
-      
+
+      // ✅ LOAD ACTUAL BANK ACCOUNT FROM DATABASE
+      const account = await revenueService.getBankAccount(session.user.id);
+      setBankAccount(account);
+
+      console.log('✅ Bank account loaded:', account ? 'Found' : 'None');
+
       // Check account status if we have a bank account
       await checkAccountStatus();
-      
+
       console.log('✅ Bank account data loaded');
     } catch (error) {
       console.error('❌ Error loading bank account:', error);
@@ -110,20 +110,43 @@ export default function PaymentMethodsScreen() {
 
     try {
       setCheckingStatus(true);
+
+      // ✅ SKIP STRIPE CHECK FOR WISE-SUPPORTED CURRENCIES
+      // Users with Wise currencies (NGN, INR, BRL, etc.) don't need Stripe Connect
+      const wiseCurrencies = [
+        'NGN', 'GHS', 'KES', 'ZAR', 'TZS', 'UGX', 'EGP',  // Africa
+        'INR', 'IDR', 'MYR', 'PHP', 'THB', 'VND', 'BDT', 'PKR', 'LKR', 'NPR', 'CNY', 'KRW',  // Asia
+        'BRL', 'MXN', 'ARS', 'CLP', 'COP', 'CRC', 'UYU',  // Latin America
+        'TRY', 'ILS', 'MAD', 'UAH', 'GEL',  // Middle East & Europe
+      ];
+
+      if (bankAccount && wiseCurrencies.includes(bankAccount.currency)) {
+        console.log(`ℹ️ User has Wise currency (${bankAccount.currency}) - skipping Stripe check`);
+        setStatusDisplay({
+          status: 'wise',
+          color: '#10B981',
+          icon: 'globe-outline',
+          message: 'Payouts via Wise (no Stripe required)',
+          actionRequired: false,
+        });
+        setCheckingStatus(false);
+        return;
+      }
+
       console.log('🔍 Checking Stripe account status...');
-      
+
       const statusResult = await walletService.checkStripeAccountStatusSafe(session);
-      
+
       if (statusResult?.success && statusResult?.accountStatus) {
         const status = statusResult.accountStatus;
         setAccountStatus(status);
-        
+
         // Get display information
         const display = walletService.getVerificationStatusDisplay(status);
         setStatusDisplay(display);
-        
+
         console.log('✅ Account status updated:', display);
-        
+
         // Show alert for restricted accounts
         if (walletService.isAccountRestricted(status)) {
           Alert.alert(
@@ -231,15 +254,16 @@ export default function PaymentMethodsScreen() {
         return;
       }
 
-      // TODO: Implement actual API call
-      // const result = await revenueService.setBankAccount(user?.id, formData);
-      
-      // Mock success for now
-      setTimeout(() => {
+      // ✅ SAVE BANK ACCOUNT TO DATABASE
+      const result = await revenueService.setBankAccount(user?.id || '', formData);
+
+      if (result.success) {
         Alert.alert('Success', 'Bank account information saved successfully!');
         setIsEditing(false);
-        loadBankAccount();
-      }, 1500);
+        await loadBankAccount(); // Reload to show saved data
+      } else {
+        throw new Error(result.error?.message || 'Failed to save bank account');
+      }
     } catch (error) {
       console.error('Error saving bank account:', error);
       Alert.alert('Error', 'Failed to save bank account information');
@@ -255,17 +279,34 @@ export default function PaymentMethodsScreen() {
   const handleCountryAwareBankSubmit = async (methodData: any) => {
     try {
       console.log('🏦 Submitting country-aware bank account:', methodData);
-      
-      // Here we would normally call the walletService to add the withdrawal method
-      // For now, let's simulate the API call and show success
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      Alert.alert('Success', 'Bank account added successfully with country-aware details!');
-      setIsEditing(false);
-      loadBankAccount(); // Refresh data
-    } catch (error) {
+
+      if (!user?.id) {
+        Alert.alert('Error', 'User not authenticated');
+        return;
+      }
+
+      // ✅ SAVE COUNTRY-AWARE BANK ACCOUNT TO DATABASE
+      const formData = {
+        account_holder_name: methodData.account_holder_name || methodData.accountHolderName,
+        bank_name: methodData.bank_name || methodData.bankName,
+        account_number: methodData.account_number || methodData.accountNumber,
+        routing_number: methodData.routing_number || methodData.routingNumber || '',
+        account_type: methodData.account_type || methodData.accountType || 'checking',
+        currency: methodData.currency || methodData.country || 'USD',
+      };
+
+      const result = await revenueService.setBankAccount(user.id, formData);
+
+      if (result.success) {
+        Alert.alert('Success', 'Bank account added successfully with country-aware details!');
+        setIsEditing(false);
+        await loadBankAccount(); // Refresh data
+      } else {
+        throw new Error(result.error?.message || 'Failed to save bank account');
+      }
+    } catch (error: any) {
       console.error('❌ Error adding bank account:', error);
-      Alert.alert('Error', 'Failed to add bank account. Please try again.');
+      Alert.alert('Error', error.message || 'Failed to add bank account. Please try again.');
     }
   };
 

@@ -256,8 +256,8 @@ class SubscriptionService {
         try {
           const { supabase } = await import('../lib/supabase');
           const { data: profile, error: profileError } = await supabase
-            .from('user_profiles')
-            .select('subscription_tier, subscription_status, currency')
+            .from('profiles')  // ✅ FIXED: Changed from 'user_profiles' to 'profiles'
+            .select('subscription_tier, subscription_status, currency, subscription_amount, subscription_currency, subscription_period_start, subscription_period_end')
             .eq('id', session.user.id)
             .single();
 
@@ -268,20 +268,32 @@ class SubscriptionService {
               subscription_tier: profile.subscription_tier,
               subscription_status: profile.subscription_status,
               currency: profile.currency,
+              amount: profile.subscription_amount,
+              period_start: profile.subscription_period_start,
+              period_end: profile.subscription_period_end,
             });
 
             // Use the tier from profile if available
             if (profile.subscription_tier && profile.subscription_tier !== 'free') {
               console.log(`✅ Using Supabase fallback tier: ${profile.subscription_tier}`);
+
+              // Calculate billing cycle from amount if available
+              let billingCycle: 'monthly' | 'yearly' = 'monthly';
+              if (profile.subscription_amount) {
+                // Premium: £6.99/month or £69.99/year
+                // Unlimited: £12.99/month or £129.99/year
+                billingCycle = profile.subscription_amount >= 50 ? 'yearly' : 'monthly';
+              }
+
               return {
                 tier: profile.subscription_tier as 'free' | 'premium' | 'unlimited',
                 status: (profile.subscription_status as any) || 'active',
-                current_period_start: new Date().toISOString(),
-                current_period_end: new Date().toISOString(),
+                current_period_start: profile.subscription_period_start || new Date().toISOString(),
+                current_period_end: profile.subscription_period_end || new Date().toISOString(),
                 cancel_at_period_end: false,
-                amount: 0,
-                currency: profile.currency || 'GBP',
-                billing_cycle: 'monthly',
+                amount: profile.subscription_amount || 0,
+                currency: profile.subscription_currency || profile.currency || 'GBP',
+                billing_cycle: billingCycle,
               };
             } else {
               console.log('⚠️ Supabase profile shows free tier or null');

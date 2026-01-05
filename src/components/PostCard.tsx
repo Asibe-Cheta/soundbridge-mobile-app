@@ -1,8 +1,9 @@
-import React, { memo, useCallback, useState, useRef } from 'react';
+import React, { memo, useCallback, useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ActivityIndicator } from 'react-native';
 import { walkthroughable } from 'react-native-copilot';
+import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import type { Post } from '../types/feed.types';
@@ -17,6 +18,8 @@ import { ReactionPicker } from './ReactionPicker';
 import CommentsModal from '../modals/CommentsModal';
 import { RepostModal } from './RepostModal';
 import { RepostedPostCard } from './RepostedPostCard';
+import { networkService } from '../services/api/networkService';
+import { useToast } from '../contexts/ToastContext';
 
 // Create walkthroughable component for tour
 const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
@@ -86,6 +89,9 @@ const PostCard = memo(function PostCard({
   isSaved = false,
 }: PostCardProps) {
   const { theme } = useTheme();
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const navigation = useNavigation();
   const [showActionsModal, setShowActionsModal] = useState(false);
   const [showFullScreenImage, setShowFullScreenImage] = useState(false);
   const [showBlockModal, setShowBlockModal] = useState(false);
@@ -94,6 +100,9 @@ const PostCard = memo(function PostCard({
   const [showCommentsModal, setShowCommentsModal] = useState(false);
   const [showRepostModal, setShowRepostModal] = useState(false);
   const [isReposting, setIsReposting] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [connectionPending, setConnectionPending] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const handleReactionPress = (reactionType: 'support' | 'love' | 'fire' | 'congrats') => {
@@ -154,6 +163,76 @@ const PostCard = memo(function PostCard({
   });
 
   const isRepost = post.reposted_from_id && post.reposted_from;
+  const isOwnPost = user?.id === post.author.id;
+
+  // Check follow status
+  useEffect(() => {
+    checkFollowStatus();
+  }, [post.author.id]);
+
+  const checkFollowStatus = async () => {
+    if (!user?.id || isOwnPost) return;
+
+    try {
+      const { supabase } = await import('../lib/supabase');
+      const { data, error } = await supabase
+        .from('follows')
+        .select('follower_id')
+        .eq('follower_id', user.id)
+        .eq('following_id', post.author.id)
+        .single();
+
+      if (error && error.code !== 'PGRST116') throw error;
+
+      setIsConnected(!!data);
+    } catch (error) {
+      console.error('❌ Error checking follow status:', error);
+    }
+  };
+
+  const handleFollowToggle = async () => {
+    if (!user?.id || isOwnPost) return;
+
+    setIsConnecting(true);
+    try {
+      const { supabase } = await import('../lib/supabase');
+
+      if (isConnected) {
+        // Unfollow
+        const { error } = await supabase
+          .from('follows')
+          .delete()
+          .eq('follower_id', user.id)
+          .eq('following_id', post.author.id);
+
+        if (error) throw error;
+
+        setIsConnected(false);
+        showToast('Unfollowed', 'success');
+      } else {
+        // Follow
+        const { error } = await supabase
+          .from('follows')
+          .insert({
+            follower_id: user.id,
+            following_id: post.author.id,
+            created_at: new Date().toISOString()
+          });
+
+        if (error) throw error;
+
+        setIsConnected(true);
+        showToast(`Following ${post.author.display_name}`, 'success');
+      }
+
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (error: any) {
+      console.error('❌ Error toggling follow:', error);
+      showToast(error.message || 'Failed to follow/unfollow', 'error');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
 
   // Handle repost with toggle behavior
   const handleRepostPress = () => {
@@ -249,29 +328,9 @@ const PostCard = memo(function PostCard({
   };
 
   return (
-    <TouchableOpacity
-      style={[
-        styles.container,
-        {
-          backgroundColor: theme.colors.card,
-          borderColor: theme.colors.border,
-        },
-      ]}
-      onPress={onPress}
-      activeOpacity={0.95}
-    >
-      {/* Redrop Indicator */}
-      {isRepost && (
-        <View style={styles.repostIndicator}>
-          <Ionicons name="repeat" size={16} color={theme.colors.textSecondary} />
-          <Text style={[styles.repostText, { color: theme.colors.textSecondary }]}>
-            REDROPPED
-          </Text>
-        </View>
-      )}
-
-      {/* Header Section */}
-      <View style={styles.header}>
+    <View style={styles.outerContainer}>
+      {/* LinkedIn-style Header - Outside Card */}
+      <View style={styles.profileHeader}>
         {/* Avatar */}
         <TouchableOpacity
           onPress={() => {
@@ -304,85 +363,169 @@ const PostCard = memo(function PostCard({
             onAuthorPress?.(post.author.id);
           }}
         >
-          <View style={styles.authorInfoRow}>
-            <Text style={[styles.authorName, { color: theme.colors.text }]}>
+          <View style={styles.authorNameRow}>
+            <Text style={[styles.authorName, { color: theme.colors.text }]} numberOfLines={1}>
               {post.author.display_name}
             </Text>
-            {/* Post Type Badge */}
-            {post.post_type && post.post_type !== 'update' && (
-              <View style={[styles.postTypeBadge, {
-                backgroundColor: getPostTypeColor(post.post_type) + '20',
-                borderColor: getPostTypeColor(post.post_type) + '40',
-              }]}>
-                <Ionicons
-                  name={getPostTypeIcon(post.post_type)}
-                  size={12}
-                  color={getPostTypeColor(post.post_type)}
-                />
-                <Text style={[styles.postTypeBadgeText, { color: getPostTypeColor(post.post_type) }]}>
-                  {getPostTypeLabel(post.post_type)}
-                </Text>
+
+            {/* Pro Badge (Premium tier) */}
+            {post.author.subscription_tier === 'premium' && (
+              <View style={styles.proBadge}>
+                <Ionicons name="diamond" size={10} color="#FFFFFF" />
+              </View>
+            )}
+
+            {/* Pro+ Badge (Unlimited tier) */}
+            {post.author.subscription_tier === 'unlimited' && (
+              <View style={styles.proPlusBadge}>
+                <Ionicons name="diamond" size={10} color="#FFFFFF" />
+                <Text style={styles.proPlusText}>+</Text>
               </View>
             )}
           </View>
+
+          {/* Professional headline only */}
           {post.author.headline && (
-            <Text style={[styles.authorHeadline, { color: theme.colors.textSecondary }]}>
+            <Text style={[styles.authorDetails, { color: theme.colors.textSecondary }]} numberOfLines={1}>
               {post.author.headline}
             </Text>
           )}
-          <Text style={[styles.timestamp, { color: theme.colors.textSecondary }]}>
-            {formatTimeAgo(post.created_at)}
-          </Text>
-        </TouchableOpacity>
 
-        {/* Save Button */}
-        <PostSaveButton 
-          postId={post.id} 
-          initialIsSaved={isSaved}
-          size={22}
-        />
-
-        {/* More Options Button */}
-        <TouchableOpacity
-          style={styles.moreButton}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            setShowActionsModal(true);
-          }}
-        >
-          <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Content Section */}
-      <View style={styles.contentSection}>
-        <Text
-          style={[styles.postContent, { color: theme.colors.text }]}
-          numberOfLines={8}
-        >
-          {post.content}
-        </Text>
-        {post.content.length > 200 && (
-          <TouchableOpacity>
-            <Text style={[styles.seeMore, { color: theme.colors.primary }]}>
-              See more
+          <View style={styles.timestampRow}>
+            <Text style={[styles.timestamp, { color: theme.colors.textSecondary }]}>
+              {formatTimeAgo(post.created_at)}
             </Text>
+            {/* Post Type Badge */}
+            {post.post_type && post.post_type !== 'update' && (
+              <>
+                <Text style={[styles.dot, { color: theme.colors.textSecondary }]}> • </Text>
+                <View style={[styles.postTypeBadge, {
+                  backgroundColor: getPostTypeColor(post.post_type) + '20',
+                  borderColor: getPostTypeColor(post.post_type) + '40',
+                }]}>
+                  <Ionicons
+                    name={getPostTypeIcon(post.post_type)}
+                    size={10}
+                    color={getPostTypeColor(post.post_type)}
+                  />
+                  <Text style={[styles.postTypeBadgeText, { color: getPostTypeColor(post.post_type) }]}>
+                    {getPostTypeLabel(post.post_type)}
+                  </Text>
+                </View>
+              </>
+            )}
+          </View>
+        </TouchableOpacity>
+
+        {/* Follow Button - LinkedIn style */}
+        {!isOwnPost && (
+          <TouchableOpacity
+            style={[
+              styles.followButton,
+              {
+                backgroundColor: isConnected ? 'transparent' : theme.colors.primary,
+                borderColor: isConnected ? theme.colors.border : theme.colors.primary,
+              }
+            ]}
+            onPress={handleFollowToggle}
+            disabled={isConnecting}
+          >
+            {isConnecting ? (
+              <ActivityIndicator size="small" color={isConnected ? theme.colors.text : '#FFFFFF'} />
+            ) : (
+              <>
+                <Ionicons
+                  name={isConnected ? "checkmark" : "person-add"}
+                  size={16}
+                  color={isConnected ? theme.colors.text : '#FFFFFF'}
+                />
+                <Text style={[
+                  styles.followButtonText,
+                  { color: isConnected ? theme.colors.text : '#FFFFFF' }
+                ]}>
+                  {isConnected ? 'Following' : 'Follow'}
+                </Text>
+              </>
+            )}
           </TouchableOpacity>
         )}
       </View>
 
+      {/* Post Card */}
+      <TouchableOpacity
+        style={[
+          styles.container,
+          {
+            backgroundColor: theme.colors.card,
+            borderColor: theme.colors.border,
+          },
+        ]}
+        onPress={onPress}
+        activeOpacity={0.95}
+      >
+        {/* Card Header - Redrop Indicator + Save and More buttons */}
+        <View style={styles.cardHeader}>
+          {/* Redrop Indicator */}
+          {isRepost ? (
+            <View style={styles.repostIndicator}>
+              <Ionicons name="repeat" size={16} color={theme.colors.textSecondary} />
+              <Text style={[styles.repostText, { color: theme.colors.textSecondary }]}>
+                REDROPPED
+              </Text>
+            </View>
+          ) : (
+            <View style={{ flex: 1 }} />
+          )}
+
+          {/* Save Button */}
+          <PostSaveButton
+            postId={post.id}
+            initialIsSaved={isSaved}
+            size={22}
+          />
+
+          {/* More Options Button */}
+          <TouchableOpacity
+            style={styles.moreButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowActionsModal(true);
+            }}
+          >
+            <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
+
+      {/* Content Section - Only show for non-reposts OR reposts with comment */}
+      {(!isRepost || (isRepost && post.content && post.content.trim().length > 0)) && (
+        <View style={styles.contentSection}>
+          <Text
+            style={[styles.postContent, { color: theme.colors.text }]}
+            numberOfLines={8}
+          >
+            {post.content}
+          </Text>
+          {post.content.length > 200 && (
+            <TouchableOpacity>
+              <Text style={[styles.seeMore, { color: theme.colors.primary }]}>
+                See more
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
       {/* Reposted Original Post (Quote Repost - Twitter style) */}
       {isRepost && (
         <>
-          {console.log('✅ Rendering RepostedPostCard for:', post.reposted_from?.author?.display_name)}
           <RepostedPostCard
             post={post.reposted_from!}
             onPress={() => {
-              // Navigate to the original post detail
+              // Navigate to the original post detail (like Twitter's quote tweet behavior)
               if (post.reposted_from_id) {
-                // TODO: Navigate to post detail screen
                 console.log('🔗 Navigating to original post:', post.reposted_from_id);
-                // navigation.navigate('PostDetail', { postId: post.reposted_from_id });
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                navigation.navigate('PostDetail' as never, { postId: post.reposted_from_id } as never);
               }
             }}
             onAuthorPress={(authorId) => {
@@ -653,6 +796,7 @@ const PostCard = memo(function PostCard({
         }}
       />
     </TouchableOpacity>
+    </View>
   );
 }, (prevProps, nextProps) => {
   // Custom comparison function for React.memo
@@ -670,9 +814,18 @@ const PostCard = memo(function PostCard({
 export default PostCard;
 
 const styles = StyleSheet.create({
+  outerContainer: {
+    marginBottom: 16,
+  },
+  profileHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
   container: {
     marginHorizontal: 16,
-    marginBottom: 12,
     padding: 16,
     borderRadius: 16,
     borderWidth: 1,
@@ -686,16 +839,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
+    flex: 1,
   },
   repostText: {
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.8,
   },
-  header: {
+  cardHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 14,
   },
   avatar: {
@@ -716,38 +869,90 @@ const styles = StyleSheet.create({
   authorInfo: {
     flex: 1,
   },
-  authorInfoRow: {
+  authorNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     marginBottom: 2,
   },
   authorName: {
     fontSize: 16,
     fontWeight: '600',
   },
-  postTypeBadge: {
+  proBadge: {
+    backgroundColor: '#DC2626',
+    borderRadius: 8,
+    width: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  proPlusBadge: {
+    backgroundColor: '#DC2626',
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 4,
+    gap: 2,
+    height: 16,
   },
-  postTypeBadgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'capitalize',
+  proPlusText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '700',
+    marginTop: -1,
   },
-  authorHeadline: {
+  authorDetails: {
     fontSize: 13,
     fontWeight: '400',
+    marginBottom: 2,
+    lineHeight: 18,
+  },
+  authorBio: {
+    fontSize: 12,
+    fontWeight: '400',
     marginBottom: 4,
+    lineHeight: 16,
+  },
+  timestampRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   timestamp: {
     fontSize: 12,
     fontWeight: '400',
+  },
+  dot: {
+    fontSize: 12,
+  },
+  followButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginLeft: 8,
+  },
+  followButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  postTypeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 3,
+  },
+  postTypeBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'capitalize',
   },
   moreButton: {
     padding: 8,

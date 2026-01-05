@@ -19,7 +19,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { dbHelpers } from '../lib/supabase';
+import { dbHelpers, supabase } from '../lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import EventCategoryPromptModal from '../components/EventCategoryPromptModal';
 
 interface Event {
   id: string;
@@ -28,6 +30,7 @@ interface Event {
   event_date: string;
   location: string;
   venue?: string;
+  city?: string;
   category: string;
   price_gbp?: number;
   price_ngn?: number;
@@ -35,6 +38,8 @@ interface Event {
   current_attendees?: number;
   image_url?: string;
   created_at: string;
+  distance_km?: number;
+  has_coordinates?: boolean;
 }
 
 type SortOption = 'date' | 'alphabetical';
@@ -52,6 +57,8 @@ export default function AllEventsScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('date');
+  const [showPreferenceModal, setShowPreferenceModal] = useState(false);
+  const [hasCheckedPreferences, setHasCheckedPreferences] = useState(false);
 
   const sortOptions = [
     { key: 'date', label: 'By Date' },
@@ -60,6 +67,7 @@ export default function AllEventsScreen() {
 
   useEffect(() => {
     loadEvents(false);
+    checkUserPreferences();
   }, []);
 
   useEffect(() => {
@@ -70,20 +78,31 @@ export default function AllEventsScreen() {
     try {
       if (refresh) setRefreshing(true);
       else setLoading(true);
-      
+
       setError(null);
-      console.log('🔄 Loading all events from Supabase...');
-      
-      const { data, error } = await dbHelpers.getUpcomingEvents(50);
-      
+      console.log('🔄 Loading personalized events from Supabase...');
+
+      // Use personalized events function if user is logged in
+      let data, error;
+      if (user?.id) {
+        const result = await dbHelpers.getPersonalizedEvents(user.id, 50);
+        data = result.data;
+        error = result.error;
+      } else {
+        // Fallback to regular events for non-logged-in users
+        const result = await dbHelpers.getUpcomingEvents(50);
+        data = result.data;
+        error = result.error;
+      }
+
       if (error) {
         console.error('❌ Error loading events:', error);
         throw error;
       }
-      
+
       console.log('✅ Events loaded:', data?.length || 0);
       setEvents(data || []);
-      
+
     } catch (error: any) {
       console.error('❌ Error loading events:', error);
       setError(error.message || 'Failed to load events');
@@ -125,6 +144,51 @@ export default function AllEventsScreen() {
     navigation.navigate('EventDetails' as never, { eventId: event.id, event: event } as never);
   };
 
+  const checkUserPreferences = async () => {
+    if (!user?.id || hasCheckedPreferences) return;
+
+    try {
+      // Check if user has dismissed the modal before
+      const dismissed = await AsyncStorage.getItem('event_preference_modal_dismissed');
+      if (dismissed === 'true') {
+        setHasCheckedPreferences(true);
+        return;
+      }
+
+      // Check if user has set event category preferences
+      const { data: preferences } = await supabase
+        .from('notification_preferences')
+        .select('preferred_event_categories')
+        .eq('user_id', user.id)
+        .single();
+
+      // Show modal if no preferences set
+      if (!preferences || !preferences.preferred_event_categories || preferences.preferred_event_categories.length === 0) {
+        // Delay modal to avoid showing immediately on screen load
+        setTimeout(() => {
+          setShowPreferenceModal(true);
+        }, 1500);
+      }
+
+      setHasCheckedPreferences(true);
+    } catch (error) {
+      console.error('Error checking user preferences:', error);
+      setHasCheckedPreferences(true);
+    }
+  };
+
+  const handleDismissModal = async () => {
+    setShowPreferenceModal(false);
+    // Remember that user dismissed the modal
+    await AsyncStorage.setItem('event_preference_modal_dismissed', 'true');
+  };
+
+  const handleSelectPreferences = () => {
+    setShowPreferenceModal(false);
+    // Navigate to notification preferences screen
+    navigation.navigate('NotificationPreferences' as never);
+  };
+
   const onRefresh = () => {
     loadEvents(true);
   };
@@ -156,10 +220,20 @@ export default function AllEventsScreen() {
           <Text style={[styles.eventDate, { color: theme.colors.primary }]}>
             📅 {formatEventDate(event.event_date)}
           </Text>
-          <Text style={[styles.eventLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-            📍 {event.location}
-            {event.venue && ` • ${event.venue}`}
-          </Text>
+          <View style={styles.locationRow}>
+            <Text style={[styles.eventLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+              📍 {event.location}
+              {event.venue && ` • ${event.venue}`}
+            </Text>
+            {event.distance_km !== null && event.distance_km !== undefined && (
+              <Text style={[styles.distanceText, { color: theme.colors.accentBlue }]}>
+                {event.distance_km < 1
+                  ? `${Math.round(event.distance_km * 1000)}m away`
+                  : `${Math.round(event.distance_km)}km away`
+                }
+              </Text>
+            )}
+          </View>
         </View>
 
         <View style={styles.eventActions}>
@@ -321,6 +395,13 @@ export default function AllEventsScreen() {
         }
       />
       </SafeAreaView>
+
+      {/* Event Category Preference Modal */}
+      <EventCategoryPromptModal
+        visible={showPreferenceModal}
+        onDismiss={handleDismissModal}
+        onSelectPreferences={handleSelectPreferences}
+      />
     </View>
   );
 }
@@ -453,9 +534,20 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginBottom: 4,
   },
+  locationRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
   eventLocation: {
     fontSize: 14,
-    marginBottom: 4,
+    flex: 1,
+  },
+  distanceText: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 8,
   },
   eventActions: {
     alignItems: 'flex-end',

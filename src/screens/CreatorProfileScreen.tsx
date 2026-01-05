@@ -34,6 +34,7 @@ import { feedService } from '../services/api/feedService';
 import type { Post } from '../types/feed.types';
 import { useServiceProviderPrompt } from '../hooks/useServiceProviderPrompt';
 import ServiceProviderPromptModal from '../components/ServiceProviderPromptModal';
+import { payoutService } from '../services/PayoutService';
 
 interface Creator {
   id: string;
@@ -44,11 +45,14 @@ interface Creator {
   banner_url?: string;
   location?: string;
   genre?: string;
+  professional_headline?: string;
+  subscription_tier?: 'free' | 'premium' | 'unlimited' | null;
   followers_count?: number;     // COMPUTED from follows table
   tracks_count?: number;        // COMPUTED from audio_tracks table
   events_count?: number;        // COMPUTED from events table
   total_tips_received?: number; // COMPUTED from creator_tips table
   total_tip_count?: number;     // COMPUTED from creator_tips table
+  total_earnings?: number;      // COMPUTED from creator_revenue table
   tips_this_month_amount?: number;
   tips_this_month_count?: number;
   created_at: string;
@@ -259,6 +263,8 @@ export default function CreatorProfileScreen() {
           avatar_url,
           banner_url,
           location,
+          professional_headline,
+          subscription_tier,
           created_at
         `)
         .eq('id', creatorId)
@@ -266,43 +272,78 @@ export default function CreatorProfileScreen() {
 
       if (profileError) throw profileError;
 
+      // Get session for creator revenue fetch
+      const { data: { session: freshSession } } = await supabase.auth.getSession();
+
       // Get computed stats with better error handling - matching ProfileScreen approach
-      const [followersResult, followingResult, tracksResult, eventsResult, tipsResult] = await Promise.all([
+      const [followersResult, followingResult, tracksResult, eventsResult, tipsResult, revenueResult] = await Promise.all([
         // Get followers count
         supabase
           .from('follows')
           .select('*', { count: 'exact', head: true })
           .eq('following_id', creatorId),
-        
+
         // Get following count
         supabase
           .from('follows')
           .select('*', { count: 'exact', head: true })
           .eq('follower_id', creatorId),
-        
+
         // Get tracks count
         supabase
           .from('audio_tracks')
           .select('*', { count: 'exact', head: true })
           .eq('creator_id', creatorId),
-        
+
         // Get events count
         supabase
           .from('events')
           .select('*', { count: 'exact', head: true })
           .eq('creator_id', creatorId),
-        
-        // Get tip statistics (may not exist yet)
-        supabase
-          .from('creator_tips')
-          .select('amount, created_at')
-          .eq('creator_id', creatorId)
-          .eq('status', 'completed')
-          .then(result => result)
-          .catch(error => {
-            console.log('ℹ️ Tips table may not exist yet:', error.message);
-            return { data: [], error: null };
-          })
+
+        // Get creator revenue stats (total_earned includes all tips)
+        (async () => {
+          try {
+            console.log(`💰 Fetching creator revenue for: ${creatorId}`);
+            const result = await supabase
+              .from('creator_revenue')
+              .select('total_earned, pending_balance')
+              .eq('creator_id', creatorId)
+              .single();
+
+            if (result.error && result.error.code !== 'PGRST116') {
+              console.log(`ℹ️ Creator revenue error:`, result.error.message);
+            }
+
+            console.log(`💰 Creator revenue result:`, {
+              found: !!result.data,
+              total_earned: result.data?.total_earned || 0,
+              pending_balance: result.data?.pending_balance || 0,
+            });
+
+            return result;
+          } catch (error: any) {
+            console.log('ℹ️ Creator revenue table may not exist yet:', error.message);
+            return { data: null, error: null };
+          }
+        })(),
+
+        // Get creator revenue (only when viewing own profile)
+        (async () => {
+          try {
+            // Only fetch revenue for the logged-in user's own profile
+            if (!freshSession || !user?.id || creatorId !== user.id) {
+              console.log('ℹ️ Skipping revenue fetch - not viewing own profile');
+              return { data: null, error: null };
+            }
+            const revenue = await payoutService.getCreatorRevenue(freshSession);
+            console.log(`💰 Creator revenue for ${creatorId}: $${revenue?.total_earned?.toFixed(2) || '0.00'}`);
+            return { data: revenue, error: null };
+          } catch (error) {
+            console.log('ℹ️ Creator revenue may not exist yet:', error);
+            return { data: null, error: null };
+          }
+        })()
       ]);
 
       // Extract counts from the results (matching ProfileScreen approach)
@@ -313,16 +354,20 @@ export default function CreatorProfileScreen() {
 
       console.log('📊 Creator stats - Followers:', followersCount, 'Following:', followingCount, 'Tracks:', tracksCount, 'Events:', eventsCount);
 
-      // Calculate tip statistics
-      const tipAmounts = tipsResult.data || [];
-      const totalTipsReceived = tipAmounts.reduce((sum, tip) => sum + (tip.amount || 0), 0);
-      const totalTipCount = tipAmounts.length;
-      const startOfMonth = new Date();
-      startOfMonth.setDate(1);
-      startOfMonth.setHours(0, 0, 0, 0);
-      const tipsThisMonth = tipAmounts.filter(tip => tip.created_at && new Date(tip.created_at) >= startOfMonth);
-      const tipsThisMonthAmount = tipsThisMonth.reduce((sum, tip) => sum + (tip.amount || 0), 0);
-      const tipsThisMonthCount = tipsThisMonth.length;
+      // Get creator revenue data (includes tips_received aggregated value)
+      const creatorRevenueData = tipsResult.data;
+      const totalTipsReceived = creatorRevenueData?.tips_received ?? 0;
+      const totalEarnings = creatorRevenueData?.total_earned ?? 0;
+
+      // Get API revenue for own profile (matching ProfileScreen approach)
+      const creatorRevenue = revenueResult.data;
+
+      console.log('💰 CreatorProfileScreen Earnings Data:', {
+        totalTipsReceived,
+        creatorRevenueTotal: creatorRevenue?.total_earned,
+        totalEarningsCalculated: totalEarnings,
+        pendingBalance: creatorRevenue?.pending_balance,
+      });
 
       const creatorWithStats = {
         ...profileData,
@@ -331,13 +376,13 @@ export default function CreatorProfileScreen() {
         tracks_count: tracksCount,
         events_count: eventsCount,
         total_tips_received: totalTipsReceived,
-        total_tip_count: totalTipCount,
-        tips_this_month_amount: tipsThisMonthAmount,
-        tips_this_month_count: tipsThisMonthCount,
+        total_earnings: totalEarnings,
       };
 
       setCreator(creatorWithStats);
       console.log('✅ Creator profile loaded:', creatorWithStats.display_name);
+      console.log('🏷️ Professional headline:', creatorWithStats.professional_headline);
+      console.log('💎 Subscription tier:', creatorWithStats.subscription_tier);
     } catch (error) {
       console.error('❌ Error loading creator profile:', error);
       Alert.alert('Error', 'Failed to load creator profile');
@@ -558,7 +603,23 @@ export default function CreatorProfileScreen() {
 
     try {
       setLoadingPosts(true);
+      console.log(`📡 CreatorProfileScreen: Loading posts for creator ${creatorId}, page ${page}`);
       const { posts: newPosts, hasMore } = await feedService.getUserPosts(creatorId, page, 10);
+
+      console.log(`✅ CreatorProfileScreen: Loaded ${newPosts.length} posts`);
+      if (newPosts.length > 0) {
+        newPosts.forEach((post, index) => {
+          console.log(`📝 Post ${index + 1}:`, {
+            id: post.id,
+            content: post.content || '(empty)',
+            contentLength: post.content?.length || 0,
+            author: post.author.display_name,
+            hasRepostedFrom: !!newPosts[0].reposted_from,
+            reposted_from_id: post.reposted_from_id,
+            reposted_from_content: post.reposted_from?.content?.substring(0, 30),
+          });
+        });
+      }
 
       if (page === 1) {
         setPosts(newPosts);
@@ -773,7 +834,29 @@ export default function CreatorProfileScreen() {
             <View style={styles.nameSection}>
               <View style={styles.nameRow}>
                 <Text style={[styles.displayName, { color: theme.colors.text }]}>{creator.display_name}</Text>
+
+                {/* Pro Badge (Premium tier) */}
+                {creator.subscription_tier === 'premium' && (
+                  <View style={styles.proBadge}>
+                    <Ionicons name="diamond" size={12} color="#FFFFFF" />
+                  </View>
+                )}
+
+                {/* Pro+ Badge (Unlimited tier) */}
+                {creator.subscription_tier === 'unlimited' && (
+                  <View style={styles.proPlusBadge}>
+                    <Ionicons name="diamond" size={12} color="#FFFFFF" />
+                    <Text style={styles.proPlusText}>+</Text>
+                  </View>
+                )}
               </View>
+
+              {creator.professional_headline && (
+                <Text style={[styles.professionalHeadline, { color: theme.colors.textSecondary }]}>
+                  {creator.professional_headline}
+                </Text>
+              )}
+
               <Text style={[styles.username, { color: theme.colors.textSecondary }]}>@{creator.username}</Text>
           </View>
         </View>
@@ -1492,11 +1575,40 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 4,
+    gap: 8,
   },
   displayName: {
     fontSize: 20,
     fontWeight: 'bold',
-    marginRight: 8,
+  },
+  proBadge: {
+    backgroundColor: '#DC2626',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  proPlusBadge: {
+    backgroundColor: '#DC2626',
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    height: 20,
+  },
+  proPlusText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: -1,
+  },
+  professionalHeadline: {
+    fontSize: 15,
+    marginBottom: 4,
+    lineHeight: 20,
   },
   username: {
     fontSize: 14,

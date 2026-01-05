@@ -49,6 +49,7 @@ import AboutScreen from './src/screens/AboutScreen';
 import TermsOfServiceScreen from './src/screens/TermsOfServiceScreen';
 import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
 import PaymentMethodsScreen from './src/screens/PaymentMethodsScreen';
+import RequestPayoutScreen from './src/screens/RequestPayoutScreen';
 import UpgradeScreen from './src/screens/UpgradeScreen';
 import BillingScreen from './src/screens/BillingScreen';
 import WalletScreen from './src/screens/WalletScreen';
@@ -58,6 +59,11 @@ import WithdrawalMethodsScreen from './src/screens/WithdrawalMethodsScreen';
 import AddWithdrawalMethodScreen from './src/screens/AddWithdrawalMethodScreen';
 import AllCreatorsScreen from './src/screens/AllCreatorsScreen';
 import AllEventsScreen from './src/screens/AllEventsScreen';
+import AllTracksScreen from './src/screens/AllTracksScreen';
+import AllAlbumsScreen from './src/screens/AllAlbumsScreen';
+import AllPlaylistsScreen from './src/screens/AllPlaylistsScreen';
+import AllServicesScreen from './src/screens/AllServicesScreen';
+import AllVenuesScreen from './src/screens/AllVenuesScreen';
 import EventDetailsScreen from './src/screens/EventDetailsScreen';
 import TrackDetailsScreen from './src/screens/TrackDetailsScreen';
 import AppealFormScreen from './src/screens/AppealFormScreen';
@@ -84,6 +90,7 @@ import FollowingListScreen from './src/screens/FollowingListScreen';
 import AlbumDetailsScreen from './src/screens/AlbumDetailsScreen';
 import SavedPostsScreen from './src/screens/SavedPostsScreen';
 import StorageManagementScreen from './src/screens/StorageManagementScreen';
+import PostDetailScreen from './src/screens/PostDetailScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -496,6 +503,7 @@ function AppNavigator() {
         ) : (
           <>
             <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen name="PostDetail" component={PostDetailScreen} options={{ headerShown: false }} />
             <Stack.Screen name="AudioPlayer" component={AudioPlayerScreen} />
             <Stack.Screen name="CreatorSetup" component={CreatorSetupScreen} />
             <Stack.Screen name="PrivacySecurity" component={PrivacySecurityScreen} />
@@ -519,6 +527,7 @@ function AppNavigator() {
             <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
             <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
             <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
+            <Stack.Screen name="RequestPayout" component={RequestPayoutScreen} />
             <Stack.Screen name="Upgrade" component={UpgradeScreen} />
             <Stack.Screen name="Billing" component={BillingScreen} />
             <Stack.Screen name="Wallet" component={WalletScreen} />
@@ -528,6 +537,11 @@ function AppNavigator() {
             <Stack.Screen name="AddWithdrawalMethod" component={AddWithdrawalMethodScreen} />
             <Stack.Screen name="AllCreators" component={AllCreatorsScreen} />
             <Stack.Screen name="AllEvents" component={AllEventsScreen} />
+            <Stack.Screen name="AllTracks" component={AllTracksScreen} />
+            <Stack.Screen name="AllAlbums" component={AllAlbumsScreen} />
+            <Stack.Screen name="AllPlaylists" component={AllPlaylistsScreen} />
+            <Stack.Screen name="AllServices" component={AllServicesScreen} />
+            <Stack.Screen name="AllVenues" component={AllVenuesScreen} />
             <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} />
             <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
             <Stack.Screen name="CreateEvent" component={CreateEventScreen} />

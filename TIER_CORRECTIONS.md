@@ -1,27 +1,25 @@
-# SoundBridge Pricing Tiers - Year 1 Structure
+# SoundBridge Pricing Tiers - Current Structure
 
-**Last Updated:** November 29, 2025  
-**Status:** Approved for Implementation  
-**Target Launch:** Q1 2026
+**Last Updated:** January 1, 2026
+**Status:** ✅ IMPLEMENTED
+**Current Version:** 3-Tier Model
 
 ---
 
 ## Overview
 
-SoundBridge operates on a freemium model with two tiers designed to convert users at critical professional workflow moments. The structure balances accessibility (robust free tier) with conversion incentives (removing pain points at upgrade).
-
-**No Free Trial Strategy:** SoundBridge does NOT offer a 7-day free trial. Instead, the generous Free tier acts as an unlimited trial period, and Pro upgrades come with a **7-day money-back guarantee**. This prevents exploitation while still offering risk-free evaluation.
+SoundBridge operates on a freemium model with **three tiers** designed to convert users at critical professional workflow moments. The structure balances accessibility (robust free tier) with conversion incentives (removing pain points at upgrade).
 
 ### Pricing Summary
 
 | Tier | Monthly | Annual | Savings |
 |------|---------|--------|---------|
 | **Free** | £0 | £0 | - |
-| **Pro** | £9.99/mo | £99/yr | £20.88 (17% discount) |
+| **Premium** | £6.99/mo | £69.99/yr | £13.89 (16% discount) |
+| **Unlimited** | £12.99/mo | £129.99/yr | £26.89 (17% discount) |
 
-**Annual Conversion Message:** "Save £20 - that's 2 months free!"
-
-**Money-Back Guarantee:** All Pro upgrades include a 7-day money-back guarantee. If you're not satisfied within 7 days of payment, request a full refund - no questions asked.
+**Premium Annual Message:** "Save £13.89 - Save 16%!"
+**Unlimited Annual Message:** "Save £26.89 - Save 17%!"
 
 ---
 
@@ -40,9 +38,9 @@ SoundBridge operates on a freemium model with two tiers designed to convert user
 - ✅ Social media links
 - ✅ Bio/about section (500 characters)
 
-**Storage Limit:** 150MB total (~3 high-quality tracks at 50MB each)
+**Storage Limit:** 30MB total (~3 tracks)
 
-**Important:** Free tier uploads do not reset. Once you've uploaded 3 tracks, you must upgrade to Pro to upload more, or delete existing tracks to make room.
+**Important:** Free tier uploads do not reset. Once you've uploaded 3 tracks, you must upgrade to Premium to upload more, or delete existing tracks to make room.
 
 ### Networking & Discovery
 
@@ -113,25 +111,21 @@ SoundBridge operates on a freemium model with two tiers designed to convert user
 
 ---
 
-## TIER 2: PRO - £9.99/month or £99/year ⭐
+## TIER 2: PREMIUM - £6.99/month or £69.99/year ⭐
 
 **Target Users:** Working professionals, session musicians, active collaborators, verified artists
 
-**Annual Savings:** £20.88/year (equivalent to 2 months free)
+**Annual Savings:** £13.89/year (16% discount - Save 16%)
 
 ### Profile & Portfolio
 
 **Everything in Free, PLUS:**
 
-- ✅ **10 track uploads PER MONTH** (resets on the 1st of each month - you get 10 fresh upload slots monthly)
-- ✅ **Verified badge eligibility** (requires documentation review)
+- ✅ **Unlimited uploads** (no monthly limit)
+- ✅ **Pro badge** on profile
 - ✅ Priority profile placement in search results
 - ✅ Custom profile URL (soundbridge.live/yourname)
-- ✅ Advanced portfolio customization:
-  - Custom themes
-  - Advanced layouts
-  - Featured track pinning
-  - Reorderable portfolio sections
+- ✅ Advanced portfolio customization
 - ✅ Video embed support (for EPK - electronic press kit)
 - ✅ Unlimited genre tags
 - ✅ Extended bio (2,000 characters)
@@ -139,13 +133,12 @@ SoundBridge operates on a freemium model with two tiers designed to convert user
 - ✅ Equipment/studio specifications listing
 - ✅ Discography section
 
-**Storage Limit:** 500MB total at any given time (~60 tracks at 8MB each)
+**Storage Limit:** 2GB total (~200 tracks)
 
 **How uploads work:**
-- You get 10 upload slots each month (resets on the 1st)
-- Previous months' uploads remain on your profile (within storage limit)
-- If you reach 500MB storage, delete old tracks to make room for new uploads
-- Example: Upload 5 tracks in January, 8 in February, 6 in March = 19 total tracks on your profile (well within 500MB limit)
+- Unlimited uploads each month
+- Previous uploads remain on your profile (within 2GB storage limit)
+- If you reach 2GB storage, delete old tracks to make room for new uploads
 
 ### Networking & Discovery
 
@@ -254,20 +247,68 @@ SoundBridge operates on a freemium model with two tiers designed to convert user
 
 ---
 
+## TIER 3: UNLIMITED - £12.99/month or £129.99/year 🚀
+
+**Target Users:** Serious creators, established professionals, artists with fan bases
+
+**Annual Savings:** £26.89/year (17% discount - Save 17%)
+
+### Profile & Portfolio
+
+**Everything in Premium, PLUS:**
+
+- ✅ **Unlimited uploads** (no monthly limit)
+- ✅ **Unlimited badge** on profile (distinct from Premium Pro badge)
+- ✅ **Featured on Discover 2x/month** (vs 1x for Premium)
+- ✅ **Top priority in feed** (highest algorithmic boost)
+- ✅ All advanced customization from Premium
+
+**Storage Limit:** 10GB total (~1000 tracks)
+
+### Monetization Features
+
+- ✅ **Fan Subscriptions** - Enable monthly subscriptions from your fans (earn recurring income)
+- ✅ **Lower platform fees** (3% vs 5% for Free/Premium)
+- ✅ Keep 97% of all tips and support
+
+### Marketing & Promotional Tools
+
+- ✅ **Social media post generator** (AI-generated promotional content)
+- ✅ **Custom promo codes** for event tickets
+- ✅ **Email list export** (export fan contact data, GDPR-compliant)
+- ✅ **Advanced promotional tools**
+
+### Support & Priority
+
+- ✅ **Highest priority support** (fastest response times)
+- ✅ **Priority bug fixes**
+- ✅ **First access to new features**
+- ✅ All Premium support benefits
+
+### Additional Unlimited Features
+
+- ✅ All Premium features included
+- ✅ Top placement in all discovery algorithms
+- ✅ Maximum visibility across platform
+- ✅ Professional tier recognition
+
+---
+
 ## Feature Comparison Matrix
 
-| Feature Category | Free | Pro |
-|------------------|------|-----|
+| Feature Category | Free | Premium | Unlimited |
+|------------------|------|---------|-----------|
+| **PRICING** |
+| Monthly Cost | £0 | £6.99 | £12.99 |
+| Annual Cost | £0 | £69.99 (Save 16%) | £129.99 (Save 17%) |
 | **UPLOADS & STORAGE** |
-| Track Uploads | 3 tracks (total/lifetime) | 10 tracks per month (resets monthly) |
-| Total Storage | 150MB | 500MB |
-| Upload Quality | Up to 320kbps | Up to 320kbps |
-| Upload Limit Resets | Never (lifetime limit) | Monthly (1st of each month) |
-| Track Management | Delete to make room | Delete old tracks if storage full |
-| Previous Uploads Remain | Yes (within limit) | Yes (within 500MB storage) |
-| Private Tracks | ❌ | ✅ |
-| Bulk Upload | ❌ | ✅ |
-| Scheduled Upload | ❌ | ✅ |
+| Track Uploads | 3 tracks (total/lifetime) | Unlimited uploads | Unlimited uploads |
+| Total Storage | 30MB | 2GB (~200 tracks) | 10GB (~1000 tracks) |
+| Upload Quality | Up to 320kbps | Up to 320kbps | Up to 320kbps |
+| Upload Limit Resets | Never (lifetime limit) | N/A (unlimited) | N/A (unlimited) |
+| Private Tracks | ❌ | ✅ | ✅ |
+| Bulk Upload | ❌ | ✅ | ✅ |
+| Scheduled Upload | ❌ | ✅ | ✅ |
 | **DISCOVERY** |
 | Professional Searches | 5/month | Unlimited |
 | Basic Filters | ✅ | ✅ |
