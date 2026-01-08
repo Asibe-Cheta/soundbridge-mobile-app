@@ -14,6 +14,8 @@ import {
   Switch,
   Modal,
   FlatList,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -884,53 +886,71 @@ export default function CreateEventScreen() {
         <Modal
           visible={showCountryPicker}
           transparent
-          animationType="slide"
+          animationType="fade"
           onRequestClose={() => setShowCountryPicker(false)}
         >
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalContent, { backgroundColor: theme.colors.surface}]}>
-              <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border}]}>
-                <Text style={[styles.modalTitle, { color: theme.colors.text}]}>Select Country</Text>
-                <TouchableOpacity onPress={() => setShowCountryPicker(false)}>
-                  <Ionicons name="close" size={24} color={theme.colors.text} />
-                </TouchableOpacity>
-              </View>
-
-              <TextInput
-                style={[styles.searchInput, { backgroundColor: theme.colors.background, color: theme.colors.text, borderColor: theme.colors.border}]}
-                placeholder="Search countries..."
-                placeholderTextColor={theme.colors.textSecondary}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
-
-              <FlatList
-                data={filteredCountries}
-                keyExtractor={(item) => item.countryCode}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={[
-                      styles.countryItem,
-                      { borderBottomColor: theme.colors.border},
-                      formData.country === item.countryCode && { backgroundColor: theme.colors.primary + '20' }
-                    ]}
-                    onPress={() => {
-                      handleInputChange('country', item.countryCode);
-                      setShowCountryPicker(false);
-                      setSearchQuery('');
-                    }}
-                  >
-                    <Text style={[styles.countryItemText, { color: theme.colors.text}]}>
-                      {item.countryName}
-                    </Text>
-                    <Text style={[styles.countryItemCurrency, { color: theme.colors.textSecondary}]}>
-                      {item.currency}
-                    </Text>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.modalOverlay}
+          >
+            <TouchableOpacity
+              style={styles.modalOverlay}
+              activeOpacity={1}
+              onPress={() => setShowCountryPicker(false)}
+            >
+              <TouchableOpacity
+                activeOpacity={1}
+                style={[styles.modalContent, { backgroundColor: theme.colors.surface}]}
+                onPress={(e) => e.stopPropagation()}
+              >
+                <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border}]}>
+                  <Text style={[styles.modalTitle, { color: theme.colors.text}]}>Select Country</Text>
+                  <TouchableOpacity onPress={() => {
+                    setShowCountryPicker(false);
+                    setSearchQuery('');
+                  }}>
+                    <Ionicons name="close" size={24} color={theme.colors.text} />
                   </TouchableOpacity>
-                )}
-              />
-            </View>
-          </View>
+                </View>
+
+                <TextInput
+                  style={[styles.searchInput, { backgroundColor: theme.colors.background, color: theme.colors.text, borderColor: theme.colors.border}]}
+                  placeholder="Search countries..."
+                  placeholderTextColor={theme.colors.textSecondary}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  autoFocus
+                />
+
+                <FlatList
+                  data={filteredCountries}
+                  keyExtractor={(item) => item.countryCode}
+                  keyboardShouldPersistTaps="handled"
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={[
+                        styles.countryItem,
+                        { borderBottomColor: theme.colors.border},
+                        formData.country === item.countryCode && { backgroundColor: theme.colors.primary + '20' }
+                      ]}
+                      onPress={() => {
+                        handleInputChange('country', item.countryCode);
+                        setShowCountryPicker(false);
+                        setSearchQuery('');
+                      }}
+                    >
+                      <Text style={[styles.countryItemText, { color: theme.colors.text}]}>
+                        {item.countryName}
+                      </Text>
+                      <Text style={[styles.countryItemCurrency, { color: theme.colors.textSecondary}]}>
+                        {item.currency}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                />
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
         </Modal>
       </SafeAreaView>
     </View>
@@ -1157,12 +1177,13 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    padding: 20,
   },
   modalContent: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '80%',
+    borderRadius: 20,
+    maxHeight: '70%',
+    minHeight: 400,
   },
   modalHeader: {
     flexDirection: 'row',
