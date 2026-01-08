@@ -61,7 +61,11 @@ export default function EventDetailsScreen() {
   const [isAttending, setIsAttending] = useState(false);
   const [purchasingTicket, setPurchasingTicket] = useState(false);
   const [userTickets, setUserTickets] = useState<EventTicket[]>([]);
+  const [deleting, setDeleting] = useState(false);
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
+
+  // Check if current user is the organizer
+  const isOrganizer = user?.id === event?.organizer_id;
 
   useEffect(() => {
     loadEventDetails();
@@ -270,6 +274,70 @@ export default function EventDetailsScreen() {
     }
   };
 
+  const handleDeleteEvent = async () => {
+    if (!event || !user?.id) return;
+
+    // Confirm deletion
+    Alert.alert(
+      'Delete Event',
+      `Are you sure you want to delete "${event.title}"? This action cannot be undone.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setDeleting(true);
+              console.log('🗑️ Deleting event:', event.id);
+
+              // Get session for API call
+              const { data: { session } } = await supabase.auth.getSession();
+              if (!session?.access_token) {
+                throw new Error('Not authenticated');
+              }
+
+              // Call API to delete event (handles all cleanup)
+              const response = await fetch(`https://www.soundbridge.live/api/events/${event.id}`, {
+                method: 'DELETE',
+                headers: {
+                  'Authorization': `Bearer ${session.access_token}`,
+                  'Content-Type': 'application/json',
+                },
+              });
+
+              if (!response.ok) {
+                const result = await response.json();
+                throw new Error(result.error || 'Failed to delete event');
+              }
+
+              console.log('✅ Event deleted successfully');
+
+              Alert.alert(
+                'Event Deleted',
+                'Your event has been deleted successfully.',
+                [
+                  {
+                    text: 'OK',
+                    onPress: () => navigation.goBack(),
+                  },
+                ]
+              );
+            } catch (error: any) {
+              console.error('❌ Error deleting event:', error);
+              Alert.alert('Error', error.message || 'Failed to delete event. Please try again.');
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([loadEventDetails(), checkAttendanceStatus(), loadUserTickets()]);
@@ -366,14 +434,29 @@ export default function EventDetailsScreen() {
         
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
-        <BackButton style={styles.headerButton} onPress={() => navigation.goBack()} />
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]} numberOfLines={1}>
-          {event.title}
-        </Text>
-        <TouchableOpacity style={styles.headerButton} onPress={handleShare}>
-          <Ionicons name="share-outline" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-      </View>
+          <BackButton style={styles.headerButton} onPress={() => navigation.goBack()} />
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]} numberOfLines={1}>
+            {event.title}
+          </Text>
+          <View style={styles.headerActions}>
+            {isOrganizer && (
+              <TouchableOpacity
+                style={styles.headerButton}
+                onPress={handleDeleteEvent}
+                disabled={deleting}
+              >
+                {deleting ? (
+                  <ActivityIndicator size="small" color={theme.colors.error} />
+                ) : (
+                  <Ionicons name="trash-outline" size={24} color={theme.colors.error} />
+                )}
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.headerButton} onPress={handleShare}>
+              <Ionicons name="share-outline" size={24} color={theme.colors.text} />
+            </TouchableOpacity>
+          </View>
+        </View>
 
       <ScrollView
         style={styles.scrollView}
@@ -615,6 +698,10 @@ const styles = StyleSheet.create({
   },
   headerButton: {
     padding: 8,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   headerTitle: {
     fontSize: 18,
