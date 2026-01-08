@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -69,6 +69,8 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   const [lastTap, setLastTap] = useState(0);
   const [isProgressPressed, setIsProgressPressed] = useState(false);
   const [isVolumePressed, setIsVolumePressed] = useState(false);
+  const [isSeeking, setIsSeeking] = useState(false);
+  const isSeekingRef = useRef(false);
   const [showLyrics, setShowLyrics] = useState(false);
   const [lyricsData, setLyricsData] = useState<string | null>(null);
   const [isLoadingLyrics, setIsLoadingLyrics] = useState(false);
@@ -134,18 +136,163 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   
   // Swipe feature disabled - using button controls only
   
-  // Pan responder for vertical swipe (close player)
+  // Helper function to check if touch is within the entire circular player area
+  const isTouchInCircularArea = (x: number, y: number): boolean => {
+    const CIRCLE_CENTER_X = 160;
+    const CIRCLE_CENTER_Y = 160;
+    const CIRCLE_RADIUS = 121.6;
+    const TOUCH_BUFFER = 30; // Extra buffer for easier touch
+    
+    const dx = x - CIRCLE_CENTER_X;
+    const dy = y - CIRCLE_CENTER_Y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    // Check if touch is within the entire circular area (including buffer)
+    return distance <= CIRCLE_RADIUS + TOUCH_BUFFER;
+  };
+
+  // Helper function to check if touch is on circular progress ring
+  const isTouchOnProgressRing = (x: number, y: number): boolean => {
+    const CIRCLE_CENTER_X = 160;
+    const CIRCLE_CENTER_Y = 160;
+    const CIRCLE_RADIUS = 121.6;
+    const INNER_RADIUS = 96;
+    const TOUCH_BUFFER = 25; // Buffer for easier touch
+    
+    const dx = x - CIRCLE_CENTER_X;
+    const dy = y - CIRCLE_CENTER_Y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    // Check if touch is within the progress ring area
+    return distance >= INNER_RADIUS - 10 && distance <= CIRCLE_RADIUS + TOUCH_BUFFER;
+  };
+
+  // Calculate seek position from circular progress bar touch
+  const handleCircularSeek = (x: number, y: number) => {
+    if (!duration || duration <= 0) return;
+    
+    const CIRCLE_CENTER_X = 160;
+    const CIRCLE_CENTER_Y = 160;
+    const CIRCLE_RADIUS = 121.6;
+    const INNER_RADIUS = 96;
+    
+    // Calculate distance from center
+    const dx = x - CIRCLE_CENTER_X;
+    const dy = y - CIRCLE_CENTER_Y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    // Only seek if touch is within the progress ring (between inner and outer radius)
+    if (distance < INNER_RADIUS - 10 || distance > CIRCLE_RADIUS + 25) {
+      return;
+    }
+    
+    // Calculate angle (in radians)
+    // atan2 returns angle from positive x-axis (-π to π)
+    // We need to convert to 0-2π range starting from top (-90 degrees)
+    let angle = Math.atan2(dy, dx);
+    
+    // Normalize to 0-2π range
+    if (angle < 0) {
+      angle = angle + 2 * Math.PI;
+    }
+    
+    // Adjust for -90deg start (progress starts at top, which is -90deg or 270deg)
+    // Top is at angle 3π/2 (270deg), we want it to be at 0
+    angle = (angle + Math.PI / 2) % (2 * Math.PI);
+    
+    // Convert angle to progress (0 to 1)
+    const progress = Math.max(0, Math.min(1, angle / (2 * Math.PI)));
+    
+    // Seek to calculated position
+    const newPosition = progress * duration;
+    seekTo(Math.max(0, Math.min(newPosition, duration)));
+  };
+
+  // Pan responder for circular progress bar seeking
+  const circularProgressPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: (evt) => {
+        const { locationX, locationY } = evt.nativeEvent;
+        if (isTouchOnProgressRing(locationX, locationY)) {
+          setIsSeeking(true);
+          isSeekingRef.current = true;
+          return true;
+        }
+        return false;
+      },
+      onStartShouldSetPanResponderCapture: (evt) => {
+        const { locationX, locationY } = evt.nativeEvent;
+        return isTouchOnProgressRing(locationX, locationY);
+      },
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        handleCircularSeek(evt.nativeEvent.locationX, evt.nativeEvent.locationY);
+      },
+      onPanResponderMove: (evt) => {
+        handleCircularSeek(evt.nativeEvent.locationX, evt.nativeEvent.locationY);
+      },
+      onPanResponderRelease: () => {
+        setIsSeeking(false);
+        isSeekingRef.current = false;
+      },
+      onPanResponderTerminate: () => {
+        setIsSeeking(false);
+        isSeekingRef.current = false;
+      },
+    })
+  ).current;
+
+  // Pan responder for vertical swipe (close player) - only when not seeking and outside circle
   const panResponder = useRef(
     PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (evt, gestureState) => {
-        return Math.abs(gestureState.dy) > 20 && Math.abs(gestureState.dx) < 50;
+        // Don't activate if user is seeking on circular progress
+        if (isSeekingRef.current) return false;
+        
+        // If there's ANY horizontal movement, it's likely circular seek - don't activate vertical swipe
+        // This prevents vertical swipe when user is dragging around the circle
+        if (Math.abs(gestureState.dx) > 15) {
+          return false;
+        }
+        
+        // Only activate for pure vertical swipes (minimal horizontal movement)
+        return Math.abs(gestureState.dy) > 30 && Math.abs(gestureState.dx) < 20;
       },
       onPanResponderMove: (evt, gestureState) => {
+        // Double check - if seeking flag is set during move, stop immediately
+        if (isSeekingRef.current) {
+          // Reset animation if seeking started
+          Animated.spring(slideAnim, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+          return;
+        }
+        
+        // Also check if horizontal movement becomes significant during move
+        if (Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 0.4) {
+          // Likely circular seek, reset animation
+          Animated.spring(slideAnim, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+          return;
+        }
+        
         if (gestureState.dy > 0) {
           slideAnim.setValue(gestureState.dy);
         }
       },
       onPanResponderRelease: (evt, gestureState) => {
+        if (isSeekingRef.current) {
+          // Reset animation if seeking was active
+          Animated.spring(slideAnim, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+          return;
+        }
         if (gestureState.dy > 100) {
           // Close player
           closePlayer();
@@ -201,11 +348,19 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   };
 
   const handlePlayPause = async () => {
-    console.log('🎮 Play/Pause button pressed, isPlaying:', isPlaying);
+    console.log('🎮 Play/Pause button pressed, isPlaying:', isPlaying, 'Position:', position, 'Duration:', duration);
     try {
       if (isPlaying) {
         await pause();
       } else {
+        // Check if track has finished (position at or near end)
+        // If so, reset to beginning before resuming
+        if (duration > 0 && position >= duration - 0.5) {
+          console.log('🎵 Track finished, resetting to start before resuming');
+          await seekTo(0);
+          // Small delay to ensure seek completes
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
         await resume();
       }
     } catch (error) {
@@ -666,7 +821,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   };
 
   // Toggle lyrics display
-  const handleToggleLyrics = async () => {
+  const handleToggleLyrics = () => {
     if (!currentTrack) {
       console.log('❌ No current track');
       return;
@@ -678,14 +833,18 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     console.log('🎵 Has lyrics data:', !!lyricsData);
     console.log('🎵 Recovery attempted:', lyricsRecoveryAttempted.current);
     
-    // Always try to recover lyrics if we don't have them yet
+    // Show the modal immediately for instant feedback
+    setShowLyrics(true);
+    
+    // Load lyrics in the background without blocking UI
     if (!currentTrack.lyrics && !lyricsData && !lyricsRecoveryAttempted.current) {
-      console.log('🔄 Attempting to recover lyrics...');
-      await recoverLyrics();
+      console.log('🔄 Attempting to recover lyrics in background...');
+      // Don't await - let it load in the background
+      recoverLyrics().catch(error => {
+        console.error('Error recovering lyrics:', error);
+      });
     }
     
-    // Always show the modal, even if no lyrics (will show "No lyrics available")
-    setShowLyrics(true);
     console.log('✅ Lyrics modal should now be visible');
   };
 
@@ -884,18 +1043,31 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
         >
           <Ionicons 
             name={isShuffled ? 'shuffle' : 'shuffle-outline'} 
-            size={24} 
+            size={22} 
             color={isShuffled ? theme.colors.primary : theme.colors.textSecondary} 
+          />
+        </TouchableOpacity>
+
+        {/* Lyrics */}
+        <TouchableOpacity 
+          style={styles.controlButton}
+          onPress={handleToggleLyrics}
+          activeOpacity={0.7}
+        >
+          <MaterialCommunityIcons 
+            name="format-quote-close" 
+            size={22} 
+            color={hasLyrics ? theme.colors.primary : theme.colors.textSecondary} 
           />
         </TouchableOpacity>
 
         {/* Previous */}
         <TouchableOpacity 
-          style={styles.controlButton}
+          style={[styles.controlButton, styles.previousButton]}
           onPress={playPrevious}
           activeOpacity={0.7}
         >
-          <Ionicons name="play-skip-back" size={28} color={theme.colors.text} />
+          <Ionicons name="play-skip-back" size={24} color={theme.colors.text} />
         </TouchableOpacity>
 
         {/* Play/Pause */}
@@ -915,11 +1087,11 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
 
         {/* Next */}
         <TouchableOpacity 
-          style={styles.controlButton}
+          style={[styles.controlButton, styles.nextButton]}
           onPress={playNext}
           activeOpacity={0.7}
         >
-          <Ionicons name="play-skip-forward" size={28} color={theme.colors.text} />
+          <Ionicons name="play-skip-forward" size={24} color={theme.colors.text} />
         </TouchableOpacity>
 
         {/* Repeat */}
@@ -931,7 +1103,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
           <View>
             <Ionicons 
               name={repeatMode !== 'off' ? 'repeat' : 'repeat-outline'} 
-              size={24} 
+              size={22} 
               color={repeatMode !== 'off' ? theme.colors.primary : theme.colors.textSecondary} 
             />
             {repeatMode === 'one' && (
@@ -941,6 +1113,21 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
             )}
           </View>
         </TouchableOpacity>
+
+        {/* Tip Icon Button */}
+        {currentTrack?.creator?.id && (
+          <TouchableOpacity 
+            style={styles.controlButton}
+            onPress={handleTipCreator}
+            activeOpacity={0.7}
+          >
+            <Ionicons 
+              name="gift" 
+              size={22} 
+              color="#FACC15" 
+            />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -1180,7 +1367,10 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
         })()}
         
         {/* Central Player - Static, no swipe animations */}
-        <View style={styles.centralPlayerContainer}>
+        <View 
+          style={styles.centralPlayerContainer}
+          {...circularProgressPanResponder.panHandlers}
+        >
           {/* Glass Ring */}
           <ExpoBlurView intensity={20} tint={theme.isDark ? 'dark' : 'light'} style={styles.glassRingBlur}>
             <LinearGradient
@@ -1199,7 +1389,9 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
           }]} />
           
           {/* Progress Arc (SVG) - Matching HTML exactly */}
-          <View style={styles.progressArcContainer}>
+          <View 
+            style={styles.progressArcContainer}
+          >
             <Svg width={320} height={320} style={styles.svgProgress}>
               {/* Background track */}
               <Circle
@@ -1271,42 +1463,6 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
 
       {/* Controls */}
       {renderControls()}
-
-      {/* Action Buttons Row - Lyrics and Tip */}
-      <View style={styles.actionButtonsRow}>
-        <TouchableOpacity
-          style={styles.lyricsButton}
-          onPress={handleToggleLyrics}
-          activeOpacity={0.7}
-        >
-          <Ionicons
-            name="musical-notes"
-            size={20}
-            color={theme.colors.primary}
-          />
-          <Text style={[styles.lyricsButtonText, { color: theme.colors.primary }]}>
-            Lyrics
-          </Text>
-        </TouchableOpacity>
-
-        {/* Tip Button */}
-        {currentTrack?.creator?.id && (
-          <TouchableOpacity
-            style={styles.tipButton}
-            onPress={handleTipCreator}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name="gift"
-              size={20}
-              color="#FACC15"
-            />
-            <Text style={[styles.tipButtonText, { color: '#FACC15' }]}>
-              Tip Artist
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
 
       {/* Next Songs Section */}
       {queue.length > 0 && (
@@ -1869,7 +2025,7 @@ const styles = StyleSheet.create({
     left: 0,
     width: 320,
     height: 320,
-    pointerEvents: 'none',
+    pointerEvents: 'box-none',
   },
   svgProgress: {
     transform: [{ rotate: '-90deg' }],
@@ -1928,7 +2084,7 @@ const styles = StyleSheet.create({
   },
   timeLabel: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 12,
     fontSize: 18,
     fontWeight: '500',
     letterSpacing: 0.5,
@@ -1989,7 +2145,7 @@ const styles = StyleSheet.create({
     height: 4,
   },
   controlsContainer: {
-    paddingHorizontal: 24,
+    paddingHorizontal: 12,
     marginTop: 12,              // Reduced space between album art and controls
     marginBottom: 24,            // Reduced bottom margin
   },
@@ -1997,14 +2153,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
+    gap: 4,
+    paddingHorizontal: 4,
   },
   controlButton: {
-    padding: 12,
+    padding: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 44,
-    minHeight: 44,
+    minWidth: 40,
+    minHeight: 40,
+  },
+  previousButton: {
+    marginRight: 12,
+  },
+  nextButton: {
+    marginLeft: 12,
   },
   repeatOneBadge: {
     position: 'absolute',

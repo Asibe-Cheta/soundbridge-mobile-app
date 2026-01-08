@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import BackButton from '../components/BackButton';
 import {
   View,
@@ -11,6 +11,9 @@ import {
   Image,
   ActivityIndicator,
   StatusBar,
+  Switch,
+  Modal,
+  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -22,21 +25,194 @@ import { supabase } from '../lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 
+// Country-specific address field configurations
+interface AddressFieldConfig {
+  name: string;
+  label: string;
+  placeholder: string;
+  required: boolean;
+  keyboardType?: 'default' | 'numeric' | 'email-address';
+}
+
+interface CountryAddressConfig {
+  countryCode: string;
+  countryName: string;
+  currency: string;
+  currencySymbol: string;
+  fields: AddressFieldConfig[];
+}
+
+// Comprehensive address configurations for all major countries
+const COUNTRY_ADDRESS_CONFIGS: CountryAddressConfig[] = [
+  {
+    countryCode: 'US',
+    countryName: 'United States',
+    currency: 'USD',
+    currencySymbol: '$',
+    fields: [
+      { name: 'street', label: 'Street Address', placeholder: '123 Main St', required: true },
+      { name: 'city', label: 'City', placeholder: 'New York', required: true },
+      { name: 'state', label: 'State', placeholder: 'NY', required: true },
+      { name: 'zipCode', label: 'ZIP Code', placeholder: '10001', required: true, keyboardType: 'numeric' },
+    ]
+  },
+  {
+    countryCode: 'GB',
+    countryName: 'United Kingdom',
+    currency: 'GBP',
+    currencySymbol: '£',
+    fields: [
+      { name: 'street', label: 'Street Address', placeholder: '10 Downing Street', required: true },
+      { name: 'city', label: 'City/Town', placeholder: 'London', required: true },
+      { name: 'county', label: 'County', placeholder: 'Greater London', required: false },
+      { name: 'postCode', label: 'Postcode', placeholder: 'SW1A 2AA', required: true },
+    ]
+  },
+  {
+    countryCode: 'CA',
+    countryName: 'Canada',
+    currency: 'CAD',
+    currencySymbol: '$',
+    fields: [
+      { name: 'street', label: 'Street Address', placeholder: '123 Main St', required: true },
+      { name: 'city', label: 'City', placeholder: 'Toronto', required: true },
+      { name: 'province', label: 'Province', placeholder: 'ON', required: true },
+      { name: 'postalCode', label: 'Postal Code', placeholder: 'M5H 2N2', required: true },
+    ]
+  },
+  {
+    countryCode: 'AU',
+    countryName: 'Australia',
+    currency: 'AUD',
+    currencySymbol: '$',
+    fields: [
+      { name: 'street', label: 'Street Address', placeholder: '123 Main St', required: true },
+      { name: 'suburb', label: 'Suburb', placeholder: 'Sydney', required: true },
+      { name: 'state', label: 'State', placeholder: 'NSW', required: true },
+      { name: 'postcode', label: 'Postcode', placeholder: '2000', required: true, keyboardType: 'numeric' },
+    ]
+  },
+  {
+    countryCode: 'NG',
+    countryName: 'Nigeria',
+    currency: 'NGN',
+    currencySymbol: '₦',
+    fields: [
+      { name: 'street', label: 'Street Address', placeholder: '123 Lagos Road', required: true },
+      { name: 'city', label: 'City', placeholder: 'Lagos', required: true },
+      { name: 'state', label: 'State', placeholder: 'Lagos State', required: true },
+      { name: 'lga', label: 'LGA', placeholder: 'Ikeja', required: false },
+    ]
+  },
+  {
+    countryCode: 'DE',
+    countryName: 'Germany',
+    currency: 'EUR',
+    currencySymbol: '€',
+    fields: [
+      { name: 'street', label: 'Straße (Street)', placeholder: 'Hauptstraße 1', required: true },
+      { name: 'city', label: 'Stadt (City)', placeholder: 'Berlin', required: true },
+      { name: 'state', label: 'Bundesland (State)', placeholder: 'Berlin', required: false },
+      { name: 'postleitzahl', label: 'Postleitzahl (ZIP)', placeholder: '10115', required: true, keyboardType: 'numeric' },
+    ]
+  },
+  {
+    countryCode: 'FR',
+    countryName: 'France',
+    currency: 'EUR',
+    currencySymbol: '€',
+    fields: [
+      { name: 'street', label: 'Rue (Street)', placeholder: '1 Rue de Rivoli', required: true },
+      { name: 'city', label: 'Ville (City)', placeholder: 'Paris', required: true },
+      { name: 'department', label: 'Département', placeholder: 'Paris', required: false },
+      { name: 'codePostal', label: 'Code Postal', placeholder: '75001', required: true, keyboardType: 'numeric' },
+    ]
+  },
+  {
+    countryCode: 'IN',
+    countryName: 'India',
+    currency: 'INR',
+    currencySymbol: '₹',
+    fields: [
+      { name: 'street', label: 'Street/House No', placeholder: '123 MG Road', required: true },
+      { name: 'city', label: 'City', placeholder: 'Mumbai', required: true },
+      { name: 'state', label: 'State', placeholder: 'Maharashtra', required: true },
+      { name: 'pinCode', label: 'PIN Code', placeholder: '400001', required: true, keyboardType: 'numeric' },
+    ]
+  },
+  {
+    countryCode: 'JP',
+    countryName: 'Japan',
+    currency: 'JPY',
+    currencySymbol: '¥',
+    fields: [
+      { name: 'prefecture', label: 'Prefecture (都道府県)', placeholder: 'Tokyo', required: true },
+      { name: 'city', label: 'City/Ward (市区町村)', placeholder: 'Shibuya', required: true },
+      { name: 'street', label: 'Street Address (番地)', placeholder: '1-1-1', required: true },
+      { name: 'postalCode', label: 'Postal Code (〒)', placeholder: '150-0001', required: true },
+    ]
+  },
+  {
+    countryCode: 'BR',
+    countryName: 'Brazil',
+    currency: 'BRL',
+    currencySymbol: 'R$',
+    fields: [
+      { name: 'street', label: 'Logradouro (Street)', placeholder: 'Av Paulista, 1000', required: true },
+      { name: 'neighborhood', label: 'Bairro (Neighborhood)', placeholder: 'Bela Vista', required: true },
+      { name: 'city', label: 'Cidade (City)', placeholder: 'São Paulo', required: true },
+      { name: 'state', label: 'Estado (State)', placeholder: 'SP', required: true },
+      { name: 'cep', label: 'CEP', placeholder: '01310-100', required: true },
+    ]
+  },
+  {
+    countryCode: 'MX',
+    countryName: 'Mexico',
+    currency: 'MXN',
+    currencySymbol: '$',
+    fields: [
+      { name: 'street', label: 'Calle (Street)', placeholder: 'Av Reforma 123', required: true },
+      { name: 'colonia', label: 'Colonia', placeholder: 'Centro', required: true },
+      { name: 'city', label: 'Ciudad (City)', placeholder: 'Ciudad de México', required: true },
+      { name: 'state', label: 'Estado (State)', placeholder: 'CDMX', required: true },
+      { name: 'codigoPostal', label: 'Código Postal', placeholder: '06000', required: true, keyboardType: 'numeric' },
+    ]
+  },
+];
+
+// Fallback for countries not in the list
+const DEFAULT_ADDRESS_CONFIG: CountryAddressConfig = {
+  countryCode: 'XX',
+  countryName: 'Other',
+  currency: 'USD',
+  currencySymbol: '$',
+  fields: [
+    { name: 'street', label: 'Street Address', placeholder: 'Enter street address', required: true },
+    { name: 'city', label: 'City', placeholder: 'Enter city', required: true },
+    { name: 'stateProvince', label: 'State/Province', placeholder: 'Enter state/province', required: false },
+    { name: 'postalCode', label: 'Postal/ZIP Code', placeholder: 'Enter postal code', required: false },
+  ]
+};
+
 interface EventFormData {
   title: string;
   description: string;
   event_date: string;
   event_time: string;
-  location: string;
   venue: string;
   category: string;
-  price_gbp: string;
-  price_ngn: string;
   max_attendees: string;
   image_url: string;
   latitude: number | null;
   longitude: number | null;
+
+  // Location fields
   country: string;
+  addressFields: Record<string, string>;
+
+  // Pricing fields
+  isFree: boolean;
+  prices: Record<string, string>; // currency -> price mapping
 }
 
 const EVENT_CATEGORIES = [
@@ -63,100 +239,111 @@ export default function CreateEventScreen() {
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
   const [formData, setFormData] = useState<EventFormData>({
     title: '',
     description: '',
     event_date: '',
     event_time: '',
-    location: '',
     venue: '',
     category: '',
-    price_gbp: '',
-    price_ngn: '',
     max_attendees: '',
     image_url: '',
     latitude: null,
     longitude: null,
-    country: '',
+    country: 'GB', // Default to UK
+    addressFields: {},
+    isFree: true,
+    prices: {},
   });
 
-  const handleInputChange = (field: keyof EventFormData, value: string) => {
+  const [selectedCountryConfig, setSelectedCountryConfig] = useState<CountryAddressConfig>(
+    COUNTRY_ADDRESS_CONFIGS.find(c => c.countryCode === 'GB') || DEFAULT_ADDRESS_CONFIG
+  );
+
+  // Update country config when country changes
+  useEffect(() => {
+    const config = COUNTRY_ADDRESS_CONFIGS.find(c => c.countryCode === formData.country);
+    setSelectedCountryConfig(config || DEFAULT_ADDRESS_CONFIG);
+    // Reset address fields when country changes
+    setFormData(prev => ({ ...prev, addressFields: {} }));
+  }, [formData.country]);
+
+  const handleInputChange = (field: keyof EventFormData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const geocodeLocation = async (locationText: string) => {
-    if (!locationText.trim()) return;
+  const handleAddressFieldChange = (fieldName: string, value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      addressFields: {
+        ...prev.addressFields,
+        [fieldName]: value,
+      }
+    }));
+  };
+
+  const handlePriceChange = (currency: string, value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      prices: {
+        ...prev.prices,
+        [currency]: value,
+      }
+    }));
+  };
+
+  const geocodeLocation = async () => {
+    // Build full address from fields
+    const addressParts = Object.entries(formData.addressFields)
+      .filter(([_, value]) => value.trim())
+      .map(([_, value]) => value);
+
+    const fullAddress = addressParts.join(', ') + ', ' + selectedCountryConfig.countryName;
+
+    if (addressParts.length === 0) {
+      Alert.alert('Error', 'Please enter address details first');
+      return;
+    }
 
     try {
       setGeocoding(true);
-      console.log('🌍 Geocoding location:', locationText);
+      console.log('🌍 Geocoding location:', fullAddress);
 
-      // Geocode the location string to get coordinates
-      const results = await Location.geocodeAsync(locationText);
+      const results = await Location.geocodeAsync(fullAddress);
 
       if (results && results.length > 0) {
         const { latitude, longitude } = results[0];
         console.log('✅ Geocoded coordinates:', { latitude, longitude });
 
-        // Reverse geocode to get country
-        const reverseGeocode = await Location.reverseGeocodeAsync({ latitude, longitude });
-        const country = reverseGeocode[0]?.country || '';
-        console.log('🌍 Detected country:', country);
-
         setFormData(prev => ({
           ...prev,
           latitude,
           longitude,
-          country,
         }));
 
-        // Show confirmation to user
         Alert.alert(
           'Location Found',
-          `Coordinates: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}\nCountry: ${country}`,
+          `Coordinates: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
           [{ text: 'OK' }]
         );
       } else {
-        console.warn('⚠️ No geocoding results found for:', locationText);
         Alert.alert(
           'Location Not Found',
-          'Could not find coordinates for this location. Please check the location name and try again, or tap "Use Anyway" to continue without coordinates.',
+          'Could not find coordinates. You can still create the event without precise coordinates.',
           [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Use Anyway',
-              onPress: () => {
-                // Clear coordinates but keep location text
-                setFormData(prev => ({
-                  ...prev,
-                  latitude: null,
-                  longitude: null,
-                  country: '',
-                }));
-              },
-            },
+            { text: 'OK', style: 'cancel' },
           ]
         );
       }
     } catch (error) {
-      console.error('❌ Error geocoding location:', error);
+      console.error('❌ Error geocoding:', error);
       Alert.alert(
         'Geocoding Error',
-        'Failed to get coordinates for this location. You can still create the event without precise coordinates.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Continue',
-            onPress: () => {
-              setFormData(prev => ({
-                ...prev,
-                latitude: null,
-                longitude: null,
-                country: '',
-              }));
-            },
-          },
-        ]
+        'Failed to get coordinates. You can still create the event.',
+        [{ text: 'OK' }]
       );
     } finally {
       setGeocoding(false);
@@ -166,7 +353,7 @@ export default function CreateEventScreen() {
   const pickImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: 'images' as any, // Fixed deprecation
         allowsEditing: true,
         aspect: [16, 9],
         quality: 0.8,
@@ -175,31 +362,46 @@ export default function CreateEventScreen() {
       if (!result.canceled && result.assets[0]) {
         setUploadingImage(true);
         const imageUri = result.assets[0].uri;
-        
-        // Upload image to Supabase Storage
+
+        console.log('📸 Uploading event image:', imageUri);
+
+        // React Native: Read file as ArrayBuffer (blob() doesn't exist in RN)
         const response = await fetch(imageUri);
-        const blob = await response.blob();
-        
-        const fileName = `event-${Date.now()}.jpg`;
+        const arrayBuffer = await response.arrayBuffer();
+        const fileBuffer = new Uint8Array(arrayBuffer);
+
+        const fileName = `event-${user?.id || 'unknown'}-${Date.now()}.jpg`;
+
+        // Upload image to Supabase Storage
         const { data, error } = await supabase.storage
           .from('event-images')
-          .upload(fileName, blob, {
+          .upload(fileName, fileBuffer, {
             contentType: 'image/jpeg',
+            upsert: false,
           });
 
-        if (error) throw error;
+        if (error) {
+          console.error('❌ Upload error:', error);
+          throw error;
+        }
 
-        const { data: { publicUrl}} = supabase.storage
+        console.log('✅ Image uploaded:', data.path);
+
+        // Get public URL
+        const { data: urlData } = supabase.storage
           .from('event-images')
-          .getPublicUrl(fileName);
+          .getPublicUrl(data.path);
+
+        const publicUrl = urlData.publicUrl;
+        console.log('✅ Public URL:', publicUrl);
 
         setFormData(prev => ({ ...prev, image_url: publicUrl }));
         setUploadingImage(false);
       }
-    } catch (error) {
-      console.error('Error uploading image:', error);
+    } catch (error: any) {
+      console.error('❌ Error uploading image:', error);
       setUploadingImage(false);
-      Alert.alert('Error', 'Failed to upload image');
+      Alert.alert('Upload Error', error.message || 'Failed to upload image. Please try again.');
     }
   };
 
@@ -220,14 +422,33 @@ export default function CreateEventScreen() {
       Alert.alert('Error', 'Please select an event time');
       return false;
     }
-    if (!formData.location.trim()) {
-      Alert.alert('Error', 'Please enter a location');
-      return false;
-    }
     if (!formData.category) {
       Alert.alert('Error', 'Please select a category');
       return false;
     }
+
+    // Validate required address fields
+    const requiredFields = selectedCountryConfig.fields.filter(f => f.required);
+    for (const field of requiredFields) {
+      if (!formData.addressFields[field.name]?.trim()) {
+        Alert.alert('Error', `Please enter ${field.label}`);
+        return false;
+      }
+    }
+
+    // Validate pricing if not free
+    if (!formData.isFree) {
+      const hasAnyPrice = Object.values(formData.prices).some(price => {
+        const numPrice = parseFloat(price);
+        return !isNaN(numPrice) && numPrice > 0;
+      });
+
+      if (!hasAnyPrice) {
+        Alert.alert('Error', 'Please set at least one price, or mark the event as free');
+        return false;
+      }
+    }
+
     return true;
   };
 
@@ -236,63 +457,75 @@ export default function CreateEventScreen() {
 
     setLoading(true);
     try {
-      // Get session for Bearer token
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
         throw new Error('Not authenticated. Please log in again.');
       }
 
-      // Combine date and time into ISO 8601 format
+      // Combine date and time
       const eventDateTime = new Date(`${formData.event_date}T${formData.event_time}`);
-      
-      // Prepare request body according to API spec
+
+      // Build location string from address fields
+      const locationParts = Object.entries(formData.addressFields)
+        .filter(([_, value]) => value.trim())
+        .map(([_, value]) => value);
+      const location = locationParts.join(', ');
+
+      // Prepare event data
       const eventData: any = {
         title: formData.title.trim(),
         description: formData.description.trim(),
         event_date: eventDateTime.toISOString(),
-        location: formData.location.trim(),
+        location: location,
         category: formData.category,
+        country: formData.country,
       };
 
-      // Add optional fields only if they have values
+      // Add optional fields
       if (formData.venue.trim()) {
         eventData.venue = formData.venue.trim();
       }
-      if (formData.price_gbp) {
-        const price = parseFloat(formData.price_gbp);
-        if (price >= 0) {
-          eventData.price_gbp = price;
-        }
-      }
-      if (formData.price_ngn) {
-        const price = parseFloat(formData.price_ngn);
-        if (price >= 0) {
-          eventData.price_ngn = price;
-        }
-      }
+
       if (formData.max_attendees) {
         const maxAttendees = parseInt(formData.max_attendees);
         if (maxAttendees >= 1) {
           eventData.max_attendees = maxAttendees;
         }
       }
+
       if (formData.image_url) {
         eventData.image_url = formData.image_url;
       }
 
-      // Add geocoded coordinates if available
+      // Add coordinates
       if (formData.latitude !== null && formData.longitude !== null) {
         eventData.latitude = formData.latitude;
         eventData.longitude = formData.longitude;
         console.log('📍 Including coordinates:', { lat: formData.latitude, lng: formData.longitude });
-      } else {
-        console.warn('⚠️ Creating event without coordinates - proximity features will not work');
       }
 
-      // Add country if available
-      if (formData.country) {
-        eventData.country = formData.country;
+      // Add pricing - convert to multiple currency fields
+      eventData.is_free = formData.isFree;
+
+      if (!formData.isFree) {
+        // Add all prices that were set
+        Object.entries(formData.prices).forEach(([currency, price]) => {
+          const numPrice = parseFloat(price);
+          if (!isNaN(numPrice) && numPrice > 0) {
+            // Backend expects price_gbp, price_ngn, price_usd, etc.
+            const fieldName = `price_${currency.toLowerCase()}`;
+            eventData[fieldName] = numPrice;
+          }
+        });
       }
+
+      // Store structured address data
+      eventData.address_data = {
+        country: formData.country,
+        fields: formData.addressFields,
+      };
+
+      console.log('📤 Sending event data:', eventData);
 
       // Call API endpoint
       const response = await fetch('https://www.soundbridge.live/api/events', {
@@ -307,7 +540,6 @@ export default function CreateEventScreen() {
       const result = await response.json();
 
       if (!response.ok) {
-        // Extract error message from API response
         const errorMessage = result.error || result.message || `HTTP ${response.status}: Failed to create event`;
         throw new Error(errorMessage);
       }
@@ -323,7 +555,7 @@ export default function CreateEventScreen() {
         ]
       );
     } catch (error: any) {
-      console.error('Error creating event:', error);
+      console.error('❌ Error creating event:', error);
       const errorMessage = error?.message || 'Failed to create event. Please try again.';
       Alert.alert('Error', errorMessage);
     } finally {
@@ -331,9 +563,13 @@ export default function CreateEventScreen() {
     }
   };
 
+  const filteredCountries = COUNTRY_ADDRESS_CONFIGS.filter(country =>
+    country.countryName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    country.countryCode.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
     <View style={styles.container}>
-      {/* Main Background Gradient - Uses theme colors */}
       <LinearGradient
         colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
         start={{ x: 0, y: 0 }}
@@ -341,216 +577,361 @@ export default function CreateEventScreen() {
         locations={[0, 0.5, 1]}
         style={styles.mainGradient}
       />
-      
+
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
-        
+
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border}]}>
-        <BackButton onPress={() => navigation.goBack() } style={styles.headerButton} />
-        <Text style={[styles.headerTitle, { color: theme.colors.text}]}>Create Event</Text>
-        <TouchableOpacity 
-          style={[styles.headerButton, { opacity: loading ? 0.5 : 1}]} 
-          onPress={handleSubmit}
-          disabled={loading}
-        >
-          <Text style={[styles.headerButtonText, { color: theme.colors.primary}]}>
-            {loading ? 'Creating...' : 'Create'}
-          </Text>
-        </TouchableOpacity>
-      </View>
+          <BackButton onPress={() => navigation.goBack()} style={styles.headerButton} />
+          <Text style={[styles.headerTitle, { color: theme.colors.text}]}>Create Event</Text>
+          <TouchableOpacity
+            style={[styles.headerButton, { opacity: loading ? 0.5 : 1}]}
+            onPress={handleSubmit}
+            disabled={loading}
+          >
+            <Text style={[styles.headerButtonText, { color: theme.colors.primary}]}>
+              {loading ? 'Creating...' : 'Create'}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        <View style={styles.contentContainer}>
-          {/* Event Image */}
-          <View style={styles.imageSection}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Event Image</Text>
-            <TouchableOpacity style={[styles.imagePicker, { borderColor: theme.colors.border}]} onPress={pickImage}>
-              {formData.image_url ? (
-                <Image source={{ uri: formData.image_url}} style={styles.eventImage} />
-              ) : (
-                <View style={styles.imagePlaceholder}>
-                  {uploadingImage ? (
-                    <ActivityIndicator size="large" color={theme.colors.primary} />
-                  ) : (
-                    <>
-                      <Ionicons name="camera-outline" size={32} color={theme.colors.textSecondary} />
-                      <Text style={[styles.imagePlaceholderText, { color: theme.colors.textSecondary}]}>
-                        Tap to add image
-                      </Text>
-                    </>
-                  )}
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* Event Title */}
-          <View style={styles.inputSection}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Event Title *</Text>
-            <TextInput
-              style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-              placeholder="Enter event title"
-              placeholderTextColor={theme.colors.textSecondary}
-              value={formData.title}
-              onChangeText={(value) => handleInputChange('title', value)}
-            />
-          </View>
-
-          {/* Description */}
-          <View style={styles.inputSection}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Description *</Text>
-            <TextInput
-              style={[styles.textArea, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-              placeholder="Describe your event..."
-              placeholderTextColor={theme.colors.textSecondary}
-              value={formData.description}
-              onChangeText={(value) => handleInputChange('description', value)}
-              multiline
-              numberOfLines={4}
-            />
-          </View>
-
-          {/* Date & Time */}
-          <View style={styles.inputSection}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Date & Time *</Text>
-            <View style={styles.dateTimeRow}>
-              <TextInput
-                style={[styles.dateInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={theme.colors.textSecondary}
-                value={formData.event_date}
-                onChangeText={(value) => handleInputChange('event_date', value)}
-              />
-              <TextInput
-                style={[styles.timeInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-                placeholder="HH:MM"
-                placeholderTextColor={theme.colors.textSecondary}
-                value={formData.event_time}
-                onChangeText={(value) => handleInputChange('event_time', value)}
-              />
-            </View>
-          </View>
-
-          {/* Location */}
-          <View style={styles.inputSection}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Location *</Text>
-            <View style={styles.locationInputContainer}>
-              <TextInput
-                style={[styles.locationInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-                placeholder="City, Country (e.g., Luton, UK)"
-                placeholderTextColor={theme.colors.textSecondary}
-                value={formData.location}
-                onChangeText={(value) => handleInputChange('location', value)}
-              />
-              <TouchableOpacity
-                style={[styles.geocodeButton, { backgroundColor: theme.colors.primary}]}
-                onPress={() => geocodeLocation(formData.location)}
-                disabled={!formData.location.trim() || geocoding}
-              >
-                {geocoding ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          <View style={styles.contentContainer}>
+            {/* Event Image */}
+            <View style={styles.imageSection}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Event Image</Text>
+              <TouchableOpacity style={[styles.imagePicker, { borderColor: theme.colors.border}]} onPress={pickImage}>
+                {formData.image_url ? (
+                  <Image source={{ uri: formData.image_url}} style={styles.eventImage} />
                 ) : (
-                  <Ionicons name="location" size={20} color="#FFFFFF" />
+                  <View style={styles.imagePlaceholder}>
+                    {uploadingImage ? (
+                      <ActivityIndicator size="large" color={theme.colors.primary} />
+                    ) : (
+                      <>
+                        <Ionicons name="camera-outline" size={32} color={theme.colors.textSecondary} />
+                        <Text style={[styles.imagePlaceholderText, { color: theme.colors.textSecondary}]}>
+                          Tap to add image
+                        </Text>
+                      </>
+                    )}
+                  </View>
                 )}
               </TouchableOpacity>
             </View>
-            {formData.latitude !== null && formData.longitude !== null && (
-              <View style={[styles.coordinatesDisplay, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border}]}>
-                <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                <Text style={[styles.coordinatesText, { color: theme.colors.textSecondary}]}>
-                  Coordinates: {formData.latitude.toFixed(4)}, {formData.longitude.toFixed(4)}
-                </Text>
+
+            {/* Event Title */}
+            <View style={styles.inputSection}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Event Title *</Text>
+              <TextInput
+                style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                placeholder="Enter event title"
+                placeholderTextColor={theme.colors.textSecondary}
+                value={formData.title}
+                onChangeText={(value) => handleInputChange('title', value)}
+              />
+            </View>
+
+            {/* Description */}
+            <View style={styles.inputSection}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Description *</Text>
+              <TextInput
+                style={[styles.textArea, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                placeholder="Describe your event..."
+                placeholderTextColor={theme.colors.textSecondary}
+                value={formData.description}
+                onChangeText={(value) => handleInputChange('description', value)}
+                multiline
+                numberOfLines={4}
+              />
+            </View>
+
+            {/* Date & Time */}
+            <View style={styles.inputSection}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Date & Time *</Text>
+              <View style={styles.dateTimeRow}>
+                <TextInput
+                  style={[styles.dateInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  value={formData.event_date}
+                  onChangeText={(value) => handleInputChange('event_date', value)}
+                />
+                <TextInput
+                  style={[styles.timeInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                  placeholder="HH:MM"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  value={formData.event_time}
+                  onChangeText={(value) => handleInputChange('event_time', value)}
+                />
               </View>
-            )}
-            <Text style={[styles.helperText, { color: theme.colors.textSecondary}]}>
-              Tap the location icon to get precise coordinates for proximity features
-            </Text>
-          </View>
+            </View>
 
-          {/* Venue */}
-          <View style={styles.inputSection}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Venue (Optional)</Text>
-            <TextInput
-              style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-              placeholder="Venue name"
-              placeholderTextColor={theme.colors.textSecondary}
-              value={formData.venue}
-              onChangeText={(value) => handleInputChange('venue', value)}
-            />
-          </View>
-
-          {/* Category */}
-          <View style={styles.inputSection}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Category *</Text>
-            <View style={styles.categoryGrid}>
-              {EVENT_CATEGORIES.map((category) => (
-                <TouchableOpacity
-                  key={category}
-                  style={[
-                    styles.categoryChip,
-                    {
-                      backgroundColor: formData.category === category ? theme.colors.primary : theme.colors.surface,
-                      borderColor: theme.colors.border,}
-                  ]}
-                  onPress={() => handleInputChange('category', category)}
-                >
-                  <Text
+            {/* Category */}
+            <View style={styles.inputSection}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Category *</Text>
+              <View style={styles.categoryGrid}>
+                {EVENT_CATEGORIES.map((category) => (
+                  <TouchableOpacity
+                    key={category}
                     style={[
-                      styles.categoryChipText,
-                      { color: formData.category === category ? '#FFFFFF' : theme.colors.text}
+                      styles.categoryChip,
+                      {
+                        backgroundColor: formData.category === category ? theme.colors.primary : theme.colors.surface,
+                        borderColor: theme.colors.border,
+                      }
                     ]}
+                    onPress={() => handleInputChange('category', category)}
                   >
-                    {category}
-                  </Text>
+                    <Text
+                      style={[
+                        styles.categoryChipText,
+                        { color: formData.category === category ? '#FFFFFF' : theme.colors.text}
+                      ]}
+                    >
+                      {category}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Country Selection */}
+            <View style={styles.inputSection}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Country *</Text>
+              <TouchableOpacity
+                style={[styles.countrySelector, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border}]}
+                onPress={() => setShowCountryPicker(true)}
+              >
+                <Text style={[styles.countrySelectorText, { color: theme.colors.text}]}>
+                  {selectedCountryConfig.countryName}
+                </Text>
+                <Ionicons name="chevron-down" size={20} color={theme.colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Dynamic Address Fields */}
+            <View style={styles.inputSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Address *</Text>
+                <TouchableOpacity
+                  style={[styles.geocodeButton, { backgroundColor: theme.colors.primary}]}
+                  onPress={geocodeLocation}
+                  disabled={geocoding}
+                >
+                  {geocoding ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="location" size={16} color="#FFFFFF" />
+                      <Text style={styles.geocodeButtonText}>Get Coordinates</Text>
+                    </>
+                  )}
                 </TouchableOpacity>
+              </View>
+
+              {selectedCountryConfig.fields.map((field) => (
+                <View key={field.name} style={styles.addressFieldContainer}>
+                  <Text style={[styles.fieldLabel, { color: theme.colors.text}]}>
+                    {field.label} {field.required && '*'}
+                  </Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                    placeholder={field.placeholder}
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={formData.addressFields[field.name] || ''}
+                    onChangeText={(value) => handleAddressFieldChange(field.name, value)}
+                    keyboardType={field.keyboardType || 'default'}
+                  />
+                </View>
               ))}
+
+              {formData.latitude !== null && formData.longitude !== null && (
+                <View style={[styles.coordinatesDisplay, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border}]}>
+                  <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                  <Text style={[styles.coordinatesText, { color: theme.colors.textSecondary}]}>
+                    Coordinates: {formData.latitude.toFixed(4)}, {formData.longitude.toFixed(4)}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Venue */}
+            <View style={styles.inputSection}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Venue (Optional)</Text>
+              <TextInput
+                style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                placeholder="Venue name"
+                placeholderTextColor={theme.colors.textSecondary}
+                value={formData.venue}
+                onChangeText={(value) => handleInputChange('venue', value)}
+              />
+            </View>
+
+            {/* Pricing Section */}
+            <View style={styles.inputSection}>
+              <View style={styles.pricingHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Pricing</Text>
+                <View style={styles.freeToggleContainer}>
+                  <Text style={[styles.freeToggleLabel, { color: theme.colors.text}]}>Free Event</Text>
+                  <Switch
+                    value={formData.isFree}
+                    onValueChange={(value) => handleInputChange('isFree', value)}
+                    trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
+                    thumbColor="#FFFFFF"
+                  />
+                </View>
+              </View>
+
+              {!formData.isFree && (
+                <View style={styles.pricingSection}>
+                  <Text style={[styles.helperText, { color: theme.colors.textSecondary, marginBottom: 12}]}>
+                    Set prices in different currencies. Leave empty if not applicable.
+                  </Text>
+
+                  {/* Primary Currency (based on selected country) */}
+                  <View style={styles.priceRow}>
+                    <Text style={[styles.currencyLabel, { color: theme.colors.text}]}>
+                      {selectedCountryConfig.currency} ({selectedCountryConfig.currencySymbol})
+                    </Text>
+                    <TextInput
+                      style={[styles.priceInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                      placeholder="0.00"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={formData.prices[selectedCountryConfig.currency] || ''}
+                      onChangeText={(value) => handlePriceChange(selectedCountryConfig.currency, value)}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+
+                  {/* Additional Common Currencies */}
+                  {selectedCountryConfig.currency !== 'USD' && (
+                    <View style={styles.priceRow}>
+                      <Text style={[styles.currencyLabel, { color: theme.colors.text}]}>USD ($)</Text>
+                      <TextInput
+                        style={[styles.priceInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                        placeholder="0.00"
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={formData.prices['USD'] || ''}
+                        onChangeText={(value) => handlePriceChange('USD', value)}
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                  )}
+
+                  {selectedCountryConfig.currency !== 'GBP' && (
+                    <View style={styles.priceRow}>
+                      <Text style={[styles.currencyLabel, { color: theme.colors.text}]}>GBP (£)</Text>
+                      <TextInput
+                        style={[styles.priceInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                        placeholder="0.00"
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={formData.prices['GBP'] || ''}
+                        onChangeText={(value) => handlePriceChange('GBP', value)}
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                  )}
+
+                  {selectedCountryConfig.currency !== 'EUR' && (
+                    <View style={styles.priceRow}>
+                      <Text style={[styles.currencyLabel, { color: theme.colors.text}]}>EUR (€)</Text>
+                      <TextInput
+                        style={[styles.priceInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                        placeholder="0.00"
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={formData.prices['EUR'] || ''}
+                        onChangeText={(value) => handlePriceChange('EUR', value)}
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                  )}
+
+                  {selectedCountryConfig.currency !== 'NGN' && (
+                    <View style={styles.priceRow}>
+                      <Text style={[styles.currencyLabel, { color: theme.colors.text}]}>NGN (₦)</Text>
+                      <TextInput
+                        style={[styles.priceInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                        placeholder="0.00"
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={formData.prices['NGN'] || ''}
+                        onChangeText={(value) => handlePriceChange('NGN', value)}
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
+
+            {/* Max Attendees */}
+            <View style={styles.inputSection}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Max Attendees (Optional)</Text>
+              <TextInput
+                style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                placeholder="Leave empty for unlimited"
+                placeholderTextColor={theme.colors.textSecondary}
+                value={formData.max_attendees}
+                onChangeText={(value) => handleInputChange('max_attendees', value)}
+                keyboardType="numeric"
+              />
             </View>
           </View>
+        </ScrollView>
 
-          {/* Pricing */}
-          <View style={styles.inputSection}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Pricing (Optional)</Text>
-            <View style={styles.pricingRow}>
-              <View style={styles.priceInputContainer}>
-                <Text style={[styles.priceLabel, { color: theme.colors.textSecondary}]}>GBP</Text>
-                <TextInput
-                  style={[styles.priceInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-                  placeholder="0"
-                  placeholderTextColor={theme.colors.textSecondary}
-                  value={formData.price_gbp}
-                  onChangeText={(value) => handleInputChange('price_gbp', value)}
-                  keyboardType="numeric"
-                />
+        {/* Country Picker Modal */}
+        <Modal
+          visible={showCountryPicker}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowCountryPicker(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { backgroundColor: theme.colors.surface}]}>
+              <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border}]}>
+                <Text style={[styles.modalTitle, { color: theme.colors.text}]}>Select Country</Text>
+                <TouchableOpacity onPress={() => setShowCountryPicker(false)}>
+                  <Ionicons name="close" size={24} color={theme.colors.text} />
+                </TouchableOpacity>
               </View>
-              <View style={styles.priceInputContainer}>
-                <Text style={[styles.priceLabel, { color: theme.colors.textSecondary}]}>NGN</Text>
-                <TextInput
-                  style={[styles.priceInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-                  placeholder="0"
-                  placeholderTextColor={theme.colors.textSecondary}
-                  value={formData.price_ngn}
-                  onChangeText={(value) => handleInputChange('price_ngn', value)}
-                  keyboardType="numeric"
-                />
-              </View>
+
+              <TextInput
+                style={[styles.searchInput, { backgroundColor: theme.colors.background, color: theme.colors.text, borderColor: theme.colors.border}]}
+                placeholder="Search countries..."
+                placeholderTextColor={theme.colors.textSecondary}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+
+              <FlatList
+                data={filteredCountries}
+                keyExtractor={(item) => item.countryCode}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[
+                      styles.countryItem,
+                      { borderBottomColor: theme.colors.border},
+                      formData.country === item.countryCode && { backgroundColor: theme.colors.primary + '20' }
+                    ]}
+                    onPress={() => {
+                      handleInputChange('country', item.countryCode);
+                      setShowCountryPicker(false);
+                      setSearchQuery('');
+                    }}
+                  >
+                    <Text style={[styles.countryItemText, { color: theme.colors.text}]}>
+                      {item.countryName}
+                    </Text>
+                    <Text style={[styles.countryItemCurrency, { color: theme.colors.textSecondary}]}>
+                      {item.currency}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
             </View>
           </View>
-
-          {/* Max Attendees */}
-          <View style={styles.inputSection}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Max Attendees (Optional)</Text>
-            <TextInput
-              style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-              placeholder="Leave empty for unlimited"
-              placeholderTextColor={theme.colors.textSecondary}
-              value={formData.max_attendees}
-              onChangeText={(value) => handleInputChange('max_attendees', value)}
-              keyboardType="numeric"
-            />
-          </View>
-        </View>
-      </ScrollView>
+        </Modal>
       </SafeAreaView>
     </View>
   );
@@ -564,8 +945,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: '100%',
     height: '100%',
-    top: 0,
-    left: 0,
   },
   safeArea: {
     flex: 1,
@@ -595,10 +974,10 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
-    backgroundColor: 'transparent',
   },
   contentContainer: {
     padding: 16,
+    paddingBottom: 40,
   },
   imageSection: {
     marginBottom: 24,
@@ -606,6 +985,12 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
+    marginBottom: 12,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 12,
   },
   imagePicker: {
@@ -646,6 +1031,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
     textAlignVertical: 'top',
+    minHeight: 100,
   },
   dateTimeRow: {
     flexDirection: 'row',
@@ -682,49 +1068,44 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  pricingRow: {
+  countrySelector: {
     flexDirection: 'row',
-    gap: 12,
-  },
-  priceInputContainer: {
-    flex: 1,
-  },
-  priceLabel: {
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  priceInput: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-  },
-  locationInputContainer: {
-    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
-  },
-  locationInput: {
-    flex: 1,
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  countrySelectorText: {
     fontSize: 16,
+  },
+  addressFieldContainer: {
+    marginBottom: 12,
+  },
+  fieldLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 6,
   },
   geocodeButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  geocodeButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   coordinatesDisplay: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 8,
+    marginTop: 12,
     padding: 12,
     borderRadius: 8,
     borderWidth: 1,
@@ -733,9 +1114,87 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
+  pricingHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  freeToggleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  freeToggleLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  pricingSection: {
+    gap: 12,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  currencyLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    width: 80,
+  },
+  priceInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+  },
   helperText: {
     fontSize: 12,
-    marginTop: 6,
     fontStyle: 'italic',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  searchInput: {
+    margin: 16,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+  },
+  countryItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  countryItemText: {
+    fontSize: 16,
+  },
+  countryItemCurrency: {
+    fontSize: 14,
   },
 });
