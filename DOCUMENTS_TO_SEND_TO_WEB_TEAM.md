@@ -1,14 +1,17 @@
-# Documents to Send to Web Team
+# Documents to Send to Web/Backend Team
 
 **Date:** January 8, 2026
 **From:** Mobile Team
 
+**Note:** Web team = Backend team (same team handles both frontend and backend)
+
 ---
 
-## Send These 4 Documents
+## 📦 Send These 4 Documents (Clickable Links)
 
-### 1. **FOR_WEB_TEAM_EVENT_SYSTEM_COMPLETE.md** (PRIMARY)
-**Priority:** HIGH - Start here
+### 1. [FOR_WEB_TEAM_EVENT_SYSTEM_COMPLETE.md](FOR_WEB_TEAM_EVENT_SYSTEM_COMPLETE.md) ⭐ PRIMARY
+**Priority:** 🔴 HIGH - Start here
+**For:** Frontend (Web App) + Backend (Webhook Overview)
 **Contains:**
 - Complete event location system (country-based address fields)
 - Event notification webhook overview
@@ -22,8 +25,9 @@
 
 ---
 
-### 2. **BACKEND_EVENT_NOTIFICATION_WEBHOOK.md** (TECHNICAL REFERENCE)
-**Priority:** HIGH - For backend deployment
+### 2. [BACKEND_EVENT_NOTIFICATION_WEBHOOK.md](BACKEND_EVENT_NOTIFICATION_WEBHOOK.md) ⭐ BACKEND
+**Priority:** 🔴 HIGH - For backend deployment
+**For:** Backend (Supabase Edge Function + Database)
 **Contains:**
 - Complete Edge Function code (TypeScript/Deno)
 - Database function implementations
@@ -38,8 +42,9 @@
 
 ---
 
-### 3. **EVENT_NOTIFICATION_SYSTEM_STATUS.md** (STATUS OVERVIEW)
-**Priority:** MEDIUM - For understanding current state
+### 3. [EVENT_NOTIFICATION_SYSTEM_STATUS.md](EVENT_NOTIFICATION_SYSTEM_STATUS.md)
+**Priority:** 🟡 MEDIUM - For understanding current state
+**For:** Both Frontend + Backend
 **Contains:**
 - What's working (mobile app)
 - What's missing (backend webhook)
@@ -52,8 +57,9 @@
 
 ---
 
-### 4. **EVENT_NOTIFICATION_DEPLOYMENT_CHECKLIST.md** (DEPLOYMENT GUIDE)
-**Priority:** MEDIUM - For deployment workflow
+### 4. [EVENT_NOTIFICATION_DEPLOYMENT_CHECKLIST.md](EVENT_NOTIFICATION_DEPLOYMENT_CHECKLIST.md)
+**Priority:** 🟡 MEDIUM - For deployment workflow
+**For:** Backend (Deployment Steps)
 **Contains:**
 - Step-by-step deployment checklist
 - Database schema verification
