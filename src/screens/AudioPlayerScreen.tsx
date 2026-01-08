@@ -1272,21 +1272,41 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
       {/* Controls */}
       {renderControls()}
 
-      {/* Lyrics Button - Always enabled */}
-      <TouchableOpacity
-        style={styles.lyricsButton}
-        onPress={handleToggleLyrics}
-        activeOpacity={0.7}
-      >
-        <Ionicons 
-          name="musical-notes" 
-          size={20} 
-          color={theme.colors.primary} 
-        />
-        <Text style={[styles.lyricsButtonText, { color: theme.colors.primary }]}>
-          Lyrics
-        </Text>
-      </TouchableOpacity>
+      {/* Action Buttons Row - Lyrics and Tip */}
+      <View style={styles.actionButtonsRow}>
+        <TouchableOpacity
+          style={styles.lyricsButton}
+          onPress={handleToggleLyrics}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name="musical-notes"
+            size={20}
+            color={theme.colors.primary}
+          />
+          <Text style={[styles.lyricsButtonText, { color: theme.colors.primary }]}>
+            Lyrics
+          </Text>
+        </TouchableOpacity>
+
+        {/* Tip Button */}
+        {currentTrack?.creator?.id && (
+          <TouchableOpacity
+            style={styles.tipButton}
+            onPress={handleTipCreator}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name="gift"
+              size={20}
+              color="#FACC15"
+            />
+            <Text style={[styles.tipButtonText, { color: '#FACC15' }]}>
+              Tip Artist
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
       {/* Next Songs Section */}
       {queue.length > 0 && (
@@ -2210,6 +2230,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 16,
   },
+  // Action Buttons Row
+  actionButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    paddingHorizontal: 24,
+    marginTop: 8,
+    marginBottom: 16,
+  },
   // Lyrics Button
   lyricsButton: {
     flexDirection: 'row',
@@ -2218,12 +2248,31 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 12,
     paddingHorizontal: 20,
-    marginTop: 8,
-    marginBottom: 16,
+    borderRadius: 999,
+    backgroundColor: 'rgba(220, 38, 38, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(220, 38, 38, 0.3)',
   },
   lyricsButtonText: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
+  },
+  // Tip Button
+  tipButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 999,
+    backgroundColor: 'rgba(250, 204, 21, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(250, 204, 21, 0.3)',
+  },
+  tipButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
   lyricsButtonDisabled: {
     opacity: 0.5,

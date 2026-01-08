@@ -11,7 +11,7 @@ SELECT
   subscription_period_start,
   subscription_period_end
 FROM profiles
-WHERE id = 'YOUR_USER_ID';
+WHERE id = 'bd8a455d-a54d-45c5-968d-e4cf5e8d928e';
 
 -- Then update with your actual subscription details:
 -- Adjust the dates and amount based on your actual subscription

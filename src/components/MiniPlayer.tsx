@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { BlurView as ExpoBlurView } from 'expo-blur';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
+import TipModal from './TipModal';
 
 export default function MiniPlayer() {
   const {
@@ -28,6 +29,7 @@ export default function MiniPlayer() {
 
   const navigation = useNavigation();
   const { theme } = useTheme();
+  const [showTipModal, setShowTipModal] = useState(false);
 
   const currentRouteName = useNavigationState((state) => {
     if (!state || !state.routes) return null;
@@ -52,6 +54,18 @@ export default function MiniPlayer() {
 
   const handleExpand = () => {
     navigation.navigate('AudioPlayer' as never);
+  };
+
+  const handleArtistPress = () => {
+    if (currentTrack?.creator?.id) {
+      navigation.navigate('CreatorProfile' as never, {
+        creatorId: currentTrack.creator.id
+      } as never);
+    }
+  };
+
+  const handleTipPress = () => {
+    setShowTipModal(true);
   };
 
   const progressPercentage = duration > 0 ? (position / duration) * 100 : 0;
@@ -148,13 +162,22 @@ export default function MiniPlayer() {
               <Text style={[styles.title, { color: titleColor }]} numberOfLines={1}>
                 {currentTrack.title}
               </Text>
-              <Text style={[styles.artist, { color: artistColor }]} numberOfLines={1}>
-                {currentTrack.creator?.display_name || currentTrack.creator?.username || 'Unknown Artist'}
-              </Text>
+              <TouchableOpacity onPress={handleArtistPress} activeOpacity={0.7}>
+                <Text style={[styles.artist, { color: artistColor }]} numberOfLines={1}>
+                  {currentTrack.creator?.display_name || currentTrack.creator?.username || 'Unknown Artist'}
+                </Text>
+              </TouchableOpacity>
             </View>
           </TouchableOpacity>
 
           <View style={styles.controls}>
+            {/* Tip Button */}
+            {currentTrack?.creator?.id && (
+              <TouchableOpacity style={styles.tipIconButton} onPress={handleTipPress}>
+                <Ionicons name="gift" size={20} color="#FACC15" />
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity style={styles.controlButton} onPress={handlePlayPause}>
               <Ionicons name={isPlaying ? 'pause' : 'play'} size={22} color={primaryControlColor} />
             </TouchableOpacity>
@@ -165,6 +188,21 @@ export default function MiniPlayer() {
           </View>
         </View>
       </ExpoBlurView>
+
+      {/* Tip Modal */}
+      {currentTrack?.creator?.id && (
+        <TipModal
+          visible={showTipModal}
+          creatorId={currentTrack.creator.id}
+          creatorName={
+            currentTrack.creator.display_name ||
+            currentTrack.creator.username ||
+            'Creator'
+          }
+          onClose={() => setShowTipModal(false)}
+          onTipSuccess={() => setShowTipModal(false)}
+        />
+      )}
     </View>
   );
 }
@@ -246,6 +284,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+  },
+  tipIconButton: {
+    padding: 10,
+    borderRadius: 999,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(250, 204, 21, 0.1)',
   },
   controlButton: {
     padding: 10,
