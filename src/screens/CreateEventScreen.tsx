@@ -473,12 +473,19 @@ export default function CreateEventScreen() {
         .map(([_, value]) => value);
       const location = locationParts.join(', ');
 
+      // Extract city from address fields (needed for notifications)
+      // Different countries use different field names for city
+      const cityField = formData.addressFields['city'] ||
+                       formData.addressFields['suburb'] ||
+                       formData.addressFields['town'] || '';
+
       // Prepare event data
       const eventData: any = {
         title: formData.title.trim(),
         description: formData.description.trim(),
         event_date: eventDateTime.toISOString(),
         location: location,
+        city: cityField.trim(), // Add city field for proximity notifications
         category: formData.category,
         country: formData.country,
       };
