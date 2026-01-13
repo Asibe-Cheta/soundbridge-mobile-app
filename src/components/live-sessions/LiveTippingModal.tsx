@@ -3,7 +3,7 @@
  * Allows users to tip creators during live sessions
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,7 +19,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { CardField, useStripe } from '@stripe/stripe-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { createTip, confirmTip } from '../../services/TipService';
 
 interface LiveTippingModalProps {
   visible: boolean;
@@ -33,17 +36,46 @@ interface LiveTippingModalProps {
 export default function LiveTippingModal({
   visible,
   creatorName,
+  creatorId,
+  sessionId,
   onClose,
   onSendTip,
 }: LiveTippingModalProps) {
   const { theme } = useTheme();
-  
+  const { user, userProfile, session } = useAuth();
+  const { confirmPayment } = useStripe();
+
   const [selectedAmount, setSelectedAmount] = useState<number | null>(null);
   const [customAmount, setCustomAmount] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  
+  const [cardComplete, setCardComplete] = useState(false);
+  const [processingMessage, setProcessingMessage] = useState<string | null>(null);
+
   const quickAmounts = [1, 5, 10, 20, 50];
+
+  // Check if Stripe is configured
+  const stripeConfigured = useMemo(() => {
+    return Boolean(process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY);
+  }, []);
+
+  // Get user's subscription tier
+  const userTier = useMemo<'free' | 'premium' | 'unlimited'>(() => {
+    const tierFromMetadata = (user?.user_metadata as any)?.subscription_tier;
+    const tierFromProfile = (userProfile as any)?.subscription_tier;
+    const tier = tierFromMetadata || tierFromProfile;
+    if (tier === 'premium' || tier === 'unlimited') {
+      return tier;
+    }
+    return 'free';
+  }, [user?.user_metadata, userProfile]);
+
+  const isCardPaymentReady = useMemo(() => {
+    if (!stripeConfigured) {
+      return true; // Allow fallback for MVP
+    }
+    return cardComplete;
+  }, [cardComplete, stripeConfigured]);
 
   const handleAmountSelect = (amount: number) => {
     setSelectedAmount(amount);
@@ -65,8 +97,18 @@ export default function LiveTippingModal({
   };
 
   const handleSendTip = async () => {
+    if (!user?.id) {
+      Alert.alert('Login Required', 'Please log in to send tips');
+      return;
+    }
+
+    if (!session) {
+      Alert.alert('Missing Session', 'We could not verify your session. Please sign out and try again.');
+      return;
+    }
+
     const amount = getFinalAmount();
-    
+
     if (!amount || amount <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid tip amount');
       return;
@@ -77,31 +119,101 @@ export default function LiveTippingModal({
       return;
     }
 
-    if (amount > 1000) {
-      Alert.alert('Maximum Tip', 'Maximum tip amount is $1,000');
+    if (amount > 100) {
+      Alert.alert('Maximum Tip', 'Maximum tip amount is $100 for in-app purchases');
+      return;
+    }
+
+    if (stripeConfigured && !isCardPaymentReady) {
+      Alert.alert('Payment Details Needed', 'Please complete your card details before sending a tip.');
       return;
     }
 
     try {
       setLoading(true);
+      setProcessingMessage('Processing payment...');
+
+      console.log('🎯 Sending live tip:', { creatorId, amount, message, tier: userTier });
+
+      // If Stripe is not configured, use fallback (for development/testing)
+      if (!stripeConfigured) {
+        console.warn('⚠️ Stripe not configured, using fallback flow');
+        await onSendTip(amount, message || undefined);
+
+        Alert.alert(
+          'Tip Sent (Simulation Mode)',
+          `Stripe is not configured. Simulating a $${amount.toFixed(2)} tip to ${creatorName}.`,
+          [{
+            text: 'OK',
+            onPress: () => {
+              // Reset form
+              setSelectedAmount(null);
+              setCustomAmount('');
+              setMessage('');
+              onClose();
+            },
+          }]
+        );
+        return;
+      }
+
+      // Stripe payment flow
+      setProcessingMessage('Contacting payment service...');
+      const createResponse = await createTip(session, {
+        creatorId,
+        amount,
+        currency: 'USD',
+        message: message.trim() || undefined,
+        isAnonymous: false,
+        userTier,
+        paymentMethod: 'card',
+      });
+
+      if (!createResponse?.success || !createResponse.clientSecret) {
+        throw new Error(createResponse?.message || 'Unable to start tip payment.');
+      }
+
+      setProcessingMessage('Confirming payment...');
+      const { error: confirmError } = await confirmPayment(createResponse.clientSecret, {
+        paymentMethodType: 'Card',
+      });
+
+      if (confirmError) {
+        console.error('❌ Stripe confirmPayment error:', confirmError);
+        throw new Error(confirmError.localizedMessage || confirmError.message || 'Payment failed.');
+      }
+
+      setProcessingMessage('Finalizing tip...');
+      const confirmResponse = await confirmTip(session, createResponse.paymentIntentId);
+
+      if (!confirmResponse?.success) {
+        throw new Error(confirmResponse?.message || 'Failed to confirm tip payment.');
+      }
+
+      // Record the tip in the live session
       await onSendTip(amount, message || undefined);
-      
+
+      const platformFee = typeof createResponse.platformFee === 'number' ? createResponse.platformFee : amount * 0.15;
+      const creatorEarnings = typeof createResponse.creatorEarnings === 'number' ? createResponse.creatorEarnings : amount * 0.85;
+
       // Reset form
       setSelectedAmount(null);
       setCustomAmount('');
       setMessage('');
-      
+
       // Close modal
       onClose();
-      
+
       // Show success
       Alert.alert(
         'Tip Sent! 🎉',
-        `You sent $${amount.toFixed(2)} to ${creatorName}`,
+        `You tipped $${amount.toFixed(2)} to ${creatorName}.
+Creator receives: $${creatorEarnings.toFixed(2)}
+Platform fee: $${platformFee.toFixed(2)}`,
         [{ text: 'OK' }]
       );
     } catch (error) {
-      console.error('Tip error:', error);
+      console.error('❌ Tip error:', error);
       Alert.alert(
         'Tip Failed',
         error instanceof Error ? error.message : 'Failed to send tip. Please try again.',
@@ -109,6 +221,7 @@ export default function LiveTippingModal({
       );
     } finally {
       setLoading(false);
+      setProcessingMessage(null);
     }
   };
 
@@ -226,6 +339,30 @@ export default function LiveTippingModal({
               </View>
             </View>
 
+            {/* Card Details - Only show if Stripe is configured */}
+            {stripeConfigured && (
+              <View style={styles.section}>
+                <Text style={[styles.sectionLabel, { color: theme.colors.textSecondary }]}>
+                  Card Details
+                </Text>
+                <View style={[styles.cardFieldContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                  <CardField
+                    postalCodeEnabled={false}
+                    placeholders={{ number: '4242 4242 4242 4242' }}
+                    cardStyle={{
+                      backgroundColor: theme.colors.card,
+                      textColor: theme.colors.text,
+                      placeholderColor: theme.colors.textSecondary,
+                    }}
+                    style={styles.cardField}
+                    onCardChange={(cardDetails) => {
+                      setCardComplete(cardDetails.complete);
+                    }}
+                  />
+                </View>
+              </View>
+            )}
+
             {/* Message */}
             <View style={styles.section}>
               <Text style={[styles.sectionLabel, { color: theme.colors.textSecondary }]}>
@@ -234,7 +371,7 @@ export default function LiveTippingModal({
               <TextInput
                 style={[
                   styles.messageInput,
-                  { 
+                  {
                     backgroundColor: theme.colors.card,
                     borderColor: theme.colors.border,
                     color: theme.colors.text,
@@ -291,6 +428,16 @@ export default function LiveTippingModal({
               </Text>
             </View>
           </ScrollView>
+
+          {/* Processing Message */}
+          {processingMessage && (
+            <View style={styles.processingContainer}>
+              <ActivityIndicator size="small" color={theme.colors.primary} />
+              <Text style={[styles.processingText, { color: theme.colors.textSecondary }]}>
+                {processingMessage}
+              </Text>
+            </View>
+          )}
 
           {/* Send Button */}
           <TouchableOpacity
@@ -425,6 +572,17 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '600',
   },
+  cardFieldContainer: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    minHeight: 50,
+  },
+  cardField: {
+    width: '100%',
+    height: 50,
+  },
   messageInput: {
     borderRadius: 12,
     borderWidth: 1,
@@ -474,6 +632,18 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     lineHeight: 18,
+  },
+  processingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  processingText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
   sendButton: {
     marginHorizontal: 20,

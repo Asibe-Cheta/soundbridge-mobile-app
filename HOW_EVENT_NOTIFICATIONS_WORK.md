@@ -80,7 +80,7 @@ User can see:
 **Mike (User in Manchester):**
 1. Lives in Manchester (263km away)
 2. Likes "Gospel Concert" category
-3. Does NOT receive notification ❌ (too far away)
+3. Does NOT receive notification ❌ (too far away) (but mike can always set to receive from any far location, but by default, he won't)
 
 ---
 
