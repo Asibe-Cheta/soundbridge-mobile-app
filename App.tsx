@@ -1,6 +1,7 @@
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View, TouchableOpacity, Text, Image } from 'react-native';
+import { View, TouchableOpacity, Text, TextInput, Image } from 'react-native';
+import { useFonts, Inter_400Regular, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -13,6 +14,8 @@ import GlassmorphicTabBar from './src/components/GlassmorphicTabBar';
 import { useUnreadMessages } from './src/hooks/useUnreadMessages';
 import GlobalSearchBar from './src/components/GlobalSearchBar';
 import TourTooltip from './src/components/TourTooltip';
+import NotificationBellButton from './src/components/NotificationBellButton';
+import { SystemTypography as Typography } from './src/constants/Typography';
 
 // Create walkthroughable components for tour
 const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
@@ -83,6 +86,8 @@ import ExperienceManagementScreen from './src/screens/ExperienceManagementScreen
 import SkillsManagementScreen from './src/screens/SkillsManagementScreen';
 import InstrumentsManagementScreen from './src/screens/InstrumentsManagementScreen';
 import AnalyticsDashboardScreen from './src/screens/AnalyticsDashboardScreen';
+import CreatorEarningsDashboardScreen from './src/screens/CreatorEarningsDashboardScreen';
+import CreatorInsightsDashboardScreen from './src/screens/CreatorInsightsDashboardScreen';
 import BrandingCustomizationScreen from './src/screens/BrandingCustomizationScreen';
 import TracksListScreen from './src/screens/TracksListScreen';
 import FollowersListScreen from './src/screens/FollowersListScreen';
@@ -91,6 +96,13 @@ import AlbumDetailsScreen from './src/screens/AlbumDetailsScreen';
 import SavedPostsScreen from './src/screens/SavedPostsScreen';
 import StorageManagementScreen from './src/screens/StorageManagementScreen';
 import PostDetailScreen from './src/screens/PostDetailScreen';
+import ExternalLinksScreen from './src/screens/ExternalLinksScreen';
+import PurchasedContentScreen from './src/screens/PurchasedContentScreen';
+import CreatorSalesAnalyticsScreen from './src/screens/CreatorSalesAnalyticsScreen';
+import ShareProfileScreen from './src/screens/ShareProfileScreen';
+import TaxInformationScreen from './src/screens/TaxInformationScreen';
+import RecentActivityScreen from './src/screens/RecentActivityScreen';
+import AccountDeletionScreen from './src/screens/AccountDeletionScreen';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -107,6 +119,7 @@ import CreatePlaylistScreen from './src/screens/CreatePlaylistScreen';
 
 // Import services
 import { notificationService } from './src/services/NotificationService';
+import { locationUpdateService } from './src/services/LocationUpdateService';
 import { offlineQueueService } from './src/services/offline/offlineQueueService';
 import { analyticsService } from './src/services/analytics/analyticsService';
 import { errorTrackingService } from './src/services/monitoring/errorTrackingService';
@@ -116,6 +129,22 @@ import * as Linking from 'expo-linking';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
+
+if (!Text.defaultProps) {
+  Text.defaultProps = {};
+}
+Text.defaultProps.style = [
+  Text.defaultProps.style,
+  { fontFamily: Typography.body.fontFamily },
+].filter(Boolean);
+
+if (!TextInput.defaultProps) {
+  TextInput.defaultProps = {};
+}
+TextInput.defaultProps.style = [
+  TextInput.defaultProps.style,
+  { fontFamily: Typography.body.fontFamily },
+].filter(Boolean);
 
 // Main Tab Navigator
 function MainTabs() {
@@ -183,32 +212,35 @@ function MainTabs() {
             <GlobalSearchBar />
           </View>
 
-          {/* Messages Icon - Right */}
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Messages' as never)}
-            style={{ position: 'relative' }}
-          >
-            <Ionicons name="chatbubbles-outline" size={24} color={theme.colors.text} />
-            {/* Unread Badge - Only show if there are unread messages */}
-            {unreadCount > 0 && (
-              <View style={{
-                position: 'absolute',
-                top: -4,
-                right: -4,
-                backgroundColor: theme.colors.error,
-                borderRadius: unreadCount > 9 ? 8 : 10,
-                minWidth: unreadCount > 9 ? 20 : 16,
-                height: 16,
-                justifyContent: 'center',
-                alignItems: 'center',
-                paddingHorizontal: unreadCount > 9 ? 4 : 0,
-              }}>
-                <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: 'bold' }}>
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          {/* Right Icons - Notifications and Messages */}
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <NotificationBellButton size={24} color={theme.colors.text} />
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Messages' as never)}
+              style={{ position: 'relative', marginLeft: 12 }}
+            >
+              <Ionicons name="chatbubbles-outline" size={24} color={theme.colors.text} />
+              {/* Unread Badge - Only show if there are unread messages */}
+              {unreadCount > 0 && (
+                <View style={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -4,
+                  backgroundColor: theme.colors.error,
+                  borderRadius: unreadCount > 9 ? 8 : 10,
+                  minWidth: unreadCount > 9 ? 20 : 16,
+                  height: 16,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  paddingHorizontal: unreadCount > 9 ? 4 : 0,
+                }}>
+                  <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: 'bold' }}>
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
       )}
@@ -365,6 +397,13 @@ function AppNavigator() {
           console.log('✅ Notification service ready');
         }
       });
+
+      // Initialize location update service for event notifications
+      locationUpdateService.initialize().then(() => {
+        console.log('✅ Location update service ready');
+        // Send initial location update if permission is granted
+        locationUpdateService.updateLocationIfNeeded('foreground');
+      });
     }
   }, [user?.id]); // Only re-run if user ID changes
 
@@ -379,37 +418,56 @@ function AppNavigator() {
     switch (firstSegment) {
       case 'event':
         if (segments[1]) {
-          navigationRef.current.navigate('EventDetails', { eventId: segments[1] });
+          navigationRef.current.navigate('EventDetails' as never, { eventId: segments[1] } as never);
         }
         break;
       case 'track':
         if (segments[1]) {
-          navigationRef.current.navigate('TrackDetails', { trackId: segments[1] });
+          navigationRef.current.navigate('TrackDetails' as never, { trackId: segments[1] } as never);
         }
         break;
       case 'album':
         if (segments[1]) {
-          navigationRef.current.navigate('AlbumDetails', { albumId: segments[1] });
+          navigationRef.current.navigate('AlbumDetails' as never, { albumId: segments[1] } as never);
         }
         break;
       case 'creator':
+      case 'profile':
         if (segments[1]) {
-          navigationRef.current.navigate('CreatorProfile', { creatorId: segments[1] });
+          navigationRef.current.navigate('CreatorProfile' as never, { creatorId: segments[1] } as never);
         }
         break;
       case 'messages':
         if (segments[1]) {
-          navigationRef.current.navigate('Messages', { conversationId: segments[1] });
+          navigationRef.current.navigate('Chat' as never, { conversationId: segments[1], recipientId: params?.recipientId } as never);
         } else {
-          navigationRef.current.navigate('Messages');
+          navigationRef.current.navigate('Messages' as never);
         }
         break;
       case 'wallet':
-        navigationRef.current.navigate('Wallet');
+        // Handle wallet sub-paths like wallet/tips or wallet/withdrawal/123
+        if (segments[1] === 'tips') {
+          navigationRef.current.navigate('Wallet' as never, { tab: 'tips', tipId: segments[2] } as never);
+        } else if (segments[1] === 'withdrawal') {
+          navigationRef.current.navigate('Wallet' as never, { tab: 'withdrawals', withdrawalId: segments[2] } as never);
+        } else {
+          navigationRef.current.navigate('Wallet' as never);
+        }
         break;
       case 'collaboration':
+        if (segments[1] === 'requests' && segments[2]) {
+          navigationRef.current.navigate('CollaborationRequests' as never, { requestId: segments[2], tab: params?.tab || 'received' } as never);
+        } else if (segments[1]) {
+          navigationRef.current.navigate('CollaborationRequests' as never, { requestId: segments[1] } as never);
+        } else {
+          navigationRef.current.navigate('CollaborationRequests' as never);
+        }
+        break;
+      case 'live':
         if (segments[1]) {
-          navigationRef.current.navigate('CollaborationRequests', { requestId: segments[1] });
+          navigationRef.current.navigate('LiveSessionRoom' as never, { sessionId: segments[1] } as never);
+        } else {
+          navigationRef.current.navigate('LiveSessions' as never);
         }
         break;
       default:
@@ -451,14 +509,130 @@ function AppNavigator() {
     console.log('✅ Navigation ready');
     // Check for pending deep links from notifications
     notificationService.getPendingDeepLink().then(data => {
-      if (data && data.deepLink && navigationRef.current) {
-        const { path, queryParams } = Linking.parse(data.deepLink);
-        if (path) {
-          handleDeepLinkNavigation(path, queryParams);
+      if (data && navigationRef.current) {
+        // If a deepLink URL is provided, use that
+        if (data.deepLink) {
+          const { path, queryParams } = Linking.parse(data.deepLink);
+          if (path) {
+            handleDeepLinkNavigation(path, queryParams);
+            return;
+          }
         }
+
+        // Otherwise, navigate based on notification type and data
+        handleNotificationNavigation(data);
       }
     });
   }, []);
+
+  // Handle navigation from notification data (when no deepLink URL is provided)
+  const handleNotificationNavigation = (data: any) => {
+    if (!navigationRef.current) return;
+
+    console.log('🔔 Handling notification navigation:', data.type);
+
+    switch (data.type) {
+      // Event notifications
+      case 'event':
+      case 'event_reminder':
+      case 'event_2_weeks':
+      case 'event_1_week':
+      case 'event_24_hours':
+      case 'event_day':
+        console.log('🔔 Event notification - Full data:', JSON.stringify(data, null, 2));
+        console.log('🔔 Event notification - eventId:', data.eventId);
+        console.log('🔔 Event notification - entityId:', data.entityId);
+        console.log('🔔 Event notification - event_id:', data.event_id);
+        console.log('🔔 Event notification - id:', data.id);
+
+        // Try multiple possible field names for the event ID
+        const resolvedEventId = data.eventId || data.entityId || data.event_id || data.id;
+
+        if (resolvedEventId) {
+          console.log('🔔 Navigating to EventDetails with eventId:', resolvedEventId);
+          navigationRef.current.navigate('EventDetails' as never, { eventId: resolvedEventId } as never);
+        } else {
+          console.error('❌ No eventId found in notification data');
+        }
+        break;
+
+      // Message notifications
+      case 'message':
+        if (data.conversationId) {
+          navigationRef.current.navigate('Chat' as never, {
+            conversationId: data.conversationId,
+          } as never);
+        } else {
+          navigationRef.current.navigate('Messages' as never);
+        }
+        break;
+
+      // Tip notifications
+      case 'tip':
+        navigationRef.current.navigate('Wallet' as never, { tab: 'tips', tipId: data.tipId || data.entityId } as never);
+        break;
+
+      // Track notifications
+      case 'track_approved':
+      case 'track_featured':
+      case 'moderation':
+        if (data.trackId || data.entityId) {
+          navigationRef.current.navigate('TrackDetails' as never, { trackId: data.trackId || data.entityId } as never);
+        }
+        break;
+
+      // Live session notifications
+      case 'live_session':
+        if (data.sessionId || data.entityId) {
+          navigationRef.current.navigate('LiveSessionRoom' as never, { sessionId: data.sessionId || data.entityId } as never);
+        } else {
+          navigationRef.current.navigate('LiveSessions' as never);
+        }
+        break;
+
+      // Withdrawal notifications
+      case 'withdrawal':
+        navigationRef.current.navigate('Wallet' as never, { tab: 'withdrawals', withdrawalId: data.withdrawalId || data.entityId } as never);
+        break;
+
+      // Collaboration notifications
+      case 'collaboration_request':
+      case 'collaboration.request.received':
+        navigationRef.current.navigate('CollaborationRequests' as never, { tab: 'received', requestId: data.requestId || data.entityId } as never);
+        break;
+
+      case 'collaboration_accepted':
+      case 'collaboration_declined':
+      case 'collaboration_confirmed':
+      case 'collaboration.request.accepted':
+      case 'collaboration.request.declined':
+        navigationRef.current.navigate('CollaborationRequests' as never, { tab: 'sent', requestId: data.requestId || data.entityId } as never);
+        break;
+
+      // Creator post notifications
+      case 'creator_post':
+        if (data.entityId || data.creatorId) {
+          navigationRef.current.navigate('CreatorProfile' as never, { creatorId: data.creatorId || data.entityId } as never);
+        }
+        break;
+
+      default:
+        console.log('⚠️ Unknown notification type for navigation:', data.type);
+    }
+  };
+
+  // Register navigation callback for notification taps
+  // This must be after handleNotificationNavigation is defined
+  React.useEffect(() => {
+    if (user) {
+      notificationService.setNavigationCallback((data) => {
+        console.log('🔔 Navigation callback triggered with data:', data);
+        if (navigationRef.current) {
+          handleNotificationNavigation(data);
+        }
+      });
+    }
+  }, [user?.id]);
 
   // No splash screen blocking - navigation works immediately
 
@@ -508,6 +682,7 @@ function AppNavigator() {
             <Stack.Screen name="CreatorSetup" component={CreatorSetupScreen} />
             <Stack.Screen name="PrivacySecurity" component={PrivacySecurityScreen} />
             <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
+            <Stack.Screen name="ExternalLinks" component={ExternalLinksScreen} />
             <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
             <Stack.Screen name="NotificationPreferences" component={NotificationPreferencesScreen} />
             <Stack.Screen name="NotificationInbox" component={NotificationInboxScreen} />
@@ -526,6 +701,10 @@ function AppNavigator() {
             <Stack.Screen name="About" component={AboutScreen} />
             <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
             <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+            <Stack.Screen name="ShareProfile" component={ShareProfileScreen} />
+            <Stack.Screen name="TaxInformation" component={TaxInformationScreen} />
+            <Stack.Screen name="RecentActivity" component={RecentActivityScreen} />
+            <Stack.Screen name="AccountDeletion" component={AccountDeletionScreen} />
             <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
             <Stack.Screen name="RequestPayout" component={RequestPayoutScreen} />
             <Stack.Screen name="Upgrade" component={UpgradeScreen} />
@@ -562,6 +741,8 @@ function AppNavigator() {
             <Stack.Screen name="SkillsManagement" component={SkillsManagementScreen} />
             <Stack.Screen name="InstrumentsManagement" component={InstrumentsManagementScreen} />
             <Stack.Screen name="AnalyticsDashboard" component={AnalyticsDashboardScreen} />
+            <Stack.Screen name="CreatorEarningsDashboard" component={CreatorEarningsDashboardScreen} />
+            <Stack.Screen name="CreatorInsightsDashboard" component={CreatorInsightsDashboardScreen} />
             <Stack.Screen name="BrandingCustomization" component={BrandingCustomizationScreen} />
             <Stack.Screen name="TracksList" component={TracksListScreen} />
             <Stack.Screen name="FollowersList" component={FollowersListScreen} />
@@ -569,6 +750,9 @@ function AppNavigator() {
             <Stack.Screen name="QueueView" component={QueueViewScreen} options={{ headerShown: false }} />
             <Stack.Screen name="LyricsView" component={LyricsViewScreen} options={{ headerShown: false }} />
             <Stack.Screen name="SongDetail" component={SongDetailScreen} options={{ headerShown: false }} />
+            {/* Paid Content Screens */}
+            <Stack.Screen name="PurchasedContent" component={PurchasedContentScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="CreatorSalesAnalytics" component={CreatorSalesAnalyticsScreen} options={{ headerShown: false }} />
             {/* Allow access to onboarding even after completion for testing */}
             <Stack.Screen name="OnboardingTest" component={OnboardingScreen} />
           </>
@@ -582,7 +766,13 @@ function AppNavigator() {
 
 export default function App() {
   console.log('🚀 SoundBridge Mobile App Loading...');
-  
+
+  const [fontsLoaded] = useFonts({
+    Inter_400Regular,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  });
+
   // Use environment configuration
   const supabaseUrl = config.supabaseUrl;
   const supabaseAnonKey = config.supabaseAnonKey;
@@ -608,6 +798,10 @@ export default function App() {
     const trackAppLaunch = performanceMonitoringService.trackScreenRender('AppLaunch');
     trackAppLaunch();
   }, []);
+
+  if (!fontsLoaded) {
+    return null;
+  }
   
   // Only render StripeProvider if we have a valid publishable key
   const appContent = (

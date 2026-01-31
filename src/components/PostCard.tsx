@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import VerifiedBadge from './VerifiedBadge';
 import { ActivityIndicator } from 'react-native';
 import { walkthroughable } from 'react-native-copilot';
 import { useNavigation } from '@react-navigation/native';
@@ -20,6 +21,7 @@ import { RepostModal } from './RepostModal';
 import { RepostedPostCard } from './RepostedPostCard';
 import { networkService } from '../services/api/networkService';
 import { useToast } from '../contexts/ToastContext';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 // Create walkthroughable component for tour
 const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
@@ -367,6 +369,8 @@ const PostCard = memo(function PostCard({
             <Text style={[styles.authorName, { color: theme.colors.text }]} numberOfLines={1}>
               {post.author.display_name}
             </Text>
+
+            {post.author.is_verified && <VerifiedBadge size={14} />}
 
             {/* Pro Badge (Premium tier) */}
             {post.author.subscription_tier === 'premium' && (
@@ -842,7 +846,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   repostText: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '700',
     letterSpacing: 0.8,
   },
@@ -876,7 +882,9 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   authorName: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
   },
   proBadge: {
@@ -899,32 +907,40 @@ const styles = StyleSheet.create({
   },
   proPlusText: {
     color: '#FFFFFF',
+    ...Typography.label,
     fontSize: 9,
+    lineHeight: 11,
     fontWeight: '700',
     marginTop: -1,
   },
   authorDetails: {
+    ...Typography.label,
     fontSize: 13,
+    lineHeight: 18,
     fontWeight: '400',
     marginBottom: 2,
-    lineHeight: 18,
   },
   authorBio: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '400',
     marginBottom: 4,
-    lineHeight: 16,
   },
   timestampRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   timestamp: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '400',
   },
   dot: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
   },
   followButton: {
     flexDirection: 'row',
@@ -937,7 +953,9 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   followButtonText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 18,
     fontWeight: '600',
   },
   postTypeBadge: {
@@ -950,7 +968,9 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   postTypeBadgeText: {
+    ...Typography.label,
     fontSize: 10,
+    lineHeight: 12,
     fontWeight: '600',
     textTransform: 'capitalize',
   },
@@ -961,12 +981,15 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   postContent: {
+    ...Typography.body,
     fontSize: 15,
-    fontWeight: '400',
     lineHeight: 22,
+    fontWeight: '400',
   },
   seeMore: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 18,
     fontWeight: '500',
     marginTop: 4,
   },
@@ -1005,7 +1028,9 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
   interactionLabel: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '500',
   },
   summaryLine: {
@@ -1017,11 +1042,15 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   summaryText: {
+    ...Typography.label,
     fontSize: 13,
+    lineHeight: 18,
     fontWeight: '400',
   },
   summaryDot: {
+    ...Typography.label,
     fontSize: 13,
+    lineHeight: 18,
     fontWeight: '400',
   },
 });

@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import VerifiedBadge from '../components/VerifiedBadge';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
@@ -201,9 +202,7 @@ export default function FollowingListScreen() {
               <Text style={[styles.displayName, { color: theme.colors.text }]} numberOfLines={1}>
                 {item.display_name}
               </Text>
-              {item.is_verified && (
-                <Ionicons name="checkmark-circle" size={16} color={theme.colors.primary} />
-              )}
+              {item.is_verified && <VerifiedBadge size={14} />}
             </View>
             <Text style={[styles.username, { color: theme.colors.textSecondary }]} numberOfLines={1}>
               @{item.username}

@@ -10,6 +10,7 @@ export interface PostAuthor {
   headline?: string;
   bio?: string;
   subscription_tier?: 'free' | 'premium' | 'unlimited' | null;
+  is_verified?: boolean;
 }
 
 export interface Post {

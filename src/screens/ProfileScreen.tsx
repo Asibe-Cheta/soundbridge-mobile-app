@@ -13,13 +13,13 @@ import {
   Switch,
   RefreshControl,
   ActivityIndicator,
-  Linking,
   Modal,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import VerifiedBadge from '../components/VerifiedBadge';
 import { walkthroughable, useCopilot } from 'react-native-copilot';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -43,13 +43,19 @@ import { useNavigation } from '@react-navigation/native';
 import { becomeServiceProvider } from '../services/creatorExpansionService';
 import * as BiometricAuth from '../services/biometricAuth';
 import ConnectionsPreview from '../components/ConnectionsPreview';
-import RecentActivity from '../components/RecentActivity';
-import { mockConnections } from '../utils/mockNetworkData';
 import { uploadImage } from '../services/UploadService';
 import { profileService } from '../services/ProfileService';
 import { walletService } from '../services/WalletService';
 import { payoutService } from '../services/PayoutService';
 import { ModerationBadge } from '../components/ModerationBadge';
+import { ExternalLinksDisplay } from '../components/ExternalLinks/ExternalLinksDisplay';
+import PromptModal from '../components/PromptModal';
+import { externalLinksService } from '../services/ExternalLinksService';
+import { ExternalLink } from '../types/external-links';
+import { SystemTypography as Typography } from '../constants/Typography';
+import { getRelativeTime } from '../utils/collaborationUtils';
+import { Connection } from '../types/network.types';
+import { ratingsService, type RatingSummary } from '../services/RatingsService';
 
 const { width } = Dimensions.get('window');
 
@@ -71,6 +77,8 @@ interface UserProfile {
   tracks_count: number;
   is_creator: boolean;
   is_verified: boolean;
+  rating_avg?: number | null;
+  rating_count?: number | null;
   created_at: string;
 }
 
@@ -85,7 +93,7 @@ interface UserStats {
 
 interface RecentActivity {
   id: string;
-  type: 'like' | 'play' | 'tip' | 'upload';
+  type: 'like' | 'play' | 'tip' | 'upload' | 'reaction' | 'connection' | 'opportunity' | 'achievement' | 'collaboration' | 'event' | 'post';
   message: string;
   time: string;
   icon: string;
@@ -110,9 +118,11 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
+  const [connectionsPreview, setConnectionsPreview] = useState<Connection[]>([]);
   const [userTracks, setUserTracks] = useState<UserTrack[]>([]);
   const [userAlbums, setUserAlbums] = useState<any[]>([]);
   const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
+  const [ratingSummary, setRatingSummary] = useState<RatingSummary | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'settings' | 'earnings'>('overview');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(false); // Start as false for instant cache display
@@ -125,6 +135,8 @@ export default function ProfileScreen() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricType, setBiometricType] = useState('');
+  const [showBiometricPasswordPrompt, setShowBiometricPasswordPrompt] = useState(false);
+  const [externalLinks, setExternalLinks] = useState<ExternalLink[]>([]);
 
   // Loading state management
   const loadingManager = useRef(new LoadingStateManager()).current;
@@ -143,6 +155,7 @@ export default function ProfileScreen() {
     // Don't wait for authLoading to finish
     if (user?.id) {
       loadProfileData();
+      loadExternalLinks();
     }
     checkBiometricAvailability();
 
@@ -281,6 +294,49 @@ export default function ProfileScreen() {
           timeout: 5000,
           fallback: [],
         },
+        recentPosts: {
+          name: 'recentPosts',
+          query: () => withQueryTimeout(
+            supabase
+              .from('posts')
+              .select('id, post_type, created_at')
+              .eq('user_id', user.id)
+              .is('deleted_at', null)
+              .order('created_at', { ascending: false })
+              .limit(5),
+            { timeout: 5000, fallback: [] }
+          ),
+          timeout: 5000,
+          fallback: [],
+        },
+        recentReactions: {
+          name: 'recentReactions',
+          query: () => withQueryTimeout(
+            supabase
+              .from('post_reactions')
+              .select('post_id, reaction_type, created_at')
+              .eq('user_id', user.id)
+              .order('created_at', { ascending: false })
+              .limit(5),
+            { timeout: 5000, fallback: [] }
+          ),
+          timeout: 5000,
+          fallback: [],
+        },
+        recentConnections: {
+          name: 'recentConnections',
+          query: () => withQueryTimeout(
+            supabase
+              .from('follows')
+              .select('following_id, created_at')
+              .eq('follower_id', user.id)
+              .order('created_at', { ascending: false })
+              .limit(5),
+            { timeout: 5000, fallback: [] }
+          ),
+          timeout: 5000,
+          fallback: [],
+        },
         tips: {
           name: 'tips',
           query: async () => {
@@ -341,6 +397,19 @@ export default function ProfileScreen() {
           timeout: 5000,
           fallback: null,
         },
+        ratingSummary: {
+          name: 'ratingSummary',
+          query: async () => {
+            try {
+              return await ratingsService.getSummary(user.id);
+            } catch (error) {
+              console.warn('⚠️ Failed to load rating summary:', error);
+              return { average: 0, count: 0 };
+            }
+          },
+          timeout: 5000,
+          fallback: { average: 0, count: 0 },
+        },
       });
 
       // Process profile data
@@ -353,8 +422,12 @@ export default function ProfileScreen() {
       const tracksData = results.tracks?.data || results.tracks || [];
       const albumsData = results.albums?.data || results.albums || [];
       const playlistsData = results.playlists?.data || results.playlists || [];
+      const recentPostsData = results.recentPosts?.data || results.recentPosts || [];
+      const recentReactionsData = results.recentReactions?.data || results.recentReactions || [];
+      const recentConnectionsData = results.recentConnections?.data || results.recentConnections || [];
       const totalTipsReceived = results.tips?.data ?? results.tips ?? 0;
       const creatorRevenue = results.creatorRevenue?.data ?? null;
+      const ratingData = results.ratingSummary?.data ?? results.ratingSummary ?? null;
 
       // Use creator revenue for total earnings (same as WalletScreen)
       // Falls back to tips if creator revenue not available
@@ -369,6 +442,17 @@ export default function ProfileScreen() {
       console.log('📊 Profile counts - Followers:', followersCount, 'Following:', followingCount, 'Tracks:', tracksCount);
 
       let profileObj: UserProfile | null = null;
+      const normalizedAlbums = Array.isArray(albumsData) ? albumsData : [];
+      const normalizedPlaylists = Array.isArray(playlistsData) ? playlistsData : [];
+      let cacheTracks: UserTrack[] = [];
+      let cacheStats: UserStats = {
+        total_plays: 0,
+        total_likes: 0,
+        total_tips_received: totalTipsReceived,
+        total_earnings: totalEarnings,
+        monthly_plays: 0,
+        monthly_earnings: Math.floor(totalEarnings * 0.3),
+      };
 
       if (profileData && !results.profile?.error) {
         console.log('✅ Profile loaded:', profileData.username);
@@ -390,6 +474,8 @@ export default function ProfileScreen() {
           tracks_count: tracksCount,
           is_creator: profileData.is_creator || false,
           is_verified: profileData.is_verified || false,
+          rating_avg: profileData.rating_avg ?? null,
+          rating_count: profileData.rating_count ?? null,
           created_at: profileData.created_at,
         };
         setProfile(profileObj);
@@ -413,6 +499,24 @@ export default function ProfileScreen() {
         setProfile(profileObj);
       }
 
+      if (normalizedAlbums.length > 0) {
+        console.log('✅ User albums loaded:', normalizedAlbums.length);
+        setUserAlbums(normalizedAlbums);
+      } else {
+        console.log('ℹ️ No user albums found');
+        setUserAlbums([]);
+      }
+
+      if (normalizedPlaylists.length > 0) {
+        console.log('✅ User playlists loaded:', normalizedPlaylists.length);
+        setUserPlaylists(normalizedPlaylists);
+      } else {
+        console.log('ℹ️ No user playlists found');
+        setUserPlaylists([]);
+      }
+
+      const activityItems: Array<RecentActivity & { created_at: string }> = [];
+
       // Process tracks data
       if (tracksData && tracksData.length > 0) {
         console.log('✅ User tracks loaded:', tracksData.length);
@@ -427,67 +531,27 @@ export default function ProfileScreen() {
         }));
         
         setUserTracks(transformedTracks);
-        
-        // Process albums data
-        if (albumsData && albumsData.length > 0) {
-          console.log('✅ User albums loaded:', albumsData.length);
-          setUserAlbums(albumsData);
-        } else {
-          console.log('ℹ️ No user albums found');
-          setUserAlbums([]);
-        }
+        cacheTracks = transformedTracks;
 
-        if (playlistsData && playlistsData.length > 0) {
-          console.log('✅ User playlists loaded:', playlistsData.length);
-          setUserPlaylists(playlistsData);
-        } else {
-          console.log('ℹ️ No user playlists found');
-          setUserPlaylists([]);
-        }
-        
-        // Generate recent activity
-        const activities: RecentActivity[] = [];
-        transformedTracks.forEach((track, index) => {
-          if (track.play_count > 100) {
-            activities.push({
-              id: `play-${track.id}`,
-              type: 'play',
-              message: `"${track.title}" reached ${track.play_count} plays`,
-              time: `${index + 1}d ago`,
-              icon: 'play',
-              color: '#4CAF50'
-            });
-          }
-          if (track.likes_count > 10) {
-            activities.push({
-              id: `like-${track.id}`,
-              type: 'like',
-              message: `"${track.title}" got ${track.likes_count} likes`,
-              time: `${index + 2}d ago`,
-              icon: 'heart',
-              color: '#DC2626'
+        transformedTracks.slice(0, 5).forEach((track) => {
+          if (track.created_at) {
+            activityItems.push({
+              id: `upload-${track.id}`,
+              type: 'upload',
+              message: `Uploaded "${track.title}"`,
+              time: getRelativeTime(track.created_at),
+              icon: 'cloud-upload',
+              color: '#2196F3',
+              created_at: track.created_at,
             });
           }
         });
-        
-        if (transformedTracks.length > 0) {
-          activities.push({
-            id: `upload-${transformedTracks[0].id}`,
-            type: 'upload',
-            message: `Uploaded "${transformedTracks[0].title}"`,
-            time: '3d ago',
-            icon: 'cloud-upload',
-            color: '#2196F3'
-          });
-        }
-        
-        setRecentActivity(activities.slice(0, 5));
         
         // Calculate stats
         const totalPlays = transformedTracks.reduce((sum, track) => sum + (track.play_count || 0), 0);
         const totalLikes = transformedTracks.reduce((sum, track) => sum + (track.likes_count || 0), 0);
 
-        const newStats = {
+        cacheStats = {
           total_plays: totalPlays,
           total_likes: totalLikes,
           total_tips_received: totalTipsReceived,
@@ -498,42 +562,190 @@ export default function ProfileScreen() {
         console.log('📊 Setting ProfileScreen stats:', {
           tips: totalTipsReceived,
           earnings: totalEarnings,
-          statsObject: newStats
+          statsObject: cacheStats
         });
-        setStats(newStats);
+        setStats(cacheStats);
+        setRatingSummary({
+          average: profileData?.rating_avg ?? ratingData?.average ?? 0,
+          count: profileData?.rating_count ?? ratingData?.count ?? 0,
+        });
       } else {
         console.log('ℹ️ No user tracks found');
         setUserTracks([]);
-        setRecentActivity([]);
-        const newStats = {
-          total_plays: 0,
-          total_likes: 0,
-          total_tips_received: totalTipsReceived,
-          total_earnings: totalEarnings, // Use creator revenue total_earned (includes tips + other earnings)
-          monthly_plays: 0,
-          monthly_earnings: Math.floor(totalEarnings * 0.3),
-        };
         console.log('📊 Setting ProfileScreen stats (no tracks):', {
           tips: totalTipsReceived,
           earnings: totalEarnings,
-          statsObject: newStats
+          statsObject: cacheStats
         });
-        setStats(newStats);
+        setStats(cacheStats);
+        setRatingSummary({
+          average: profileData?.rating_avg ?? ratingData?.average ?? 0,
+          count: profileData?.rating_count ?? ratingData?.count ?? 0,
+        });
+      }
+
+      let connectionsMap = new Map<string, any>();
+      if (recentConnectionsData.length > 0) {
+        const connectionIds = Array.from(new Set(recentConnectionsData.map((c: any) => c.following_id).filter(Boolean)));
+        if (connectionIds.length > 0) {
+          const { data: connections } = await supabase
+            .from('profiles')
+            .select('id, display_name, username, avatar_url, professional_headline')
+            .in('id', connectionIds);
+
+          connections?.forEach((connection) => {
+            connectionsMap.set(connection.id, connection);
+          });
+        }
+
+        const previewConnections = recentConnectionsData
+          .map((connection: any) => {
+            const profile = connectionsMap.get(connection.following_id);
+            return {
+              id: connection.following_id,
+              user_id: user.id,
+              connected_user_id: connection.following_id,
+              connected_at: connection.created_at,
+              user: {
+                id: connection.following_id,
+                username: profile?.username || 'unknown',
+                display_name: profile?.display_name || profile?.username || 'SoundBridge User',
+                avatar_url: profile?.avatar_url || undefined,
+                headline: profile?.professional_headline || undefined,
+              },
+            } as Connection;
+          })
+          .filter(Boolean);
+
+        setConnectionsPreview(previewConnections);
+      } else {
+        setConnectionsPreview([]);
+      }
+
+      if (recentPostsData.length > 0) {
+        recentPostsData.forEach((post: any) => {
+          const postType = post.post_type || 'update';
+          let message = 'Shared a new update';
+          let icon = 'chatbubble';
+          let color = '#6366F1';
+
+          if (postType === 'opportunity') {
+            message = 'Shared a new opportunity';
+            icon = 'briefcase';
+            color = '#F59E0B';
+          } else if (postType === 'achievement') {
+            message = 'Shared a new achievement';
+            icon = 'trophy';
+            color = '#10B981';
+          } else if (postType === 'collaboration') {
+            message = 'Shared a collaboration post';
+            icon = 'people';
+            color = '#3B82F6';
+          } else if (postType === 'event') {
+            message = 'Shared a new event';
+            icon = 'calendar';
+            color = '#8B5CF6';
+          }
+
+          if (post.created_at) {
+            activityItems.push({
+              id: `post-${post.id}`,
+              type: postType,
+              message,
+              time: getRelativeTime(post.created_at),
+              icon,
+              color,
+              created_at: post.created_at,
+            });
+          }
+        });
+      }
+
+      if (recentReactionsData.length > 0) {
+        const reactionPostIds = Array.from(new Set(recentReactionsData.map((r: any) => r.post_id).filter(Boolean)));
+        let postsMap = new Map<string, any>();
+        let authorsMap = new Map<string, any>();
+
+        if (reactionPostIds.length > 0) {
+          const { data: reactionPosts } = await supabase
+            .from('posts')
+            .select('id, user_id')
+            .in('id', reactionPostIds);
+
+          reactionPosts?.forEach((post) => {
+            postsMap.set(post.id, post);
+          });
+
+          const authorIds = Array.from(new Set((reactionPosts || []).map((post) => post.user_id).filter(Boolean)));
+          if (authorIds.length > 0) {
+            const { data: authors } = await supabase
+              .from('profiles')
+              .select('id, display_name, username')
+              .in('id', authorIds);
+
+            authors?.forEach((author) => {
+              authorsMap.set(author.id, author);
+            });
+          }
+        }
+
+        recentReactionsData.forEach((reaction: any) => {
+          const post = postsMap.get(reaction.post_id);
+          const author = post ? authorsMap.get(post.user_id) : null;
+          const authorName = author?.display_name || author?.username || 'a creator';
+          const reactionType = reaction.reaction_type || 'reaction';
+          const icon = reactionType === 'love' ? 'heart' : reactionType === 'fire' ? 'flame' : reactionType === 'congrats' ? 'trophy' : 'thumbs-up';
+          const color = reactionType === 'love' ? '#DC2626' : reactionType === 'fire' ? '#F97316' : reactionType === 'congrats' ? '#10B981' : '#3B82F6';
+
+          if (reaction.created_at) {
+            activityItems.push({
+              id: `reaction-${reaction.post_id}-${reaction.created_at}`,
+              type: 'reaction',
+              message: `Reacted to ${authorName}'s post`,
+              time: getRelativeTime(reaction.created_at),
+              icon,
+              color,
+              created_at: reaction.created_at,
+            });
+          }
+        });
+      }
+
+      if (recentConnectionsData.length > 0) {
+        recentConnectionsData.forEach((connection: any) => {
+          const profile = connectionsMap.get(connection.following_id);
+          const name = profile?.display_name || profile?.username || 'a creator';
+
+          if (connection.created_at) {
+            activityItems.push({
+              id: `connection-${connection.following_id}-${connection.created_at}`,
+              type: 'connection',
+              message: `Connected with ${name}`,
+              time: getRelativeTime(connection.created_at),
+              icon: 'people',
+              color: '#8B5CF6',
+              created_at: connection.created_at,
+            });
+          }
+        });
+      }
+
+      if (activityItems.length > 0) {
+        const sorted = activityItems
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .slice(0, 5)
+          .map(({ created_at, ...activity }) => activity);
+        setRecentActivity(sorted);
+      } else {
+        setRecentActivity([]);
       }
 
       // Save to cache
       if (profileObj) {
         await contentCacheService.saveCache('PROFILE', cacheKey, {
           profile: profileObj,
-          stats: stats || {
-            total_plays: 0,
-            total_likes: 0,
-            total_tips_received: totalTipsReceived,
-            total_earnings: totalEarnings, // Use creator revenue total_earned (includes tips + other earnings)
-            monthly_plays: 0,
-            monthly_earnings: Math.floor(totalEarnings * 0.3),
-          },
-          tracks: userTracks,
+          stats: cacheStats,
+          tracks: cacheTracks,
         });
       }
 
@@ -567,6 +779,7 @@ export default function ProfileScreen() {
         monthly_earnings: 0,
       };
       setStats(fallbackStats);
+      setRatingSummary({ average: 0, count: 0 });
       
       // Save fallback to cache if we don't have cached data
       if (!profile) {
@@ -583,9 +796,26 @@ export default function ProfileScreen() {
     }
   };
 
+  // Load external portfolio links
+  const loadExternalLinks = async () => {
+    if (!user?.id) return;
+
+    try {
+      console.log('🔗 Loading external links...');
+      const links = await externalLinksService.getExternalLinks(user.id);
+      setExternalLinks(links);
+      console.log(`✅ Loaded ${links.length} external links`);
+    } catch (error) {
+      console.error('❌ Error loading external links:', error);
+      // Don't show alert - external links are optional
+      setExternalLinks([]);
+    }
+  };
+
   const onRefresh = () => {
     setRefreshing(true);
     loadProfileData(true); // Force refresh
+    loadExternalLinks(); // Reload external links
   };
 
   const handleEditProfile = () => {
@@ -773,7 +1003,7 @@ export default function ProfileScreen() {
 
 
   const handleShareProfile = () => {
-    Alert.alert('Share Profile', 'Share your SoundBridge profile with others!');
+    navigation.navigate('ShareProfile' as never);
   };
 
   // Quick Actions handlers
@@ -931,36 +1161,27 @@ export default function ProfileScreen() {
           {
             text: 'Continue',
             onPress: () => {
-              // Navigate to a password confirmation screen or show a modal
-              Alert.prompt(
-                'Enter Password',
-                'Please enter your current password to enable biometric login',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Enable',
-                    onPress: async (password) => {
-                      if (!password || !user?.email) {
-                        Alert.alert('Error', 'Password is required');
-                        return;
-                      }
-                      
-                      const result = await BiometricAuth.enableBiometricLogin(user.email, password);
-                      if (result.success) {
-                        setBiometricEnabled(true);
-                        Alert.alert('Success', `${biometricType} login enabled!`);
-                      } else {
-                        Alert.alert('Error', result.error || 'Failed to enable biometric login');
-                      }
-                    },
-                  },
-                ],
-                'secure-text'
-              );
+              setShowBiometricPasswordPrompt(true);
             },
           },
         ]
       );
+    }
+  };
+
+  const handleBiometricPasswordConfirm = async (password: string) => {
+    if (!password || !user?.email) {
+      Alert.alert('Error', 'Password is required');
+      return;
+    }
+
+    setShowBiometricPasswordPrompt(false);
+    const result = await BiometricAuth.enableBiometricLogin(user.email, password);
+    if (result.success) {
+      setBiometricEnabled(true);
+      Alert.alert('Success', `${biometricType} login enabled!`);
+    } else {
+      Alert.alert('Error', result.error || 'Failed to enable biometric login');
     }
   };
 
@@ -970,40 +1191,19 @@ export default function ProfileScreen() {
 
   // Support & About handlers
   const handleHelpSupport = () => {
-    Alert.alert(
-      'Help & Support',
-      'Choose how you\'d like to get help',
-      [
-        { text: 'In-App Help', onPress: () => navigation.navigate('HelpSupport' as never) },
-        { text: 'Visit Website', onPress: () => Linking.openURL('https://soundbridge.live/support') },
-        { text: 'Email Support', onPress: () => Linking.openURL('mailto:support@soundbridge.live') },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
+    navigation.navigate('HelpSupport' as never);
   };
 
   const handleTermsOfService = () => {
-    Alert.alert(
-      'Terms of Service',
-      'Choose how you\'d like to view our terms',
-      [
-        { text: 'In-App View', onPress: () => navigation.navigate('TermsOfService' as never) },
-        { text: 'Open Website', onPress: () => Linking.openURL('https://soundbridge.live/legal/terms') },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
+    navigation.navigate('TermsOfService' as never);
   };
 
   const handlePrivacyPolicy = () => {
-    Alert.alert(
-      'Privacy Policy',
-      'Choose how you\'d like to view our privacy policy',
-      [
-        { text: 'In-App View', onPress: () => navigation.navigate('PrivacyPolicy' as never) },
-        { text: 'Open Website', onPress: () => Linking.openURL('https://soundbridge.live/legal/privacy') },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
+    navigation.navigate('PrivacyPolicy' as never);
+  };
+
+  const handleAccountDeletion = () => {
+    navigation.navigate('AccountDeletion' as never);
   };
 
   const handleAbout = () => {
@@ -1045,7 +1245,13 @@ export default function ProfileScreen() {
   };
 
   const handleTaxInfo = () => {
-    Alert.alert('Tax Information', 'Upload tax documents for compliance. Feature coming soon!');
+    navigation.navigate('TaxInformation' as never);
+  };
+
+  const handleRecentActivity = () => {
+    navigation.navigate('RecentActivity' as never, {
+      activities: recentActivity,
+    } as never);
   };
 
   const formatNumber = (num: number) => {
@@ -1084,32 +1290,44 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {/* Ratings Summary */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Ratings</Text>
+        <View style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <Ionicons name="star" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>
+            {ratingSummary?.average ? ratingSummary.average.toFixed(1) : 'No ratings yet'}
+          </Text>
+          <View style={[styles.activityMeta, styles.rowEnd]}>
+            <Text style={[styles.activityMetaText, { color: theme.colors.textSecondary }]}>
+              {ratingSummary?.count || 0}
+            </Text>
+          </View>
+        </View>
+      </View>
+
       {/* Connections Preview */}
       <ConnectionsPreview
-        connections={mockConnections}
-        totalCount={142}
+        connections={connectionsPreview}
+        totalCount={profile?.following_count || 0}
       />
-
-      {/* Recent Activity Component */}
-      <RecentActivity />
 
       {/* Recent Activity */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Activity</Text>
-        {recentActivity.length > 0 ? (
-          recentActivity.map((activity) => (
-            <View key={activity.id} style={[styles.activityItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-              <Ionicons name={activity.icon as any} size={20} color={activity.color} />
-              <Text style={[styles.activityText, { color: theme.colors.text }]}>{activity.message}</Text>
-              <Text style={[styles.activityTime, { color: theme.colors.textSecondary }]}>{activity.time}</Text>
-            </View>
-          ))
-        ) : (
-          <View style={styles.emptyState}>
-            <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No recent activity</Text>
-            <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>Start uploading tracks to see your activity here!</Text>
+        <TouchableOpacity
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+          onPress={handleRecentActivity}
+        >
+          <Ionicons name="time" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>View Recent Activity</Text>
+          <View style={[styles.activityMeta, styles.rowEnd]}>
+            <Text style={[styles.activityMetaText, { color: theme.colors.textSecondary }]}>
+              {recentActivity.length}
+            </Text>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
           </View>
-        )}
+        </TouchableOpacity>
       </View>
 
       {/* Quick Actions */}
@@ -1118,6 +1336,9 @@ export default function ProfileScreen() {
         <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleUploadTrack}>
           <Ionicons name="add-circle" size={24} color={theme.colors.primary} />
           <Text style={[styles.actionText, { color: theme.colors.text }]}>Upload New Track</Text>
+          <View style={styles.rowEnd}>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          </View>
         </TouchableOpacity>
         {/* Step 5: Create Events - Targeted Audience */}
         <WalkthroughableTouchable
@@ -1128,15 +1349,24 @@ export default function ProfileScreen() {
           <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleCreateEvent}>
             <Ionicons name="calendar" size={24} color={theme.colors.primary} />
             <Text style={[styles.actionText, { color: theme.colors.text }]}>Create Event</Text>
+            <View style={styles.rowEnd}>
+              <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+            </View>
           </TouchableOpacity>
         </WalkthroughableTouchable>
         <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleManageAvailability}>
           <Ionicons name="time" size={24} color={theme.colors.primary} />
           <Text style={[styles.actionText, { color: theme.colors.text }]}>Manage Availability</Text>
+          <View style={styles.rowEnd}>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          </View>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleCreatePlaylist}>
           <Ionicons name="musical-notes" size={24} color={theme.colors.primary} />
           <Text style={[styles.actionText, { color: theme.colors.text }]}>Create Playlist</Text>
+          <View style={styles.rowEnd}>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          </View>
         </TouchableOpacity>
         <TouchableOpacity 
           style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
@@ -1144,198 +1374,45 @@ export default function ProfileScreen() {
         >
           <Ionicons name="bookmark" size={24} color={theme.colors.primary} />
           <Text style={[styles.actionText, { color: theme.colors.text }]}>Saved Posts</Text>
+          <View style={styles.rowEnd}>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          </View>
         </TouchableOpacity>
       </View>
 
-      {/* My Tracks (matching web app) */}
+      {/* My Content */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>My Tracks</Text>
-        {userTracks.length > 0 ? (
-          userTracks.slice(0, 5).map((track) => (
-            <View key={track.id} style={[styles.trackItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-              <View style={styles.trackImageContainer}>
-                {track.cover_url ? (
-                  <Image 
-                    source={{ uri: track.cover_url }} 
-                    style={styles.trackImage}
-                    onError={() => console.log(`❌ Failed to load track image: ${track.cover_url}`)}
-                    onLoad={() => console.log(`✅ Track image loaded: ${track.cover_url}`)}
-                  />
-                ) : (
-                  <View style={[styles.trackImage, styles.trackImagePlaceholder, { backgroundColor: theme.colors.surface }]}>
-                    <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />
-                  </View>
-                )}
-              </View>
-              
-              <View style={styles.trackInfo}>
-                <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
-                  {track.title}
-                </Text>
-                <View style={styles.trackStats}>
-                  <Ionicons name="play" size={12} color={theme.colors.textSecondary} />
-                  <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>{formatNumber(track.play_count || 0)}</Text>
-                  <Ionicons name="heart" size={12} color={theme.colors.textSecondary} style={{ marginLeft: 8 }} />
-                  <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>{formatNumber(track.likes_count || 0)}</Text>
-                </View>
-                <ModerationBadge
-                  status={track.moderation_status}
-                  confidence={track.moderation_confidence}
-                  isOwner={true}
-                />
-              </View>
-              
-              <TouchableOpacity style={styles.trackMenu}>
-                <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-          ))
-        ) : (
-          <View style={styles.emptyState}>
-            <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No tracks yet</Text>
-            <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>Upload your first track to get started!</Text>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>My Content</Text>
+        <TouchableOpacity
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+          onPress={() => navigation.navigate('TracksList' as never, { userId: profile?.id } as never)}
+        >
+          <Ionicons name="musical-notes" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>My Tracks</Text>
+          <View style={styles.rowEnd}>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
           </View>
-        )}
-        
-        {userTracks.length > 5 && (
-          <TouchableOpacity
-            style={[styles.viewAllButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-            onPress={() => navigation.navigate('TracksList' as never, { userId: profile?.id } as never)}
-          >
-            <Text style={[styles.viewAllText, { color: theme.colors.primary }]}>View All Tracks</Text>
-            <Ionicons name="arrow-forward" size={16} color={theme.colors.primary} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* My Albums */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>My Albums</Text>
-        {userAlbums.length > 0 ? (
-          userAlbums.slice(0, 5).map((album) => (
-            <TouchableOpacity
-              key={album.id}
-              style={[styles.trackItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-              onPress={() => navigation.navigate('AlbumDetails' as never, { albumId: album.id } as never)}
-            >
-              <View style={styles.trackImageContainer}>
-                {album.cover_image_url ? (
-                  <Image 
-                    source={{ uri: album.cover_image_url }} 
-                    style={styles.trackImage}
-                  />
-                ) : (
-                  <View style={[styles.trackImage, styles.trackImagePlaceholder, { backgroundColor: theme.colors.surface }]}>
-                    <Ionicons name="albums" size={20} color={theme.colors.textSecondary} />
-                  </View>
-                )}
-              </View>
-              
-              <View style={styles.trackInfo}>
-                <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
-                  {album.title}
-                </Text>
-                <View style={styles.trackStats}>
-                  <Ionicons name="musical-notes" size={12} color={theme.colors.textSecondary} />
-                  <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>
-                    {album.tracks_count || 0} tracks
-                  </Text>
-                  <Ionicons name="play" size={12} color={theme.colors.textSecondary} style={{ marginLeft: 8 }} />
-                  <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>
-                    {formatNumber(album.total_plays || 0)}
-                  </Text>
-                </View>
-              </View>
-              
-              <TouchableOpacity style={styles.trackMenu}>
-                <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.textSecondary} />
-              </TouchableOpacity>
-            </TouchableOpacity>
-          ))
-        ) : (
-          <View style={styles.emptyState}>
-            <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No albums yet</Text>
-            <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
-              Create your first album to showcase multiple tracks!
-            </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+          onPress={() => navigation.navigate('AllAlbums' as never, { title: 'My Albums', userId: profile?.id } as never)}
+        >
+          <Ionicons name="albums" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>My Albums</Text>
+          <View style={styles.rowEnd}>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
           </View>
-        )}
-        
-        {userAlbums.length > 5 && (
-          <TouchableOpacity
-            style={[styles.viewAllButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-          >
-            <Text style={[styles.viewAllText, { color: theme.colors.primary }]}>View All Albums</Text>
-            <Ionicons name="arrow-forward" size={16} color={theme.colors.primary} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* My Playlists */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>My Playlists</Text>
-        {userPlaylists.length > 0 ? (
-          userPlaylists.slice(0, 5).map((playlist) => (
-            <TouchableOpacity
-              key={playlist.id}
-              style={[styles.trackItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-              onPress={() => navigation.navigate('PlaylistDetails' as never, { playlistId: playlist.id } as never)}
-            >
-              <View style={styles.trackImageContainer}>
-                {playlist.cover_image_url ? (
-                  <Image 
-                    source={{ uri: playlist.cover_image_url }} 
-                    style={styles.trackImage}
-                  />
-                ) : (
-                  <View style={[styles.trackImage, styles.trackImagePlaceholder, { backgroundColor: theme.colors.surface }]}>
-                    <Ionicons name="musical-notes" size={20} color={theme.colors.textSecondary} />
-                  </View>
-                )}
-              </View>
-              
-              <View style={styles.trackInfo}>
-                <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
-                  {playlist.name}
-                </Text>
-                <View style={styles.trackStats}>
-                  <Ionicons name="musical-notes" size={12} color={theme.colors.textSecondary} />
-                  <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>
-                    {playlist.tracks_count || 0} tracks
-                  </Text>
-                  {!playlist.is_public && (
-                    <>
-                      <Ionicons name="lock-closed" size={12} color={theme.colors.textSecondary} style={{ marginLeft: 8 }} />
-                      <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>
-                        Private
-                      </Text>
-                    </>
-                  )}
-                </View>
-              </View>
-              
-              <TouchableOpacity style={styles.trackMenu}>
-                <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.textSecondary} />
-              </TouchableOpacity>
-            </TouchableOpacity>
-          ))
-        ) : (
-          <View style={styles.emptyState}>
-            <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No playlists yet</Text>
-            <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
-              Create your first playlist to organize your favorite tracks!
-            </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+          onPress={() => navigation.navigate('AllPlaylists' as never, { title: 'My Playlists', userId: profile?.id } as never)}
+        >
+          <Ionicons name="list" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>My Playlists</Text>
+          <View style={styles.rowEnd}>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
           </View>
-        )}
-        
-        {userPlaylists.length > 5 && (
-          <TouchableOpacity
-            style={[styles.viewAllButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-          >
-            <Text style={[styles.viewAllText, { color: theme.colors.primary }]}>View All Playlists</Text>
-            <Ionicons name="arrow-forward" size={16} color={theme.colors.primary} />
-          </TouchableOpacity>
-        )}
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -1377,6 +1454,19 @@ export default function ProfileScreen() {
             <Text style={[styles.earningsItemAmount, { color: theme.colors.text }]}>$0.00</Text>
           </View>
         </View>
+      </View>
+
+      {/* Content & Purchases */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Content & Purchases</Text>
+        <TouchableOpacity
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+          onPress={() => navigation.navigate('PurchasedContent' as never)}
+        >
+          <Ionicons name="musical-notes" size={20} color="#10B981" />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>My Purchased Content</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
       </View>
 
       {/* Payout Settings */}
@@ -1457,8 +1547,34 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
           </TouchableOpacity>
         </WalkthroughableTouchable>
-        <TouchableOpacity 
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
+        <TouchableOpacity
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+          onPress={() => navigation.navigate('CreatorInsightsDashboard' as never)}
+        >
+          <Ionicons name="stats-chart-outline" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Creator Insights</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+          onPress={() => navigation.navigate('CreatorEarningsDashboard' as never)}
+        >
+          <Ionicons name="cash-outline" size={20} color={theme.colors.primary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Earnings Dashboard</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+        {(user?.subscription_tier === 'premium' || user?.subscription_tier === 'unlimited') && (
+          <TouchableOpacity
+            style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+            onPress={() => navigation.navigate('CreatorSalesAnalytics' as never)}
+          >
+            <Ionicons name="trending-up" size={20} color={theme.colors.primary} />
+            <Text style={[styles.settingText, { color: theme.colors.text }]}>Sales Analytics</Text>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
           onPress={() => navigation.navigate('BrandingCustomization' as never)}
         >
           <Ionicons name="color-palette-outline" size={20} color={theme.colors.primary} />
@@ -1466,6 +1582,21 @@ export default function ProfileScreen() {
           <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
       </View>
+
+      {/* Portfolio Links Section */}
+      {session && user?.id && (
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Portfolio</Text>
+          <TouchableOpacity
+            style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+            onPress={() => navigation.navigate('ExternalLinks' as never)}
+          >
+            <Ionicons name="link" size={20} color={theme.colors.textSecondary} />
+            <Text style={[styles.settingText, { color: theme.colors.text }]}>External Links</Text>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Account Settings */}
       <View style={styles.section}>
@@ -1525,6 +1656,14 @@ export default function ProfileScreen() {
           <Text style={[styles.settingText, { color: theme.colors.text }]}>Offline Downloads</Text>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.error }]}
+          onPress={handleAccountDeletion}
+        >
+          <Ionicons name="trash-outline" size={20} color={theme.colors.error} />
+          <Text style={[styles.settingText, { color: theme.colors.error }]}>Delete Account</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.error} />
+        </TouchableOpacity>
       </View>
 
       {/* Creator Tools */}
@@ -1571,6 +1710,14 @@ export default function ProfileScreen() {
             style={{ marginLeft: 8 }}
           />
         </View>
+        <TouchableOpacity
+          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+          onPress={handleNotificationSettings}
+        >
+          <Ionicons name="options-outline" size={20} color={theme.colors.textSecondary} />
+          <Text style={[styles.settingText, { color: theme.colors.text }]}>Notification Preferences</Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
         {/* Step 7: Settings - Wallet, Privacy, Themes */}
         <WalkthroughableTouchable
           order={7}
@@ -1677,29 +1824,34 @@ export default function ProfileScreen() {
         
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Profile</Text>
-        <View style={styles.headerButtons}>
-          {isEditing ? (
-            <>
-              <TouchableOpacity style={styles.headerButton} onPress={handleCancelEdit}>
-                <Ionicons name="close" size={24} color={theme.colors.text} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.headerButton} onPress={handleSaveProfile}>
-                <Ionicons name="checkmark" size={24} color={theme.colors.text} />
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <TouchableOpacity style={styles.headerButton} onPress={handleEditProfile}>
-                <Ionicons name="pencil-outline" size={24} color={theme.colors.text} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.headerButton} onPress={handleShareProfile}>
-                <Ionicons name="share-outline" size={24} color={theme.colors.text} />
-              </TouchableOpacity>
-            </>
-          )}
+          <View style={styles.headerRow}>
+            <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Profile</Text>
+            <View style={styles.headerButtons}>
+              {isEditing ? (
+                <>
+                  <TouchableOpacity style={styles.headerButton} onPress={handleCancelEdit}>
+                    <Ionicons name="close" size={24} color={theme.colors.text} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.headerButton} onPress={handleSaveProfile}>
+                    <Ionicons name="checkmark" size={24} color={theme.colors.text} />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <TouchableOpacity style={styles.headerButton} onPress={handleEditProfile}>
+                    <Ionicons name="pencil-outline" size={24} color={theme.colors.text} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.headerButton} onPress={handleShareProfile}>
+                    <Ionicons name="share-outline" size={24} color={theme.colors.text} />
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </View>
+          <Text style={[styles.headerSubtitle, { color: theme.colors.textSecondary }]}>
+            Manage your profile
+          </Text>
         </View>
-      </View>
 
       {/* Scrollable Content - Profile Banner, Tabs, and Content all scroll together */}
       <ScrollView
@@ -1792,11 +1944,7 @@ export default function ProfileScreen() {
                   <>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
                       <Text style={styles.displayNameOverlay}>{profile?.display_name}</Text>
-                      {profile?.is_verified && (
-                        <View style={styles.verifiedBadgeOverlay}>
-                          <Ionicons name="checkmark" size={14} color="#FFFFFF" />
-                        </View>
-                      )}
+                      {profile?.is_verified && <VerifiedBadge size={16} />}
                     </View>
                     <Text style={styles.usernameOverlay}>@{profile?.username}</Text>
                     {profile?.professional_headline && (
@@ -1805,9 +1953,13 @@ export default function ProfileScreen() {
                     {profile?.bio && (
                       <Text style={styles.bioOverlay}>{profile.bio}</Text>
                     )}
+                    {/* External Portfolio Links */}
+                    {!isEditing && externalLinks.length > 0 && (
+                      <ExternalLinksDisplay links={externalLinks} showClickCounts={false} />
+                    )}
                   </>
                 )}
-                
+
                 {/* Stats Overlay - Clickable */}
                 <View style={styles.profileStatsOverlay}>
                   <TouchableOpacity
@@ -1842,9 +1994,9 @@ export default function ProfileScreen() {
         </View>
 
         {/* Tabs - Scroll up with content */}
-        <View style={[styles.tabsContainer, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+        <View style={[styles.tabsContainer, { backgroundColor: theme.colors.surface }]}>
           <TouchableOpacity
-            style={[styles.tab, activeTab === 'overview' && { backgroundColor: theme.colors.primary + '20' }]}
+            style={[styles.tab, activeTab === 'overview' && [styles.activeTab, { borderBottomColor: theme.colors.primary }]]}
             onPress={() => setActiveTab('overview')}
           >
             <Text style={[styles.tabText, { color: activeTab === 'overview' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'overview' && styles.activeTabText]}>
@@ -1852,7 +2004,7 @@ export default function ProfileScreen() {
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.tab, activeTab === 'earnings' && { backgroundColor: theme.colors.primary + '20' }]}
+            style={[styles.tab, activeTab === 'earnings' && [styles.activeTab, { borderBottomColor: theme.colors.primary }]]}
             onPress={() => setActiveTab('earnings')}
           >
             <Text style={[styles.tabText, { color: activeTab === 'earnings' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'earnings' && styles.activeTabText]}>
@@ -1860,7 +2012,7 @@ export default function ProfileScreen() {
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.tab, activeTab === 'settings' && { backgroundColor: theme.colors.primary + '20' }]}
+            style={[styles.tab, activeTab === 'settings' && [styles.activeTab, { borderBottomColor: theme.colors.primary }]]}
             onPress={() => setActiveTab('settings')}
           >
             <Text style={[styles.tabText, { color: activeTab === 'settings' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'settings' && styles.activeTabText]}>
@@ -1894,6 +2046,16 @@ export default function ProfileScreen() {
           </View>
         </View>
       </Modal>
+      <PromptModal
+        visible={showBiometricPasswordPrompt}
+        title="Enter Password"
+        message={`Please enter your current password to enable ${biometricType} login.`}
+        placeholder="Password"
+        secureTextEntry
+        confirmLabel="Enable"
+        onCancel={() => setShowBiometricPasswordPrompt(false)}
+        onConfirm={handleBiometricPasswordConfirm}
+      />
       </SafeAreaView>
     </View>
   );
@@ -1922,20 +2084,34 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     // color applied dynamically in JSX
-    fontSize: 16,
+    ...Typography.body,
   },
   header: {
+    flexDirection: 'column',
+    justifyContent: 'flex-start',
+    alignItems: 'stretch',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingTop: 8,
+    borderBottomWidth: 1,
+  },
+  headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    ...Typography.headerLarge,
+    fontSize: 34,
+    lineHeight: 40,
+    letterSpacing: -0.4,
+  },
+  headerSubtitle: {
+    ...Typography.label,
+    fontSize: 15,
+    lineHeight: 20,
+    letterSpacing: 0.2,
+    marginTop: 2,
   },
   headerButton: {
     padding: 8,
@@ -1944,7 +2120,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 300, // Extra space for mini player
+    paddingBottom: 120, // Extra space for mini player
   },
   profileHeader: {
     marginBottom: 0,
@@ -1995,8 +2171,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   displayNameOverlay: {
-    fontSize: 28,
-    fontWeight: 'bold',
+    ...Typography.headerLarge,
     color: '#FFFFFF',
     marginBottom: 4,
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
@@ -2004,7 +2179,7 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
   },
   usernameOverlay: {
-    fontSize: 16,
+    ...Typography.label,
     color: 'rgba(255, 255, 255, 0.9)',
     marginBottom: 4,
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
@@ -2012,7 +2187,7 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
   },
   headlineOverlay: {
-    fontSize: 15,
+    ...Typography.label,
     color: 'rgba(255, 255, 255, 0.85)',
     marginBottom: 8,
     fontStyle: 'italic',
@@ -2021,10 +2196,9 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
   },
   bioOverlay: {
-    fontSize: 14,
+    ...Typography.body,
     color: 'rgba(255, 255, 255, 0.9)',
     marginBottom: 16,
-    lineHeight: 20,
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
@@ -2040,8 +2214,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   statNumberOverlay: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    ...Typography.headerMedium,
     color: '#FFFFFF',
     marginBottom: 2,
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
@@ -2049,14 +2222,14 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
   },
   statLabelOverlay: {
-    fontSize: 12,
+    ...Typography.label,
     color: 'rgba(255, 255, 255, 0.8)',
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
   },
   joinDateOverlay: {
-    fontSize: 12,
+    ...Typography.label,
     color: 'rgba(255, 255, 255, 0.7)',
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 0, height: 1 },
@@ -2068,7 +2241,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 8,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
@@ -2076,39 +2251,28 @@ const styles = StyleSheet.create({
     height: 80,
     textAlignVertical: 'top',
   },
-  verifiedBadgeOverlay: {
-    marginLeft: 8,
-    backgroundColor: '#4CAF50',
-    borderRadius: 12,
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#FFFFFF',
-  },
   tabsContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
+    paddingTop: 4,
+    paddingBottom: 4,
   },
   tab: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginRight: 8,
-    borderRadius: 20,
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    marginRight: 12,
+    alignItems: 'center',
   },
   activeTab: {
-    // backgroundColor applied dynamically in JSX
+    borderBottomWidth: 2,
   },
   tabText: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '500',
   },
   activeTabText: {
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
   content: {
     backgroundColor: 'transparent',
@@ -2120,96 +2284,121 @@ const styles = StyleSheet.create({
   statsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 24,
+    marginBottom: 20,
   },
   statCard: {
     flex: 1,
     // backgroundColor applied dynamically in JSX
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 18,
+    paddingVertical: 18,
+    paddingHorizontal: 12,
     alignItems: 'center',
-    marginHorizontal: 4,
-    borderWidth: 1,
+    marginHorizontal: 6,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 3,
   },
   section: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    ...Typography.label,
     // color applied dynamically in JSX
-    marginBottom: 16,
+    marginBottom: 12,
   },
   activityItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
     // backgroundColor applied dynamically in JSX
-    borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 1,
+    borderRadius: 999,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 2,
   },
   activityText: {
     flex: 1,
     // color applied dynamically in JSX
-    fontSize: 14,
+    ...Typography.body,
     marginLeft: 12,
   },
   activityTime: {
     // color applied dynamically in JSX
-    fontSize: 12,
+    ...Typography.label,
+  },
+  activityMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  activityMetaText: {
+    ...Typography.label,
   },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
     // backgroundColor applied dynamically in JSX
-    borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 1,
+    borderRadius: 999,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 2,
   },
   actionText: {
     // color applied dynamically in JSX
-    fontSize: 16,
+    ...Typography.body,
     marginLeft: 12,
+    flex: 1,
   },
   earningsOverview: {
     // backgroundColor applied dynamically in JSX
-    borderRadius: 12,
+    borderRadius: 24,
     padding: 24,
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    elevation: 3,
   },
   earningsTotal: {
-    fontSize: 36,
-    fontWeight: 'bold',
+    ...Typography.headerLarge,
     color: '#4CAF50',
     marginBottom: 8,
   },
   earningsLabel: {
-    fontSize: 16,
+    ...Typography.label,
     color: 'rgba(255, 255, 255, 0.8)',
     marginBottom: 4,
   },
   earningsMonthly: {
-    fontSize: 14,
+    ...Typography.label,
     color: 'rgba(255, 255, 255, 0.6)',
   },
   earningsItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
     // backgroundColor applied dynamically in JSX
-    borderRadius: 8,
-    marginBottom: 8,
+    borderRadius: 999,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 2,
   },
   earningsItemContent: {
     flex: 1,
@@ -2217,35 +2406,42 @@ const styles = StyleSheet.create({
   },
   earningsItemTitle: {
     // color applied dynamically in JSX
-    fontSize: 14,
+    ...Typography.label,
     marginBottom: 2,
   },
   earningsItemAmount: {
     // color applied dynamically in JSX
-    fontSize: 16,
-    fontWeight: 'bold',
+    ...Typography.body,
   },
   settingButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
     // backgroundColor applied dynamically in JSX
-    borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 1,
+    borderRadius: 999,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 2,
   },
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingLeft: 16,
-    paddingRight: 16,
+    paddingVertical: 18,
+    paddingLeft: 18,
+    paddingRight: 18,
     // backgroundColor applied dynamically in JSX
-    borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 1,
+    borderRadius: 999,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 2,
   },
   settingInfo: {
     flexDirection: 'row',
@@ -2256,42 +2452,44 @@ const styles = StyleSheet.create({
   },
   settingText: {
     // color applied dynamically in JSX
-    fontSize: 16,
+    ...Typography.body,
     marginLeft: 12,
+    flex: 1,
   },
   settingSubtext: {
-    fontSize: 13,
+    ...Typography.label,
     marginLeft: 12,
     marginTop: 2,
   },
   signOutButton: {
     // backgroundColor applied dynamically in JSX
-    borderRadius: 8,
-    paddingVertical: 16,
+    borderRadius: 999,
+    paddingVertical: 18,
     alignItems: 'center',
     marginTop: 24,
-    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 2,
   },
   signOutText: {
     // color applied dynamically in JSX
-    fontSize: 16,
-    fontWeight: 'bold',
+    ...Typography.button,
   },
   // Test button styles
   testButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 1,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    borderRadius: 999,
+    marginBottom: 12,
     borderStyle: 'dashed',
   },
   testButtonText: {
     flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.button,
     marginLeft: 12,
   },
   headerButtons: {
@@ -2304,7 +2502,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginBottom: 8,
     // color applied dynamically in JSX
-    fontSize: 16,
+    ...Typography.body,
   },
   bioInput: {
     height: 80,
@@ -2316,24 +2514,33 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     // color applied dynamically in JSX
-    fontSize: 16,
-    fontWeight: 'bold',
+    ...Typography.body,
     marginBottom: 4,
   },
   emptyStateSubtext: {
     color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 14,
+    ...Typography.label,
     textAlign: 'center',
   },
   // Track-related styles (matching web app)
   trackItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
     // backgroundColor applied dynamically in JSX
-    borderRadius: 8,
-    marginBottom: 8,
+    borderRadius: 999,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  rowEnd: {
+    marginLeft: 'auto',
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   trackImageContainer: {
     marginRight: 12,
@@ -2354,8 +2561,7 @@ const styles = StyleSheet.create({
   },
   trackTitle: {
     // color applied dynamically in JSX
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.body,
     marginBottom: 4,
   },
   trackStats: {
@@ -2364,7 +2570,7 @@ const styles = StyleSheet.create({
   },
   trackStatText: {
     color: '#666',
-    fontSize: 12,
+    ...Typography.label,
     marginLeft: 4,
   },
   trackMenu: {
@@ -2379,8 +2585,7 @@ const styles = StyleSheet.create({
   },
   viewAllText: {
     color: '#DC2626',
-    fontSize: 14,
-    fontWeight: '600',
+    ...Typography.button,
     marginRight: 4,
   },
   earningsHeader: {
@@ -2400,7 +2605,9 @@ const styles = StyleSheet.create({
   },
   upgradeButtonText: {
     // color applied dynamically in JSX
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '600',
   },
   // Avatar upload styles
@@ -2440,14 +2647,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   modalTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
+    lineHeight: 24,
     marginTop: 16,
     marginBottom: 8,
   },
   modalMessage: {
+    ...Typography.label,
     fontSize: 14,
-    textAlign: 'center',
     lineHeight: 20,
+    textAlign: 'center',
   },
 });

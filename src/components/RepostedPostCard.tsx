@@ -1,9 +1,11 @@
 import React, { memo, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import VerifiedBadge from './VerifiedBadge';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { SystemTypography as Typography } from '../constants/Typography';
 import type { Post } from '../types/feed.types';
 import { formatTimeAgo } from '../utils/timeAgo';
 import * as Haptics from 'expo-haptics';
@@ -141,6 +143,8 @@ export const RepostedPostCard = memo(function RepostedPostCard({
               <Text style={[styles.authorName, { color: theme.colors.text }]} numberOfLines={1}>
                 {post.author.display_name}
               </Text>
+
+              {post.author.is_verified && <VerifiedBadge size={13} />}
 
               {/* Pro Badge (Premium tier) */}
               {post.author.subscription_tier === 'premium' && (
@@ -314,7 +318,9 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   authorName: {
+    ...Typography.body,
     fontSize: 15,
+    lineHeight: 20,
     fontWeight: '600',
   },
   proBadge: {
@@ -337,24 +343,30 @@ const styles = StyleSheet.create({
   },
   proPlusText: {
     color: '#FFFFFF',
+    ...Typography.label,
     fontSize: 8,
+    lineHeight: 10,
     fontWeight: '700',
     marginTop: -1,
   },
   authorDetails: {
+    ...Typography.label,
     fontSize: 13,
+    lineHeight: 17,
     fontWeight: '400',
     marginBottom: 2,
-    lineHeight: 17,
   },
   authorBio: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '400',
     marginBottom: 3,
-    lineHeight: 16,
   },
   timestamp: {
+    ...Typography.label,
     fontSize: 13,
+    lineHeight: 18,
     fontWeight: '400',
   },
   followButton: {
@@ -368,6 +380,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   content: {
+    ...Typography.body,
     fontSize: 15,
     lineHeight: 22,
     marginBottom: 4,
@@ -377,7 +390,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   seeMoreText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 18,
     fontWeight: '600',
   },
   mediaPreview: {
@@ -395,7 +410,9 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(128, 128, 128, 0.2)',
   },
   statText: {
+    ...Typography.label,
     fontSize: 13,
+    lineHeight: 18,
     fontWeight: '400',
   },
 });

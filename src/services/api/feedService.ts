@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { apiFetch } from '../../lib/apiClient';
 import { Post, CreatePostDto, Comment } from '../../types/feed.types';
+import { config } from '../../config/environment';
 
 interface FeedResponse {
   posts: Post[];
@@ -182,7 +183,7 @@ export class FeedService {
       const userIds = [...new Set(postsData.map(p => p.user_id))];
       const { data: authorsData, error: authorsError} = await supabase
         .from('profiles')
-        .select('id, username, display_name, avatar_url, role, bio, professional_headline, subscription_tier')
+        .select('id, username, display_name, avatar_url, role, bio, professional_headline, subscription_tier, is_verified')
         .in('id', userIds);
 
       if (authorsError) {
@@ -344,6 +345,7 @@ export class FeedService {
             headline: author.professional_headline || undefined,
             bio: author.bio || undefined,
             subscription_tier: author.subscription_tier || undefined,
+            is_verified: author.is_verified || false,
           },
           content: post.content || '',
           post_type: post.post_type || 'update',
@@ -439,7 +441,7 @@ export class FeedService {
       }
 
       // For file uploads, we need to use fetch directly with proper headers
-      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://www.soundbridge.live';
+      const API_BASE_URL = config.apiUrl.replace(/\/api\/?$/, '');
       const response = await fetch(`${API_BASE_URL}/api/posts/upload-image`, {
         method: 'POST',
         headers: {
@@ -544,7 +546,7 @@ export class FeedService {
         formData.append('post_id', postId);
       }
 
-      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://www.soundbridge.live';
+      const API_BASE_URL = config.apiUrl.replace(/\/api\/?$/, '');
       const response = await fetch(`${API_BASE_URL}/api/posts/upload-audio`, {
         method: 'POST',
         headers: {
@@ -1114,9 +1116,9 @@ export class FeedService {
       const postIds = postsData.map(p => p.id);
 
       const [attachmentsResult, reactionsResult, commentsResult] = await Promise.all([
-        supabase.from('attachments').select('post_id, file_url, file_type').in('post_id', postIds),
-        supabase.from('reactions').select('post_id, reaction_type').in('post_id', postIds),
-        supabase.from('comments').select('post_id').in('post_id', postIds),
+        supabase.from('post_attachments').select('post_id, file_url, attachment_type').in('post_id', postIds),
+        supabase.from('post_reactions').select('post_id, reaction_type').in('post_id', postIds),
+        supabase.from('post_comments').select('post_id').in('post_id', postIds),
       ]);
 
       // Build maps
@@ -1145,8 +1147,8 @@ export class FeedService {
       // Transform to Post type
       const transformedPosts: Post[] = postsData.map((post: any) => {
         const attachments = attachmentsMap.get(post.id) || [];
-        const imageAttachment = attachments.find((a: any) => a.file_type?.startsWith('image/'));
-        const audioAttachment = attachments.find((a: any) => a.file_type?.startsWith('audio/'));
+        const imageAttachment = attachments.find((a: any) => a.attachment_type === 'image');
+        const audioAttachment = attachments.find((a: any) => a.attachment_type === 'audio');
 
         return {
           id: post.id,

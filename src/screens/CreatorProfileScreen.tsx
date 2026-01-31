@@ -15,11 +15,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import VerifiedBadge from '../components/VerifiedBadge';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { config } from '../config/environment';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useCollaboration } from '../contexts/CollaborationContext';
 import TipModal from '../components/TipModal';
@@ -35,6 +37,11 @@ import type { Post } from '../types/feed.types';
 import { useServiceProviderPrompt } from '../hooks/useServiceProviderPrompt';
 import ServiceProviderPromptModal from '../components/ServiceProviderPromptModal';
 import { payoutService } from '../services/PayoutService';
+import { ExternalLinksDisplay } from '../components/ExternalLinks/ExternalLinksDisplay';
+import { externalLinksService } from '../services/ExternalLinksService';
+import type { ExternalLink } from '../types/external-links';
+import { SystemTypography as Typography } from '../constants/Typography';
+import { ratingsService, type RatingSummary } from '../services/RatingsService';
 
 interface Creator {
   id: string;
@@ -47,6 +54,7 @@ interface Creator {
   genre?: string;
   professional_headline?: string;
   subscription_tier?: 'free' | 'premium' | 'unlimited' | null;
+  role?: 'user' | 'creator' | 'admin';  // User role - tips only allowed for 'creator'
   followers_count?: number;     // COMPUTED from follows table
   tracks_count?: number;        // COMPUTED from audio_tracks table
   events_count?: number;        // COMPUTED from events table
@@ -55,6 +63,7 @@ interface Creator {
   total_earnings?: number;      // COMPUTED from creator_revenue table
   tips_this_month_amount?: number;
   tips_this_month_count?: number;
+  is_verified?: boolean;
   created_at: string;
   isFollowing?: boolean;
 }
@@ -76,7 +85,7 @@ export default function CreatorProfileScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const { play, addToQueue } = useAudioPlayer();
   const { getBookingStatus } = useCollaboration();
 
@@ -147,12 +156,22 @@ export default function CreatorProfileScreen() {
   const [notifyOnCollabAvailability, setNotifyOnCollabAvailability] = useState(false);
   const [showFullScreenAvatar, setShowFullScreenAvatar] = useState(false);
 
+  // External links state
+  const [externalLinks, setExternalLinks] = useState<ExternalLink[]>([]);
+
   // Tab and posts state
   const [activeTab, setActiveTab] = useState<'drops' | 'tracks' | 'about'>('drops');
   const [posts, setPosts] = useState<Post[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [postsPage, setPostsPage] = useState(1);
   const [hasMorePosts, setHasMorePosts] = useState(true);
+
+  // Ratings state
+  const [ratingSummary, setRatingSummary] = useState<RatingSummary | null>(null);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [selectedRating, setSelectedRating] = useState(0);
+  const [ratingComment, setRatingComment] = useState('');
+  const [submittingRating, setSubmittingRating] = useState(false);
 
   const canRequestCollaboration = useMemo(() => {
     if (bookingStatus) {
@@ -168,6 +187,7 @@ export default function CreatorProfileScreen() {
     loadBookingStatus();
     loadCreatorAvailability();
     loadUserPosts(1);
+    loadExternalLinks();
   }, [creatorId]);
 
   useEffect(() => {
@@ -204,7 +224,7 @@ export default function CreatorProfileScreen() {
 
   // Trigger service provider prompt when viewing a service provider profile
   useEffect(() => {
-    if (!loading && !user || user.id === creatorId) {
+    if (!loading && (!user || user.id === creatorId)) {
       // Don't trigger if viewing own profile or not logged in
       return;
     }
@@ -265,6 +285,10 @@ export default function CreatorProfileScreen() {
           location,
           professional_headline,
           subscription_tier,
+          is_verified,
+          rating_avg,
+          rating_count,
+          role,
           created_at
         `)
         .eq('id', creatorId)
@@ -307,7 +331,7 @@ export default function CreatorProfileScreen() {
             console.log(`💰 Fetching creator revenue for: ${creatorId}`);
             const result = await supabase
               .from('creator_revenue')
-              .select('total_earned, pending_balance')
+              .select('total_earned, pending_balance, tips_received')
               .eq('creator_id', creatorId)
               .single();
 
@@ -380,6 +404,10 @@ export default function CreatorProfileScreen() {
       };
 
       setCreator(creatorWithStats);
+      setRatingSummary({
+        average: profileData?.rating_avg ?? 0,
+        count: profileData?.rating_count ?? 0,
+      });
       console.log('✅ Creator profile loaded:', creatorWithStats.display_name);
       console.log('🏷️ Professional headline:', creatorWithStats.professional_headline);
       console.log('💎 Subscription tier:', creatorWithStats.subscription_tier);
@@ -394,7 +422,7 @@ export default function CreatorProfileScreen() {
   const loadCreatorTracks = async () => {
     try {
       console.log('🔧 Loading creator tracks:', creatorId);
-      
+
       const { data, error } = await supabase
         .from('audio_tracks')
         .select(`
@@ -421,6 +449,17 @@ export default function CreatorProfileScreen() {
       console.log('🎵 Track details:', data?.map(t => ({ id: t.id, title: t.title, creator_id: creatorId })) || []);
     } catch (error) {
       console.error('❌ Error loading creator tracks:', error);
+    }
+  };
+
+  const loadExternalLinks = async () => {
+    try {
+      console.log('🔗 Loading external links for creator:', creatorId);
+      const links = await externalLinksService.getExternalLinks(creatorId);
+      setExternalLinks(links);
+      console.log('✅ External links loaded:', links.length);
+    } catch (error) {
+      console.error('❌ Error loading external links:', error);
     }
   };
 
@@ -497,7 +536,7 @@ export default function CreatorProfileScreen() {
         return;
       }
 
-      const response = await fetch(`https://www.soundbridge.live/api/user/follow/${creatorId}/notifications`, {
+      const response = await fetch(`${config.apiUrl}/user/follow/${creatorId}/notifications`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
@@ -531,7 +570,7 @@ export default function CreatorProfileScreen() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) return;
 
-      await fetch(`https://www.soundbridge.live/api/user/follow/${creatorId}`, {
+      await fetch(`${config.apiUrl}/user/follow/${creatorId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
@@ -596,6 +635,42 @@ export default function CreatorProfileScreen() {
 
     // Optionally refresh the profile to get updated data
     // await loadCreatorProfile();
+  };
+
+  const handleSubmitRating = async () => {
+    if (!session) {
+      Alert.alert('Login Required', 'Please log in to submit a rating.');
+      return;
+    }
+    if (!selectedRating) {
+      Alert.alert('Select a Rating', 'Please choose a star rating before submitting.');
+      return;
+    }
+
+    try {
+      setSubmittingRating(true);
+      await ratingsService.submitRating(session, {
+        ratedUserId: creatorId,
+        rating: selectedRating,
+        comment: ratingComment.trim() || undefined,
+      });
+      const updatedSummary = await ratingsService.getSummary(creatorId);
+      setRatingSummary(updatedSummary);
+      setShowRatingModal(false);
+      setSelectedRating(0);
+      setRatingComment('');
+      Alert.alert('Thanks!', 'Your rating has been submitted.');
+    } catch (error: any) {
+      console.error('❌ Failed to submit rating:', error);
+      const errorCode = error?.body?.code || error?.body?.error?.code;
+      if (error?.status === 403 && errorCode === 'NOT_ELIGIBLE') {
+        Alert.alert('Not Eligible Yet', 'Ratings unlock after a completed paid interaction.');
+      } else {
+        Alert.alert('Rating Failed', error?.message || 'Please try again.');
+      }
+    } finally {
+      setSubmittingRating(false);
+    }
   };
 
   const loadUserPosts = async (page: number = 1) => {
@@ -835,6 +910,8 @@ export default function CreatorProfileScreen() {
               <View style={styles.nameRow}>
                 <Text style={[styles.displayName, { color: theme.colors.text }]}>{creator.display_name}</Text>
 
+                {creator.is_verified && <VerifiedBadge size={16} />}
+
                 {/* Pro Badge (Premium tier) */}
                 {creator.subscription_tier === 'premium' && (
                   <View style={styles.proBadge}>
@@ -876,6 +953,16 @@ export default function CreatorProfileScreen() {
             <View style={[styles.genreTag, { backgroundColor: theme.colors.primary + '20' }]}>
               <Text style={[styles.genreText, { color: theme.colors.primary }]}>{creator.genre}</Text>
           </View>
+          )}
+
+          {/* External Links */}
+          {externalLinks.length > 0 && (
+            <View style={styles.portfolioSection}>
+              <Text style={[styles.portfolioLabel, { color: theme.colors.textSecondary }]}>
+                Portfolio
+              </Text>
+              <ExternalLinksDisplay links={externalLinks} />
+            </View>
           )}
 
           {/* Collaboration Status */}
@@ -976,6 +1063,67 @@ export default function CreatorProfileScreen() {
               </TouchableOpacity>
           )}
 
+            {/* Message Button - Show for all users except own profile */}
+            {user?.id !== creatorId && (
+              <TouchableOpacity
+                style={[
+                  styles.messageButton,
+                  {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.primary,
+                  }
+                ]}
+                onPress={() => {
+                  if (!user?.id) {
+                    Alert.alert('Login Required', 'Please log in to send messages');
+                    return;
+                  }
+                  // ChatScreen expects conversationId in format "userId1_userId2" (sorted alphabetically)
+                  // and otherUser object with user details
+                  const sortedIds = [user.id, creatorId].sort();
+                  const conversationId = `${sortedIds[0]}_${sortedIds[1]}`;
+
+                  navigation.navigate('Chat' as never, {
+                    conversationId,
+                    otherUser: {
+                      id: creatorId,
+                      username: creator?.username || 'user',
+                      display_name: creator?.display_name || creator?.username || 'User',
+                      avatar_url: creator?.avatar_url || null,
+                      role: creator?.role || 'creator',
+                    },
+                  } as never);
+                }}
+              >
+                <Ionicons name="chatbubble-outline" size={16} color={theme.colors.primary} />
+                <Text
+                  style={[
+                    styles.messageButtonText,
+                    { color: theme.colors.primary }
+                  ]}
+                >
+                  Message
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Rate Button */}
+            {user?.id !== creatorId && (
+              <TouchableOpacity
+                style={[
+                  styles.rateButton,
+                  {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.primary,
+                  }
+                ]}
+                onPress={() => setShowRatingModal(true)}
+              >
+                <Ionicons name="star-outline" size={16} color={theme.colors.primary} />
+                <Text style={[styles.rateButtonText, { color: theme.colors.primary }]}>Rate</Text>
+              </TouchableOpacity>
+            )}
+
             {/* Collaboration Button */}
             {user?.id !== creatorId && (
               <TouchableOpacity
@@ -990,10 +1138,10 @@ export default function CreatorProfileScreen() {
                 onPress={() => handleCollaborationRequest()}
                 disabled={!canRequestCollaboration}
           >
-            <Ionicons 
-                  name="people" 
-                  size={16} 
-                  color={canRequestCollaboration ? '#FFFFFF' : theme.colors.primary} 
+            <Ionicons
+                  name="people"
+                  size={16}
+                  color={canRequestCollaboration ? '#FFFFFF' : theme.colors.primary}
                 />
                 <Text
                   style={[
@@ -1005,27 +1153,30 @@ export default function CreatorProfileScreen() {
             </Text>
           </TouchableOpacity>
             )}
-          
-          <TouchableOpacity 
-              style={[
-                styles.tipButton,
-                {
-                  backgroundColor: theme.colors.surface,
-                  borderColor: theme.colors.primary,
-                }
-              ]}
-              onPress={() => setShowTipModal(true)}
-            >
-              <Ionicons name="heart" size={16} color={theme.colors.primary} />
-              <Text
+
+            {/* Tip Button - Only show on creator profiles (role === 'creator'), not your own profile */}
+            {user?.id !== creatorId && creator?.role === 'creator' && (
+              <TouchableOpacity
                 style={[
-                  styles.tipButtonText,
-                  { color: theme.colors.primary }
+                  styles.tipButton,
+                  {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.primary,
+                  }
                 ]}
+                onPress={() => setShowTipModal(true)}
               >
-                Tip
-              </Text>
-          </TouchableOpacity>
+                <Ionicons name="heart" size={16} color={theme.colors.primary} />
+                <Text
+                  style={[
+                    styles.tipButtonText,
+                    { color: theme.colors.primary }
+                  ]}
+                >
+                  Tip
+                </Text>
+              </TouchableOpacity>
+            )}
         </View>
 
           {/* Stats */}
@@ -1042,28 +1193,16 @@ export default function CreatorProfileScreen() {
               <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(creator.events_count || 0)}</Text>
               <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Events</Text>
             </View>
-            <View style={styles.statItem}>
-              <Text style={[styles.statNumber, { color: theme.colors.primary }]}>
-                ${formatNumber(creator.total_tips_received || 0)}
-              </Text>
-              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>
-                Tips ({creator.total_tip_count || 0})
-              </Text>
-            </View>
           </View>
 
-        <View style={[styles.tipsSummaryCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-          <Ionicons name="gift-outline" size={18} color={theme.colors.primary} style={styles.tipsSummaryIcon} />
-          <View style={styles.tipsSummaryContent}>
-            <Text style={[styles.tipsSummaryTitle, { color: theme.colors.text }]}>
-              💰 Received {creator.tips_this_month_count || 0} tips this month
-            </Text>
-            {typeof creator.tips_this_month_amount === 'number' && creator.tips_this_month_amount > 0 ? (
-              <Text style={[styles.tipsSummarySubtitle, { color: theme.colors.textSecondary }]}>
-                Total {formatCurrency(creator.tips_this_month_amount)}
-              </Text>
-            ) : null}
-          </View>
+        <View style={styles.ratingRow}>
+          <Ionicons name="star" size={16} color={theme.colors.primary} />
+          <Text style={[styles.ratingText, { color: theme.colors.text }]}>
+            {ratingSummary?.average ? ratingSummary.average.toFixed(1) : 'No ratings yet'}
+          </Text>
+          <Text style={[styles.ratingCount, { color: theme.colors.textSecondary }]}>
+            {ratingSummary?.count || 0}
+          </Text>
         </View>
         </View>
 
@@ -1253,6 +1392,63 @@ export default function CreatorProfileScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Rating Modal */}
+      <Modal visible={showRatingModal} animationType="fade" transparent>
+        <View style={styles.ratingOverlay}>
+          <View style={[styles.ratingModal, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <Text style={[styles.ratingTitle, { color: theme.colors.text }]}>Rate this creator</Text>
+            <Text style={[styles.ratingSubtitle, { color: theme.colors.textSecondary }]}>
+              Share your experience to help others
+            </Text>
+
+            <View style={styles.starsRow}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <TouchableOpacity key={star} onPress={() => setSelectedRating(star)}>
+                  <Ionicons
+                    name={selectedRating >= star ? 'star' : 'star-outline'}
+                    size={28}
+                    color={selectedRating >= star ? theme.colors.primary : theme.colors.textSecondary}
+                    style={styles.starIcon}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TextInput
+              style={[
+                styles.ratingInput,
+                { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border },
+              ]}
+              placeholder="Optional comment"
+              placeholderTextColor={theme.colors.textSecondary}
+              multiline
+              value={ratingComment}
+              onChangeText={setRatingComment}
+            />
+
+            <View style={styles.ratingActions}>
+              <TouchableOpacity style={styles.ratingCancel} onPress={() => setShowRatingModal(false)}>
+                <Text style={[styles.ratingCancelText, { color: theme.colors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.ratingSubmit,
+                  { backgroundColor: selectedRating ? theme.colors.primary : theme.colors.primary + '60' },
+                ]}
+                onPress={handleSubmitRating}
+                disabled={!selectedRating || submittingRating}
+              >
+                {submittingRating ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.ratingSubmitText}>Submit</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Tip Modal */}
       <TipModal
@@ -1504,8 +1700,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   loadingText: {
+    ...Typography.body,
     marginTop: 16,
     fontSize: 16,
+    lineHeight: 24,
   },
   errorContainer: {
     flex: 1,
@@ -1515,8 +1713,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   errorText: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
     marginTop: 16,
     marginBottom: 24,
   },
@@ -1532,8 +1731,9 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   headerTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
   },
   scrollView: {
     flex: 1,
@@ -1578,8 +1778,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   displayName: {
+    ...Typography.headerMedium,
     fontSize: 20,
-    fontWeight: 'bold',
+    lineHeight: 26,
   },
   proBadge: {
     backgroundColor: '#DC2626',
@@ -1601,49 +1802,58 @@ const styles = StyleSheet.create({
   },
   proPlusText: {
     color: '#FFFFFF',
+    ...Typography.label,
     fontSize: 10,
+    lineHeight: 12,
     fontWeight: '700',
     marginTop: -1,
   },
   professionalHeadline: {
+    ...Typography.body,
     fontSize: 15,
-    marginBottom: 4,
     lineHeight: 20,
+    marginBottom: 4,
   },
   username: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 18,
   },
   actionButtons: {
     flexDirection: 'row',
-    gap: 12,
+    flexWrap: 'wrap',
+    gap: 8,
     marginVertical: 16,
   },
   followButton: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
     borderWidth: 1,
     alignItems: 'center',
-    minWidth: 100,
+    minWidth: 80,
   },
   followButtonText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 18,
     fontWeight: '600',
   },
   tipButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 24,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
     borderWidth: 1,
-    gap: 6,
-    minWidth: 80,
+    gap: 4,
+    minWidth: 60,
   },
   tipButtonText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 18,
     fontWeight: '600',
   },
   collaborationStatus: {
@@ -1659,15 +1869,21 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   statusText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 18,
     fontWeight: '600',
   },
   nextSlotText: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     marginLeft: 24,
   },
   statusActionText: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '600',
     marginTop: 8,
   },
@@ -1675,7 +1891,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   availabilityTitle: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginBottom: 12,
   },
@@ -1691,34 +1909,76 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   slotDate: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 18,
     fontWeight: '600',
     marginBottom: 4,
   },
   slotTime: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     marginBottom: 6,
   },
   slotNotes: {
+    ...Typography.label,
     fontSize: 11,
     lineHeight: 14,
+  },
+  messageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 4,
+    minWidth: 70,
+  },
+  messageButtonText: {
+    ...Typography.label,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  rateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 6,
+    minWidth: 70,
+  },
+  rateButtonText: {
+    ...Typography.label,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   collabButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 24,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
     borderWidth: 1,
-    gap: 6,
-    minWidth: 120,
+    gap: 4,
+    minWidth: 90,
   },
   collabButtonText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 18,
     fontWeight: '600',
   },
   bio: {
+    ...Typography.body,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 12,
@@ -1729,7 +1989,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   location: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 18,
     marginLeft: 4,
   },
   genreTag: {
@@ -1740,8 +2002,20 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   genreText: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '600',
+  },
+  portfolioSection: {
+    marginBottom: 16,
+  },
+  portfolioLabel: {
+    ...Typography.label,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+    marginBottom: 8,
   },
   statsRow: {
     flexDirection: 'row',
@@ -1750,16 +2024,37 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
+  ratingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: 12,
+    gap: 8,
+  },
+  ratingText: {
+    ...Typography.label,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  ratingCount: {
+    ...Typography.label,
+    fontSize: 12,
+    lineHeight: 16,
+  },
   statItem: {
     alignItems: 'center',
   },
   statNumber: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
+    lineHeight: 24,
     marginBottom: 4,
   },
   statLabel: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
   },
   tipsSummaryCard: {
     flexDirection: 'row',
@@ -1781,12 +2076,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   tipsSummaryTitle: {
+    ...Typography.body,
     fontSize: 15,
+    lineHeight: 20,
     fontWeight: '700',
     marginBottom: 4,
   },
   tipsSummarySubtitle: {
+    ...Typography.label,
     fontSize: 13,
+    lineHeight: 18,
     fontWeight: '500',
   },
   tracksSection: {
@@ -1794,8 +2093,9 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   sectionTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
+    lineHeight: 24,
     marginBottom: 16,
   },
   trackItem: {
@@ -1824,7 +2124,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   trackTitle: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 18,
     fontWeight: '600',
     marginBottom: 4,
   },
@@ -1833,7 +2135,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   trackStatText: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     marginLeft: 4,
   },
   trackActions: {
@@ -1842,7 +2146,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   trackDuration: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
   },
   playButton: {
     width: 32,
@@ -1856,7 +2162,9 @@ const styles = StyleSheet.create({
     paddingVertical: 48,
   },
   emptyText: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     marginTop: 16,
   },
   // Notification preferences modal styles
@@ -1865,10 +2173,72 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'flex-end',
   },
+  ratingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
   modalContainer: {
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: '80%',
+  },
+  ratingModal: {
+    width: '100%',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+  },
+  ratingTitle: {
+    ...Typography.headerMedium,
+    fontSize: 18,
+    lineHeight: 24,
+    marginBottom: 4,
+  },
+  ratingSubtitle: {
+    ...Typography.label,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  starsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  starIcon: {
+    marginHorizontal: 4,
+  },
+  ratingInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    minHeight: 90,
+    textAlignVertical: 'top',
+    marginBottom: 12,
+  },
+  ratingActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  ratingCancel: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  ratingCancelText: {
+    ...Typography.label,
+  },
+  ratingSubmit: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+  },
+  ratingSubmitText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1878,8 +2248,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   modalTitle: {
+    ...Typography.headerMedium,
     fontSize: 20,
-    fontWeight: 'bold',
+    lineHeight: 26,
   },
   modalCloseButton: {
     padding: 4,
@@ -1888,6 +2259,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalDescription: {
+    ...Typography.body,
     fontSize: 15,
     lineHeight: 22,
     marginBottom: 24,
@@ -1910,11 +2282,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   notifPrefTitle: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginBottom: 4,
   },
   notifPrefSubtitle: {
+    ...Typography.label,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -1927,6 +2302,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   notifNoteText: {
+    ...Typography.label,
     fontSize: 13,
     lineHeight: 18,
     flex: 1,
@@ -1942,7 +2318,9 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     color: '#fff',
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
   },
   // Full-Screen Avatar Modal Styles
@@ -1988,13 +2366,16 @@ const styles = StyleSheet.create({
   },
   fullScreenAvatarName: {
     color: '#FFFFFF',
+    ...Typography.headerMedium,
     fontSize: 24,
-    fontWeight: 'bold',
+    lineHeight: 30,
     marginBottom: 4,
   },
   fullScreenAvatarUsername: {
     color: 'rgba(255, 255, 255, 0.7)',
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   tabsContainer: {
     flexDirection: 'row',
@@ -2012,7 +2393,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
   },
   tabText: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
   },
   tabContent: {
@@ -2024,8 +2407,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   loadingText: {
+    ...Typography.label,
     marginTop: 12,
     fontSize: 14,
+    lineHeight: 18,
   },
   emptyState: {
     padding: 60,
@@ -2033,8 +2418,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emptyStateText: {
+    ...Typography.body,
     marginTop: 16,
     fontSize: 16,
+    lineHeight: 22,
   },
   aboutSection: {
     padding: 16,
@@ -2045,11 +2432,14 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   aboutTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
+    lineHeight: 24,
     fontWeight: '700',
     marginBottom: 12,
   },
   aboutText: {
+    ...Typography.body,
     fontSize: 15,
     lineHeight: 22,
   },
