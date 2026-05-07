@@ -145,7 +145,7 @@
       "expo-apple-authentication",
       "expo-asset",
       "expo-audio",
-      "./plugins/withAndroidOldArch"
+      "./plugins/withTrackPlayerFix"
     ]
   }
 }
