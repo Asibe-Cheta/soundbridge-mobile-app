@@ -1,7 +1,9 @@
 import { Session } from '@supabase/supabase-js';
 import { currencyService } from './CurrencyService';
+import { config } from '../config/environment';
+import { supabase } from '../lib/supabase';
 
-const API_BASE_URL = 'https://www.soundbridge.live';
+const API_BASE_URL = config.apiUrl.replace(/\/api\/?$/, '');
 
 export interface WalletBalance {
   balance: number;
@@ -11,12 +13,20 @@ export interface WalletBalance {
 
 export interface WalletTransaction {
   id: string;
-  transaction_type: 'deposit' | 'withdrawal' | 'tip_received' | 'tip_sent' | 'payout' | 'refund';
+  transaction_type: 'deposit' | 'withdrawal' | 'tip_received' | 'tip_sent' | 'payout' | 'refund' | 'gig_payment' | 'gig_refund' | 'content_sale';
   amount: number;
   currency: string;
   description?: string;
   status: 'pending' | 'completed' | 'failed' | 'cancelled';
   created_at: string;
+  reference_type?: 'opportunity_project' | null;
+  reference_id?: string | null; // Stripe Payment Intent ID for content_sale
+  metadata?: {
+    content_id?: string;
+    content_type?: 'track' | 'album';
+    buyer_id?: string;
+    [key: string]: any;
+  } | null;
 }
 
 export interface TransactionsResponse {
@@ -120,16 +130,29 @@ class WalletService {
   }
 
   private async makeRequest<T>(
-    endpoint: string, 
-    session: Session, 
+    endpoint: string,
+    session: Session,
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${API_BASE_URL}/api${endpoint}`;
-    
+
+    // Always get a fresh session from Supabase to avoid using expired access tokens.
+    // supabase.auth.getSession() handles token refresh internally.
+    let activeToken = session.access_token;
+    try {
+      const { data: { session: freshSession } } = await supabase.auth.getSession();
+      if (freshSession?.access_token) {
+        activeToken = freshSession.access_token;
+      }
+    } catch {
+      // Fall back to the passed session token if refresh fails
+    }
+
+    const freshSession = { ...session, access_token: activeToken };
     const config: RequestInit = {
       ...options,
       headers: {
-        ...this.getAuthHeaders(session),
+        ...this.getAuthHeaders(freshSession),
         ...options.headers,
       },
     };
@@ -200,7 +223,11 @@ class WalletService {
    * Get wallet balance
    */
   async getWalletBalance(session: Session, currency: string = 'USD'): Promise<WalletBalance> {
-    return this.makeRequest(`/wallet/balance?currency=${currency}`, session);
+    const response: WalletBalance = await this.makeRequest(`/wallet/balance?currency=${currency}`, session);
+    return {
+      ...response,
+      balance: this.normalizeAmount(response.balance),
+    };
   }
 
   /**
@@ -218,12 +245,35 @@ class WalletService {
   /**
    * Get wallet transactions with pagination
    */
+  /**
+   * Normalize a transaction amount to major currency units (pounds/dollars).
+   * The DB stores amounts as decimals (8.80 = £8.80). If the Stripe webhook
+   * accidentally stores minor units (1000 = 1000 pence = £10), this corrects it.
+   * Rule: whole integer with no decimal places → divide by 100.
+   */
+  private normalizeAmount(raw: any): number {
+    const n = parseFloat(raw);
+    if (!Number.isFinite(n)) return 0;
+    // If it arrived as a whole number (no fractional pence), it's in minor units
+    const isWholeNumber = n === Math.floor(n) && !String(raw).includes('.');
+    return isWholeNumber ? n / 100 : n;
+  }
+
   async getWalletTransactions(
-    session: Session, 
-    limit: number = 50, 
+    session: Session,
+    limit: number = 50,
     offset: number = 0
   ): Promise<TransactionsResponse> {
-    return this.makeRequest(`/wallet/transactions?limit=${limit}&offset=${offset}`, session);
+    const response: TransactionsResponse = await this.makeRequest(
+      `/wallet/transactions?limit=${limit}&offset=${offset}`,
+      session
+    );
+    // Normalize amounts in case webhook stored Stripe minor units (pence) instead of major units (pounds)
+    response.transactions = (response.transactions || []).map(tx => ({
+      ...tx,
+      amount: this.normalizeAmount(tx.amount),
+    }));
+    return response;
   }
 
   /**
@@ -384,6 +434,27 @@ class WalletService {
   }
 
   /**
+   * Get the list of banks for a given country (proxied from Fincra Banks API).
+   * Returns an empty array if the country doesn't have a bank list (e.g. IBAN countries).
+   */
+  async getCountryBanksSafe(
+    session: Session,
+    countryCode: string,
+    currency: string
+  ): Promise<{ name: string; code: string }[]> {
+    try {
+      const result = await this.makeRequest<{ banks: { name: string; code: string }[] }>(
+        `/banks?country=${countryCode}&currency=${currency}`,
+        session
+      );
+      return result?.banks ?? [];
+    } catch (error) {
+      console.log(`🔇 WalletService: Bank list not available for ${countryCode} (safe mode)`);
+      return [];
+    }
+  }
+
+  /**
    * Process withdrawal with enhanced status tracking
    */
   async processWithdrawal(
@@ -411,6 +482,9 @@ class WalletService {
       case 'deposit': return 'Deposit';
       case 'payout': return 'Payout';
       case 'refund': return 'Refund';
+      case 'gig_payment': return 'Gig Payment';
+      case 'gig_refund': return 'Gig Refund';
+      case 'content_sale': return 'Content Sale';
       default: return 'Transaction';
     }
   }
@@ -426,7 +500,29 @@ class WalletService {
       case 'deposit': return 'arrow-down-circle';
       case 'payout': return 'card';
       case 'refund': return 'refresh-circle';
+      case 'gig_payment': return 'flash';
+      case 'gig_refund': return 'refresh-circle';
+      case 'content_sale': return 'musical-notes';
       default: return 'wallet';
+    }
+  }
+
+  getTransactionLabel(transaction: WalletTransaction): string {
+    if (transaction.transaction_type === 'content_sale') {
+      const contentType = transaction.metadata?.content_type;
+      if (contentType === 'album') return 'Album Sale';
+      return 'Track Sale';
+    }
+    switch (transaction.transaction_type) {
+      case 'tip_received': return 'Tip Received';
+      case 'tip_sent': return 'Tip Sent';
+      case 'withdrawal': return 'Withdrawal';
+      case 'deposit': return 'Deposit';
+      case 'payout': return 'Payout';
+      case 'refund': return 'Refund';
+      case 'gig_payment': return 'Gig Payment';
+      case 'gig_refund': return 'Gig Refund';
+      default: return 'Transaction';
     }
   }
 

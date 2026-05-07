@@ -14,12 +14,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { getTwoFactorStatus } from '../services/twoFactorAuthService';
-import type { TwoFactorStatusResponse } from '../types/twoFactor';
-import { profileService } from '../services/ProfileService';
 import { supabase } from '../lib/supabase';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 export default function PrivacySecurityScreen() {
   const navigation = useNavigation();
@@ -30,42 +29,12 @@ export default function PrivacySecurityScreen() {
   const [allowMessages, setAllowMessages] = useState(true);
   const [showOnlineStatus, setShowOnlineStatus] = useState(true);
   const [allowDataCollection, setAllowDataCollection] = useState(false);
-  const [twoFactorStatus, setTwoFactorStatus] = useState<TwoFactorStatusResponse | null>(null);
-  const [loading2FA, setLoading2FA] = useState(true);
   const [loadingPrivacy, setLoadingPrivacy] = useState(true);
   const [savingPrivacy, setSavingPrivacy] = useState(false);
 
   useEffect(() => {
-    loadTwoFactorStatus();
     loadPrivacySettings();
   }, []);
-
-  const loadTwoFactorStatus = async () => {
-    if (!session) {
-      setLoading2FA(false);
-      return;
-    }
-
-    try {
-      setLoading2FA(true);
-      const status = await getTwoFactorStatus(session);
-      setTwoFactorStatus(status);
-    } catch (error: any) {
-      console.error('Failed to load 2FA status:', error);
-      // Don't show alert on ProfileScreen - just log the error
-      // The error will be handled gracefully
-    } finally {
-      setLoading2FA(false);
-    }
-  };
-
-  const handleTwoFactorPress = () => {
-    if (twoFactorStatus?.enabled) {
-      (navigation as any).navigate('TwoFactorSettings');
-    } else {
-      (navigation as any).navigate('TwoFactorSetup');
-    }
-  };
 
   const loadPrivacySettings = async () => {
     if (!session || !user) {
@@ -75,7 +44,8 @@ export default function PrivacySecurityScreen() {
 
     try {
       setLoadingPrivacy(true);
-      // Load privacy settings from profile
+
+      // Load confirmed DB columns
       const { data: profile, error } = await supabase
         .from('profiles')
         .select('profile_visibility, show_email, allow_messages')
@@ -84,9 +54,17 @@ export default function PrivacySecurityScreen() {
 
       if (!error && profile) {
         setProfileVisibility((profile.profile_visibility as 'public' | 'private') || 'public');
-        setShowEmail(profile.show_email || false);
-        setAllowMessages(profile.allow_messages !== false); // Default to true if null
+        setShowEmail(profile.show_email ?? false);
+        setAllowMessages(profile.allow_messages !== false);
       }
+
+      // Load local-only preferences (columns not yet in DB)
+      const [onlineStatus, dataCollection] = await Promise.all([
+        AsyncStorage.getItem(`privacy_show_online_status_${user.id}`),
+        AsyncStorage.getItem(`privacy_allow_data_collection_${user.id}`),
+      ]);
+      if (onlineStatus !== null) setShowOnlineStatus(onlineStatus === 'true');
+      if (dataCollection !== null) setAllowDataCollection(dataCollection === 'true');
     } catch (error) {
       console.error('❌ Error loading privacy settings:', error);
     } finally {
@@ -94,31 +72,14 @@ export default function PrivacySecurityScreen() {
     }
   };
 
-  const savePrivacySettings = async () => {
-    if (!session) return;
-
-    try {
-      setSavingPrivacy(true);
-      const result = await profileService.updatePrivacy(
-        {
-          profileVisibility,
-          showEmail,
-          allowMessages,
-        },
-        session
-      );
-
-      if (result.success) {
-        Alert.alert('Success', 'Privacy settings updated successfully');
-      } else {
-        Alert.alert('Error', result.error || 'Failed to update privacy settings');
-      }
-    } catch (error) {
-      console.error('❌ Error saving privacy settings:', error);
-      Alert.alert('Error', 'Failed to update privacy settings');
-    } finally {
-      setSavingPrivacy(false);
-    }
+  // Save a column directly to Supabase — pass the new value explicitly to avoid stale closure
+  const saveToSupabase = async (updates: Record<string, boolean | string>) => {
+    if (!user) return;
+    const { error } = await supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', user.id);
+    if (error) throw error;
   };
 
   const handleAccountVisibility = () => {
@@ -126,19 +87,37 @@ export default function PrivacySecurityScreen() {
       'Account Visibility',
       'Choose who can see your profile and tracks',
       [
-        { 
-          text: 'Public', 
+        {
+          text: 'Public',
           onPress: async () => {
+            const prev = profileVisibility;
             setProfileVisibility('public');
-            await savePrivacySettings();
-          }
+            setSavingPrivacy(true);
+            try {
+              await saveToSupabase({ profile_visibility: 'public' });
+            } catch {
+              setProfileVisibility(prev);
+              Alert.alert('Error', 'Failed to update visibility. Please try again.');
+            } finally {
+              setSavingPrivacy(false);
+            }
+          },
         },
-        { 
-          text: 'Private', 
+        {
+          text: 'Private',
           onPress: async () => {
+            const prev = profileVisibility;
             setProfileVisibility('private');
-            await savePrivacySettings();
-          }
+            setSavingPrivacy(true);
+            try {
+              await saveToSupabase({ profile_visibility: 'private' });
+            } catch {
+              setProfileVisibility(prev);
+              Alert.alert('Error', 'Failed to update visibility. Please try again.');
+            } finally {
+              setSavingPrivacy(false);
+            }
+          },
         },
         { text: 'Cancel', style: 'cancel' },
       ]
@@ -147,12 +126,42 @@ export default function PrivacySecurityScreen() {
 
   const handleShowEmailToggle = async (value: boolean) => {
     setShowEmail(value);
-    await savePrivacySettings();
+    try {
+      await saveToSupabase({ show_email: value });
+    } catch {
+      setShowEmail(!value);
+      Alert.alert('Error', 'Failed to save. Please try again.');
+    }
   };
 
   const handleAllowMessagesToggle = async (value: boolean) => {
     setAllowMessages(value);
-    await savePrivacySettings();
+    try {
+      await saveToSupabase({ allow_messages: value });
+    } catch {
+      setAllowMessages(!value);
+      Alert.alert('Error', 'Failed to save. Please try again.');
+    }
+  };
+
+  const handleShowOnlineStatusToggle = async (value: boolean) => {
+    setShowOnlineStatus(value);
+    try {
+      await AsyncStorage.setItem(`privacy_show_online_status_${user?.id}`, String(value));
+    } catch {
+      setShowOnlineStatus(!value);
+      Alert.alert('Error', 'Failed to save. Please try again.');
+    }
+  };
+
+  const handleAllowDataCollectionToggle = async (value: boolean) => {
+    setAllowDataCollection(value);
+    try {
+      await AsyncStorage.setItem(`privacy_allow_data_collection_${user?.id}`, String(value));
+    } catch {
+      setAllowDataCollection(!value);
+      Alert.alert('Error', 'Failed to save. Please try again.');
+    }
   };
 
   const handleDownloadData = () => {
@@ -167,18 +176,7 @@ export default function PrivacySecurityScreen() {
   };
 
   const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete Account',
-      'This action cannot be undone. All your tracks, followers, and data will be permanently deleted.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Delete Account', 
-          style: 'destructive',
-          onPress: () => Alert.alert('Account Deletion', 'Please contact support@soundbridge.live to delete your account.')
-        },
-      ]
-    );
+    (navigation as any).navigate('AccountDeletion');
   };
 
   return (
@@ -224,20 +222,12 @@ export default function PrivacySecurityScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Security</Text>
           
-          <TouchableOpacity style={styles.settingItem} onPress={handleTwoFactorPress}>
+          <TouchableOpacity style={styles.settingItem} onPress={() => (navigation as any).navigate('TwoFactorSettings')}>
             <View style={styles.settingInfo}>
               <Ionicons name="shield-checkmark" size={24} color="#FFFFFF" />
               <View style={styles.settingContent}>
                 <Text style={styles.settingText}>Two-Factor Authentication</Text>
-                {loading2FA ? (
-                  <ActivityIndicator size="small" color="#666" style={{ marginTop: 4 }} />
-                ) : (
-                  <Text style={styles.settingSubtext}>
-                    {twoFactorStatus?.enabled
-                      ? `Enabled • ${twoFactorStatus.backupCodesRemaining} backup codes remaining`
-                      : 'Add an extra layer of security'}
-                  </Text>
-                )}
+                <Text style={styles.settingSubtext}>Add an extra layer of security</Text>
               </View>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#666" />
@@ -292,7 +282,7 @@ export default function PrivacySecurityScreen() {
             </View>
             <Switch
               value={showOnlineStatus}
-              onValueChange={setShowOnlineStatus}
+              onValueChange={handleShowOnlineStatusToggle}
               trackColor={{ false: '#767577', true: '#DC2626' }}
               thumbColor={showOnlineStatus ? '#FFFFFF' : '#f4f3f4'}
             />
@@ -324,7 +314,7 @@ export default function PrivacySecurityScreen() {
             </View>
             <Switch
               value={allowDataCollection}
-              onValueChange={setAllowDataCollection}
+              onValueChange={handleAllowDataCollectionToggle}
               trackColor={{ false: '#767577', true: '#DC2626' }}
               thumbColor={allowDataCollection ? '#FFFFFF' : '#f4f3f4'}
             />
@@ -334,7 +324,7 @@ export default function PrivacySecurityScreen() {
         {/* Blocked Users */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Blocked Users</Text>
-          <TouchableOpacity style={styles.settingItem}>
+          <TouchableOpacity style={styles.settingItem} onPress={() => navigation.navigate('BlockedUsers' as never)}>
             <View style={styles.settingInfo}>
               <Ionicons name="ban" size={24} color="#FFFFFF" />
               <View style={styles.settingContent}>
@@ -381,7 +371,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: '#FFFFFF',
+    ...Typography.headerMedium,
     fontSize: 18,
+    lineHeight: 24,
     fontWeight: 'bold',
   },
   content: {
@@ -393,7 +385,9 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: '#FFFFFF',
+    ...Typography.headerMedium,
     fontSize: 18,
+    lineHeight: 24,
     fontWeight: 'bold',
     marginBottom: 16,
   },
@@ -428,12 +422,16 @@ const styles = StyleSheet.create({
   },
   settingText: {
     color: '#FFFFFF',
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '500',
   },
   settingSubtext: {
     color: 'rgba(255, 255, 255, 0.6)',
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     marginTop: 2,
   },
   dangerItem: {

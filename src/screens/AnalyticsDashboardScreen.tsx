@@ -17,6 +17,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { profileService } from '../services/ProfileService';
 import { contentCacheService } from '../services/contentCacheService';
+import { supabase } from '../lib/supabase';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 interface AnalyticsData {
   stats: {
@@ -103,6 +105,85 @@ export default function AnalyticsDashboardScreen() {
     }
   };
 
+  const fetchAnalyticsFromSupabase = async (): Promise<AnalyticsData | null> => {
+    if (!user) return null;
+    try {
+      // Fetch profile summary stats
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('followers_count, following_count, total_plays, total_likes, total_events, genres')
+        .eq('id', user.id)
+        .single();
+
+      // Fetch recent tracks
+      const { data: tracks } = await supabase
+        .from('audio_tracks')
+        .select('id, title, duration, play_count, likes_count, created_at, cover_art_url')
+        .eq('creator_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      // Fetch track count
+      const { count: trackCount } = await supabase
+        .from('audio_tracks')
+        .select('*', { count: 'exact', head: true })
+        .eq('creator_id', user.id);
+
+      // Fetch recent events
+      const { data: events } = await supabase
+        .from('events')
+        .select('id, title, event_date, location')
+        .eq('creator_id', user.id)
+        .order('event_date', { ascending: false })
+        .limit(5);
+
+      const recentTracks = (tracks || []).map((t) => ({
+        id: t.id,
+        title: t.title,
+        duration: t.duration ? `${Math.floor(t.duration / 60)}:${String(t.duration % 60).padStart(2, '0')}` : '0:00',
+        plays: t.play_count || 0,
+        likes: t.likes_count || 0,
+        uploadedAt: t.created_at,
+        coverArt: t.cover_art_url || undefined,
+      }));
+
+      const recentEvents = (events || []).map((e: any) => ({
+        id: e.id,
+        title: e.title,
+        date: e.event_date,
+        attendees: 0,
+        location: e.location || '',
+        status: (new Date(e.event_date) > new Date() ? 'upcoming' : 'past') as 'upcoming' | 'past' | 'cancelled',
+      }));
+
+      const totalPlays = profile?.total_plays || 0;
+      const genres: string[] = profile?.genres || [];
+
+      return {
+        stats: {
+          totalPlays,
+          totalLikes: profile?.total_likes || 0,
+          totalShares: 0,
+          totalDownloads: 0,
+          followers: profile?.followers_count || 0,
+          following: profile?.following_count || 0,
+          tracks: trackCount || 0,
+          events: profile?.total_events || 0,
+        },
+        recentTracks,
+        recentEvents,
+        monthlyPlays: totalPlays,
+        engagementRate: 0,
+        topGenre: genres[0] || '',
+        monthlyPlaysChange: 0,
+        engagementRateChange: 0,
+      };
+    } catch (err) {
+      console.error('❌ Supabase analytics fallback error:', err);
+      return null;
+    }
+  };
+
   const fetchAnalytics = async (background = false) => {
     if (!session) return;
 
@@ -111,16 +192,30 @@ export default function AnalyticsDashboardScreen() {
         setLoading(true);
       }
 
-      const result = await profileService.getAnalytics(session);
-      
-      if (result.success && result.analytics) {
-        setAnalytics(result.analytics);
+      let analyticsData: AnalyticsData | null = null;
+
+      try {
+        const result = await profileService.getAnalytics(session);
+        if (result.success && result.analytics) {
+          analyticsData = result.analytics;
+        }
+      } catch (apiError: any) {
+        // If the API endpoint returns 401 (auth bug on server), fall back to Supabase direct queries
+        const is401 = apiError?.message?.includes('401') || apiError?.message?.includes('Authentication');
+        if (is401) {
+          console.warn('⚠️ Analytics API returned 401 — falling back to Supabase direct queries');
+          analyticsData = await fetchAnalyticsFromSupabase();
+        } else {
+          throw apiError;
+        }
+      }
+
+      if (analyticsData) {
+        setAnalytics(analyticsData);
         lastFetchTime.current = Date.now();
-        
-        // Cache the data
-        await contentCacheService.saveCache('ANALYTICS', CACHE_KEY, result.analytics);
+        await contentCacheService.saveCache('ANALYTICS', CACHE_KEY, analyticsData);
       } else {
-        console.warn('⚠️ Analytics API returned no data');
+        console.warn('⚠️ Analytics: no data from API or fallback');
       }
     } catch (error) {
       console.error('❌ Error fetching analytics:', error);
@@ -446,8 +541,9 @@ const styles = StyleSheet.create({
     width: 40,
   },
   headerTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
   },
   scrollView: {
     flex: 1,
@@ -463,19 +559,23 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 16,
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
   },
   emptyText: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
     marginTop: 16,
   },
   section: {
     marginBottom: 24,
   },
   sectionTitle: {
+    ...Typography.headerMedium,
     fontSize: 20,
-    fontWeight: '600',
+    lineHeight: 26,
     marginBottom: 16,
   },
   statsGrid: {
@@ -509,20 +609,28 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   trendText: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '600',
   },
   statValue: {
+    ...Typography.headerMedium,
     fontSize: 24,
+    lineHeight: 30,
     fontWeight: 'bold',
     marginBottom: 4,
   },
   statTitle: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     fontWeight: '500',
   },
   statSubtitle: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     marginTop: 4,
   },
   engagementCard: {
@@ -538,11 +646,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   engagementLabel: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     fontWeight: '500',
   },
   engagementValue: {
+    ...Typography.headerLarge,
     fontSize: 32,
+    lineHeight: 38,
     fontWeight: 'bold',
     marginBottom: 16,
   },
@@ -564,11 +676,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   genreLabel: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     marginBottom: 4,
   },
   genreValue: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
   },
   progressContainer: {
@@ -580,11 +696,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   progressLabel: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '500',
   },
   progressValue: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '600',
   },
   progressBar: {
@@ -597,7 +717,9 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   progressPercentage: {
+    ...Typography.label,
     fontSize: 10,
+    lineHeight: 12,
     marginTop: 4,
     textAlign: 'right',
   },
@@ -620,7 +742,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   trackTitle: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginBottom: 4,
   },
@@ -634,7 +758,9 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   trackStatText: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
   },
   eventCard: {
     flexDirection: 'row',
@@ -649,7 +775,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   eventTitle: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginBottom: 8,
   },
@@ -663,7 +791,9 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   eventDetailText: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
   },
   eventStats: {
     flexDirection: 'row',
@@ -676,11 +806,15 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   eventStatusText: {
+    ...Typography.label,
     fontSize: 10,
+    lineHeight: 12,
     fontWeight: '600',
   },
   eventAttendees: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
   },
 });
 

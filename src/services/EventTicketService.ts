@@ -4,14 +4,15 @@
  */
 
 import { supabase } from '../lib/supabase';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://soundbridge.live/api';
+import { apiFetch } from '../lib/apiClient';
 
 export interface TicketPaymentIntent {
   clientSecret: string;
   paymentIntentId: string;
   amount: number;
   currency: string;
+  customerId?: string;
+  customerEphemeralKeySecret?: string;
 }
 
 export interface PurchaseTicketParams {
@@ -43,36 +44,48 @@ export const EventTicketService = {
   async createTicketPaymentIntent(params: PurchaseTicketParams): Promise<TicketPaymentIntent> {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
 
-      if (!token) {
+      if (!session?.access_token) {
         throw new Error('User not authenticated');
       }
 
       console.log('🎟️ Creating payment intent for event ticket:', params);
 
-      const response = await fetch(`${API_URL}/events/create-ticket-payment-intent`, {
+      const response = await apiFetch<{
+        success?: boolean;
+        data?: TicketPaymentIntent;
+        clientSecret?: string;
+        paymentIntentId?: string;
+        amount?: number;
+        currency?: string;
+        customer_id?: string;
+        ephemeral_key_secret?: string;
+      }>('/api/events/create-ticket-payment-intent', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        session,
         body: JSON.stringify(params),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || errorData.error || 'Failed to create payment intent');
+      const payload = (response && 'success' in response && response.success && response.data)
+        ? response.data
+        : response;
+
+      if (!payload?.clientSecret || !payload?.paymentIntentId) {
+        throw new Error('Failed to create payment intent');
       }
 
-      const data = await response.json();
-      console.log('✅ Ticket payment intent created:', data.paymentIntentId);
+      console.log('✅ Ticket payment intent created:', payload.paymentIntentId);
+
+      const rootCustomerId = (response as any).customer_id;
+      const rootEphemeralKey = (response as any).ephemeral_key_secret;
 
       return {
-        clientSecret: data.clientSecret,
-        paymentIntentId: data.paymentIntentId,
-        amount: data.amount,
-        currency: data.currency,
+        clientSecret: payload.clientSecret,
+        paymentIntentId: payload.paymentIntentId,
+        amount: payload.amount || 0,
+        currency: payload.currency || params.currency,
+        customerId: (payload as any).customer_id || rootCustomerId || undefined,
+        customerEphemeralKeySecret: (payload as any).ephemeral_key_secret || rootEphemeralKey || undefined,
       };
     } catch (error) {
       console.error('❌ Error creating ticket payment intent:', error);
@@ -92,36 +105,30 @@ export const EventTicketService = {
   ): Promise<EventTicket> {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
       const user = session?.user;
 
-      if (!token || !user) {
+      if (!session?.access_token || !user) {
         throw new Error('User not authenticated');
       }
 
       console.log('✅ Confirming ticket purchase:', paymentIntentId);
 
-      const response = await fetch(`${API_URL}/events/confirm-ticket-purchase`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          paymentIntentId,
-          eventId,
-          quantity,
-          amount,
-          currency,
-        }),
-      });
+      const response = await apiFetch<{ ticket?: EventTicket }>(
+        '/api/events/confirm-ticket-purchase',
+        {
+          method: 'POST',
+          session,
+          body: JSON.stringify({
+            paymentIntentId,
+            eventId,
+            quantity,
+            amount,
+            currency,
+          }),
+        }
+      );
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || errorData.error || 'Failed to confirm ticket purchase');
-      }
-
-      const ticket = await response.json();
+      const ticket = response?.ticket || (response as EventTicket);
       console.log('🎟️ Ticket purchase confirmed:', ticket.ticket_code);
 
       return ticket;
@@ -143,7 +150,7 @@ export const EventTicketService = {
       }
 
       const { data, error } = await supabase
-        .from('event_tickets')
+        .from('purchased_event_tickets')
         .select('*')
         .eq('event_id', eventId)
         .eq('user_id', session.user.id)
@@ -174,7 +181,7 @@ export const EventTicketService = {
       }
 
       const { data, error } = await supabase
-        .from('event_tickets')
+        .from('purchased_event_tickets')
         .select(`
           *,
           event:events(
@@ -208,30 +215,20 @@ export const EventTicketService = {
   async validateTicket(ticketCode: string): Promise<{ valid: boolean; ticket?: EventTicket; message: string }> {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
 
-      if (!token) {
+      if (!session?.access_token) {
         throw new Error('User not authenticated');
       }
 
-      const response = await fetch(`${API_URL}/events/validate-ticket`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ ticketCode }),
-      });
+      const result = await apiFetch<{ valid: boolean; ticket?: EventTicket; message: string }>(
+        '/api/events/validate-ticket',
+        {
+          method: 'POST',
+          session,
+          body: JSON.stringify({ ticketCode }),
+        }
+      );
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        return {
-          valid: false,
-          message: errorData.message || 'Invalid ticket code',
-        };
-      }
-
-      const result = await response.json();
       return result;
     } catch (error) {
       console.error('❌ Error validating ticket:', error);

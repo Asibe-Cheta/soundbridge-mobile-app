@@ -23,6 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
+import { SystemTypography as Typography } from '../constants/Typography';
 import { useCollaboration } from '../contexts/CollaborationContext';
 import { collaborationUtils } from '../utils/collaborationUtils';
 import type { CreatorAvailability, CreateAvailabilityRequest } from '../types/collaboration';
@@ -454,8 +455,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   headerTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
   },
   errorContainer: {
     flexDirection: 'row',
@@ -469,7 +471,9 @@ const styles = StyleSheet.create({
   },
   errorText: {
     flex: 1,
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
   },
   content: {
     flex: 1,
@@ -487,6 +491,7 @@ const styles = StyleSheet.create({
   },
   infoText: {
     flex: 1,
+    ...Typography.label,
     fontSize: 14,
     lineHeight: 20,
   },
@@ -496,7 +501,9 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   loadingText: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -504,11 +511,14 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   emptyTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
   },
   emptySubtitle: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     textAlign: 'center',
     paddingHorizontal: 32,
   },
@@ -520,7 +530,9 @@ const styles = StyleSheet.create({
   },
   emptyButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
   },
   availabilityList: {
@@ -542,12 +554,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   slotDate: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginBottom: 4,
   },
   slotDuration: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
   },
   slotActions: {
     flexDirection: 'row',
@@ -573,7 +589,9 @@ const styles = StyleSheet.create({
   },
   metaText: {
     flex: 1,
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
   },
   expiredBadge: {
     alignSelf: 'flex-start',
@@ -584,7 +602,9 @@ const styles = StyleSheet.create({
   },
   expiredText: {
     color: '#6B7280',
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '500',
   },
   // Modal Styles
@@ -601,14 +621,19 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   modalCancel: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   modalTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
   },
   modalSave: {
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
   },
   modalContent: {
@@ -620,7 +645,9 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   formLabel: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginBottom: 8,
   },
@@ -634,26 +661,34 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   dateButtonText: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   textInput: {
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 8,
     borderWidth: 1,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   textArea: {
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 8,
     borderWidth: 1,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     minHeight: 80,
     textAlignVertical: 'top',
   },
   formHint: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     marginTop: 4,
   },
 });

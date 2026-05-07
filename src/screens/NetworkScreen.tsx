@@ -7,6 +7,7 @@ import {
   StatusBar,
   RefreshControl,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,7 +18,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useNetwork } from '../hooks/useNetwork';
 import { subscriptionService, UsageLimits } from '../services/SubscriptionService';
-import { mockOpportunities } from '../utils/mockNetworkData';
+import { opportunityService, OpportunityPost } from '../services/OpportunityService';
 import ConnectionSuggestionCard from '../components/ConnectionSuggestionCard';
 import ConnectionCard from '../components/ConnectionCard';
 import ConnectionRequestCard from '../components/ConnectionRequestCard';
@@ -26,6 +27,7 @@ import * as Haptics from 'expo-haptics';
 import { walkthroughable } from 'react-native-copilot';
 import { useServiceProviderPrompt } from '../hooks/useServiceProviderPrompt';
 import ServiceProviderPromptModal from '../components/ServiceProviderPromptModal';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 type NetworkTab = 'connections' | 'invitations' | 'opportunities';
 
@@ -36,6 +38,7 @@ const WalkthroughableView = walkthroughable(View);
 export default function NetworkScreen() {
   const { theme } = useTheme();
   const navigation = useNavigation();
+  const { user, userProfile } = useAuth();
   const {
     connections,
     suggestions,
@@ -50,7 +53,8 @@ export default function NetworkScreen() {
   } = useNetwork();
   const [activeTab, setActiveTab] = useState<NetworkTab>('connections');
   const [refreshing, setRefreshing] = useState(false);
-  const [opportunities] = useState(mockOpportunities);
+  const [opportunities, setOpportunities] = useState<OpportunityPost[]>([]);
+  const [opportunitiesLoading, setOpportunitiesLoading] = useState(false);
 
   // Service Provider Prompt Modal
   const {
@@ -66,9 +70,70 @@ export default function NetworkScreen() {
     checkConnectScreenTrigger();
   }, []);
 
+  // Load opportunities when Opportunities tab is first selected
+  useEffect(() => {
+    if (activeTab === 'opportunities' && opportunities.length === 0 && !opportunitiesLoading) {
+      loadOpportunities();
+    }
+  }, [activeTab]);
+
+  // Extract the country/region from a location string like "London, UK" → "uk"
+  const extractLocationCountry = (loc?: string): string | null => {
+    if (!loc) return null;
+    const parts = loc.split(',').map((p) => p.trim());
+    return parts[parts.length - 1].toLowerCase();
+  };
+
+  // Returns true if this opportunity is relevant to the viewer's location
+  const isLocationRelevant = (opp: { location?: string; is_remote: boolean }): boolean => {
+    if (opp.is_remote) return true;
+    if (!opp.location) return true; // no restriction set — show to all
+    const userCountry = extractLocationCountry((userProfile as any)?.location);
+    if (!userCountry) return true; // viewer has no location set — show all
+    const oppCountry = extractLocationCountry(opp.location);
+    if (!oppCountry) return true;
+    return oppCountry === userCountry;
+  };
+
+  const loadOpportunities = async () => {
+    setOpportunitiesLoading(true);
+    try {
+      const [{ items: feedItems }, myItems] = await Promise.all([
+        opportunityService.getFeed(20, 0),
+        opportunityService.getMyOpportunities().catch(() => []),
+      ]);
+
+      // Filter feed by viewer's location — remote or matching country pass through
+      const locationFiltered = feedItems.filter(isLocationRelevant);
+
+      // Merge own active posts at the top, dedup by id
+      // Backfill posted_by from current user since /api/opportunities/mine omits it
+      const feedIds = new Set(locationFiltered.map((i) => i.id));
+      const ownActive = myItems
+        .filter((i) => i.is_active && !feedIds.has(i.id))
+        .map((i) => ({
+          ...i,
+          posted_by: i.posted_by ?? {
+            id: user?.id ?? '',
+            username: userProfile?.username ?? '',
+            display_name: userProfile?.display_name ?? userProfile?.username ?? 'You',
+            avatar_url: userProfile?.avatar_url ?? undefined,
+          },
+        }));
+      setOpportunities([...ownActive, ...locationFiltered]);
+    } catch (error) {
+      console.error('Failed to load opportunities:', error);
+    } finally {
+      setOpportunitiesLoading(false);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await refresh();
+    if (activeTab === 'opportunities') {
+      await loadOpportunities();
+    }
     setRefreshing(false);
   };
 
@@ -118,13 +183,13 @@ export default function NetworkScreen() {
   };
 
   const handleOpportunityPress = (opportunityId: string) => {
-    // TODO: Navigate to opportunity details
+    // Future: navigate to a single opportunity detail screen
     console.log('View opportunity:', opportunityId);
   };
 
   const handleApply = (opportunityId: string) => {
-    // TODO: Implement API call
-    console.log('Apply to opportunity:', opportunityId);
+    // Interest submitted — refresh the feed to reflect has_expressed_interest
+    loadOpportunities();
   };
 
   const invitationsCount = invitations.filter((r) => r.status === 'pending').length;
@@ -162,7 +227,8 @@ export default function NetworkScreen() {
           ]}
         >
           <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFillObject} />
-          <View style={styles.tabBar}>
+          <View style={styles.tabBarRow}>
+          <View style={[styles.tabBar, { flex: 1 }]}>
             <TouchableOpacity
               style={[
                 styles.tabButton,
@@ -252,6 +318,25 @@ export default function NetworkScreen() {
               </Text>
             </WalkthroughableTouchable>
           </View>
+          </View>
+          {activeTab === 'opportunities' && (
+            <View style={[styles.opportunityActionsRow, { borderTopColor: theme.colors.border }]}>
+              <TouchableOpacity
+                style={styles.myPostsBtn}
+                onPress={() => navigation.navigate('MyOpportunities' as never)}
+              >
+                <Ionicons name="list-outline" size={15} color={theme.colors.primary} />
+                <Text style={[styles.myPostsBtnText, { color: theme.colors.primary }]}>My Posts</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.postOpportunityBtn, { borderColor: theme.colors.primary }]}
+                onPress={() => navigation.navigate('CreateOpportunity' as never)}
+              >
+                <Ionicons name="add" size={15} color={theme.colors.primary} />
+                <Text style={[styles.myPostsBtnText, { color: theme.colors.primary }]}>Post</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {/* Content Area */}
@@ -292,7 +377,7 @@ export default function NetworkScreen() {
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <View>
-                    <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+                    <Text style={[styles.mainSectionTitle, { color: theme.colors.text }]}>
                       Your Connections
                     </Text>
                     <Text style={[styles.connectionCount, { color: theme.colors.textSecondary }]}>
@@ -353,21 +438,43 @@ export default function NetworkScreen() {
 
           {/* Tab 3: Opportunities */}
           {activeTab === 'opportunities' && (
-            /* Step 9: Opportunities Feed - Apply for Gigs */
             <WalkthroughableView
               order={9}
               name="apply_for_gigs"
               text="Browse and apply for PAID gigs here. Each card shows: Budget range, Project type, Location, Required skills. Tap to see full details and submit your application. Premium/Unlimited members get priority visibility - your profile shows first to employers."
               style={styles.section}
             >
-              {opportunities.map((opportunity) => (
-                <OpportunityCard
-                  key={opportunity.id}
-                  opportunity={opportunity}
-                  onPress={handleOpportunityPress}
-                  onApply={handleApply}
-                />
-              ))}
+              {opportunitiesLoading ? (
+                <ActivityIndicator size="large" color={theme.colors.primary} style={{ marginTop: 40 }} />
+              ) : opportunities.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="megaphone-outline" size={56} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>No opportunities yet</Text>
+                  <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+                    Be the first to post a collaboration, event slot, or job
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.postFirstBtn, { borderColor: theme.colors.primary }]}
+                    onPress={() => navigation.navigate('CreateOpportunity' as never)}
+                  >
+                    <Text style={[styles.postFirstBtnText, { color: theme.colors.primary }]}>
+                      Post an Opportunity
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                opportunities.map((opportunity) => (
+                  <OpportunityCard
+                    key={opportunity.id}
+                    opportunity={{
+                      ...opportunity,
+                      posted_at: opportunity.created_at,
+                    }}
+                    onPress={() => handleOpportunityPress(opportunity.id)}
+                    onApply={handleApply}
+                  />
+                ))
+              )}
             </WalkthroughableView>
           )}
         </ScrollView>
@@ -405,10 +512,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     overflow: 'hidden',
   },
+  tabBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   tabBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 8,
+  },
+  opportunityActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  myPostsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+  },
+  myPostsBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  postOpportunityBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
   },
   tabButton: {
     flexShrink: 1,
@@ -426,8 +570,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   tabText: {
-    fontSize: 13,
-    fontWeight: '600',
+    ...Typography.label,
     textAlign: 'center',
   },
   tabBadge: {
@@ -443,8 +586,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tabBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
+    ...Typography.label,
     color: '#FFFFFF',
   },
   scrollView: {
@@ -464,13 +606,18 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    ...Typography.headerMedium,
     marginBottom: 12,
   },
+  mainSectionTitle: {
+    fontSize: 34,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    lineHeight: 40,
+    fontFamily: Typography.body.fontFamily,
+  },
   connectionCount: {
-    fontSize: 16,
-    fontWeight: '400',
+    ...Typography.label,
   },
   searchButton: {
     padding: 8,
@@ -483,15 +630,24 @@ const styles = StyleSheet.create({
     paddingVertical: 100,
   },
   emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    ...Typography.headerMedium,
     marginTop: 16,
     marginBottom: 8,
     textAlign: 'center',
   },
   emptySubtitle: {
-    fontSize: 14,
+    ...Typography.body,
     textAlign: 'center',
-    lineHeight: 20,
+  },
+  postFirstBtn: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  postFirstBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

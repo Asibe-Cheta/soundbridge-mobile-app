@@ -1,5 +1,7 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import { supabase } from '../lib/supabase';
+import { config } from '../config/environment';
 import Purchases, {
   PurchasesOffering,
   PurchasesPackage,
@@ -72,6 +74,12 @@ class RevenueCatService {
     }
 
     this.initializationAttempted = true;
+
+    if (!apiKey || apiKey.trim().length === 0) {
+      console.warn('⚠️ RevenueCat API key is empty. Skipping initialization to prevent crash.');
+      this.initializationFailed = true;
+      return false;
+    }
 
     try {
       console.log('🚀 Initializing RevenueCat...');
@@ -458,32 +466,33 @@ class RevenueCatService {
 
       console.log('🎯 Syncing tier to backend:', tier);
 
-      // Call backend API to sync subscription status
-      // Note: This requires the backend to have an endpoint that accepts RevenueCat data
-      // For now, we'll use the verify-iap endpoint if it exists
-      // Otherwise, rely on RevenueCat webhooks
+      // Get auth token for the API call
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
 
-      console.log('⚠️ Backend sync not fully implemented - relying on RevenueCat webhooks');
-      console.log('⚠️ Backend should listen to RevenueCat webhooks to update user tier');
-      console.log('⚠️ If webhooks not configured, user tier will not update automatically');
+      if (!token) {
+        console.warn('⚠️ No auth session — skipping backend sync');
+        return;
+      }
 
-      // TODO: Implement actual API call like:
-      // const response = await fetch('https://soundbridge.live/api/subscriptions/sync-revenuecat', {
-      //   method: 'POST',
-      //   headers: {
-      //     'Authorization': `Bearer ${session.access_token}`,
-      //     'Content-Type': 'application/json',
-      //   },
-      //   body: JSON.stringify({
-      //     customerInfo: {
-      //       activeSubscriptions,
-      //       entitlements: Object.keys(entitlements),
-      //       tier,
-      //     },
-      //   }),
-      // });
+      const response = await fetch(`${config.apiUrl}/subscriptions/sync-revenuecat`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          tier,
+          activeSubscriptions,
+          entitlements: Object.keys(entitlements),
+        }),
+      });
 
-      console.log('✅ Sync completed (webhook will handle backend update)');
+      if (!response.ok) {
+        console.warn('⚠️ Backend sync returned', response.status, '— webhook will handle update');
+      } else {
+        console.log('✅ Backend sync successful — tier and email triggered');
+      }
     } catch (error) {
       console.error('❌ Failed to sync with backend:', error);
       // Don't throw - sync failure shouldn't block the purchase

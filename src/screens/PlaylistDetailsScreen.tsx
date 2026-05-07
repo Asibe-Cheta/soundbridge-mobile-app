@@ -61,7 +61,7 @@ interface PlaylistData {
 export default function PlaylistDetailsScreen() {
   const navigation = useNavigation();
   const route = useRoute();
-  const { play } = useAudioPlayer();
+  const { play, addToQueue } = useAudioPlayer();
   const { theme } = useTheme();
   
   const { playlistId } = route.params as { playlistId: string };
@@ -132,8 +132,11 @@ export default function PlaylistDetailsScreen() {
     if (!playlist?.tracks.length) return;
     
     console.log('🎵 Playing all tracks from playlist:', playlist.name);
-    // Play the first track, others will be added to queue automatically
+    // Play the first track and queue the rest
     handlePlayTrack(playlist.tracks[0]);
+    for (let i = 1; i < playlist.tracks.length; i++) {
+      addToQueue(playlist.tracks[i]);
+    }
   };
 
   const handleShare = async () => {

@@ -21,7 +21,9 @@ import {
   parseTwoFactorError,
 } from '../services/twoFactorAuthConfig';
 import BackupCodesModal from '../components/BackupCodesModal';
+import PromptModal from '../components/PromptModal';
 import type { TwoFactorStatusResponse } from '../types/twoFactor';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 export default function TwoFactorSettingsScreen() {
   const navigation = useNavigation();
@@ -31,6 +33,10 @@ export default function TwoFactorSettingsScreen() {
   const [status, setStatus] = useState<TwoFactorStatusResponse | null>(null);
   const [showBackupCodes, setShowBackupCodes] = useState(false);
   const [newBackupCodes, setNewBackupCodes] = useState<string[]>([]);
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+  const [showDisableCodePrompt, setShowDisableCodePrompt] = useState(false);
+  const [showRegenerateCodePrompt, setShowRegenerateCodePrompt] = useState(false);
+  const [pendingPassword, setPendingPassword] = useState('');
 
   useEffect(() => {
     loadStatus();
@@ -61,47 +67,8 @@ export default function TwoFactorSettingsScreen() {
   };
 
   const handleDisableTwoFactor = () => {
-    Alert.prompt(
-      'Disable Two-Factor Authentication',
-      'Enter your password to continue',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Continue',
-          onPress: (password) => {
-            if (!password) {
-              Alert.alert('Error', 'Password is required');
-              return;
-            }
-            
-            // Ask for TOTP code
-            Alert.prompt(
-              'Enter Verification Code',
-              'Enter your current 6-digit code from your authenticator app',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Disable',
-                  style: 'destructive',
-                  onPress: async (code) => {
-                    if (!code || code.length !== 6) {
-                      Alert.alert('Error', 'Please enter a valid 6-digit code');
-                      return;
-                    }
-                    
-                    await performDisable(password, code);
-                  },
-                },
-              ],
-              'plain-text',
-              '',
-              'number-pad'
-            );
-          },
-        },
-      ],
-      'secure-text'
-    );
+    setPendingPassword('');
+    setShowPasswordPrompt(true);
   };
 
   const performDisable = async (password: string, code: string) => {
@@ -121,27 +88,42 @@ export default function TwoFactorSettingsScreen() {
   };
 
   const handleRegenerateBackupCodes = () => {
-    Alert.prompt(
-      'Regenerate Backup Codes',
-      'This will invalidate all existing backup codes. Enter your current 6-digit code to continue.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Regenerate',
-          onPress: async (code) => {
-            if (!code || code.length !== 6) {
-              Alert.alert('Error', 'Please enter a valid 6-digit code');
-              return;
-            }
-            
-            await performRegenerate(code);
-          },
-        },
-      ],
-      'plain-text',
-      '',
-      'number-pad'
-    );
+    setShowRegenerateCodePrompt(true);
+  };
+
+  const handlePasswordConfirm = (password: string) => {
+    const trimmed = password.trim();
+    if (!trimmed) {
+      Alert.alert('Error', 'Password is required');
+      return;
+    }
+
+    setPendingPassword(trimmed);
+    setShowPasswordPrompt(false);
+    setShowDisableCodePrompt(true);
+  };
+
+  const handleDisableCodeConfirm = async (code: string) => {
+    const cleanedCode = code.trim();
+    if (!/^\d{6}$/.test(cleanedCode)) {
+      Alert.alert('Error', 'Please enter a valid 6-digit code');
+      return;
+    }
+
+    setShowDisableCodePrompt(false);
+    await performDisable(pendingPassword, cleanedCode);
+    setPendingPassword('');
+  };
+
+  const handleRegenerateCodeConfirm = async (code: string) => {
+    const cleanedCode = code.trim();
+    if (!/^\d{6}$/.test(cleanedCode)) {
+      Alert.alert('Error', 'Please enter a valid 6-digit code');
+      return;
+    }
+
+    setShowRegenerateCodePrompt(false);
+    await performRegenerate(cleanedCode);
   };
 
   const performRegenerate = async (code: string) => {
@@ -401,6 +383,42 @@ export default function TwoFactorSettingsScreen() {
           title="New Backup Codes"
           message="Your old backup codes have been invalidated. Save these new codes in a safe place."
         />
+        <PromptModal
+          visible={showPasswordPrompt}
+          title="Disable Two-Factor Authentication"
+          message="Enter your password to continue."
+          placeholder="Password"
+          secureTextEntry
+          confirmLabel="Continue"
+          onCancel={() => {
+            setShowPasswordPrompt(false);
+            setPendingPassword('');
+          }}
+          onConfirm={handlePasswordConfirm}
+        />
+        <PromptModal
+          visible={showDisableCodePrompt}
+          title="Enter Verification Code"
+          message="Enter your current 6-digit code from your authenticator app."
+          placeholder="6-digit code"
+          keyboardType="number-pad"
+          confirmLabel="Disable"
+          onCancel={() => {
+            setShowDisableCodePrompt(false);
+            setPendingPassword('');
+          }}
+          onConfirm={handleDisableCodeConfirm}
+        />
+        <PromptModal
+          visible={showRegenerateCodePrompt}
+          title="Regenerate Backup Codes"
+          message="This will invalidate existing backup codes. Enter your current 6-digit code to continue."
+          placeholder="6-digit code"
+          keyboardType="number-pad"
+          confirmLabel="Regenerate"
+          onCancel={() => setShowRegenerateCodePrompt(false)}
+          onConfirm={handleRegenerateCodeConfirm}
+        />
       </LinearGradient>
     </SafeAreaView>
   );
@@ -421,7 +439,9 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     color: 'rgba(255, 255, 255, 0.7)',
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     marginTop: 16,
   },
   header: {
@@ -436,7 +456,9 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   headerTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
+    lineHeight: 24,
     fontWeight: 'bold',
     color: '#FFFFFF',
   },
@@ -478,20 +500,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   statusTitle: {
+    ...Typography.headerMedium,
     fontSize: 20,
+    lineHeight: 26,
     fontWeight: 'bold',
     color: '#FFFFFF',
     marginBottom: 4,
   },
   statusSubtitle: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     color: 'rgba(255, 255, 255, 0.6)',
   },
   section: {
     marginBottom: 32,
   },
   sectionTitle: {
+    ...Typography.headerMedium,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     color: 'rgba(255, 255, 255, 0.7)',
     marginBottom: 16,
@@ -509,12 +537,16 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   detailLabel: {
+    ...Typography.label,
     fontSize: 13,
+    lineHeight: 18,
     color: 'rgba(255, 255, 255, 0.5)',
     marginBottom: 4,
   },
   detailValue: {
+    ...Typography.body,
     fontSize: 15,
+    lineHeight: 20,
     color: '#FFFFFF',
     fontWeight: '500',
   },
@@ -543,13 +575,17 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   backupCodesCount: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     color: '#FFFFFF',
     marginBottom: 4,
   },
   backupCodesExpiry: {
+    ...Typography.label,
     fontSize: 13,
+    lineHeight: 18,
     color: 'rgba(255, 255, 255, 0.5)',
   },
   backupCodesAlert: {
@@ -563,7 +599,9 @@ const styles = StyleSheet.create({
   backupCodesAlertText: {
     flex: 1,
     color: '#F59E0B',
+    ...Typography.label,
     fontSize: 13,
+    lineHeight: 18,
     marginLeft: 8,
   },
   regenerateButton: {
@@ -579,7 +617,9 @@ const styles = StyleSheet.create({
   },
   regenerateButtonText: {
     color: '#4ECDC4',
+    ...Typography.button,
     fontSize: 15,
+    lineHeight: 20,
     fontWeight: '600',
     marginLeft: 8,
   },
@@ -596,7 +636,9 @@ const styles = StyleSheet.create({
   },
   dangerButtonText: {
     color: '#FF6B6B',
+    ...Typography.button,
     fontSize: 15,
+    lineHeight: 20,
     fontWeight: '600',
     marginLeft: 10,
   },
@@ -608,9 +650,10 @@ const styles = StyleSheet.create({
   benefitText: {
     flex: 1,
     color: 'rgba(255, 255, 255, 0.8)',
+    ...Typography.body,
     fontSize: 15,
-    marginLeft: 16,
     lineHeight: 22,
+    marginLeft: 16,
   },
   enableButton: {
     height: 56,
@@ -627,7 +670,9 @@ const styles = StyleSheet.create({
   },
   enableButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: 'bold',
   },
   helpSection: {
@@ -642,6 +687,7 @@ const styles = StyleSheet.create({
   helpText: {
     flex: 1,
     color: 'rgba(255, 255, 255, 0.6)',
+    ...Typography.label,
     fontSize: 14,
     lineHeight: 20,
     marginLeft: 12,

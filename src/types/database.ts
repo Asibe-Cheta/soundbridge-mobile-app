@@ -33,6 +33,34 @@ export interface Database {
           total_events: number | null
           last_active: string | null
           expo_push_token: string | null
+          // Subscription fields
+          subscription_tier: 'free' | 'premium' | 'unlimited' | null
+          subscription_status: string | null
+          subscription_period_start: string | null
+          subscription_period_end: string | null
+          subscription_amount: number | null
+          subscription_currency: string | null
+          subscription_updated_at: string | null
+          // Early adopter programme
+          early_adopter: boolean | null
+          // Branding fields
+          custom_logo_url: string | null
+          custom_logo_width: number | null
+          custom_logo_height: number | null
+          custom_logo_position: string | null
+          primary_color: string | null
+          secondary_color: string | null
+          accent_color: string | null
+          background_gradient: any | null
+          layout_style: string | null
+          show_powered_by: boolean | null
+          watermark_enabled: boolean | null
+          watermark_opacity: number | null
+          watermark_position: string | null
+          avatar_border_type: string | null
+          avatar_border_color: string | null
+          avatar_border_gradient_start: string | null
+          avatar_border_gradient_end: string | null
           created_at: string
           updated_at: string | null
         }
@@ -58,6 +86,13 @@ export interface Database {
           total_likes?: number | null
           total_events?: number | null
           last_active?: string | null
+          subscription_tier?: 'free' | 'premium' | 'unlimited' | null
+          subscription_status?: string | null
+          subscription_period_start?: string | null
+          subscription_period_end?: string | null
+          subscription_amount?: number | null
+          subscription_currency?: string | null
+          early_adopter?: boolean | null
           created_at?: string
           updated_at?: string | null
         }
@@ -83,6 +118,31 @@ export interface Database {
           total_likes?: number | null
           total_events?: number | null
           last_active?: string | null
+          subscription_tier?: 'free' | 'premium' | 'unlimited' | null
+          subscription_status?: string | null
+          subscription_period_start?: string | null
+          subscription_period_end?: string | null
+          subscription_amount?: number | null
+          subscription_currency?: string | null
+          subscription_updated_at?: string | null
+          early_adopter?: boolean | null
+          custom_logo_url?: string | null
+          custom_logo_width?: number | null
+          custom_logo_height?: number | null
+          custom_logo_position?: string | null
+          primary_color?: string | null
+          secondary_color?: string | null
+          accent_color?: string | null
+          background_gradient?: any | null
+          layout_style?: string | null
+          show_powered_by?: boolean | null
+          watermark_enabled?: boolean | null
+          watermark_opacity?: number | null
+          watermark_position?: string | null
+          avatar_border_type?: string | null
+          avatar_border_color?: string | null
+          avatar_border_gradient_start?: string | null
+          avatar_border_gradient_end?: string | null
           created_at?: string
           updated_at?: string | null
         }
@@ -361,9 +421,9 @@ export interface Database {
           title: string
           description: string | null
           category: ServiceCategory
-          rate: number
+          rate_amount: number
           rate_currency: string
-          unit: string
+          rate_unit: string
           is_active: boolean
           created_at: string
           updated_at: string | null
@@ -374,9 +434,9 @@ export interface Database {
           title: string
           description?: string | null
           category: ServiceCategory
-          rate: number
+          rate_amount: number
           rate_currency: string
-          unit: string
+          rate_unit: string
           is_active?: boolean
           created_at?: string
           updated_at?: string | null
@@ -387,9 +447,9 @@ export interface Database {
           title?: string
           description?: string | null
           category?: ServiceCategory
-          rate?: number
+          rate_amount?: number
           rate_currency?: string
-          unit?: string
+          rate_unit?: string
           is_active?: boolean
           created_at?: string
           updated_at?: string | null
@@ -528,7 +588,7 @@ export interface Database {
           id: string
           provider_id: string
           booker_id: string
-          offering_id: string | null
+          service_offering_id: string | null
           status: ServiceBookingStatus
           scheduled_start: string | null
           scheduled_end: string | null
@@ -551,7 +611,7 @@ export interface Database {
           id?: string
           provider_id: string
           booker_id: string
-          offering_id?: string | null
+          service_offering_id?: string | null
           status?: ServiceBookingStatus
           scheduled_start?: string | null
           scheduled_end?: string | null
@@ -574,7 +634,7 @@ export interface Database {
           id?: string
           provider_id?: string
           booker_id?: string
-          offering_id?: string | null
+          service_offering_id?: string | null
           status?: ServiceBookingStatus
           scheduled_start?: string | null
           scheduled_end?: string | null

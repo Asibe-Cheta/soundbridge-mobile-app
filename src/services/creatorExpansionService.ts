@@ -200,15 +200,24 @@ export async function upsertServiceProviderProfile(
   profile: ServiceProviderProfileInput,
   options?: AuthOptions
 ): Promise<ServiceProviderProfileResponse> {
-  // Validate categories before sending to API
-  const validatedProfile = {
-    ...profile,
+  // Convert camelCase fields to snake_case as required by the API
+  const payload: Record<string, any> = {
+    display_name: profile.displayName,
+    headline: profile.headline,
+    bio: profile.bio,
     categories: profile.categories ? validateServiceCategories(profile.categories) : undefined,
+    default_rate: profile.defaultRate,
+    rate_currency: profile.rateCurrency,
   };
+
+  // Remove undefined fields so we don't send nulls for optional fields
+  Object.keys(payload).forEach((key) => {
+    if (payload[key] === undefined) delete payload[key];
+  });
 
   return apiFetch(`/api/service-providers`, {
     method: 'POST',
-    body: JSON.stringify(validatedProfile),
+    body: JSON.stringify(payload),
     ...buildOptions(options),
   });
 }
@@ -224,6 +233,7 @@ export interface ServiceOfferingInput {
   rate_currency: string; // Required, valid currency
   rate_unit: 'per_hour' | 'per_track' | 'per_project' | 'fixed'; // Required
   is_active?: boolean; // Optional, defaults to true
+  description?: string; // Optional
 }
 
 /**
@@ -300,7 +310,7 @@ export interface PortfolioItemInput {
   media_url: string; // Required, full URL
   thumbnail_url?: string;
   caption?: string;
-  display_order?: number;
+  sort_order?: number;
 }
 
 /**
@@ -721,6 +731,54 @@ export async function fetchVerificationStatus(
     }
     throw error;
   }
+}
+
+export interface PersonaVerificationStartResult {
+  inquiry_url: string | null;
+  inquiry_id: string;
+  needs_review: boolean;    // under_review / needs_review → no URL, manual review in progress
+  already_verified: boolean; // approved already, no action needed
+  pending_resume: boolean;   // existing open inquiry resumed — inquiry_url is valid, open as normal
+}
+
+/**
+ * Start a Persona identity verification inquiry.
+ * Returns a hosted Persona URL to open in the device browser.
+ * Special cases:
+ *   - needs_review: true  → inquiry is under manual review, inquiry_url is null
+ *   - already_verified: true → user is already approved, no action needed
+ *   - Resume: calling again while pending returns the same inquiry_url
+ */
+export async function startPersonaVerification(
+  userId: string,
+  options?: AuthOptions
+): Promise<PersonaVerificationStartResult> {
+  // Backend wraps response in { success: true, data: {...} }
+  const raw = await apiFetch<{
+    success: boolean;
+    data: {
+      inquiry_url: string | null;
+      inquiry_id: string;
+      needs_review?: boolean;
+      already_verified?: boolean;
+      under_review?: boolean;
+      pending_resume?: boolean;
+    };
+  }>(
+    `/api/service-providers/${userId}/verification/start`,
+    {
+      method: 'POST',
+      ...buildOptions(options),
+    }
+  );
+  const data = raw.data;
+  return {
+    inquiry_url: data.inquiry_url ?? null,
+    inquiry_id: data.inquiry_id,
+    needs_review: !!(data.needs_review || data.under_review),
+    already_verified: !!data.already_verified,
+    pending_resume: !!data.pending_resume,
+  };
 }
 
 export interface VerificationRequestInput {

@@ -17,8 +17,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
+import { SystemTypography as Typography } from '../constants/Typography';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { config } from '../config/environment';
 
 export default function CreatePlaylistScreen() {
   const navigation = useNavigation();
@@ -69,7 +71,7 @@ export default function CreatePlaylistScreen() {
       }
 
       // Call API endpoint
-      const response = await fetch('https://www.soundbridge.live/api/playlists', {
+      const response = await fetch(`${config.apiUrl}/playlists`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
@@ -241,14 +243,17 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   headerTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
     flex: 1,
     textAlign: 'center',
     marginHorizontal: 16,
   },
   headerButtonText: {
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
   },
   scrollView: {
@@ -262,7 +267,9 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   sectionTitle: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginBottom: 12,
   },
@@ -271,19 +278,25 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   textArea: {
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     textAlignVertical: 'top',
     minHeight: 100,
   },
   characterCount: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     marginTop: 4,
     textAlign: 'right',
   },
@@ -306,11 +319,14 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   privacyTitle: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginBottom: 4,
   },
   privacyDescription: {
+    ...Typography.label,
     fontSize: 14,
     lineHeight: 20,
   },
@@ -323,6 +339,7 @@ const styles = StyleSheet.create({
   },
   infoText: {
     flex: 1,
+    ...Typography.label,
     fontSize: 14,
     lineHeight: 20,
     marginLeft: 12,

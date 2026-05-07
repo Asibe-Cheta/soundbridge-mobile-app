@@ -187,6 +187,20 @@ export default function TwoFactorVerificationScreen() {
       return;
     }
 
+    if (!activeSessionId) {
+      debugError('❌ Missing verification session ID, cannot verify');
+      setError('Verification session expired. Please log in again.');
+      setIsChecking2FA(false);
+      setIsLoading(false);
+      setLoadingMessage('');
+      Alert.alert(
+        'Session Expired',
+        'Your verification session has expired. Please log in again.',
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
+      return;
+    }
+
     if (useBackupCode) {
       if (cleanedCode.length !== 8) {
         Alert.alert('Error', 'Backup codes are 8 characters long');

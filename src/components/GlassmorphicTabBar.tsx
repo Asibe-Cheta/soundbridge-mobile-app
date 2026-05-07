@@ -4,10 +4,12 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
 
 export default function GlassmorphicTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <View style={styles.container}>
@@ -29,7 +31,7 @@ export default function GlassmorphicTabBar({ state, descriptors, navigation }: B
           end={{ x: 1, y: 1 }}
         />
         
-        <View style={styles.tabBar}>
+        <View style={[styles.tabBar, { paddingBottom: 8 + insets.bottom }]}>
           {state.routes.map((route, index) => {
             const { options } = descriptors[route.key];
             const label =

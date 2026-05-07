@@ -6,6 +6,7 @@ import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { CopilotProvider, walkthroughable } from 'react-native-copilot';
@@ -33,6 +34,8 @@ import ChatScreen from './src/screens/ChatScreen';
 import LiveSessionsScreen from './src/screens/LiveSessionsScreen';
 import LiveSessionRoomScreen from './src/screens/LiveSessionRoomScreen';
 import CreateLiveSessionScreen from './src/screens/CreateLiveSessionScreen';
+import RequestRoomSetupScreen from './src/screens/RequestRoomSetupScreen';
+import RequestRoomDashboardScreen from './src/screens/RequestRoomDashboardScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import AudioPlayerScreen from './src/screens/AudioPlayerScreen';
 import QueueViewScreen from './src/screens/QueueViewScreen';
@@ -41,6 +44,7 @@ import SongDetailScreen from './src/screens/SongDetailScreen';
 import CreatorProfileScreen from './src/screens/CreatorProfileScreen';
 import CreatorSetupScreen from './src/screens/CreatorSetupScreen';
 import PrivacySecurityScreen from './src/screens/PrivacySecurityScreen';
+import BlockedUsersScreen from './src/screens/BlockedUsersScreen';
 import ChangePasswordScreen from './src/screens/ChangePasswordScreen';
 import NotificationSettingsScreen from './src/screens/NotificationSettingsScreen';
 import NotificationPreferencesScreen from './src/screens/NotificationPreferencesScreen';
@@ -67,7 +71,12 @@ import AllAlbumsScreen from './src/screens/AllAlbumsScreen';
 import AllPlaylistsScreen from './src/screens/AllPlaylistsScreen';
 import AllServicesScreen from './src/screens/AllServicesScreen';
 import AllVenuesScreen from './src/screens/AllVenuesScreen';
+import VenueDetailScreen from './src/screens/VenueDetailScreen';
+import ListVenueScreen from './src/screens/ListVenueScreen';
+import MyVenuesScreen from './src/screens/MyVenuesScreen';
 import EventDetailsScreen from './src/screens/EventDetailsScreen';
+import TicketConfirmationScreen from './src/screens/TicketConfirmationScreen';
+import TicketWalletScreen from './src/screens/TicketWalletScreen';
 import TrackDetailsScreen from './src/screens/TrackDetailsScreen';
 import AppealFormScreen from './src/screens/AppealFormScreen';
 import PlaylistDetailsScreen from './src/screens/PlaylistDetailsScreen';
@@ -99,6 +108,7 @@ import PostDetailScreen from './src/screens/PostDetailScreen';
 import ExternalLinksScreen from './src/screens/ExternalLinksScreen';
 import PurchasedContentScreen from './src/screens/PurchasedContentScreen';
 import CreatorSalesAnalyticsScreen from './src/screens/CreatorSalesAnalyticsScreen';
+import AICareerAdvisorScreen from './src/screens/AICareerAdvisorScreen';
 import ShareProfileScreen from './src/screens/ShareProfileScreen';
 import TaxInformationScreen from './src/screens/TaxInformationScreen';
 import RecentActivityScreen from './src/screens/RecentActivityScreen';
@@ -114,11 +124,42 @@ import { ToastProvider } from './src/contexts/ToastContext';
 // Import components
 import MiniPlayer from './src/components/MiniPlayer';
 import SoundBridgeErrorBoundary from './src/components/SoundBridgeErrorBoundary';
+import ScreenCaptureBanner from './src/components/ScreenCaptureBanner';
+import { useAudioPlayer } from './src/contexts/AudioPlayerContext';
 import CreateEventScreen from './src/screens/CreateEventScreen';
 import CreatePlaylistScreen from './src/screens/CreatePlaylistScreen';
+import CreateOpportunityScreen from './src/screens/CreateOpportunityScreen';
+import MyOpportunitiesScreen from './src/screens/MyOpportunitiesScreen';
+import OpportunityInterestListScreen from './src/screens/OpportunityInterestListScreen';
+import OpportunityProjectScreen from './src/screens/OpportunityProjectScreen';
+import DisputeDetailScreen from './src/screens/DisputeDetailScreen';
+import PostGigRatingScreen from './src/screens/PostGigRatingScreen';
+import ProviderAvailabilityScreen from './src/screens/ProviderAvailabilityScreen';
+import UrgentGigTypeSelectionScreen from './src/screens/UrgentGigTypeSelectionScreen';
+import CreateUrgentGigScreen from './src/screens/CreateUrgentGigScreen';
+import UrgentGigResponsesScreen from './src/screens/UrgentGigResponsesScreen';
+import UrgentGigConfirmationScreen from './src/screens/UrgentGigConfirmationScreen';
+import ProviderGigDetailScreen from './src/screens/ProviderGigDetailScreen';
 
-// Import services
+// TrackPlayer is iOS-only — its TurboModule has a method-signature mismatch on Android
+// that throws at JNI level before JS try/catch can intercept it, crashing the app.
+// expo-av handles Android audio (BackgroundAudioService USE_EXPO_AV = true on Android).
+import { Platform as _Platform } from 'react-native';
+if (_Platform.OS === 'ios') {
+  try {
+    const TrackPlayer = require('react-native-track-player').default;
+    if (TrackPlayer && typeof TrackPlayer.registerPlaybackService === 'function') {
+      TrackPlayer.registerPlaybackService(() => require('./src/services/trackPlayerService'));
+    }
+  } catch (e) {
+    // Native module not available (e.g. Expo Go) — fail silently
+  }
+}
+
 import { notificationService } from './src/services/NotificationService';
+import { nudgeService } from './src/services/NudgeService';
+import BroadcastBanner from './src/components/BroadcastBanner';
+import { metaEventsService } from './src/services/MetaEventsService';
 import { locationUpdateService } from './src/services/LocationUpdateService';
 import { offlineQueueService } from './src/services/offline/offlineQueueService';
 import { analyticsService } from './src/services/analytics/analyticsService';
@@ -340,7 +381,8 @@ function MainTabs() {
 
 // Main App Navigator
 function AppNavigator() {
-  const { user, loading, needsOnboarding } = useAuth();
+  console.log('🧭 AppNavigator RENDERING');
+  const { user, loading, needsOnboarding, pendingPasswordReset, clearPendingPasswordReset } = useAuth();
   const { theme } = useTheme();
   const navigationRef = React.useRef<any>(null);
 
@@ -395,6 +437,8 @@ function AppNavigator() {
       notificationService.initialize().then(success => {
         if (success) {
           console.log('✅ Notification service ready');
+          // Evaluate fan-acquisition nudges after notifications are ready
+          nudgeService.evaluateAndFire(user.id);
         }
       });
 
@@ -470,6 +514,58 @@ function AppNavigator() {
           navigationRef.current.navigate('LiveSessions' as never);
         }
         break;
+      // Post deep links
+      case 'post':
+        if (segments[1]) {
+          navigationRef.current.navigate('PostDetail' as never, { postId: segments[1] } as never);
+        }
+        break;
+      // Follower profile
+      case 'follower':
+      case 'followers':
+        if (segments[1]) {
+          navigationRef.current.navigate('CreatorProfile' as never, { creatorId: segments[1] } as never);
+        } else {
+          navigationRef.current.navigate('Profile' as never);
+        }
+        break;
+      // Opportunity
+      case 'opportunity':
+        if (segments[1] === 'interests' || segments[2] === 'interests') {
+          const oppId = segments[1] === 'interests' ? undefined : segments[1];
+          navigationRef.current.navigate('OpportunityInterestList' as never, { opportunityId: oppId } as never);
+        } else if (segments[1]) {
+          navigationRef.current.navigate('OpportunityInterestList' as never, { opportunityId: segments[1] } as never);
+        } else {
+          navigationRef.current.navigate('MyOpportunities' as never);
+        }
+        break;
+      // Project
+      case 'project':
+        if (segments[1]) {
+          if (segments[2] === 'dispute') {
+            navigationRef.current.navigate('DisputeDetail' as never, { projectId: segments[1] } as never);
+          } else {
+            navigationRef.current.navigate('OpportunityProject' as never, { projectId: segments[1] } as never);
+          }
+        }
+        break;
+      // Gig
+      case 'gig':
+        if (segments[1]) {
+          navigationRef.current.navigate('ProviderGigDetail' as never, { gigId: segments[1] } as never);
+        }
+        break;
+      // Nudge deep links
+      case 'share-profile':
+        navigationRef.current.navigate('ShareProfile' as never);
+        break;
+      case 'request-room-setup':
+        navigationRef.current.navigate('RequestRoomSetup' as never);
+        break;
+      case 'create-event':
+        navigationRef.current.navigate('CreateEvent' as never);
+        break;
       default:
         console.log('Unknown deep link path:', path);
     }
@@ -503,6 +599,14 @@ function AppNavigator() {
       subscription.remove();
     };
   }, [user]);
+
+  // Navigate to ChangePassword when a password reset deep link is followed
+  React.useEffect(() => {
+    if (pendingPasswordReset && user && !needsOnboarding && navigationRef.current) {
+      navigationRef.current.navigate('ChangePassword' as never);
+      clearPendingPasswordReset();
+    }
+  }, [pendingPasswordReset, user, needsOnboarding]);
 
   // Handle navigation ready
   const onNavigationReady = React.useCallback(() => {
@@ -616,6 +720,147 @@ function AppNavigator() {
         }
         break;
 
+      // Follow notifications
+      case 'new_follower':
+      case 'follow':
+        if (data.followerId || data.entityId) {
+          navigationRef.current.navigate('CreatorProfile' as never, { creatorId: data.followerId || data.entityId } as never);
+        } else {
+          navigationRef.current.navigate('Profile' as never);
+        }
+        break;
+
+      // Reaction / comment on a post
+      case 'like':
+      case 'reaction':
+        if (data.postId || data.entityId) {
+          navigationRef.current.navigate('PostDetail' as never, { postId: data.postId || data.entityId } as never);
+        }
+        break;
+      case 'comment':
+        if (data.postId || data.entityId) {
+          navigationRef.current.navigate('PostDetail' as never, { postId: data.postId || data.entityId } as never);
+        }
+        break;
+
+      // Opportunity notifications
+      case 'opportunity_interest':
+        if (data.opportunityId || data.entityId) {
+          navigationRef.current.navigate('OpportunityInterestList' as never, { opportunityId: data.opportunityId || data.entityId } as never);
+        } else {
+          navigationRef.current.navigate('MyOpportunities' as never);
+        }
+        break;
+      case 'opportunity_agreement_received':
+      case 'opportunity':
+        if (data.projectId || data.project_id) {
+          navigationRef.current.navigate('OpportunityProject' as never, { projectId: data.projectId || data.project_id } as never);
+        } else if (data.opportunityId || data.entityId) {
+          navigationRef.current.navigate('OpportunityInterestList' as never, { opportunityId: data.opportunityId || data.entityId } as never);
+        } else {
+          navigationRef.current.navigate('MyOpportunities' as never);
+        }
+        break;
+
+      // Gig / project lifecycle
+      case 'gig_accepted':
+      case 'gig_confirmed':
+      case 'gig_starting_soon': {
+        const gId = data.gigId || data.gig_id || data.entityId;
+        if (gId) {
+          navigationRef.current.navigate('ProviderGigDetail' as never, { gigId: gId } as never);
+        }
+        break;
+      }
+      case 'gig_expired':
+      case 'gig_payment':
+      case 'gig_refund':
+      case 'payout':
+      case 'content_purchase':
+        navigationRef.current.navigate('Wallet' as never);
+        break;
+
+      case 'gig_rating_received': {
+        const rProjId = data.projectId || data.project_id;
+        if (rProjId) {
+          navigationRef.current.navigate('PostGigRating' as never, { projectId: rProjId } as never);
+        } else {
+          navigationRef.current.navigate('Profile' as never);
+        }
+        break;
+      }
+
+      case 'dispute_raised': {
+        const dProjId = data.projectId || data.project_id || data.entityId;
+        if (dProjId) {
+          navigationRef.current.navigate('DisputeDetail' as never, { projectId: dProjId } as never);
+        }
+        break;
+      }
+
+      // Subscription / billing
+      case 'subscription':
+        navigationRef.current.navigate('Billing' as never);
+        break;
+
+      // Venue match — fetch venue from Supabase then open VenueDetail
+      case 'venue_match': {
+        const vId = data.venueId || data.venue_id || data.entityId;
+        if (vId) {
+          import('./src/lib/supabase').then(({ supabase }) => {
+            supabase
+              .from('venues')
+              .select('id, name, description, address, city, country, venue_type, capacity, latitude, longitude, hourly_rate, daily_rate, currency, photo_url, photos, rating, website, contact_email, contact_phone, external_booking_link, owner_id')
+              .eq('id', vId)
+              .single()
+              .then(({ data: venueRow }) => {
+                if (venueRow && navigationRef.current) {
+                  const addrLine = typeof venueRow.address === 'object' && venueRow.address !== null
+                    ? venueRow.address.line1
+                    : (typeof venueRow.address === 'string' ? venueRow.address : null)
+                  const venue = {
+                    id: venueRow.id,
+                    source: 'soundbridge' as const,
+                    name: venueRow.name,
+                    address: [addrLine, venueRow.city, venueRow.country].filter(Boolean).join(', '),
+                    city: venueRow.city,
+                    latitude: venueRow.latitude,
+                    longitude: venueRow.longitude,
+                    venue_type: venueRow.venue_type,
+                    daily_rate: venueRow.daily_rate,
+                    hourly_rate: venueRow.hourly_rate,
+                    currency: venueRow.currency ?? 'GBP',
+                    photo_url: venueRow.photo_url,
+                    photos: venueRow.photos,
+                    rating: venueRow.rating,
+                    description: venueRow.description,
+                    website: venueRow.website,
+                    contact_email: venueRow.contact_email,
+                    contact_phone: venueRow.contact_phone,
+                    external_booking_link: venueRow.external_booking_link,
+                    capacity: venueRow.capacity,
+                    owner_id: venueRow.owner_id,
+                  };
+                  navigationRef.current.navigate('VenueDetail' as never, { venue } as never);
+                } else if (navigationRef.current) {
+                  // Venue not found — fall back to Discover tab
+                  navigationRef.current.navigate('Discover' as never);
+                }
+              });
+          });
+        } else {
+          navigationRef.current.navigate('Discover' as never);
+        }
+        break;
+      }
+
+      // Fan acquisition nudges — navigate directly to the target screen
+      case 'nudge':
+        if (data.screen && navigationRef.current) {
+          navigationRef.current.navigate(data.screen as never, (data.screenParams ?? {}) as never);
+        }
+        break;
+
       default:
         console.log('⚠️ Unknown notification type for navigation:', data.type);
     }
@@ -637,8 +882,9 @@ function AppNavigator() {
   // No splash screen blocking - navigation works immediately
 
   return (
-    <View style={{ flex: 1, backgroundColor: 'transparent' }}>
-      <NavigationContainer 
+    <View style={{ flex: 1, backgroundColor: '#1A1A1A' }}>
+
+      <NavigationContainer
         ref={navigationRef} 
         onReady={onNavigationReady}
         theme={{
@@ -653,10 +899,11 @@ function AppNavigator() {
           },
         }}
       >
-        <Stack.Navigator 
-          screenOptions={{ 
+        <Stack.Navigator
+          screenOptions={{
             headerShown: false,
-            animation: 'fade', // Smooth transition
+            animation: 'fade',
+            cardStyle: { backgroundColor: 'transparent' },
           }}
         >
         {!user ? (
@@ -681,6 +928,7 @@ function AppNavigator() {
             <Stack.Screen name="AudioPlayer" component={AudioPlayerScreen} />
             <Stack.Screen name="CreatorSetup" component={CreatorSetupScreen} />
             <Stack.Screen name="PrivacySecurity" component={PrivacySecurityScreen} />
+            <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} options={{ headerShown: false }} />
             <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
             <Stack.Screen name="ExternalLinks" component={ExternalLinksScreen} />
             <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
@@ -690,9 +938,18 @@ function AppNavigator() {
             <Stack.Screen name="Messages" component={MessagesScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
             <Stack.Screen name="Search" component={SearchScreen} />
-            <Stack.Screen name="LiveSessions" component={LiveSessionsScreen} />
+            <Stack.Screen
+              name="LiveSessions"
+              component={LiveSessionsScreen}
+              options={{
+                animation: 'slide_from_right',
+                animationDuration: 320,
+              }}
+            />
             <Stack.Screen name="LiveSessionRoom" component={LiveSessionRoomScreen} />
             <Stack.Screen name="CreateLiveSession" component={CreateLiveSessionScreen} />
+            <Stack.Screen name="RequestRoomSetup" component={RequestRoomSetupScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="RequestRoomDashboard" component={RequestRoomDashboardScreen} options={{ headerShown: false, gestureEnabled: false }} />
             <Stack.Screen name="TwoFactorVerification" component={TwoFactorVerificationScreen} />
             <Stack.Screen name="TwoFactorSetup" component={TwoFactorSetupScreen} />
             <Stack.Screen name="TwoFactorSettings" component={TwoFactorSettingsScreen} />
@@ -721,8 +978,13 @@ function AppNavigator() {
             <Stack.Screen name="AllPlaylists" component={AllPlaylistsScreen} />
             <Stack.Screen name="AllServices" component={AllServicesScreen} />
             <Stack.Screen name="AllVenues" component={AllVenuesScreen} />
+            <Stack.Screen name="VenueDetail" component={VenueDetailScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="ListVenue" component={ListVenueScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="MyVenues" component={MyVenuesScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} />
             <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
+            <Stack.Screen name="TicketConfirmation" component={TicketConfirmationScreen} options={{ headerShown: false, gestureEnabled: false }} />
+            <Stack.Screen name="TicketWallet" component={TicketWalletScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CreateEvent" component={CreateEventScreen} />
             <Stack.Screen name="CreatePlaylist" component={CreatePlaylistScreen} />
             <Stack.Screen name="TrackDetails" component={TrackDetailsScreen} />
@@ -753,6 +1015,20 @@ function AppNavigator() {
             {/* Paid Content Screens */}
             <Stack.Screen name="PurchasedContent" component={PurchasedContentScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CreatorSalesAnalytics" component={CreatorSalesAnalyticsScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="AICareerAdvisor" component={AICareerAdvisorScreen} options={{ headerShown: false }} />
+            {/* Opportunities Screens */}
+            <Stack.Screen name="CreateOpportunity" component={CreateOpportunityScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="MyOpportunities" component={MyOpportunitiesScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="OpportunityInterestList" component={OpportunityInterestListScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="OpportunityProject" component={OpportunityProjectScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="DisputeDetail" component={DisputeDetailScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="PostGigRating" component={PostGigRatingScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="ProviderAvailability" component={ProviderAvailabilityScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="UrgentGigTypeSelection" component={UrgentGigTypeSelectionScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="CreateUrgentGig" component={CreateUrgentGigScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="UrgentGigResponses" component={UrgentGigResponsesScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="UrgentGigConfirmation" component={UrgentGigConfirmationScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="ProviderGigDetail" component={ProviderGigDetailScreen} options={{ headerShown: false }} />
             {/* Allow access to onboarding even after completion for testing */}
             <Stack.Screen name="OnboardingTest" component={OnboardingScreen} />
           </>
@@ -764,14 +1040,25 @@ function AppNavigator() {
   );
 }
 
+/** Mounts inside AudioPlayerProvider — reads isCaptured from context and shows banner */
+function ScreenCaptureGuard() {
+  const { isCaptured } = useAudioPlayer();
+  return <ScreenCaptureBanner visible={isCaptured} />;
+}
+
+
 export default function App() {
   console.log('🚀 SoundBridge Mobile App Loading...');
 
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_600SemiBold,
     Inter_700Bold,
   });
+
+  // useFonts hangs indefinitely on some Android devices (expo/expo#17876).
+  // Render immediately with system-font fallback; Inter loads async in the background.
+  const fontTimeout = true;
 
   // Use environment configuration
   const supabaseUrl = config.supabaseUrl;
@@ -793,15 +1080,38 @@ export default function App() {
     console.log('✅ Stripe publishable key loaded - Event tickets and tips are enabled');
   }
   
+  // OTA updates are handled natively by checkAutomatically: "ON_LOAD" in app.json.
+  // Do NOT fetch updates from JS: fetchUpdateAsync() downloads ~8MB in background,
+  // and when it completes RCTFileReaderModule.readAsText crashes (null dispatch queue
+  // on iOS 26) — killing the process and interrupting background audio.
+
+  // Catch async errors that slip past the error boundary (event handlers, promises)
+  React.useEffect(() => {
+    const prev = ErrorUtils.getGlobalHandler();
+    ErrorUtils.setGlobalHandler((error, isFatal) => {
+      console.error('💥 UNHANDLED ERROR:', error?.message, '\n', error?.stack);
+      errorTrackingService.captureException(error as Error, { isFatal });
+      prev?.(error, isFatal);
+    });
+  }, []);
+
   // Track app launch performance
   React.useEffect(() => {
     const trackAppLaunch = performanceMonitoringService.trackScreenRender('AppLaunch');
     trackAppLaunch();
   }, []);
 
-  if (!fontsLoaded) {
-    return null;
+  // Meta (Facebook) App Events — AppOpen every launch, AppInstall once
+  React.useEffect(() => {
+    metaEventsService.initialize();
+  }, []);
+
+  console.log('🔤 fonts:', fontsLoaded, !!fontError, fontTimeout);
+  if (!fontsLoaded && !fontError && !fontTimeout) {
+    console.log('🔤 Waiting for fonts — dark view');
+    return <View style={{ flex: 1, backgroundColor: '#1A1A1A' }} />;
   }
+  console.log('🌳 Rendering full app tree');
   
   // Only render StripeProvider if we have a valid publishable key
   const appContent = (
@@ -835,12 +1145,14 @@ export default function App() {
   };
 
   return (
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0A0E1A' }}>
     <SoundBridgeErrorBoundary>
       <SafeAreaProvider>
         <ThemeProvider>
           <AuthProvider>
             <CollaborationProvider>
               <AudioPlayerProvider>
+                <ScreenCaptureGuard />
                 <ToastProvider>
                   <CopilotProvider
                     overlay="svg"
@@ -859,5 +1171,6 @@ export default function App() {
         </ThemeProvider>
       </SafeAreaProvider>
     </SoundBridgeErrorBoundary>
+    </GestureHandlerRootView>
   );
 }

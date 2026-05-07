@@ -11,6 +11,10 @@ export interface CurrencyInfo {
 }
 
 class CurrencyService {
+  private exchangeRates: Record<string, number> = {};
+  private lastFetchTime: number = 0;
+  private readonly CACHE_DURATION = 3600000; // 1 hour in milliseconds
+
   private readonly COUNTRY_CURRENCY_MAP: Record<string, string> = {
     // Major Markets
     'US': 'USD',
@@ -248,6 +252,123 @@ class CurrencyService {
     }
 
     return this.formatAmount(amount, currencyCode);
+  }
+
+  /**
+   * Fetch live exchange rates from API
+   * Uses exchangerate-api.com free tier (1500 requests/month)
+   */
+  async fetchExchangeRates(baseCurrency: string = 'USD'): Promise<void> {
+    try {
+      const now = Date.now();
+
+      // Check if cache is still valid
+      if (this.exchangeRates[baseCurrency] && (now - this.lastFetchTime) < this.CACHE_DURATION) {
+        console.log('💱 Using cached exchange rates');
+        return;
+      }
+
+      console.log(`💱 Fetching live exchange rates for ${baseCurrency}...`);
+
+      const response = await fetch(`https://api.exchangerate-api.com/v4/latest/${baseCurrency}`);
+
+      if (!response.ok) {
+        throw new Error(`Exchange rate API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      this.exchangeRates = data.rates;
+      this.lastFetchTime = now;
+
+      console.log(`✅ Exchange rates fetched successfully (base: ${baseCurrency})`);
+    } catch (error) {
+      console.error('❌ Failed to fetch exchange rates:', error);
+      // Fallback to approximate rates if API fails
+      if (Object.keys(this.exchangeRates).length === 0) {
+        this.useFallbackRates();
+      }
+    }
+  }
+
+  /**
+   * Fallback exchange rates (approximate, updated periodically)
+   * Used when the API is unavailable
+   */
+  private useFallbackRates(): void {
+    console.warn('⚠️ Using fallback exchange rates (may not be accurate)');
+    // Base currency: USD (as of January 2025)
+    this.exchangeRates = {
+      'USD': 1.0,
+      'GBP': 0.79,
+      'EUR': 0.92,
+      'CAD': 1.35,
+      'AUD': 1.52,
+      'JPY': 149.50,
+      'CHF': 0.88,
+      'CNY': 7.24,
+      'INR': 83.12,
+      'SGD': 1.34,
+      'HKD': 7.83,
+      'NZD': 1.63,
+      'MYR': 4.48,
+      'THB': 35.20,
+      'PHP': 55.65,
+      'IDR': 15785.0,
+      'VND': 24350.0,
+      'KRW': 1337.50,
+      'BRL': 5.02,
+      'MXN': 17.35,
+      'ZAR': 18.25,
+      'NGN': 1456.75,
+      'AED': 3.67,
+      'SAR': 3.75,
+    };
+    this.lastFetchTime = Date.now();
+  }
+
+  /**
+   * Convert amount from one currency to another
+   * @param amount - The amount to convert
+   * @param fromCurrency - Source currency code
+   * @param toCurrency - Target currency code
+   * @returns Converted amount
+   */
+  async convertCurrency(amount: number, fromCurrency: string, toCurrency: string): Promise<number> {
+    if (fromCurrency === toCurrency) {
+      return amount;
+    }
+
+    // Ensure we have exchange rates
+    if (Object.keys(this.exchangeRates).length === 0) {
+      await this.fetchExchangeRates('USD');
+    }
+
+    const fromUpper = fromCurrency.toUpperCase();
+    const toUpper = toCurrency.toUpperCase();
+
+    // Get rates (assuming USD as base)
+    const fromRate = this.exchangeRates[fromUpper] || 1;
+    const toRate = this.exchangeRates[toUpper] || 1;
+
+    // Convert: amount in fromCurrency -> USD -> toCurrency
+    const amountInUSD = amount / fromRate;
+    const convertedAmount = amountInUSD * toRate;
+
+    console.log(`💱 Converted ${amount} ${fromUpper} → ${convertedAmount.toFixed(2)} ${toUpper} (rates: ${fromRate}, ${toRate})`);
+
+    return convertedAmount;
+  }
+
+  /**
+   * Convert and format amount for display
+   * @param amount - The amount to convert
+   * @param fromCurrency - Source currency code
+   * @param toCurrency - Target currency code
+   * @returns Formatted string with converted amount
+   */
+  async convertAndFormat(amount: number, fromCurrency: string, toCurrency: string): Promise<string> {
+    const converted = await this.convertCurrency(amount, fromCurrency, toCurrency);
+    return this.formatAmount(converted, toCurrency);
   }
 }
 

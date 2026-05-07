@@ -7,14 +7,12 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Switch,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
-import { useAuth } from '../contexts/AuthContext';
 import * as Haptics from 'expo-haptics';
 
 interface Opportunity {
@@ -40,7 +38,6 @@ interface ExpressInterestModalProps {
     opportunityId: string;
     reason: string;
     message: string;
-    enableAlerts: boolean;
   }) => Promise<void>;
 }
 
@@ -78,14 +75,9 @@ export default function ExpressInterestModal({
   onSubmit,
 }: ExpressInterestModalProps) {
   const { theme } = useTheme();
-  const { userProfile } = useAuth();
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
   const [message, setMessage] = useState('');
-  const [enableAlerts, setEnableAlerts] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
-  // Check if user is a subscriber (for alerts toggle)
-  const isSubscriber = userProfile?.subscription_tier !== 'free';
 
   const handleReasonSelect = (reasonId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -108,13 +100,11 @@ export default function ExpressInterestModal({
         opportunityId: opportunity.id,
         reason: selectedReason,
         message: message.trim(),
-        enableAlerts: enableAlerts && isSubscriber,
       });
 
       // Reset form
       setSelectedReason(null);
       setMessage('');
-      setEnableAlerts(false);
       onClose();
     } catch (error) {
       console.error('Failed to submit interest:', error);
@@ -127,7 +117,6 @@ export default function ExpressInterestModal({
   const handleClose = () => {
     setSelectedReason(null);
     setMessage('');
-    setEnableAlerts(false);
     onClose();
   };
 
@@ -258,41 +247,6 @@ export default function ExpressInterestModal({
               </Text>
             </View>
 
-            {/* Alerts Toggle (Subscribers Only) */}
-            <View style={[styles.alertsSection, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-              <View style={styles.alertsInfo}>
-                <View style={styles.alertsHeader}>
-                  <Ionicons
-                    name="notifications"
-                    size={20}
-                    color={isSubscriber ? theme.colors.primary : theme.colors.textSecondary}
-                  />
-                  <Text style={[styles.alertsTitle, { color: theme.colors.text }]}>
-                    Get alerts for similar opportunities
-                  </Text>
-                </View>
-                <Text style={[styles.alertsDescription, { color: theme.colors.textSecondary }]}>
-                  {isSubscriber
-                    ? 'We\'ll notify you when new opportunities matching this one are posted'
-                    : 'Upgrade to Premium or Unlimited to get alerts for similar opportunities'}
-                </Text>
-                {!isSubscriber && (
-                  <TouchableOpacity style={styles.upgradeButton}>
-                    <Text style={[styles.upgradeText, { color: theme.colors.primary }]}>
-                      Upgrade Now
-                    </Text>
-                    <Ionicons name="arrow-forward" size={14} color={theme.colors.primary} />
-                  </TouchableOpacity>
-                )}
-              </View>
-              <Switch
-                value={enableAlerts}
-                onValueChange={setEnableAlerts}
-                disabled={!isSubscriber}
-                trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
           </ScrollView>
 
           {/* Submit Button */}
@@ -434,43 +388,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'right',
     marginTop: 6,
-  },
-  alertsSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 24,
-  },
-  alertsInfo: {
-    flex: 1,
-    marginRight: 12,
-  },
-  alertsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 6,
-  },
-  alertsTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  alertsDescription: {
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  upgradeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 8,
-  },
-  upgradeText: {
-    fontSize: 13,
-    fontWeight: '600',
   },
   footer: {
     padding: 16,

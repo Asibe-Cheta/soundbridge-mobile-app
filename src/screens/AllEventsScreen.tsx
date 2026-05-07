@@ -16,12 +16,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { SystemTypography as Typography } from '../constants/Typography';
 import { dbHelpers, supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import EventCategoryPromptModal from '../components/EventCategoryPromptModal';
+import { config } from '../config/environment';
+import { apiFetch } from '../lib/apiClient';
 
 interface Event {
   id: string;
@@ -34,6 +37,14 @@ interface Event {
   category: string;
   price_gbp?: number;
   price_ngn?: number;
+  price_usd?: number;
+  price_eur?: number;
+  price_cad?: number;
+  price_aud?: number;
+  price_inr?: number;
+  price_jpy?: number;
+  price_brl?: number;
+  price_mxn?: number;
   max_attendees?: number;
   current_attendees?: number;
   image_url?: string;
@@ -46,8 +57,14 @@ type SortOption = 'date' | 'alphabetical';
 
 export default function AllEventsScreen() {
   const navigation = useNavigation();
+  const route = useRoute();
   const { theme } = useTheme();
   const { user } = useAuth();
+
+  const params = route.params as { mode?: 'created' | 'booked'; title?: string; userId?: string } | undefined;
+  const mode = params?.mode;
+  const screenTitle = params?.title || 'All Events';
+  const filterUserId = params?.userId;
 
   const [events, setEvents] = useState<Event[]>([]);
   const [filteredEvents, setFilteredEvents] = useState<Event[]>([]);
@@ -67,7 +84,9 @@ export default function AllEventsScreen() {
 
   useEffect(() => {
     loadEvents(false);
-    checkUserPreferences();
+    if (!mode) {
+      checkUserPreferences();
+    }
   }, []);
 
   useEffect(() => {
@@ -80,28 +99,68 @@ export default function AllEventsScreen() {
       else setLoading(true);
 
       setError(null);
-      console.log('🔄 Loading personalized events from Supabase...');
 
-      // Use personalized events function if user is logged in
-      let data, error;
-      if (user?.id) {
-        const result = await dbHelpers.getPersonalizedEvents(user.id, 50);
+      let data: Event[] | null = null;
+      let fetchError: any = null;
+
+      if (mode === 'created' && filterUserId) {
+        console.log('🔄 Loading created events for user:', filterUserId);
+        const result = await supabase
+          .from('events')
+          .select('*')
+          .eq('creator_id', filterUserId)
+          .order('event_date', { ascending: false });
         data = result.data;
-        error = result.error;
+        fetchError = result.error;
+      } else if (mode === 'booked' && filterUserId) {
+        console.log('🔄 Loading booked events for user:', filterUserId);
+        const { data: { session } } = await supabase.auth.getSession();
+        const [bookedResult, attendeesResult] = await Promise.all([
+          session
+            ? apiFetch<{ items: any[]; total: number }>('/api/users/me/booked-events', { session })
+            : Promise.resolve({ items: [], total: 0 }),
+          supabase.from('event_attendees').select('event_id').eq('user_id', filterUserId),
+        ]);
+        const bookedEventIds = (bookedResult.items || []).map((e: any) => e.id ?? e.event_id);
+        const attendeeEventIds = (attendeesResult.data || []).map((a: any) => a.event_id);
+        const uniqueEventIds = [...new Set([...bookedEventIds, ...attendeeEventIds])];
+
+        if (uniqueEventIds.length > 0) {
+          const result = await supabase
+            .from('events')
+            .select('*')
+            .in('id', uniqueEventIds)
+            .order('event_date', { ascending: true });
+          data = result.data;
+          fetchError = result.error;
+        } else {
+          data = [];
+        }
       } else {
-        // Fallback to regular events for non-logged-in users
-        const result = await dbHelpers.getUpcomingEvents(50);
-        data = result.data;
-        error = result.error;
+        console.log('🔄 Loading personalized events from Supabase...');
+        if (user?.id) {
+          const result = await dbHelpers.getPersonalizedEvents(user.id, 50);
+          data = result.data;
+          fetchError = result.error;
+        } else {
+          const result = await dbHelpers.getUpcomingEvents(50);
+          data = result.data;
+          fetchError = result.error;
+        }
       }
 
-      if (error) {
-        console.error('❌ Error loading events:', error);
-        throw error;
+      if (fetchError) {
+        console.error('❌ Error loading events:', fetchError);
+        throw fetchError;
       }
 
       console.log('✅ Events loaded:', data?.length || 0);
       setEvents(data || []);
+
+      // Only run diagnostics in default mode
+      if (!mode && (!data || data.length === 0) && user?.id) {
+        checkEventDiscoveryHealth();
+      }
 
     } catch (error: any) {
       console.error('❌ Error loading events:', error);
@@ -118,11 +177,13 @@ export default function AllEventsScreen() {
 
     // Search filter
     if (searchQuery.trim()) {
-      filtered = filtered.filter(event =>
-        event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        event.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (event.description && event.description.toLowerCase().includes(searchQuery.toLowerCase()))
-      );
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(event => {
+        const title = (event.title || '').toLowerCase();
+        const location = (event.location || '').toLowerCase();
+        const description = (event.description || '').toLowerCase();
+        return title.includes(query) || location.includes(query) || description.includes(query);
+      });
     }
 
     // Sort
@@ -144,10 +205,74 @@ export default function AllEventsScreen() {
     navigation.navigate('EventDetails' as never, { eventId: event.id, event: event } as never);
   };
 
+  // Diagnostic function to check why events aren't showing
+  const checkEventDiscoveryHealth = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        console.warn('⚠️ No session for event discovery health check');
+        return;
+      }
+
+      console.log('🔍 Running event discovery health check...');
+      const response = await fetch(`${config.apiUrl}/user/event-discovery/health`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (response.ok) {
+        const health = await response.json();
+        console.log('📊 EVENT DISCOVERY HEALTH CHECK:');
+        console.log('   📍 Latitude:', health.latitude ?? 'NOT SET');
+        console.log('   📍 Longitude:', health.longitude ?? 'NOT SET');
+        console.log('   📏 Preferred Distance:', health.preferredEventDistance ?? 'NOT SET');
+        console.log('   🎵 Preferred Genres:', health.preferredEventGenres?.length > 0 ? health.preferredEventGenres.join(', ') : 'NOT SET');
+        console.log('   🌍 Location State:', health.locationState ?? 'NOT SET');
+        console.log('   🌍 Location Country:', health.locationCountry ?? 'NOT SET');
+        console.log('   🔔 Event Notifications:', health.eventNotificationsEnabled ? 'ENABLED' : 'DISABLED');
+
+        // Alert user about missing data
+        const issues = [];
+        if (!health.latitude || !health.longitude) {
+          issues.push('Location coordinates not set - enable location permission');
+        }
+        if (!health.preferredEventGenres || health.preferredEventGenres.length === 0) {
+          issues.push('No event preferences selected');
+        }
+
+        if (issues.length > 0) {
+          console.warn('⚠️ ISSUES FOUND:', issues.join('; '));
+        }
+      } else {
+        console.warn('⚠️ Event discovery health check failed:', response.status);
+      }
+    } catch (error) {
+      console.error('❌ Error checking event discovery health:', error);
+    }
+  };
+
   const checkUserPreferences = async () => {
     if (!user?.id || hasCheckedPreferences) return;
 
     try {
+      // First check if user has set event category preferences in the database
+      // Note: The API may use either preferred_event_categories or preferred_event_genres
+      const { data: preferences } = await supabase
+        .from('notification_preferences')
+        .select('preferred_event_categories, preferred_event_genres')
+        .eq('user_id', user.id)
+        .single();
+
+      // If user has preferences set (check both possible column names), don't show modal
+      const categories = preferences?.preferred_event_categories || preferences?.preferred_event_genres;
+      if (categories && categories.length > 0) {
+        console.log('✅ User has event preferences set:', categories);
+        setHasCheckedPreferences(true);
+        return;
+      }
+
       // Check if user has dismissed the modal before
       const dismissed = await AsyncStorage.getItem('event_preference_modal_dismissed');
       if (dismissed === 'true') {
@@ -155,20 +280,11 @@ export default function AllEventsScreen() {
         return;
       }
 
-      // Check if user has set event category preferences
-      const { data: preferences } = await supabase
-        .from('notification_preferences')
-        .select('preferred_event_categories')
-        .eq('user_id', user.id)
-        .single();
-
-      // Show modal if no preferences set
-      if (!preferences || !preferences.preferred_event_categories || preferences.preferred_event_categories.length === 0) {
-        // Delay modal to avoid showing immediately on screen load
-        setTimeout(() => {
-          setShowPreferenceModal(true);
-        }, 1500);
-      }
+      // Show modal if no preferences set AND user hasn't dismissed it
+      console.log('📢 Showing event preference modal - no preferences set');
+      setTimeout(() => {
+        setShowPreferenceModal(true);
+      }, 1500);
 
       setHasCheckedPreferences(true);
     } catch (error) {
@@ -183,8 +299,10 @@ export default function AllEventsScreen() {
     await AsyncStorage.setItem('event_preference_modal_dismissed', 'true');
   };
 
-  const handleSelectPreferences = () => {
+  const handleSelectPreferences = async () => {
     setShowPreferenceModal(false);
+    // Mark modal as dismissed since user is going to set preferences
+    await AsyncStorage.setItem('event_preference_modal_dismissed', 'true');
     // Navigate to notification preferences screen
     navigation.navigate('NotificationPreferences' as never);
   };
@@ -204,6 +322,57 @@ export default function AllEventsScreen() {
     if (diffDays < 7) return `In ${diffDays} days`;
     
     return date.toLocaleDateString();
+  };
+
+  const getEventPrice = (eventData: Event): { currency: string; amount: number } | null => {
+    const currencyOrder = [
+      'GBP',
+      'NGN',
+      'USD',
+      'EUR',
+      'CAD',
+      'AUD',
+      'INR',
+      'JPY',
+      'BRL',
+      'MXN',
+    ];
+
+    for (const currency of currencyOrder) {
+      const fieldName = `price_${currency.toLowerCase()}` as keyof Event;
+      const value = eventData[fieldName];
+      if (typeof value === 'number' && value >= 0) {
+        return { currency, amount: value };
+      }
+    }
+
+    return null;
+  };
+
+  const formatEventPrice = (eventData: Event) => {
+    const priceInfo = getEventPrice(eventData);
+    if (!priceInfo) return null;
+    if (priceInfo.amount === 0) return 'FREE';
+
+    const symbols: Record<string, string> = {
+      GBP: '£',
+      NGN: '₦',
+      USD: '$',
+      EUR: '€',
+      CAD: '$',
+      AUD: '$',
+      INR: '₹',
+      JPY: '¥',
+      BRL: 'R$',
+      MXN: '$',
+    };
+
+    const symbol = symbols[priceInfo.currency] || `${priceInfo.currency} `;
+    const formattedAmount = priceInfo.currency === 'NGN'
+      ? priceInfo.amount.toLocaleString()
+      : priceInfo.amount.toString();
+
+    return `${symbol}${formattedAmount}`;
   };
 
   const renderEventCard = (event: Event) => (
@@ -237,15 +406,10 @@ export default function AllEventsScreen() {
         </View>
 
         <View style={styles.eventActions}>
-          {(event.price_gbp !== undefined || event.price_ngn !== undefined) && (
+          {formatEventPrice(event) && (
             <View style={[styles.priceTag, { backgroundColor: theme.colors.primary + '20' }]}>
               <Text style={[styles.priceText, { color: theme.colors.primary }]}>
-                {(!event.price_gbp || event.price_gbp === 0) && (!event.price_ngn || event.price_ngn === 0) 
-                  ? 'FREE' 
-                  : event.price_gbp 
-                    ? `£${event.price_gbp}` 
-                    : `₦${event.price_ngn}`
-                }
+                {formatEventPrice(event)}
               </Text>
             </View>
           )}
@@ -326,9 +490,9 @@ export default function AllEventsScreen() {
         <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
         <BackButton onPress={() => navigation.goBack()} />
         <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
-          All Events ({filteredEvents.length})
+          {screenTitle} ({filteredEvents.length})
         </Text>
-        <View style={{ width: 24 }} />
+        <View style={{ width: 40 }} />
       </View>
 
       {/* Search Bar */}
@@ -389,7 +553,13 @@ export default function AllEventsScreen() {
               No events found
             </Text>
             <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
-              {searchQuery ? 'Try adjusting your search' : 'Check back later for new events'}
+              {searchQuery
+                ? 'Try adjusting your search'
+                : mode === 'created'
+                  ? "You haven't created any events yet"
+                  : mode === 'booked'
+                    ? "You haven't booked any events yet"
+                    : 'Check back later for new events'}
             </Text>
           </View>
         }
@@ -428,6 +598,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   loadingText: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginTop: 10,
     fontSize: 16,
   },
@@ -438,6 +611,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   errorText: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     color: '#c62828',
     textAlign: 'center',
     fontSize: 14,
@@ -447,12 +623,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 16,
+    paddingTop: 8,
     borderBottomWidth: 1,
   },
   headerTitle: {
     flex: 1,
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    lineHeight: 40,
+    fontSize: 34,
     textAlign: 'center',
   },
   searchContainer: {
@@ -469,6 +649,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   searchInput: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     flex: 1,
     marginLeft: 8,
     fontSize: 16,
@@ -481,8 +664,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   filterLabel: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     fontSize: 16,
-    fontWeight: '600',
     marginRight: 12,
   },
   filterOptions: {
@@ -490,15 +675,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   filterButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
     borderWidth: 1,
     marginRight: 8,
   },
   filterButtonText: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     fontSize: 14,
-    fontWeight: '500',
   },
   listContainer: {
     padding: 16,
@@ -525,13 +712,17 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   eventTitle: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     fontSize: 18,
-    fontWeight: '600',
     marginBottom: 8,
   },
   eventDate: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     fontSize: 14,
-    fontWeight: '500',
     marginBottom: 4,
   },
   locationRow: {
@@ -541,12 +732,17 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   eventLocation: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     fontSize: 14,
     flex: 1,
   },
   distanceText: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     fontSize: 12,
-    fontWeight: '600',
     marginLeft: 8,
   },
   eventActions: {
@@ -558,10 +754,15 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   priceText: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     fontSize: 12,
-    fontWeight: '600',
   },
   eventDescription: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 12,
@@ -581,6 +782,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statText: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     fontSize: 12,
     marginLeft: 4,
   },
@@ -591,8 +795,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   categoryText: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     fontSize: 12,
-    fontWeight: '500',
   },
   emptyContainer: {
     flex: 1,
@@ -601,12 +807,17 @@ const styles = StyleSheet.create({
     paddingVertical: 64,
   },
   emptyTitle: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     fontSize: 20,
-    fontWeight: 'bold',
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtitle: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     fontSize: 16,
     textAlign: 'center',
   },

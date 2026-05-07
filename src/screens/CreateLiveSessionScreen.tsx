@@ -25,6 +25,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { dbHelpers, supabase } from '../lib/supabase';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 export default function CreateLiveSessionScreen() {
   const navigation = useNavigation();
@@ -471,8 +472,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 34,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    lineHeight: 40,
+    fontFamily: Typography.body.fontFamily,
   },
   scrollView: {
     flex: 1,
@@ -482,8 +486,8 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   label: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
     marginBottom: 12,
   },
   required: {
@@ -494,6 +498,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 16,
     paddingVertical: 14,
+    ...Typography.body,
     fontSize: 15,
   },
   textArea: {
@@ -504,6 +509,7 @@ const styles = StyleSheet.create({
     maxWidth: 100,
   },
   helperText: {
+    ...Typography.label,
     fontSize: 12,
     marginTop: 8,
   },
@@ -522,11 +528,12 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   typeButtonText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
     marginTop: 8,
   },
   typeButtonSubtext: {
+    ...Typography.label,
     fontSize: 12,
     marginTop: 4,
     textAlign: 'center',
@@ -542,8 +549,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   switchText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '500',
   },
   scheduleSection: {
     flexDirection: 'row',
@@ -561,8 +568,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   dateTimeButtonText: {
+    ...Typography.button,
     fontSize: 15,
-    fontWeight: '500',
   },
   infoBox: {
     flexDirection: 'row',
@@ -575,6 +582,7 @@ const styles = StyleSheet.create({
   },
   infoText: {
     flex: 1,
+    ...Typography.label,
     fontSize: 13,
     lineHeight: 20,
   },
@@ -596,8 +604,8 @@ const styles = StyleSheet.create({
   },
   createButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 17,
-    fontWeight: '700',
   },
 });
 

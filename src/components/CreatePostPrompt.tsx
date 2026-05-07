@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 interface CreatePostPromptProps {
   onPress: () => void;
@@ -88,7 +89,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
-    elevation: 2,
+    elevation: 0,
   },
   avatarContainer: {
     width: 44,
@@ -109,8 +110,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   promptText: {
+    ...Typography.body,
     fontSize: 15,
-    fontWeight: '400',
     marginBottom: 8,
   },
   mediaIconsRow: {
@@ -123,6 +124,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   mediaLabel: {
+    ...Typography.label,
     fontSize: 12,
     marginLeft: 4,
   },

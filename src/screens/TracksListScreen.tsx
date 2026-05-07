@@ -11,13 +11,13 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { supabase } from '../lib/supabase';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { profileService } from '../services/ProfileService';
 import { ModerationBadge } from '../components/ModerationBadge';
 
 interface Track {
@@ -34,14 +34,17 @@ interface Track {
   creator_id?: string;
   moderation_status?: 'pending_check' | 'checking' | 'clean' | 'flagged' | 'approved' | 'rejected' | 'appealed';
   moderation_confidence?: number;
+  is_paid?: boolean;
+  price?: number;
+  currency?: string;
 }
 
 export default function TracksListScreen() {
   const navigation = useNavigation();
   const route = useRoute();
-  const { user, session } = useAuth();
+  const { user } = useAuth();
   const { theme } = useTheme();
-  const { playTrack, currentTrack, isPlaying } = useAudioPlayer();
+  const { play, currentTrack, isPlaying } = useAudioPlayer();
 
   // Get userId from route params or use current user
   const userId = (route.params as any)?.userId || user?.id;
@@ -64,68 +67,51 @@ export default function TracksListScreen() {
       setLoading(true);
       console.log('🎵 Loading tracks for user:', userId);
 
-      // Try API endpoint first, fallback to Supabase if it fails
-      let tracksData: Track[] = [];
-      
-      try {
-        const result = await profileService.getTracks(userId, session || undefined);
-        if (result.success && result.tracks) {
-          console.log('✅ Loaded tracks from API:', result.tracks.length);
-          tracksData = result.tracks.map(track => ({
-            id: track.id,
-            title: track.title,
-            artist_name: track.artist_name,
-            cover_url: track.cover_image_url || null,
-            audio_url: track.audio_url,
-            duration: track.duration,
-            play_count: track.play_count,
-            likes_count: track.likes_count,
-            created_at: track.created_at,
-            is_liked: track.is_liked,
-          }));
-        }
-      } catch (apiError) {
-        console.warn('⚠️ API endpoint failed, falling back to Supabase:', apiError);
-        
-        // Fallback to Supabase
-        const { data: tracksDataSupabase, error: tracksError } = await supabase
+      // Always use Supabase directly — API route doesn't return creator join or cover art
+      const { data: tracksDataSupabase, error: tracksError } = await supabase
         .from('audio_tracks')
-        .select('*')
+        .select(`
+          id, title, file_url, cover_art_url, duration,
+          play_count, likes_count, created_at, creator_id,
+          is_paid, price, currency,
+          moderation_status, moderation_confidence,
+          creator:profiles!creator_id(id, username, display_name, avatar_url)
+        `)
         .eq('creator_id', userId)
         .order('created_at', { ascending: false });
 
       if (tracksError) throw tracksError;
 
-      // Get current user's likes to check if they liked these tracks
+      // Get current user's likes
       let likedTrackIds: string[] = [];
-      if (user?.id) {
+      if (user?.id && tracksDataSupabase && tracksDataSupabase.length > 0) {
         const { data: likesData } = await supabase
           .from('likes')
           .select('content_id')
           .eq('user_id', user.id)
           .eq('content_type', 'track')
-          .in('content_id', tracksDataSupabase?.map(t => t.id) || []);
-
+          .in('content_id', tracksDataSupabase.map(t => t.id));
         likedTrackIds = likesData?.map(l => l.content_id) || [];
       }
 
-      // Transform data
-        tracksData = (tracksDataSupabase || []).map(track => ({
+      const tracksData: Track[] = (tracksDataSupabase || []).map((track: any) => ({
         id: track.id,
         title: track.title || 'Untitled Track',
-        artist_name: track.artist_name || 'Unknown Artist',
-        cover_url: track.cover_image_url || track.cover_url || track.artwork_url || track.image_url,
-        audio_url: track.audio_url || track.file_url,
+        artist_name: track.creator?.display_name || track.creator?.username || '',
+        cover_url: track.cover_art_url || null,
+        audio_url: track.file_url || '',
         duration: track.duration || 0,
-        play_count: track.play_count || track.plays_count || 0,
-        likes_count: track.likes_count || track.like_count || 0,
+        play_count: track.play_count || 0,
+        likes_count: track.likes_count || 0,
         created_at: track.created_at,
         is_liked: likedTrackIds.includes(track.id),
         creator_id: track.creator_id,
         moderation_status: track.moderation_status,
         moderation_confidence: track.moderation_confidence,
+        is_paid: track.is_paid,
+        price: track.price,
+        currency: track.currency,
       }));
-      }
 
       setTracks(tracksData);
     } catch (error) {
@@ -223,13 +209,18 @@ export default function TracksListScreen() {
       }
 
       // Play track using audio player context
-      await playTrack({
+      await play({
         id: track.id,
         title: track.title,
-        artist: track.artist_name,
-        artwork: track.cover_url || '',
-        url: track.audio_url,
+        created_at: track.created_at,
+        file_url: track.audio_url,
+        audio_url: track.audio_url,
+        cover_image_url: track.cover_url || '',
         duration: track.duration,
+        is_paid: track.is_paid,
+        price: track.price,
+        currency: track.currency,
+        creator_id: track.creator_id,
       });
 
       // Update local play count
@@ -336,76 +327,105 @@ export default function TracksListScreen() {
     const isCurrentlyPlaying = isCurrentTrack && isPlaying;
 
     return (
-      <View style={[styles.trackItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-        <TouchableOpacity
-          style={styles.trackMain}
-          onPress={() => handlePlayTrack(item)}
-        >
-          {/* Track Cover */}
-          <View style={styles.coverContainer}>
-            {item.cover_url ? (
-              <Image source={{ uri: item.cover_url }} style={styles.cover} />
-            ) : (
-              <View style={[styles.cover, styles.coverPlaceholder, { backgroundColor: theme.colors.surface }]}>
-                <Ionicons name="musical-notes" size={24} color={theme.colors.textSecondary} />
-              </View>
-            )}
-            {/* Play/Pause Overlay */}
+      <TouchableOpacity
+        activeOpacity={0.85}
+        style={[styles.trackItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+        onPress={() => isOwnProfile
+          ? (navigation as any).navigate('TrackDetails', { trackId: item.id, track: item })
+          : handlePlayTrack(item)
+        }
+      >
+        {/* Cover + active indicator */}
+        <View style={styles.coverContainer}>
+          {item.cover_url ? (
+            <Image source={{ uri: item.cover_url }} style={styles.cover} />
+          ) : (
+            <LinearGradient
+              colors={[theme.colors.primary + '40', theme.colors.primary + '10']}
+              style={[styles.cover, styles.coverPlaceholder]}
+            >
+              <Ionicons name="musical-notes" size={26} color={theme.colors.primary} />
+            </LinearGradient>
+          )}
+          {/* Play overlay — shown when this track is active */}
+          {isCurrentTrack && (
             <View style={styles.playOverlay}>
-              {isCurrentlyPlaying ? (
-                <Ionicons name="pause-circle" size={32} color="#FFFFFF" />
-              ) : (
-                <Ionicons name="play-circle" size={32} color="#FFFFFF" />
-              )}
+              <Ionicons
+                name={isCurrentlyPlaying ? 'pause-circle' : 'play-circle'}
+                size={34}
+                color="#FFFFFF"
+              />
             </View>
-          </View>
+          )}
+          {/* Price badge on cover for paid tracks */}
+          {item.is_paid && item.price ? (
+            <View style={[styles.coverPriceBadge, { backgroundColor: theme.colors.primary }]}>
+              <Text style={styles.coverPriceBadgeText}>
+                {item.currency === 'GBP' ? '£' : item.currency === 'EUR' ? '€' : '$'}{Number(item.price).toFixed(2)}
+              </Text>
+            </View>
+          ) : null}
+        </View>
 
-          {/* Track Info */}
-          <View style={styles.trackInfo}>
-            <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
-              {item.title}
-            </Text>
-            <Text style={[styles.artistName, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-              {item.artist_name}
-            </Text>
-            {isOwnProfile && item.moderation_status && (
+        {/* Track Info */}
+        <View style={styles.trackInfo}>
+          <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
+            {item.title}
+          </Text>
+          <Text style={[styles.artistName, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+            {item.artist_name}
+          </Text>
+          {isOwnProfile && item.moderation_status && (
+            <View style={{ marginTop: 4 }}>
               <ModerationBadge
                 status={item.moderation_status}
                 confidence={item.moderation_confidence}
                 isOwner={true}
               />
-            )}
-            <View style={styles.trackStats}>
-              <View style={styles.stat}>
-                <Ionicons name="play" size={12} color={theme.colors.textSecondary} />
-                <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
-                  {formatNumber(item.play_count)}
-                </Text>
-              </View>
-              <View style={styles.stat}>
-                <Ionicons name="heart" size={12} color={theme.colors.textSecondary} />
-                <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
-                  {formatNumber(item.likes_count)}
-                </Text>
-              </View>
+            </View>
+          )}
+          <View style={styles.trackStats}>
+            <View style={styles.stat}>
+              <Ionicons name="play" size={11} color={theme.colors.textSecondary} />
               <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
-                {formatDate(item.created_at)}
+                {formatNumber(item.play_count)}
               </Text>
             </View>
-          </View>
-
-          {/* Duration */}
-          {item.duration > 0 && (
-            <Text style={[styles.duration, { color: theme.colors.textSecondary }]}>
-              {formatDuration(item.duration)}
+            <View style={styles.stat}>
+              <Ionicons name="heart" size={11} color={theme.colors.textSecondary} />
+              <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
+                {formatNumber(item.likes_count)}
+              </Text>
+            </View>
+            {item.duration > 0 && (
+              <View style={styles.stat}>
+                <Ionicons name="time-outline" size={11} color={theme.colors.textSecondary} />
+                <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
+                  {formatDuration(item.duration)}
+                </Text>
+              </View>
+            )}
+            <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
+              {formatDate(item.created_at)}
             </Text>
-          )}
-        </TouchableOpacity>
+          </View>
+        </View>
 
-        {/* Action Buttons */}
+        {/* Right-side actions */}
         <View style={styles.actions}>
           <TouchableOpacity
-            style={styles.actionButton}
+            style={[styles.actionButton, { backgroundColor: theme.colors.surface }]}
+            onPress={() => handlePlayTrack(item)}
+          >
+            <Ionicons
+              name={isCurrentlyPlaying ? 'pause' : 'play'}
+              size={16}
+              color={isCurrentTrack ? theme.colors.primary : theme.colors.text}
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionButton, { backgroundColor: theme.colors.surface }]}
             onPress={() => handleLikeToggle(item.id, item.is_liked)}
             disabled={isProcessingLike}
           >
@@ -414,37 +434,61 @@ export default function TracksListScreen() {
             ) : (
               <Ionicons
                 name={item.is_liked ? 'heart' : 'heart-outline'}
-                size={24}
+                size={16}
                 color={item.is_liked ? theme.colors.primary : theme.colors.textSecondary}
               />
             )}
           </TouchableOpacity>
 
           {isOwnProfile && (
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => handleDeleteTrack(item.id)}
-            >
-              <Ionicons name="trash-outline" size={24} color={theme.colors.error} />
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: item.is_paid ? theme.colors.primary + '20' : theme.colors.surface }]}
+                onPress={() => (navigation as any).navigate('TrackDetails', { trackId: item.id, track: item })}
+              >
+                <Ionicons
+                  name="pricetag-outline"
+                  size={16}
+                  color={item.is_paid ? theme.colors.primary : theme.colors.textSecondary}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: theme.colors.surface }]}
+                onPress={() => handleDeleteTrack(item.id)}
+              >
+                <Ionicons name="trash-outline" size={16} color={theme.colors.error} />
+              </TouchableOpacity>
+            </>
           )}
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+      <LinearGradient
+        colors={[theme.colors.card, theme.colors.background]}
+        style={[styles.header, { borderBottomColor: theme.colors.border }]}
+      >
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
+          <View style={[styles.backButtonInner, { backgroundColor: theme.colors.surface }]}>
+            <Ionicons name="arrow-back" size={20} color={theme.colors.text} />
+          </View>
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
-          {isOwnProfile ? 'My Tracks' : 'Tracks'}
-        </Text>
+        <View style={styles.headerCenter}>
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
+            {isOwnProfile ? 'My Tracks' : 'Tracks'}
+          </Text>
+          {isOwnProfile && (
+            <Text style={[styles.headerSubtitle, { color: theme.colors.textSecondary }]}>
+              Tap a track to manage pricing
+            </Text>
+          )}
+        </View>
         <View style={styles.backButton} />
-      </View>
+      </LinearGradient>
 
       {/* Moderation Filter (Owner Only) */}
       {isOwnProfile && (
@@ -539,18 +583,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    paddingTop: 8,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backButton: {
     width: 40,
-    height: 40,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  backButtonInner: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+  },
+  headerSubtitle: {
+    fontSize: 11,
+    marginTop: 2,
+    letterSpacing: -0.2,
   },
   loadingContainer: {
     flex: 1,
@@ -569,7 +630,8 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: '700',
+    letterSpacing: -0.5,
     marginTop: 16,
     marginBottom: 8,
   },
@@ -582,38 +644,37 @@ const styles = StyleSheet.create({
   uploadButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 13,
+    borderRadius: 28,
     gap: 8,
   },
   uploadButtonText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
+    letterSpacing: -0.3,
     color: '#FFFFFF',
   },
   listContent: {
     padding: 16,
+    paddingBottom: 32,
   },
   trackItem: {
-    borderRadius: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  trackMain: {
     flexDirection: 'row',
     alignItems: 'center',
+    borderRadius: 16,
+    marginBottom: 10,
+    borderWidth: StyleSheet.hairlineWidth,
     padding: 12,
+    gap: 12,
   },
   coverContainer: {
     position: 'relative',
-    marginRight: 12,
   },
   cover: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
+    width: 58,
+    height: 58,
+    borderRadius: 10,
   },
   coverPlaceholder: {
     justifyContent: 'center',
@@ -627,58 +688,77 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderRadius: 10,
+  },
+  coverPriceBadge: {
+    position: 'absolute',
+    bottom: -4,
+    right: -6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  coverPriceBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
   },
   trackInfo: {
     flex: 1,
-    marginRight: 12,
+    minWidth: 0,
   },
   trackTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
-    marginBottom: 4,
+    letterSpacing: -0.3,
+    marginBottom: 2,
   },
   artistName: {
-    fontSize: 14,
+    fontSize: 13,
     marginBottom: 4,
+    letterSpacing: -0.2,
   },
   trackStats: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 2,
   },
   stat: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
   },
   statText: {
-    fontSize: 12,
-  },
-  duration: {
-    fontSize: 12,
+    fontSize: 11,
+    letterSpacing: -0.2,
   },
   actions: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-    gap: 12,
+    gap: 8,
   },
   actionButton: {
-    padding: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   filterContainer: {
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   filterLabel: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
-    marginBottom: 8,
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
+    marginBottom: 10,
   },
   filterButtons: {
     flexDirection: 'row',
@@ -686,13 +766,14 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   filterButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
     borderRadius: 20,
     borderWidth: 1,
   },
   filterButtonText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
+    letterSpacing: -0.2,
   },
 });

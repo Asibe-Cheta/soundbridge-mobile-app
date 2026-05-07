@@ -16,10 +16,13 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Dimensions,
 } from 'react-native';
+
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { CardField, useStripe } from '@stripe/stripe-react-native';
+import { useStripe } from '@stripe/stripe-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { createTip, confirmTip } from '../../services/TipService';
@@ -30,7 +33,7 @@ interface LiveTippingModalProps {
   creatorId: string;
   sessionId: string;
   onClose: () => void;
-  onSendTip: (amount: number, message?: string) => Promise<void>;
+  onSendTip: (amount: number, message?: string, paymentIntentId?: string) => Promise<void>;
 }
 
 export default function LiveTippingModal({
@@ -43,13 +46,12 @@ export default function LiveTippingModal({
 }: LiveTippingModalProps) {
   const { theme } = useTheme();
   const { user, userProfile, session } = useAuth();
-  const { confirmPayment } = useStripe();
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
   const [selectedAmount, setSelectedAmount] = useState<number | null>(null);
   const [customAmount, setCustomAmount] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const [cardComplete, setCardComplete] = useState(false);
   const [processingMessage, setProcessingMessage] = useState<string | null>(null);
 
   const quickAmounts = [1, 5, 10, 20, 50];
@@ -70,12 +72,6 @@ export default function LiveTippingModal({
     return 'free';
   }, [user?.user_metadata, userProfile]);
 
-  const isCardPaymentReady = useMemo(() => {
-    if (!stripeConfigured) {
-      return true; // Allow fallback for MVP
-    }
-    return cardComplete;
-  }, [cardComplete, stripeConfigured]);
 
   const handleAmountSelect = (amount: number) => {
     setSelectedAmount(amount);
@@ -119,23 +115,12 @@ export default function LiveTippingModal({
       return;
     }
 
-    if (amount > 100) {
-      Alert.alert('Maximum Tip', 'Maximum tip amount is $100 for in-app purchases');
-      return;
-    }
-
-    if (stripeConfigured && !isCardPaymentReady) {
-      Alert.alert('Payment Details Needed', 'Please complete your card details before sending a tip.');
-      return;
-    }
-
     try {
       setLoading(true);
       setProcessingMessage('Processing payment...');
 
       console.log('🎯 Sending live tip:', { creatorId, amount, message, tier: userTier });
 
-      // If Stripe is not configured, use fallback (for development/testing)
       if (!stripeConfigured) {
         console.warn('⚠️ Stripe not configured, using fallback flow');
         await onSendTip(amount, message || undefined);
@@ -146,7 +131,6 @@ export default function LiveTippingModal({
           [{
             text: 'OK',
             onPress: () => {
-              // Reset form
               setSelectedAmount(null);
               setCustomAmount('');
               setMessage('');
@@ -157,7 +141,6 @@ export default function LiveTippingModal({
         return;
       }
 
-      // Stripe payment flow
       setProcessingMessage('Contacting payment service...');
       const createResponse = await createTip(session, {
         creatorId,
@@ -173,14 +156,28 @@ export default function LiveTippingModal({
         throw new Error(createResponse?.message || 'Unable to start tip payment.');
       }
 
-      setProcessingMessage('Confirming payment...');
-      const { error: confirmError } = await confirmPayment(createResponse.clientSecret, {
-        paymentMethodType: 'Card',
+      const { error: initError } = await initPaymentSheet({
+        paymentIntentClientSecret: createResponse.clientSecret,
+        merchantDisplayName: 'SoundBridge',
+        ...(createResponse.customer_id && createResponse.ephemeral_key_secret
+          ? { customerId: createResponse.customer_id, customerEphemeralKeySecret: createResponse.ephemeral_key_secret }
+          : {}),
+        defaultBillingDetails: {
+          name: user?.display_name || user?.email || undefined,
+          email: user?.email || undefined,
+        },
       });
 
-      if (confirmError) {
-        console.error('❌ Stripe confirmPayment error:', confirmError);
-        throw new Error(confirmError.localizedMessage || confirmError.message || 'Payment failed.');
+      if (initError) {
+        throw new Error(initError.localizedMessage || initError.message || 'Payment setup failed.');
+      }
+
+      setProcessingMessage('Confirming payment...');
+      const { error: presentError } = await presentPaymentSheet();
+
+      if (presentError) {
+        if (presentError.code === 'Canceled') return;
+        throw new Error(presentError.localizedMessage || presentError.message || 'Payment failed.');
       }
 
       setProcessingMessage('Finalizing tip...');
@@ -191,7 +188,7 @@ export default function LiveTippingModal({
       }
 
       // Record the tip in the live session
-      await onSendTip(amount, message || undefined);
+      await onSendTip(amount, message || undefined, createResponse.paymentIntentId);
 
       const platformFee = typeof createResponse.platformFee === 'number' ? createResponse.platformFee : amount * 0.15;
       const creatorEarnings = typeof createResponse.creatorEarnings === 'number' ? createResponse.creatorEarnings : amount * 0.85;
@@ -286,7 +283,7 @@ Platform fee: $${platformFee.toFixed(2)}`,
             </TouchableOpacity>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {/* Quick Amounts */}
             <View style={styles.section}>
               <Text style={[styles.sectionLabel, { color: theme.colors.textSecondary }]}>
@@ -339,29 +336,6 @@ Platform fee: $${platformFee.toFixed(2)}`,
               </View>
             </View>
 
-            {/* Card Details - Only show if Stripe is configured */}
-            {stripeConfigured && (
-              <View style={styles.section}>
-                <Text style={[styles.sectionLabel, { color: theme.colors.textSecondary }]}>
-                  Card Details
-                </Text>
-                <View style={[styles.cardFieldContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-                  <CardField
-                    postalCodeEnabled={false}
-                    placeholders={{ number: '4242 4242 4242 4242' }}
-                    cardStyle={{
-                      backgroundColor: theme.colors.card,
-                      textColor: theme.colors.text,
-                      placeholderColor: theme.colors.textSecondary,
-                    }}
-                    style={styles.cardField}
-                    onCardChange={(cardDetails) => {
-                      setCardComplete(cardDetails.complete);
-                    }}
-                  />
-                </View>
-              </View>
-            )}
 
             {/* Message */}
             <View style={styles.section}>
@@ -485,7 +459,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingBottom: 24,
-    maxHeight: '90%',
+    maxHeight: Math.round(SCREEN_HEIGHT * 0.56),
   },
   handleBar: {
     alignItems: 'center',
@@ -572,24 +546,13 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '600',
   },
-  cardFieldContainer: {
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    minHeight: 50,
-  },
-  cardField: {
-    width: '100%',
-    height: 50,
-  },
   messageInput: {
     borderRadius: 12,
     borderWidth: 1,
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 15,
-    minHeight: 100,
+    minHeight: 64,
     textAlignVertical: 'top',
   },
   characterCount: {

@@ -23,6 +23,7 @@ import { walletService } from '../services/WalletService';
 import { currencyService } from '../services/CurrencyService';
 import { revenueService } from '../services/revenueService';
 import CountryAwareBankForm from '../components/CountryAwareBankForm';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 interface BankAccount {
   id: string;
@@ -46,11 +47,19 @@ interface BankAccountFormData {
   currency: string;
 }
 
+// Currencies routed through Wise — Stripe Connect is irrelevant for these
+const WISE_CURRENCIES = new Set([
+  'NGN', 'GHS', 'KES', 'ZAR', 'TZS', 'UGX', 'EGP', 'RWF', 'XOF', 'XAF',
+  'INR', 'IDR', 'MYR', 'PHP', 'THB', 'VND', 'BDT', 'PKR', 'LKR', 'NPR', 'CNY', 'KRW',
+  'BRL', 'MXN', 'ARS', 'CLP', 'COP', 'CRC', 'UYU',
+  'TRY', 'ILS', 'MAD', 'UAH', 'GEL',
+]);
+
 export default function PaymentMethodsScreen() {
   const navigation = useNavigation();
   const { user, session } = useAuth();
   const { theme } = useTheme();
-  
+
   const [bankAccount, setBankAccount] = useState<BankAccount | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -60,6 +69,7 @@ export default function PaymentMethodsScreen() {
   const [cleaningAccounts, setCleaningAccounts] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showAccountDetails, setShowAccountDetails] = useState(false);
+  const [isWiseCountry, setIsWiseCountry] = useState(false);
   
   const [formData, setFormData] = useState<BankAccountFormData>({
     account_holder_name: '',
@@ -84,19 +94,37 @@ export default function PaymentMethodsScreen() {
       setLoading(true);
       console.log('🔄 Loading bank account data...');
 
-      // ✅ LOAD ACTUAL BANK ACCOUNT FROM DATABASE
-      const account = await revenueService.getBankAccount(session.user.id);
-      setBankAccount(account);
+      // Detect country in parallel with loading bank account
+      const [account, countryResult] = await Promise.allSettled([
+        revenueService.getBankAccount(session.user.id),
+        walletService.detectCountryForStripe(session),
+      ]);
 
-      console.log('✅ Bank account loaded:', account ? 'Found' : 'None');
+      const resolvedAccount = account.status === 'fulfilled' ? account.value : null;
+      setBankAccount(resolvedAccount);
+      setFormData({
+        account_holder_name: resolvedAccount?.account_holder_name || '',
+        bank_name: resolvedAccount?.bank_name || '',
+        account_number: resolvedAccount?.account_number_encrypted || '',
+        routing_number: resolvedAccount?.routing_number_encrypted || '',
+        account_type: resolvedAccount?.account_type || 'checking',
+        currency: resolvedAccount?.currency || 'USD'
+      });
 
-      // Check account status if we have a bank account
-      await checkAccountStatus();
+      // Determine payout provider from country detection
+      if (countryResult.status === 'fulfilled') {
+        setIsWiseCountry(!countryResult.value.supported_by_stripe);
+      }
+
+      console.log('✅ Bank account loaded:', resolvedAccount ? 'Found' : 'None');
+
+      // Check Stripe account status only for non-Wise users with a bank account
+      await checkAccountStatus(resolvedAccount);
 
       console.log('✅ Bank account data loaded');
     } catch (error) {
+      // Don't show error dialog — just show the empty/setup state
       console.error('❌ Error loading bank account:', error);
-      Alert.alert('Error', 'Failed to load bank account data');
     } finally {
       setLoading(false);
     }
@@ -105,12 +133,13 @@ export default function PaymentMethodsScreen() {
   /**
    * Check Stripe account status and update display
    */
-  const checkAccountStatus = async () => {
+  const checkAccountStatus = async (accountOverride?: BankAccount | null) => {
     if (!session) return;
 
     try {
       setCheckingStatus(true);
 
+      const accountToCheck = accountOverride ?? bankAccount;
       // ✅ SKIP STRIPE CHECK FOR WISE-SUPPORTED CURRENCIES
       // Users with Wise currencies (NGN, INR, BRL, etc.) don't need Stripe Connect
       const wiseCurrencies = [
@@ -120,8 +149,8 @@ export default function PaymentMethodsScreen() {
         'TRY', 'ILS', 'MAD', 'UAH', 'GEL',  // Middle East & Europe
       ];
 
-      if (bankAccount && wiseCurrencies.includes(bankAccount.currency)) {
-        console.log(`ℹ️ User has Wise currency (${bankAccount.currency}) - skipping Stripe check`);
+      if (accountToCheck && wiseCurrencies.includes(accountToCheck.currency)) {
+        console.log(`ℹ️ User has Wise currency (${accountToCheck.currency}) - skipping Stripe check`);
         setStatusDisplay({
           status: 'wise',
           color: '#10B981',
@@ -286,13 +315,16 @@ export default function PaymentMethodsScreen() {
       }
 
       // ✅ SAVE COUNTRY-AWARE BANK ACCOUNT TO DATABASE
+      const derivedCurrency = methodData.currency
+        || (methodData.country ? currencyService.getCurrencyForCountry(methodData.country) : undefined)
+        || 'USD';
       const formData = {
         account_holder_name: methodData.account_holder_name || methodData.accountHolderName,
         bank_name: methodData.bank_name || methodData.bankName,
         account_number: methodData.account_number || methodData.accountNumber,
-        routing_number: methodData.routing_number || methodData.routingNumber || '',
+        routing_number: methodData.bank_code || methodData.routing_number || methodData.routingNumber || '',
         account_type: methodData.account_type || methodData.accountType || 'checking',
-        currency: methodData.currency || methodData.country || 'USD',
+        currency: derivedCurrency,
       };
 
       const result = await revenueService.setBankAccount(user.id, formData);
@@ -737,17 +769,17 @@ export default function PaymentMethodsScreen() {
             {/* Verification Status */}
             <View style={styles.statusContainer}>
               <View style={styles.statusInfo}>
-                <View style={[styles.statusIcon, { backgroundColor: `${getVerificationStatusColor(bankAccount.verification_status)}20` }]}>
-                  <Ionicons 
-                    name={getVerificationStatusIcon(bankAccount.verification_status) as any} 
-                    size={20} 
-                    color={getVerificationStatusColor(bankAccount.verification_status)} 
+                <View style={[styles.statusIcon, { backgroundColor: `${getVerificationStatusColor(WISE_CURRENCIES.has(bankAccount.currency) ? 'verified' : bankAccount.verification_status)}20` }]}>
+                  <Ionicons
+                    name={getVerificationStatusIcon(WISE_CURRENCIES.has(bankAccount.currency) ? 'verified' : bankAccount.verification_status) as any}
+                    size={20}
+                    color={getVerificationStatusColor(WISE_CURRENCIES.has(bankAccount.currency) ? 'verified' : bankAccount.verification_status)}
                   />
                 </View>
                 <View>
                   <Text style={[styles.statusTitle, { color: theme.colors.text }]}>Verification Status</Text>
                   <Text style={[styles.statusSubtitle, { color: theme.colors.textSecondary }]}>
-                    {bankAccount.verification_status.charAt(0).toUpperCase() + bankAccount.verification_status.slice(1)}
+                    {WISE_CURRENCIES.has(bankAccount.currency) ? 'Active' : bankAccount.verification_status.charAt(0).toUpperCase() + bankAccount.verification_status.slice(1)}
                   </Text>
                 </View>
               </View>
@@ -843,63 +875,97 @@ export default function PaymentMethodsScreen() {
           </View>
         )}
 
-        {/* Stripe Connect Setup */}
+        {/* Payout Account Setup — country-aware */}
         {!bankAccount && !isEditing && (
           <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
-            <View style={styles.stripeContainer}>
-              <View style={styles.stripeIcon}>
-                <Ionicons name="card" size={32} color="#635BFF" />
-              </View>
-              <Text style={[styles.stripeTitle, { color: theme.colors.text }]}>Set Up Payout Account</Text>
-              <Text style={[styles.stripeSubtitle, { color: theme.colors.textSecondary }]}>
-                Connect your bank account to receive payouts from your earnings. 
-                We use Stripe Connect for secure and reliable payments.
-              </Text>
-              
-              <TouchableOpacity 
-                style={styles.stripeButton}
-                onPress={handleSetupStripeConnect}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Ionicons name="card" size={20} color="#FFFFFF" />
-                    <Text style={styles.stripeButtonText}>Set Up with Stripe Connect</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-              
-              
-              <TouchableOpacity 
-                style={[styles.manualButton, { backgroundColor: theme.colors.card }]}
-                onPress={() => setIsEditing(true)}
-                disabled={saving}
-              >
-                <Ionicons name="business" size={20} color={theme.colors.text} />
-                <Text style={[styles.manualButtonText, { color: theme.colors.text }]}>Manual Bank Account Setup</Text>
-              </TouchableOpacity>
+            {isWiseCountry ? (
+              /* ── WISE SETUP (Nigeria, Ghana, Kenya, etc.) ── */
+              <View style={styles.stripeContainer}>
+                <View style={[styles.stripeIcon, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
+                  <Ionicons name="globe" size={32} color="#10B981" />
+                </View>
+                <Text style={[styles.stripeTitle, { color: theme.colors.text }]}>Set Up Bank Payout</Text>
+                <Text style={[styles.stripeSubtitle, { color: theme.colors.textSecondary }]}>
+                  Add your local bank account to receive payouts. We use Wise to send money directly to your bank in your local currency.
+                </Text>
 
-              {/* Benefits */}
-              <View style={styles.benefitsContainer}>
-                <View style={styles.benefitsHeader}>
-                  <Ionicons name="shield-checkmark" size={20} color="#10B981" />
-                  <Text style={[styles.benefitsTitle, { color: theme.colors.text }]}>Why Stripe Connect?</Text>
-                </View>
-                <View style={styles.benefitsList}>
-                  <Text style={[styles.benefitItem, { color: theme.colors.textSecondary }]}>• Secure and trusted payment processing</Text>
-                  <Text style={[styles.benefitItem, { color: theme.colors.textSecondary }]}>• Faster payouts (1-2 business days)</Text>
-                  <Text style={[styles.benefitItem, { color: theme.colors.textSecondary }]}>• Lower fees compared to manual transfers</Text>
-                  <Text style={[styles.benefitItem, { color: theme.colors.textSecondary }]}>• Automatic tax reporting and compliance</Text>
+                <TouchableOpacity
+                  style={[styles.stripeButton, { backgroundColor: '#10B981' }]}
+                  onPress={() => navigation.navigate('AddWithdrawalMethod' as never)}
+                  disabled={saving}
+                >
+                  <Ionicons name="business" size={20} color="#FFFFFF" />
+                  <Text style={styles.stripeButtonText}>Add Bank Account</Text>
+                </TouchableOpacity>
+
+                <View style={styles.benefitsContainer}>
+                  <View style={styles.benefitsHeader}>
+                    <Ionicons name="shield-checkmark" size={20} color="#10B981" />
+                    <Text style={[styles.benefitsTitle, { color: theme.colors.text }]}>How payouts work</Text>
+                  </View>
+                  <View style={styles.benefitsList}>
+                    <Text style={[styles.benefitItem, { color: theme.colors.textSecondary }]}>• Earnings land in your SoundBridge wallet instantly</Text>
+                    <Text style={[styles.benefitItem, { color: theme.colors.textSecondary }]}>• Withdraw to your bank account anytime (min. $25)</Text>
+                    <Text style={[styles.benefitItem, { color: theme.colors.textSecondary }]}>• Wise converts USD to your local currency at the live rate</Text>
+                    <Text style={[styles.benefitItem, { color: theme.colors.textSecondary }]}>• Transfers typically arrive within 1–3 business days</Text>
+                  </View>
                 </View>
               </View>
-            </View>
+            ) : (
+              /* ── STRIPE CONNECT SETUP (UK, US, EU, etc.) ── */
+              <View style={styles.stripeContainer}>
+                <View style={styles.stripeIcon}>
+                  <Ionicons name="card" size={32} color="#635BFF" />
+                </View>
+                <Text style={[styles.stripeTitle, { color: theme.colors.text }]}>Set Up Payout Account</Text>
+                <Text style={[styles.stripeSubtitle, { color: theme.colors.textSecondary }]}>
+                  Connect your bank account to receive payouts from your earnings.
+                  We use Stripe Connect for secure and reliable payments.
+                </Text>
+
+                <TouchableOpacity
+                  style={styles.stripeButton}
+                  onPress={handleSetupStripeConnect}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="card" size={20} color="#FFFFFF" />
+                      <Text style={styles.stripeButtonText}>Set Up with Stripe Connect</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.manualButton, { backgroundColor: theme.colors.card }]}
+                  onPress={() => setIsEditing(true)}
+                  disabled={saving}
+                >
+                  <Ionicons name="business" size={20} color={theme.colors.text} />
+                  <Text style={[styles.manualButtonText, { color: theme.colors.text }]}>Manual Bank Account Setup</Text>
+                </TouchableOpacity>
+
+                <View style={styles.benefitsContainer}>
+                  <View style={styles.benefitsHeader}>
+                    <Ionicons name="shield-checkmark" size={20} color="#10B981" />
+                    <Text style={[styles.benefitsTitle, { color: theme.colors.text }]}>Why Stripe Connect?</Text>
+                  </View>
+                  <View style={styles.benefitsList}>
+                    <Text style={[styles.benefitItem, { color: theme.colors.textSecondary }]}>• Secure and trusted payment processing</Text>
+                    <Text style={[styles.benefitItem, { color: theme.colors.textSecondary }]}>• Faster payouts (1-2 business days)</Text>
+                    <Text style={[styles.benefitItem, { color: theme.colors.textSecondary }]}>• Lower fees compared to manual transfers</Text>
+                    <Text style={[styles.benefitItem, { color: theme.colors.textSecondary }]}>• Automatic tax reporting and compliance</Text>
+                  </View>
+                </View>
+              </View>
+            )}
           </View>
         )}
 
-        {/* Complete Verification Section */}
-        {bankAccount && bankAccount.verification_status === 'pending' && (
+        {/* Complete Verification Section — Stripe countries only */}
+        {bankAccount && bankAccount.verification_status === 'pending' && !WISE_CURRENCIES.has(bankAccount.currency) && (
           <View style={[styles.verificationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.primary }]}>
             <View style={styles.verificationHeader}>
               <Ionicons name="shield-checkmark" size={24} color={theme.colors.primary} />
@@ -925,8 +991,21 @@ export default function PaymentMethodsScreen() {
           </View>
         )}
 
-        {/* Bank Account Reset Section */}
-        {bankAccount && bankAccount.verification_status === 'pending' && (
+        {/* Wise accounts — show ready status instead of Stripe verification prompt */}
+        {bankAccount && WISE_CURRENCIES.has(bankAccount.currency) && (
+          <View style={[styles.verificationSection, { backgroundColor: theme.colors.surface, borderColor: '#10B981' }]}>
+            <View style={styles.verificationHeader}>
+              <Ionicons name="globe" size={24} color="#10B981" />
+              <Text style={[styles.verificationTitle, { color: theme.colors.text }]}>Ready for Withdrawals</Text>
+            </View>
+            <Text style={[styles.verificationDescription, { color: theme.colors.textSecondary }]}>
+              Your bank account is set up and ready. When you earn from gigs, tips, or content, funds land in your SoundBridge wallet first. You can then withdraw to your local bank in {bankAccount.currency} via Wise — typically arriving within 1–3 business days. Minimum withdrawal is $25. No further verification needed.
+            </Text>
+          </View>
+        )}
+
+        {/* Bank Account Reset Section — Stripe countries only */}
+        {bankAccount && bankAccount.verification_status === 'pending' && !WISE_CURRENCIES.has(bankAccount.currency) && (
           <View style={[styles.resetSection, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
             <View style={styles.resetHeader}>
               <Ionicons name="refresh-circle" size={24} color="#EF4444" />
@@ -994,8 +1073,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 34,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    lineHeight: 40,
+    fontFamily: Typography.body.fontFamily,
   },
   scrollView: {
     flex: 1,
@@ -1014,7 +1096,9 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 16,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   card: {
     borderRadius: 12,
@@ -1022,8 +1106,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   cardTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
     marginBottom: 16,
   },
   statusContainer: {
@@ -1045,11 +1129,13 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   statusTitle: {
+    ...Typography.body,
     fontSize: 16,
-    fontWeight: '600',
   },
   statusSubtitle: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     marginTop: 2,
   },
   verifiedBadge: {
@@ -1062,8 +1148,8 @@ const styles = StyleSheet.create({
   },
   verifiedText: {
     color: '#10B981',
+    ...Typography.label,
     fontSize: 12,
-    fontWeight: '600',
     marginLeft: 4,
   },
   detailsGrid: {
@@ -1076,13 +1162,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   detailLabel: {
+    ...Typography.label,
     fontSize: 12,
-    fontWeight: '500',
     marginBottom: 4,
   },
   detailValue: {
+    ...Typography.body,
     fontSize: 16,
-    fontWeight: '600',
   },
   accountNumberContainer: {
     flexDirection: 'row',
@@ -1099,15 +1185,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   emptyTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
     marginBottom: 8,
   },
   emptySubtitle: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     textAlign: 'center',
     marginBottom: 24,
-    lineHeight: 20,
   },
   addButton: {
     backgroundColor: '#DC2626',
@@ -1117,8 +1204,8 @@ const styles = StyleSheet.create({
   },
   addButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
   },
   formContainer: {
     marginBottom: 24,
@@ -1131,8 +1218,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   inputLabel: {
+    ...Typography.label,
     fontSize: 14,
-    fontWeight: '500',
     marginBottom: 8,
   },
   input: {
@@ -1140,7 +1227,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 12,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   pickerContainer: {
     borderWidth: 1,
@@ -1154,7 +1243,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   pickerText: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   formActions: {
     flexDirection: 'row',
@@ -1171,8 +1262,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cancelButtonText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
   },
   saveButton: {
     flex: 1,
@@ -1184,8 +1275,8 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
   },
   stripeContainer: {
     alignItems: 'center',
@@ -1201,14 +1292,15 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   stripeTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
     marginBottom: 8,
   },
   stripeSubtitle: {
+    ...Typography.label,
     fontSize: 14,
-    textAlign: 'center',
     lineHeight: 20,
+    textAlign: 'center',
     marginBottom: 24,
   },
   stripeButton: {
@@ -1224,8 +1316,8 @@ const styles = StyleSheet.create({
   },
   stripeButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
     marginLeft: 8,
   },
   manualButton: {
@@ -1239,8 +1331,8 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   manualButtonText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
     marginLeft: 8,
   },
   benefitsContainer: {
@@ -1255,14 +1347,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   benefitsTitle: {
+    ...Typography.label,
     fontSize: 14,
-    fontWeight: '600',
     marginLeft: 8,
   },
   benefitsList: {
     marginTop: 8,
   },
   benefitItem: {
+    ...Typography.label,
     fontSize: 12,
     lineHeight: 18,
     marginBottom: 2,
@@ -1279,11 +1372,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   securityTitle: {
+    ...Typography.label,
     fontSize: 14,
-    fontWeight: '600',
     marginLeft: 8,
   },
   securityText: {
+    ...Typography.label,
     fontSize: 12,
     lineHeight: 18,
   },
@@ -1299,12 +1393,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   verificationTitle: {
+    ...Typography.body,
     fontSize: 16,
-    fontWeight: '600',
     marginLeft: 8,
     flex: 1,
   },
   verificationDescription: {
+    ...Typography.label,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 16,
@@ -1319,8 +1414,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   verificationButtonText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
     color: '#FFFFFF',
   },
   resetSection: {
@@ -1335,11 +1430,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   resetTitle: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginLeft: 8,
   },
   resetDescription: {
+    ...Typography.label,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 16,
@@ -1355,7 +1453,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   resetButtonText: {
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
     color: '#EF4444',
   },

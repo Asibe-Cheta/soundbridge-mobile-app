@@ -144,9 +144,9 @@ export default function AccountDeletionScreen() {
             {loadingReasons ? (
               <ActivityIndicator color={theme.colors.primary} />
             ) : (
-              reasons.map((reason) => (
+              reasons.map((reason, index) => (
                 <TouchableOpacity
-                  key={reason.id}
+                  key={reason.id ?? String(index)}
                   style={[
                     styles.reasonRow,
                     { backgroundColor: theme.colors.card, borderColor: theme.colors.border },

@@ -11,37 +11,25 @@ import {
   Switch,
   Platform,
   StatusBar,
+  Dimensions,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { SystemTypography as Typography } from '../constants/Typography';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import RevenueCatService, { RevenueCatProduct } from '../services/RevenueCatService';
 import { config } from '../config/environment';
-
-interface Plan {
-  id: 'free' | 'premium' | 'unlimited';
-  name: string;
-  description: string;
-  icon: string;
-  price: { monthly: number; yearly: number };
-  color: string;
-  features: string[];
-  popular: boolean;
-  savings?: string;
-  packageIds: {
-    monthly: string;
-    yearly: string;
-  };
-}
+import { subscriptionPlans, Plan } from '../constants/subscriptionPlans';
 
 export default function UpgradeScreen() {
   const navigation = useNavigation();
   const { user, session, refreshUser } = useAuth();
   const { theme } = useTheme();
+  const { width } = Dimensions.get('window');
 
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [isLoading, setIsLoading] = useState(false);
@@ -51,82 +39,7 @@ export default function UpgradeScreen() {
   const [revenueCatProducts, setRevenueCatProducts] = useState<RevenueCatProduct[]>([]);
 
   // Plan configurations matching RevenueCat packages
-  const plans: Plan[] = [
-    {
-      id: 'free',
-      name: 'Free',
-      description: 'Perfect for getting started',
-      icon: 'flash',
-      price: { monthly: 0, yearly: 0 },
-      color: '#3B82F6',
-      features: [
-        '30MB storage (~3 tracks)',
-        '3 uploads total',
-        'Basic profile & networking',
-        'Receive tips (keep 95%)',
-        'Create & sell event tickets',
-        'Browse & discover music',
-        'Basic analytics',
-        'Community support',
-      ],
-      popular: false,
-      packageIds: { monthly: '', yearly: '' },
-    },
-    {
-      id: 'premium',
-      name: 'Premium',
-      description: 'Everything you need to grow your career',
-      icon: 'diamond',
-      price: { monthly: 6.99, yearly: 69.99 },
-      color: '#8B5CF6',
-      features: [
-        '2GB storage (~200 tracks)',
-        'Unlimited uploads*',
-        'Pro badge on profile',
-        'Custom profile URL',
-        'Featured on Discover 1x/month',
-        'Advanced analytics',
-        'Priority in feed',
-        '60-second audio previews',
-        'AI collaboration matching',
-        'Priority support',
-      ],
-      popular: true,
-      savings: 'Save 16%',
-      packageIds: {
-        monthly: 'soundbridge_premium_monthly',
-        yearly: 'soundbridge_premium_annual',
-      },
-    },
-    {
-      id: 'unlimited',
-      name: 'Unlimited',
-      description: 'For serious creators and professionals',
-      icon: 'rocket',
-      price: { monthly: 12.99, yearly: 129.99 },
-      color: '#F59E0B',
-      features: [
-        '10GB storage (~1000 tracks)',
-        'Unlimited uploads',
-        'Unlimited badge on profile',
-        'Featured on Discover 2x/month',
-        'Top priority in feed',
-        'All Premium features',
-        'Fan subscriptions (earn monthly)',
-        'Social media post generator',
-        'Custom promo codes',
-        'Email list export',
-        'Lower fees (3% vs 5%)',
-        'Highest priority support',
-      ],
-      popular: false,
-      savings: 'Save 17%',
-      packageIds: {
-        monthly: 'soundbridge_unlimited_monthly',
-        yearly: 'soundbridge_unlimited_annual',
-      },
-    },
-  ];
+  const plans: Plan[] = subscriptionPlans;
 
   useEffect(() => {
     loadProducts();
@@ -605,13 +518,28 @@ export default function UpgradeScreen() {
     );
     const price = getProductPrice(plan);
 
+    const cardWidth = width - 64;
+
+    const getPlanGradient = (): [string, string, string] => {
+      switch (plan.id) {
+        case 'premium':
+          return ['#241236', '#6D28D9', '#EC4899'];
+        case 'unlimited':
+          return ['#2A1408', '#F59E0B', '#EC4899'];
+        default:
+          return ['#0F2457', '#3B82F6', '#2563EB'];
+      }
+    };
+
+    const planIconName = plan.id === 'free' ? plan.icon : 'crown';
+
     return (
       <TouchableOpacity
         key={plan.id}
         style={[
           styles.planCard,
           isCurrentPlan && styles.planCardActive,
-          { borderColor: plan.color },
+          { borderColor: plan.color, width: cardWidth },
         ]}
         onPress={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -621,12 +549,13 @@ export default function UpgradeScreen() {
         activeOpacity={0.7}
       >
         <LinearGradient
-          colors={
-            isCurrentPlan
-              ? [plan.color + '20', plan.color + '10']
-              : ['#1F2937', '#111827']
-          }
-          style={styles.planCardGradient}
+          colors={getPlanGradient()}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[
+            styles.planCardGradient,
+            { minHeight: plan.id === 'free' ? 380 : 520 },
+          ]}
         >
           {plan.popular && (
             <View style={[styles.popularBadge, { backgroundColor: plan.color }]}>
@@ -636,7 +565,11 @@ export default function UpgradeScreen() {
 
           <View style={styles.planHeader}>
             <View style={[styles.planIcon, { backgroundColor: plan.color + '20' }]}>
-              <Ionicons name={plan.icon as any} size={32} color={plan.color} />
+              {plan.id === 'free' ? (
+                <Ionicons name={planIconName as any} size={32} color={plan.color} />
+              ) : (
+                <MaterialCommunityIcons name={planIconName as any} size={32} color={plan.color} />
+              )}
             </View>
             <View style={styles.planInfo}>
               <Text style={styles.planName}>{plan.name}</Text>
@@ -674,25 +607,33 @@ export default function UpgradeScreen() {
             </View>
           ) : (
             <TouchableOpacity
-              style={[styles.upgradeButton, { backgroundColor: plan.color }]}
+              style={styles.upgradeButton}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                 handleUpgrade(plan);
               }}
               disabled={isLoading || isInitializing}
+              activeOpacity={0.85}
             >
-              <Text style={styles.upgradeButtonText}>
-                {plan.id === 'free'
-                  ? 'Downgrade'
-                  : (currentPlan === 'premium' || currentPlan === 'unlimited') && currentBillingCycle !== billingCycle
-                    ? 'Switch Plan'
-                    : currentPlan !== 'free' && currentPlan !== plan.id
-                      ? 'Switch to ' + plan.name
-                      : 'Upgrade Now'}
-              </Text>
-              {plan.id !== 'free' && (
-                <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
-              )}
+              <LinearGradient
+                colors={['rgba(255,255,255,0.95)', 'rgba(255,255,255,0.8)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.upgradeButtonGradient}
+              >
+                <Text style={[styles.upgradeButtonText, { color: plan.color }]}>
+                  {plan.id === 'free'
+                    ? 'Downgrade'
+                    : (currentPlan === 'premium' || currentPlan === 'unlimited') && currentBillingCycle !== billingCycle
+                      ? 'Switch Plan'
+                      : currentPlan !== 'free' && currentPlan !== plan.id
+                        ? 'Switch to ' + plan.name
+                        : 'Upgrade Now'}
+                </Text>
+                {plan.id !== 'free' && (
+                  <Ionicons name="arrow-forward" size={20} color={plan.color} />
+                )}
+              </LinearGradient>
             </TouchableOpacity>
           )}
         </LinearGradient>
@@ -741,54 +682,79 @@ export default function UpgradeScreen() {
         {/* Billing Cycle Toggle */}
         <View style={styles.billingToggle}>
           <TouchableOpacity
-            style={[
-              styles.billingOption,
-              billingCycle === 'monthly' && styles.billingOptionActive,
-            ]}
+            style={styles.billingOption}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setBillingCycle('monthly');
             }}
             disabled={isLoading}
+            activeOpacity={0.85}
           >
-            <Text
-              style={[
-                styles.billingText,
-                billingCycle === 'monthly' && styles.billingTextActive,
-              ]}
-            >
-              Monthly
-            </Text>
+            {billingCycle === 'monthly' ? (
+              <LinearGradient
+                colors={['#8B5CF6', '#EC4899']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.billingOptionGradient}
+              >
+                <Text style={styles.billingTextActive}>Monthly</Text>
+              </LinearGradient>
+            ) : (
+              <Text style={styles.billingText}>Monthly</Text>
+            )}
           </TouchableOpacity>
           <TouchableOpacity
-            style={[
-              styles.billingOption,
-              billingCycle === 'yearly' && styles.billingOptionActive,
-            ]}
+            style={styles.billingOption}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setBillingCycle('yearly');
             }}
             disabled={isLoading}
+            activeOpacity={0.85}
           >
-            <Text
-              style={[
-                styles.billingText,
-                billingCycle === 'yearly' && styles.billingTextActive,
-              ]}
-            >
-              Yearly
-            </Text>
-            <View style={styles.savingsPill}>
-              <Text style={styles.savingsPillText}>Save up to 17%</Text>
-            </View>
+            {billingCycle === 'yearly' ? (
+              <LinearGradient
+                colors={['#8B5CF6', '#EC4899']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.billingOptionGradient}
+              >
+                <View style={styles.billingRow}>
+                  <Text style={styles.billingTextActive} numberOfLines={1}>
+                    Yearly
+                  </Text>
+                  <View style={styles.savingsPill}>
+                    <Text style={styles.savingsPillText} numberOfLines={1}>
+                      Save up to 17%
+                    </Text>
+                  </View>
+                </View>
+              </LinearGradient>
+            ) : (
+              <View style={styles.billingRow}>
+                <Text style={styles.billingText} numberOfLines={1}>
+                  Yearly
+                </Text>
+                <View style={styles.savingsPill}>
+                  <Text style={styles.savingsPillText} numberOfLines={1}>
+                    Save up to 17%
+                  </Text>
+                </View>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
 
         {/* Plan Cards */}
-        <View style={styles.plansContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={width - 48}
+          decelerationRate="fast"
+          contentContainerStyle={styles.plansScrollContent}
+        >
           {plans.map(plan => renderPlanCard(plan))}
-        </View>
+        </ScrollView>
 
         {/* Restore Purchases */}
         <TouchableOpacity
@@ -847,9 +813,12 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 34,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    lineHeight: 40,
     color: '#FFFFFF',
+    fontFamily: Typography.body.fontFamily,
   },
   scrollView: {
     flex: 1,
@@ -864,13 +833,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
+    ...Typography.headerLarge,
     fontSize: 32,
-    fontWeight: 'bold',
     color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: 8,
   },
   subtitle: {
+    ...Typography.body,
     fontSize: 16,
     color: 'rgba(255,255,255,0.7)',
     textAlign: 'center',
@@ -879,57 +849,82 @@ const styles = StyleSheet.create({
   billingToggle: {
     flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 12,
-    padding: 4,
-    marginHorizontal: 20,
+    borderRadius: 28,
+    padding: 6,
+    marginHorizontal: 16,
     marginBottom: 30,
   },
   billingOption: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    minHeight: 48,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 24,
     alignItems: 'center',
-    flexDirection: 'row',
     justifyContent: 'center',
-    gap: 8,
   },
-  billingOptionActive: {
-    backgroundColor: '#10B981',
+  billingOptionGradient: {
+    width: '100%',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  billingRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
   },
   billingText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.button,
+    fontSize: 14,
     color: 'rgba(255,255,255,0.5)',
+    flexShrink: 1,
   },
   billingTextActive: {
     color: '#FFFFFF',
+    ...Typography.button,
+    fontSize: 14,
+    flexShrink: 1,
   },
   savingsPill: {
     backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 10,
+    flexShrink: 0,
   },
   savingsPillText: {
-    fontSize: 12,
-    fontWeight: '600',
+    ...Typography.label,
+    fontSize: 10,
     color: '#FFFFFF',
   },
-  plansContainer: {
+  plansScrollContent: {
     paddingHorizontal: 20,
-    gap: 20,
+    paddingBottom: 24,
   },
   planCard: {
-    borderRadius: 16,
+    borderRadius: 26,
     borderWidth: 2,
+    marginRight: 16,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 10,
   },
   planCardActive: {
     borderWidth: 3,
   },
   planCardGradient: {
-    padding: 20,
+    padding: 24,
+    backgroundColor: '#111827',
+    flexGrow: 1,
+    justifyContent: 'space-between',
   },
   popularBadge: {
     position: 'absolute',
@@ -941,8 +936,8 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 12,
   },
   popularText: {
+    ...Typography.label,
     fontSize: 12,
-    fontWeight: '700',
     color: '#FFFFFF',
     textTransform: 'uppercase',
   },
@@ -963,12 +958,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   planName: {
+    ...Typography.headerMedium,
     fontSize: 24,
-    fontWeight: 'bold',
     color: '#FFFFFF',
     marginBottom: 4,
   },
   planDescription: {
+    ...Typography.body,
     fontSize: 14,
     color: 'rgba(255,255,255,0.7)',
   },
@@ -978,11 +974,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   price: {
+    ...Typography.headerLarge,
     fontSize: 40,
-    fontWeight: 'bold',
     color: '#FFFFFF',
   },
   pricePeriod: {
+    ...Typography.body,
     fontSize: 18,
     color: 'rgba(255,255,255,0.7)',
     marginLeft: 4,
@@ -995,8 +992,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   savingsText: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
   },
   featuresContainer: {
     gap: 12,
@@ -1009,6 +1006,7 @@ const styles = StyleSheet.create({
   },
   featureText: {
     flex: 1,
+    ...Typography.body,
     fontSize: 15,
     color: 'rgba(255,255,255,0.9)',
     lineHeight: 22,
@@ -1019,21 +1017,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   currentPlanText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
     color: '#FFFFFF',
   },
   upgradeButton: {
+    borderRadius: 999,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  upgradeButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: 999,
     gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
   },
   upgradeButtonText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
     color: '#FFFFFF',
   },
   restoreButton: {
@@ -1046,8 +1055,8 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   restoreButtonText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
   },
   footer: {
     paddingHorizontal: 20,
@@ -1055,6 +1064,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   footerText: {
+    ...Typography.label,
     fontSize: 12,
     color: 'rgba(255,255,255,0.5)',
     textAlign: 'center',
@@ -1067,11 +1077,13 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   footerLink: {
+    ...Typography.label,
     fontSize: 12,
     color: '#10B981',
     textDecorationLine: 'underline',
   },
   footerDivider: {
+    ...Typography.label,
     fontSize: 12,
     color: 'rgba(255,255,255,0.3)',
   },
@@ -1082,6 +1094,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 16,
+    ...Typography.body,
     fontSize: 16,
   },
   loadingOverlay: {

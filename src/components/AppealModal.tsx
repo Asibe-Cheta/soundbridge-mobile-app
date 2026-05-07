@@ -15,8 +15,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { config } from '../config/environment';
+import { takedownService } from '../services/TakedownService';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://www.soundbridge.live';
+const API_BASE_URL = config.apiUrl.replace(/\/api\/?$/, '');
 
 interface AppealModalProps {
   visible: boolean;
@@ -25,6 +27,8 @@ interface AppealModalProps {
   flagReasons?: string[];
   onClose: () => void;
   onSuccess: () => void;
+  isTakedown?: boolean;
+  takedownId?: string;
 }
 
 export default function AppealModal({
@@ -34,13 +38,53 @@ export default function AppealModal({
   flagReasons = [],
   onClose,
   onSuccess,
+  isTakedown = false,
+  takedownId,
 }: AppealModalProps) {
   const { theme } = useTheme();
   const { session } = useAuth();
   const [appealText, setAppealText] = useState('');
+  const [perjuryChecked, setPerjuryChecked] = useState(false);
+  const [courtChecked, setCourtChecked] = useState(false);
+  const [serviceAddress, setServiceAddress] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const isCounterNoticeReady =
+    isTakedown &&
+    appealText.trim().length >= 20 &&
+    perjuryChecked &&
+    courtChecked &&
+    serviceAddress.trim().length >= 5;
+
   const handleSubmit = async () => {
+    if (isTakedown) {
+      if (!isCounterNoticeReady) return;
+      if (!takedownId) {
+        Alert.alert('Error', 'Takedown ID is missing. Please contact support.');
+        return;
+      }
+      try {
+        setSubmitting(true);
+        await takedownService.submitCounterNotice(takedownId, {
+          statement: appealText.trim(),
+          penalty_of_perjury_consent: true,
+          court_jurisdiction_consent: true,
+          service_address: serviceAddress.trim(),
+        });
+        Alert.alert(
+          'Counter-Notice Submitted',
+          'Your counter-notice has been submitted. The rights holder has 10–14 business days to file a court action. If they do not, your content may be restored.',
+          [{ text: 'OK', onPress: () => { setAppealText(''); setPerjuryChecked(false); setCourtChecked(false); setServiceAddress(''); onSuccess(); } }]
+        );
+      } catch (error: any) {
+        Alert.alert('Error', error.message || 'An unexpected error occurred. Please try again.');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    // Standard appeal path
     if (!appealText.trim()) {
       Alert.alert('Appeal Required', 'Please provide a reason for your appeal.');
       return;
@@ -64,7 +108,6 @@ export default function AppealModal({
     try {
       setSubmitting(true);
 
-      // Use API endpoint instead of direct Supabase call
       const response = await fetch(`${API_BASE_URL}/api/tracks/${trackId}/appeal`, {
         method: 'POST',
         headers: {
@@ -79,27 +122,18 @@ export default function AppealModal({
       const data = await response.json();
 
       if (response.ok && data.success) {
-      console.log('✅ Appeal submitted successfully for track:', trackId);
-      Alert.alert(
-        'Appeal Submitted',
+        console.log('✅ Appeal submitted successfully for track:', trackId);
+        Alert.alert(
+          'Appeal Submitted',
           "We'll review your appeal within 24-48 hours. You'll receive a notification with our decision.",
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              setAppealText('');
-              onSuccess();
-            },
-          },
-        ]
-      );
+          [{ text: 'OK', onPress: () => { setAppealText(''); onSuccess(); } }]
+        );
       } else {
         throw new Error(data.error || 'Failed to submit appeal');
       }
     } catch (error: any) {
       console.error('❌ Exception submitting appeal:', error);
-      const errorMessage = error.message || 'An unexpected error occurred. Please try again.';
-      Alert.alert('Error', errorMessage);
+      Alert.alert('Error', error.message || 'An unexpected error occurred. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -108,8 +142,8 @@ export default function AppealModal({
   const handleClose = () => {
     if (appealText.trim() && !submitting) {
       Alert.alert(
-        'Discard Appeal?',
-        'Are you sure you want to discard your appeal?',
+        isTakedown ? 'Discard Counter-Notice?' : 'Discard Appeal?',
+        'Are you sure you want to discard this?',
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -117,6 +151,9 @@ export default function AppealModal({
             style: 'destructive',
             onPress: () => {
               setAppealText('');
+              setPerjuryChecked(false);
+              setCourtChecked(false);
+              setServiceAddress('');
               onClose();
             },
           },
@@ -149,7 +186,7 @@ export default function AppealModal({
               <Ionicons name="close" size={28} color={theme.colors.text} />
             </TouchableOpacity>
             <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
-              Submit Appeal
+              {isTakedown ? 'Submit Counter-Notice' : 'Submit Appeal'}
             </Text>
             <View style={styles.closeButton} />
           </View>
@@ -192,19 +229,33 @@ export default function AppealModal({
               </View>
             )}
 
-            {/* Instructions */}
-            <View style={[styles.instructions, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-              <Ionicons name="information-circle" size={20} color={theme.colors.primary} />
-              <Text style={[styles.instructionsText, { color: theme.colors.textSecondary }]}>
-                Please explain why you believe this decision should be reconsidered. Be specific and provide relevant details.
-              </Text>
-            </View>
+            {/* Instructions / Legal preamble */}
+            {isTakedown ? (
+              <View style={[styles.instructions, { backgroundColor: '#7C3AED20', borderColor: '#7C3AED50' }]}>
+                <Ionicons name="scale" size={20} color="#7C3AED" />
+                <Text style={[styles.instructionsText, { color: theme.colors.text }]}>
+                  This is a formal counter-notification under DMCA Section 512(g) / UK CDPA. Submitting a false counter-notice may expose you to legal liability.
+                </Text>
+              </View>
+            ) : (
+              <View style={[styles.instructions, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                <Ionicons name="information-circle" size={20} color={theme.colors.primary} />
+                <Text style={[styles.instructionsText, { color: theme.colors.textSecondary }]}>
+                  Please explain why you believe this decision should be reconsidered. Be specific and provide relevant details.
+                </Text>
+              </View>
+            )}
 
-            {/* Appeal Text Input */}
+            {/* Appeal / Statement Text Input */}
             <View style={styles.inputContainer}>
               <Text style={[styles.label, { color: theme.colors.text }]}>
-                Your Appeal <Text style={{ color: theme.colors.error }}>*</Text>
+                {isTakedown ? 'Your statement' : 'Your Appeal'} <Text style={{ color: theme.colors.error }}>*</Text>
               </Text>
+              {isTakedown && (
+                <Text style={[styles.characterCount, { color: theme.colors.textSecondary, textAlign: 'left', marginBottom: 6 }]}>
+                  State why the material was removed by mistake or misidentification (min 20 characters).
+                </Text>
+              )}
               <TextInput
                 style={[
                   styles.textArea,
@@ -214,7 +265,7 @@ export default function AppealModal({
                     borderColor: theme.colors.border,
                   },
                 ]}
-                placeholder="Explain your case here... (20-500 characters)"
+                placeholder={isTakedown ? 'Explain why the material was removed in error...' : 'Explain your case here... (20-500 characters)'}
                 placeholderTextColor={theme.colors.textSecondary}
                 multiline
                 numberOfLines={8}
@@ -230,36 +281,97 @@ export default function AppealModal({
               </Text>
             </View>
 
-            {/* Guidelines */}
-            <View style={[styles.guidelines, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-              <Text style={[styles.guidelinesTitle, { color: theme.colors.text }]}>
-                Appeal Guidelines
-              </Text>
-              <View style={styles.guideline}>
-                <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                <Text style={[styles.guidelineText, { color: theme.colors.textSecondary }]}>
-                  Be specific about why you believe the decision was incorrect
+            {/* Counter-notice extra fields */}
+            {isTakedown && (
+              <>
+                {/* Service address */}
+                <View style={styles.inputContainer}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>
+                    Your address for service of process <Text style={{ color: theme.colors.error }}>*</Text>
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.textArea,
+                      {
+                        backgroundColor: theme.colors.surface,
+                        color: theme.colors.text,
+                        borderColor: theme.colors.border,
+                        minHeight: 80,
+                      },
+                    ]}
+                    placeholder="Street, City, Postcode/ZIP, Country"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    multiline
+                    numberOfLines={3}
+                    value={serviceAddress}
+                    onChangeText={setServiceAddress}
+                    editable={!submitting}
+                    textAlignVertical="top"
+                  />
+                </View>
+
+                {/* Perjury declaration */}
+                <TouchableOpacity
+                  style={[styles.guidelines, { borderColor: perjuryChecked ? theme.colors.primary : theme.colors.border, backgroundColor: perjuryChecked ? theme.colors.primary + '15' : theme.colors.surface, flexDirection: 'row', gap: 12 }]}
+                  onPress={() => setPerjuryChecked(!perjuryChecked)}
+                  disabled={submitting}
+                >
+                  <View style={[styles.checkbox, { borderColor: perjuryChecked ? theme.colors.primary : theme.colors.textSecondary, backgroundColor: perjuryChecked ? theme.colors.primary : 'transparent' }]}>
+                    {perjuryChecked && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                  </View>
+                  <Text style={[styles.instructionsText, { color: theme.colors.text, flex: 1 }]}>
+                    I declare under penalty of perjury that I have a good faith belief the material was removed by mistake or misidentification.
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Court consent */}
+                <TouchableOpacity
+                  style={[styles.guidelines, { borderColor: courtChecked ? theme.colors.primary : theme.colors.border, backgroundColor: courtChecked ? theme.colors.primary + '15' : theme.colors.surface, flexDirection: 'row', gap: 12 }]}
+                  onPress={() => setCourtChecked(!courtChecked)}
+                  disabled={submitting}
+                >
+                  <View style={[styles.checkbox, { borderColor: courtChecked ? theme.colors.primary : theme.colors.textSecondary, backgroundColor: courtChecked ? theme.colors.primary : 'transparent' }]}>
+                    {courtChecked && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                  </View>
+                  <Text style={[styles.instructionsText, { color: theme.colors.text, flex: 1 }]}>
+                    I consent to jurisdiction of the Federal District Court for my judicial district (US filers) or UK courts (UK filers).
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {/* Standard appeal guidelines */}
+            {!isTakedown && (
+              <View style={[styles.guidelines, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                <Text style={[styles.guidelinesTitle, { color: theme.colors.text }]}>
+                  Appeal Guidelines
                 </Text>
+                <View style={styles.guideline}>
+                  <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                  <Text style={[styles.guidelineText, { color: theme.colors.textSecondary }]}>
+                    Be specific about why you believe the decision was incorrect
+                  </Text>
+                </View>
+                <View style={styles.guideline}>
+                  <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                  <Text style={[styles.guidelineText, { color: theme.colors.textSecondary }]}>
+                    Provide context or clarification about your content
+                  </Text>
+                </View>
+                <View style={styles.guideline}>
+                  <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                  <Text style={[styles.guidelineText, { color: theme.colors.textSecondary }]}>
+                    Be respectful and professional in your explanation
+                  </Text>
+                </View>
+                <View style={styles.guideline}>
+                  <Ionicons name="close-circle" size={16} color="#EF4444" />
+                  <Text style={[styles.guidelineText, { color: theme.colors.textSecondary }]}>
+                    Avoid aggressive or demanding language
+                  </Text>
+                </View>
               </View>
-              <View style={styles.guideline}>
-                <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                <Text style={[styles.guidelineText, { color: theme.colors.textSecondary }]}>
-                  Provide context or clarification about your content
-                </Text>
-              </View>
-              <View style={styles.guideline}>
-                <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                <Text style={[styles.guidelineText, { color: theme.colors.textSecondary }]}>
-                  Be respectful and professional in your explanation
-                </Text>
-              </View>
-              <View style={styles.guideline}>
-                <Ionicons name="close-circle" size={16} color="#EF4444" />
-                <Text style={[styles.guidelineText, { color: theme.colors.textSecondary }]}>
-                  Avoid aggressive or demanding language
-                </Text>
-              </View>
-            </View>
+            )}
           </ScrollView>
 
           {/* Submit Button */}
@@ -268,21 +380,21 @@ export default function AppealModal({
               style={[
                 styles.submitButton,
                 {
-                  backgroundColor: appealText.trim().length >= 20 && !submitting
-                    ? theme.colors.primary
+                  backgroundColor: (isTakedown ? isCounterNoticeReady : appealText.trim().length >= 20) && !submitting
+                    ? (isTakedown ? '#7C3AED' : theme.colors.primary)
                     : theme.colors.surface,
                   borderColor: theme.colors.border,
                 },
               ]}
               onPress={handleSubmit}
-              disabled={appealText.trim().length < 20 || submitting}
+              disabled={(isTakedown ? !isCounterNoticeReady : appealText.trim().length < 20) || submitting}
             >
               {submitting ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <>
-                  <Ionicons name="send" size={20} color="#FFFFFF" />
-                  <Text style={styles.submitButtonText}>Submit Appeal</Text>
+                  <Ionicons name={isTakedown ? 'scale' : 'send'} size={20} color="#FFFFFF" />
+                  <Text style={styles.submitButtonText}>{isTakedown ? 'Submit Counter-Notice' : 'Submit Appeal'}</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -441,6 +553,15 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
   },
 });
 

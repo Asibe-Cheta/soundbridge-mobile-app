@@ -93,11 +93,16 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     }
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
   try {
     const response = await fetch(url, {
       ...rest,
       headers: mergedHeaders,
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     console.log(`📡 API Response: ${response.status} ${response.statusText}`);
 
@@ -171,6 +176,16 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 
     return response.json() as Promise<T>;
   } catch (error: any) {
+    clearTimeout(timeoutId);
+
+    if (error?.name === 'AbortError') {
+      console.error(`⏱️ Request timed out after 15s: ${rest.method || 'GET'} ${url}`);
+      const timeoutError = new Error('Request timed out. The server took too long to respond. Please try again.');
+      (timeoutError as any).status = 0;
+      (timeoutError as any).isNetworkError = true;
+      throw timeoutError;
+    }
+
     // Enhanced error logging for debugging
     // Don't log detailed error info for 404s (they're expected when endpoints don't exist)
     if (error?.status !== 404) {

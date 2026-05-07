@@ -27,7 +27,7 @@ export const CancellationWarningModal: React.FC<CancellationWarningModalProps> =
   storageUsed,
   storageLimit,
 }) => {
-  const freeTierLimit = 30 * 1024 * 1024; // 30MB
+  const freeTierLimit = 250 * 1024 * 1024; // 250MB
   const isOverFreeLimit = storageUsed > freeTierLimit;
   const excessStorage = Math.max(0, storageUsed - freeTierLimit);
   const timesOverLimit = Math.floor(storageUsed / freeTierLimit);
@@ -57,7 +57,7 @@ export const CancellationWarningModal: React.FC<CancellationWarningModalProps> =
                 {formatBytes(storageUsed)} / {formatBytes(storageLimit)}
               </Text>
               <Text style={styles.freeTierInfo}>
-                Free tier includes only 30MB of storage
+                Free tier includes 250MB of storage
               </Text>
               {isOverFreeLimit && (
                 <Text style={styles.warningText}>
@@ -100,7 +100,7 @@ export const CancellationWarningModal: React.FC<CancellationWarningModalProps> =
 
               <View style={styles.subBullets}>
                 <Text style={styles.subBulletText}>
-                  • Delete content to get under 30MB, OR
+                  • Delete content to get under 250MB, OR
                 </Text>
                 <Text style={styles.subBulletText}>
                   • Re-subscribe to {tierName}
@@ -116,7 +116,7 @@ export const CancellationWarningModal: React.FC<CancellationWarningModalProps> =
                 <View style={styles.bulletPoint}>
                   <Ionicons name="information-circle" size={20} color="#2196F3" />
                   <Text style={styles.bulletText}>
-                    Only 30MB of your content stays public
+                    Only 250MB of your content stays public
                   </Text>
                 </View>
 
@@ -151,7 +151,7 @@ export const CancellationWarningModal: React.FC<CancellationWarningModalProps> =
               </View>
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Free tier limit:</Text>
-                <Text style={styles.summaryValue}>30MB</Text>
+                <Text style={styles.summaryValue}>250MB</Text>
               </View>
               {isOverFreeLimit && (
                 <View style={styles.summaryRow}>

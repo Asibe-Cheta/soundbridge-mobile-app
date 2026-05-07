@@ -8,6 +8,7 @@
 import { Session } from '@supabase/supabase-js';
 import { apiFetch } from '../lib/apiClient';
 import { supabase } from '../lib/supabase';
+import { config } from '../config/environment';
 import { debugLog, debugError, debugWarn, debugInfo } from '../utils/logStore';
 import type {
   TwoFactorStatusResponse,
@@ -33,31 +34,20 @@ export async function loginWithTwoFactorCheck(
   password: string
 ): Promise<LoginResult> {
   try {
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedPassword = password;
+
     debugLog('🔐 Initiating secure login flow...');
-    debugLog('📧 Email:', email);
+    debugLog('📧 Email:', normalizedEmail);
     
-    // Get API base URL
-    const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://www.soundbridge.live';
-    const url = `${API_BASE_URL}/api/auth/login-initiate`;
-    
-    debugLog('🌐 Calling login-initiate endpoint:', url);
+    debugLog('🌐 Calling login-initiate endpoint:', '/api/auth/login-initiate');
     
     // Call the new secure endpoint that validates credentials first
-    const response = await fetch(url, {
+    const data = await apiFetch<any>('/api/auth/login-initiate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email: normalizedEmail, password: normalizedPassword }),
     });
-    
-    debugLog('📡 Response status:', response.status, response.statusText);
-    
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-      debugError('❌ Login-initiate failed:', errorData);
-      throw new Error(errorData.error || 'Login failed');
-    }
-    
-    const data = await response.json();
     debugLog('📊 Login-initiate response:', JSON.stringify({
       success: data.success,
       requires2FA: data.requires2FA,
@@ -110,8 +100,15 @@ export async function loginWithTwoFactorCheck(
     debugError('❌ Login initiate error:', error);
     
     // Provide user-friendly error message
-    const errorMessage = error?.message || error?.toString() || 'Login failed';
-    throw new Error(errorMessage);
+    const errorMessage = error?.body?.error || error?.message || error?.toString() || 'Login failed';
+    const authError = new Error(errorMessage);
+    if (error?.body?.code) {
+      (authError as any).code = error.body.code;
+    }
+    if (error?.status) {
+      (authError as any).status = error.status;
+    }
+    throw authError;
   }
 }
 
@@ -352,7 +349,7 @@ export async function verifyCodeDuringLogin(
     // - verificationSessionId and code in body
     // - NO userId, NO trustDevice
     // Use direct fetch instead of apiFetch to avoid automatic Authorization header
-    const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://www.soundbridge.live';
+    const API_BASE_URL = config.apiUrl.replace(/\/api\/?$/, '');
     const url = `${API_BASE_URL}${API_BASE}/verify-code`;
     
     debugLog('🌐 Calling verify-code endpoint:', url);
@@ -500,7 +497,7 @@ export async function verifyBackupCodeDuringLogin(
     });
     
     // Use direct fetch instead of apiFetch to avoid automatic Authorization header
-    const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://www.soundbridge.live';
+    const API_BASE_URL = config.apiUrl.replace(/\/api\/?$/, '');
     const url = `${API_BASE_URL}${API_BASE}/verify-backup-code`;
     
     const response = await fetch(url, {

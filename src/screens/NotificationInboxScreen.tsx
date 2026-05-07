@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { notificationService, NotificationData, NotificationType } from '../services/NotificationService';
+import * as Notifications from 'expo-notifications';
 
 interface StoredNotification {
   id: string;
@@ -36,13 +37,7 @@ export default function NotificationInboxScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  useFocusEffect(
-    useCallback(() => {
-      loadNotifications();
-    }, [])
-  );
-
-  const loadNotifications = async () => {
+  const loadNotifications = useCallback(async () => {
     try {
       setLoading(true);
       const stored = await notificationService.getStoredNotifications();
@@ -56,7 +51,23 @@ export default function NotificationInboxScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadNotifications();
+    }, [loadNotifications])
+  );
+
+  useEffect(() => {
+    const subscription = Notifications.addNotificationReceivedListener(() => {
+      loadNotifications();
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [loadNotifications]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -92,7 +103,7 @@ export default function NotificationInboxScreen() {
 
       case 'message':
         if (data.conversationId) {
-          nav.navigate('Messages', { conversationId: data.conversationId });
+          nav.navigate('Chat', { conversationId: data.conversationId });
         }
         break;
 
@@ -101,8 +112,9 @@ export default function NotificationInboxScreen() {
       case 'collaboration_declined':
       case 'collaboration_confirmed':
         if (data.requestId) {
-          // Navigate to collaboration details or calendar
-          nav.navigate('Calendar');
+          nav.navigate('CollaborationRequests', { requestId: data.requestId, tab: 'received' });
+        } else {
+          nav.navigate('CollaborationRequests');
         }
         break;
 
@@ -126,6 +138,19 @@ export default function NotificationInboxScreen() {
       case 'live_session':
         // Future: navigate to live session
         Alert.alert('Coming Soon', 'Live sessions will be available soon!');
+        break;
+
+      case 'opportunity_interest':
+        nav.navigate('OpportunityInterestList', {
+          opportunityId: data.opportunityId || data.entityId,
+          opportunityTitle: data.opportunityTitle || '',
+        });
+        break;
+
+      case 'opportunity_agreement_received':
+        nav.navigate('OpportunityProject', {
+          projectId: data.projectId || data.entityId,
+        });
         break;
 
       default:
@@ -173,6 +198,9 @@ export default function NotificationInboxScreen() {
         return 'person-circle';
       case 'live_session':
         return 'radio';
+      case 'opportunity_interest':
+      case 'opportunity_agreement_received':
+        return 'hand-left';
       default:
         return 'notifications';
     }
@@ -201,6 +229,9 @@ export default function NotificationInboxScreen() {
         return '#E67E22';
       case 'live_session':
         return '#E74C3C';
+      case 'opportunity_interest':
+      case 'opportunity_agreement_received':
+        return '#7C3AED';
       default:
         return '#95A5A6';
     }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -12,14 +12,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
+import DMCANoticeModal from '../modals/DMCANoticeModal';
 
 export default function CopyrightPolicyScreen() {
   const navigation = useNavigation();
   const { theme } = useTheme();
+  const [showDMCAModal, setShowDMCAModal] = useState(false);
 
   return (
     <View style={styles.container}>
-      {/* Main Background Gradient */}
       <LinearGradient
         colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
         start={{ x: 0, y: 0 }}
@@ -29,7 +30,7 @@ export default function CopyrightPolicyScreen() {
       />
 
       <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+        <StatusBar barStyle={theme.isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
@@ -40,12 +41,9 @@ export default function CopyrightPolicyScreen() {
           <View style={styles.headerSpacer} />
         </View>
 
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Introduction */}
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+
+          {/* Intro */}
           <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
             <View style={styles.iconHeader}>
               <Ionicons name="shield-checkmark" size={48} color={theme.colors.primary} />
@@ -54,54 +52,60 @@ export default function CopyrightPolicyScreen() {
               Protecting Your Rights & Others'
             </Text>
             <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
-              SoundBridge is committed to protecting intellectual property rights. This policy explains what you need to know before uploading content to our platform.
+              SoundBridge is committed to protecting intellectual property rights and operating in full compliance with the Digital Millennium Copyright Act (DMCA) and the UK Copyright, Designs and Patents Act 1988 (CDPA). This policy was last updated on 26 February 2026 (version 2026-02-26).
             </Text>
           </View>
 
-          {/* What You Must Confirm */}
+          {/* DMCA Designated Agent */}
           <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-              What You Must Confirm
+              Designated Copyright Agent
             </Text>
             <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
-              When you upload content to SoundBridge, you are confirming that:
+              SoundBridge has designated a copyright agent to receive notices of claimed infringement as required by 17 USC § 512(c)(2). Contact details:
             </Text>
-
-            <View style={styles.listItem}>
-              <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} style={styles.listIcon} />
-              <Text style={[styles.listText, { color: theme.colors.text }]}>
-                You own all rights to the music, or you have obtained proper licenses/permissions to upload it
+            <View style={[styles.agentBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <Text style={[styles.agentLabel, { color: theme.colors.text }]}>SoundBridge Legal — Copyright Agent</Text>
+              <TouchableOpacity>
+                <Text style={[styles.linkText, { color: theme.colors.primary }]}>copyright@soundbridge.com</Text>
+              </TouchableOpacity>
+              <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
+                SoundBridge Ltd{'\n'}
+                [Registered address — to be completed]{'\n'}
+                United Kingdom
               </Text>
             </View>
-
-            <View style={styles.listItem}>
-              <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} style={styles.listIcon} />
-              <Text style={[styles.listText, { color: theme.colors.text }]}>
-                Your content does not infringe on any third-party intellectual property rights, including copyrights, trademarks, or patents
-              </Text>
-            </View>
-
-            <View style={styles.listItem}>
-              <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} style={styles.listIcon} />
-              <Text style={[styles.listText, { color: theme.colors.text }]}>
-                You understand that uploading copyrighted material without permission may result in account suspension or termination
-              </Text>
-            </View>
-
-            <View style={styles.listItem}>
-              <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} style={styles.listIcon} />
-              <Text style={[styles.listText, { color: theme.colors.text }]}>
-                You grant SoundBridge a non-exclusive license to stream and distribute your content on the platform
-              </Text>
-            </View>
+            <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
+              This agent is registered with the US Copyright Office under 17 USC § 512(c)(2). Only notices of copyright infringement should be sent to this agent. All other questions should be directed to support.
+            </Text>
           </View>
 
-          {/* What This Means */}
+          {/* What you must confirm */}
           <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-              What This Means
+              Uploader Obligations
             </Text>
+            <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
+              When you upload content to SoundBridge, you confirm that:
+            </Text>
+            {[
+              'You own all rights to the content, or have obtained proper licences/permissions',
+              'Your content does not infringe any third-party copyright, trademark, or other intellectual property rights',
+              'You grant SoundBridge a non-exclusive licence to stream and distribute your content on the platform',
+              'You understand that uploading infringing material may result in content removal, account suspension, or termination',
+            ].map((item, i) => (
+              <View key={i} style={styles.listItem}>
+                <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} style={styles.listIcon} />
+                <Text style={[styles.listText, { color: theme.colors.text }]}>{item}</Text>
+              </View>
+            ))}
+          </View>
 
+          {/* What you can / cannot upload */}
+          <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              What You Can and Cannot Upload
+            </Text>
             <View style={styles.exampleBox}>
               <View style={[styles.exampleHeader, { backgroundColor: theme.colors.success + '20' }]}>
                 <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} />
@@ -111,11 +115,10 @@ export default function CopyrightPolicyScreen() {
                 • Your original music compositions{'\n'}
                 • Tracks you produced yourself{'\n'}
                 • Music you have written permission to upload{'\n'}
-                • Covers with proper mechanical licenses{'\n'}
+                • Cover recordings (with mechanical licence — SoundBridge holds a blanket PRS/MCPS licence){'\n'}
                 • Public domain works
               </Text>
             </View>
-
             <View style={styles.exampleBox}>
               <View style={[styles.exampleHeader, { backgroundColor: theme.colors.error + '20' }]}>
                 <Ionicons name="close-circle" size={20} color={theme.colors.error} />
@@ -126,46 +129,105 @@ export default function CopyrightPolicyScreen() {
                 • Copyrighted beats or instrumentals you don't own{'\n'}
                 • Samples from other songs without clearance{'\n'}
                 • Music downloaded from other platforms{'\n'}
-                • Cover songs without proper licensing
+                • Any content you do not have the right to distribute
               </Text>
             </View>
           </View>
 
-          {/* Consequences of Infringement */}
+          {/* Repeat Infringer Policy */}
           <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-              Consequences of Copyright Infringement
+              Repeat Infringer Policy
             </Text>
             <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
-              If you upload content that infringes on someone else's copyright:
+              In accordance with 17 USC § 512(i), SoundBridge maintains and enforces a policy to terminate the accounts of users who are repeat infringers:
             </Text>
-
             <View style={styles.warningBox}>
               <Ionicons name="warning" size={24} color={theme.colors.warning} style={styles.warningIcon} />
               <View style={styles.warningContent}>
                 <Text style={[styles.warningText, { color: theme.colors.text }]}>
-                  1. Your content may be removed immediately{'\n'}
-                  2. Your account may be suspended or permanently banned{'\n'}
-                  3. You may face legal action from the copyright owner{'\n'}
-                  4. You may be liable for damages and legal fees
+                  1st notice: Content removed immediately; formal warning issued{'\n'}
+                  2nd notice: Content removed; upload privileges suspended{'\n'}
+                  3rd notice: Account terminated permanently
                 </Text>
               </View>
             </View>
+            <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
+              Counter-notices submitted in good faith reset the count for that specific removal. Abuse of the counter-notice process is itself a grounds for account termination.
+            </Text>
           </View>
 
-          {/* Reporting Infringement */}
+          {/* How to submit a notice */}
           <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-              Reporting Copyright Infringement
+              How to Submit a Copyright Notice
             </Text>
             <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
-              If you believe someone has uploaded content that infringes your copyright, please contact us at:
+              To be effective under 17 USC § 512(c)(3), a copyright notice must include all of the following:
             </Text>
-            <TouchableOpacity>
-              <Text style={[styles.linkText, { color: theme.colors.primary }]}>
-                copyright@soundbridge.com
-              </Text>
+            {[
+              '(i) Identification of the copyrighted work claimed to have been infringed',
+              '(ii) Identification of the material claimed to be infringing, with enough detail to locate it on the platform',
+              '(iii) Your contact information (name, address, phone, email)',
+              '(iv) A statement that you have a good faith belief that the use is not authorised by the copyright owner, its agent, or law',
+              '(v) A statement that the information in the notice is accurate and, under penalty of perjury, that you are authorised to act on behalf of the copyright owner',
+              '(vi) Your physical or electronic signature',
+            ].map((item, i) => (
+              <View key={i} style={styles.listItem}>
+                <Ionicons name="document-text" size={16} color={theme.colors.primary} style={styles.listIcon} />
+                <Text style={[styles.listText, { color: theme.colors.textSecondary }]}>{item}</Text>
+              </View>
+            ))}
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: '#7C3AED' }]}
+              onPress={() => setShowDMCAModal(true)}
+            >
+              <Ionicons name="scale" size={18} color="#FFFFFF" />
+              <Text style={styles.buttonText}>Submit Formal Copyright Notice →</Text>
             </TouchableOpacity>
+          </View>
+
+          {/* Counter-notice rights */}
+          <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              Counter-Notification Rights
+            </Text>
+            <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
+              If your content was removed and you believe it was a mistake or misidentification, you may submit a counter-notice under 17 USC § 512(g) / UK CDPA. A counter-notice must include:
+            </Text>
+            {[
+              'Identification of the material that was removed and its prior location',
+              'A statement under penalty of perjury that you have a good faith belief the material was removed by mistake or misidentification',
+              'Your name, address, phone number, and consent to jurisdiction of the courts',
+              'Your physical or electronic signature',
+            ].map((item, i) => (
+              <View key={i} style={styles.listItem}>
+                <Ionicons name="document-text" size={16} color={theme.colors.primary} style={styles.listIcon} />
+                <Text style={[styles.listText, { color: theme.colors.textSecondary }]}>{item}</Text>
+              </View>
+            ))}
+            <View style={[styles.agentBox, { backgroundColor: theme.colors.surface + '80', borderColor: theme.colors.border }]}>
+              <Ionicons name="information-circle" size={20} color={theme.colors.primary} />
+              <Text style={[styles.bodyText, { color: theme.colors.textSecondary, marginTop: 4 }]}>
+                After we receive a counter-notice, we will forward it to the original claimant. The claimant then has 10–14 business days to notify us that they have filed a court action. If no court action is filed in that window, we may restore the content.
+              </Text>
+            </View>
+            <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
+              To submit a counter-notice, open the relevant track from your profile and tap "Submit Counter-Notice" from the moderation status banner.
+            </Text>
+          </View>
+
+          {/* UK CDPA */}
+          <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              UK CDPA Equivalent Provisions
+            </Text>
+            <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
+              SoundBridge is registered in the UK. UK users and rights holders may also proceed under the Copyright, Designs and Patents Act 1988 and the Electronic Commerce (EC Directive) Regulations 2002. The hosting exemption under these regulations requires expeditious removal upon actual knowledge of infringement — which is why we act promptly on all valid notices.
+            </Text>
+            <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
+              SoundBridge holds applicable licences from PRS for Music / MCPS for the public performance and reproduction of musical compositions. Cover song recordings may be uploaded under these blanket licences.
+            </Text>
           </View>
 
           {/* Audit Trail */}
@@ -179,7 +241,7 @@ export default function CopyrightPolicyScreen() {
             <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
               • Timestamp of your confirmation{'\n'}
               • Device information (platform, OS, app version){'\n'}
-              • Terms version you agreed to
+              • Terms version you agreed to (2026-02-26)
             </Text>
             <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
               This creates an immutable audit trail that protects both you and SoundBridge in case of disputes.
@@ -189,30 +251,37 @@ export default function CopyrightPolicyScreen() {
           {/* Questions */}
           <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-              Still Have Questions?
+              Questions?
             </Text>
             <Text style={[styles.bodyText, { color: theme.colors.textSecondary }]}>
-              If you're unsure whether you can upload certain content, please contact our support team before uploading.
+              For general copyright questions, contact our support team. For formal copyright notices only, use the designated agent address above.
             </Text>
             <TouchableOpacity style={[styles.button, { backgroundColor: theme.colors.primary }]}>
               <Text style={styles.buttonText}>Contact Support</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Last Updated */}
           <Text style={[styles.lastUpdated, { color: theme.colors.textSecondary }]}>
-            Last Updated: January 1, 2026 • Version 1.0.0
+            Last Updated: 26 February 2026 • Version 2026-02-26
           </Text>
         </ScrollView>
       </SafeAreaView>
+
+      {/* DMCA Notice Modal */}
+      <DMCANoticeModal
+        visible={showDMCAModal}
+        contentId=""
+        contentType="track"
+        contentTitle="[Content ID will be populated from context]"
+        onClose={() => setShowDMCAModal(false)}
+        onSubmitted={() => setShowDMCAModal(false)}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   mainGradient: {
     position: 'absolute',
     width: '100%',
@@ -220,10 +289,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
   },
-  safeArea: {
-    flex: 1,
-    backgroundColor: 'transparent',
-  },
+  safeArea: { flex: 1, backgroundColor: 'transparent' },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -237,23 +303,11 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  backButton: {
-    padding: 4,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  headerSpacer: {
-    width: 32,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
+  backButton: { padding: 4 },
+  headerTitle: { fontSize: 20, fontWeight: 'bold' },
+  headerSpacer: { width: 32 },
+  scrollView: { flex: 1 },
+  scrollContent: { padding: 20, paddingBottom: 40 },
   section: {
     marginBottom: 20,
     borderRadius: 12,
@@ -265,53 +319,16 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  iconHeader: {
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  bodyText: {
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 12,
-  },
-  listItem: {
-    flexDirection: 'row',
-    marginBottom: 12,
-  },
-  listIcon: {
-    marginRight: 12,
-    marginTop: 2,
-  },
-  listText: {
-    fontSize: 15,
-    lineHeight: 22,
-    flex: 1,
-  },
-  exampleBox: {
-    marginBottom: 16,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  exampleHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    gap: 8,
-  },
-  exampleTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  exampleText: {
-    fontSize: 14,
-    lineHeight: 20,
-    padding: 12,
-  },
+  iconHeader: { alignItems: 'center', marginBottom: 16 },
+  sectionTitle: { fontSize: 20, fontWeight: '700', marginBottom: 12 },
+  bodyText: { fontSize: 15, lineHeight: 22, marginBottom: 12 },
+  listItem: { flexDirection: 'row', marginBottom: 12 },
+  listIcon: { marginRight: 12, marginTop: 2 },
+  listText: { fontSize: 15, lineHeight: 22, flex: 1 },
+  exampleBox: { marginBottom: 16, borderRadius: 8, overflow: 'hidden' },
+  exampleHeader: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 8 },
+  exampleTitle: { fontSize: 16, fontWeight: '600' },
+  exampleText: { fontSize: 14, lineHeight: 20, padding: 12 },
   warningBox: {
     flexDirection: 'row',
     padding: 16,
@@ -319,36 +336,29 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(245, 158, 11, 0.1)',
     borderWidth: 1,
     borderColor: 'rgba(245, 158, 11, 0.3)',
+    marginBottom: 12,
   },
-  warningIcon: {
-    marginRight: 12,
+  warningIcon: { marginRight: 12 },
+  warningContent: { flex: 1 },
+  warningText: { fontSize: 14, lineHeight: 20 },
+  agentBox: {
+    padding: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 12,
+    gap: 6,
   },
-  warningContent: {
-    flex: 1,
-  },
-  warningText: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  linkText: {
-    fontSize: 16,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
+  agentLabel: { fontSize: 15, fontWeight: '600', marginBottom: 4 },
+  linkText: { fontSize: 16, fontWeight: '600', textDecorationLine: 'underline', marginBottom: 4 },
   button: {
     borderRadius: 8,
-    padding: 16,
+    padding: 14,
     alignItems: 'center',
     marginTop: 8,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
   },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  lastUpdated: {
-    textAlign: 'center',
-    fontSize: 12,
-    marginTop: 8,
-  },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  lastUpdated: { textAlign: 'center', fontSize: 12, marginTop: 8 },
 });

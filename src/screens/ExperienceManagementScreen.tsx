@@ -13,14 +13,60 @@ import {
   Switch,
   ScrollView,
   Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { Picker } from '@react-native-picker/picker';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { profileService } from '../services/ProfileService';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { SystemTypography as Typography } from '../constants/Typography';
+
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const START_YEAR = 1960;
+const END_YEAR = new Date().getFullYear() + 10; // allow a few future years for end dates
+const YEARS = Array.from({ length: END_YEAR - START_YEAR + 1 }, (_, i) => START_YEAR + i);
+
+interface MonthYearPickerProps {
+  month: number; // 1-12
+  year: number;
+  maxYear?: number;
+  onMonthChange: (m: number) => void;
+  onYearChange: (y: number) => void;
+  textColor: string;
+  backgroundColor: string;
+}
+
+function MonthYearPicker({ month, year, maxYear, onMonthChange, onYearChange, textColor, backgroundColor }: MonthYearPickerProps) {
+  const years = maxYear ? YEARS.filter(y => y <= maxYear) : YEARS;
+  return (
+    <View style={{ flexDirection: 'row', height: 180 }}>
+      <Picker
+        style={{ flex: 1, color: textColor }}
+        selectedValue={month}
+        onValueChange={(val) => onMonthChange(Number(val))}
+        itemStyle={{ color: textColor, fontSize: 16 }}
+      >
+        {MONTH_FULL.map((name, i) => (
+          <Picker.Item key={name} label={name} value={i + 1} color={textColor} />
+        ))}
+      </Picker>
+      <Picker
+        style={{ flex: 1, color: textColor }}
+        selectedValue={year}
+        onValueChange={(val) => onYearChange(Number(val))}
+        itemStyle={{ color: textColor, fontSize: 16 }}
+      >
+        {years.map((y) => (
+          <Picker.Item key={y} label={String(y)} value={y} color={textColor} />
+        ))}
+      </Picker>
+    </View>
+  );
+}
 
 interface ExperienceEntry {
   id: string;
@@ -55,11 +101,22 @@ export default function ExperienceManagementScreen() {
     is_current: false,
   });
 
+  // Committed month/year values
+  const nowYear = new Date().getFullYear();
+  const nowMonth = new Date().getMonth() + 1;
+  const [startMonth, setStartMonth] = useState(nowMonth);
+  const [startYear, setStartYear] = useState(nowYear);
+  const [endMonth, setEndMonth] = useState(nowMonth);
+  const [endYear, setEndYear] = useState(nowYear);
+
   // Date picker state
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
-  const [startDate, setStartDate] = useState(new Date());
-  const [endDate, setEndDate] = useState(new Date());
+  // Temp values while picker is open — only committed on confirm tap
+  const [tempStartMonth, setTempStartMonth] = useState(nowMonth);
+  const [tempStartYear, setTempStartYear] = useState(nowYear);
+  const [tempEndMonth, setTempEndMonth] = useState(nowMonth);
+  const [tempEndYear, setTempEndYear] = useState(nowYear);
 
   useEffect(() => {
     loadExperiences();
@@ -71,7 +128,7 @@ export default function ExperienceManagementScreen() {
     try {
       setLoading(true);
       const result = await profileService.getExperience(session);
-      
+
       if (result.success && result.experience) {
         setExperiences(result.experience);
       } else {
@@ -102,8 +159,10 @@ export default function ExperienceManagementScreen() {
       end_date: '',
       is_current: false,
     });
-    setStartDate(new Date());
-    setEndDate(new Date());
+    setStartMonth(nowMonth); setStartYear(nowYear);
+    setEndMonth(nowMonth); setEndYear(nowYear);
+    setTempStartMonth(nowMonth); setTempStartYear(nowYear);
+    setTempEndMonth(nowMonth); setTempEndYear(nowYear);
     setShowForm(true);
   };
 
@@ -117,17 +176,24 @@ export default function ExperienceManagementScreen() {
       end_date: experience.end_date || '',
       is_current: experience.is_current,
     });
-    
-    // Parse dates if they exist
+
     if (experience.start_date) {
-      const [year, month] = experience.start_date.split('-');
-      setStartDate(new Date(parseInt(year), parseInt(month) - 1, 1));
+      const [y, m] = experience.start_date.split('-').map(Number);
+      setStartMonth(m); setStartYear(y);
+      setTempStartMonth(m); setTempStartYear(y);
+    } else {
+      setStartMonth(nowMonth); setStartYear(nowYear);
+      setTempStartMonth(nowMonth); setTempStartYear(nowYear);
     }
     if (experience.end_date) {
-      const [year, month] = experience.end_date.split('-');
-      setEndDate(new Date(parseInt(year), parseInt(month) - 1, 1));
+      const [y, m] = experience.end_date.split('-').map(Number);
+      setEndMonth(m); setEndYear(y);
+      setTempEndMonth(m); setTempEndYear(y);
+    } else {
+      setEndMonth(nowMonth); setEndYear(nowYear);
+      setTempEndMonth(nowMonth); setTempEndYear(nowYear);
     }
-    
+
     setShowForm(true);
   };
 
@@ -171,19 +237,22 @@ export default function ExperienceManagementScreen() {
     try {
       setSaving(true);
 
-      // Format dates as YYYY-MM
-      const formattedStartDate = formData.is_current && !formData.start_date
-        ? undefined
-        : `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
-      
+      // API stores as DATE (YYYY-MM-DD) — always send first of month
+      const toApiDate = (y: number, m: number) => `${y}-${String(m).padStart(2, '0')}-01`;
+
+      const formattedStartDate = formData.start_date
+        ? (formData.start_date.length === 7 ? formData.start_date + '-01' : formData.start_date)
+        : toApiDate(startYear, startMonth);
+
       const formattedEndDate = formData.is_current
         ? undefined
         : formData.end_date
-        ? `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}`
-        : undefined;
+        ? (formData.end_date.length === 7 ? formData.end_date + '-01' : formData.end_date)
+        : toApiDate(endYear, endMonth);
 
       const experienceData = {
         title: formData.title.trim(),
+        role: formData.title.trim(), // backend table uses 'role' as NOT NULL column
         company: formData.company.trim() || undefined,
         description: formData.description.trim() || undefined,
         start_date: formattedStartDate,
@@ -191,14 +260,7 @@ export default function ExperienceManagementScreen() {
         is_current: formData.is_current,
       };
 
-      let result;
-      if (editingExperience) {
-        // For editing, we need to delete and recreate (API doesn't support PUT)
-        // Or we can just use POST which should handle updates
-        result = await profileService.addExperience(experienceData, session);
-      } else {
-        result = await profileService.addExperience(experienceData, session);
-      }
+      const result = await profileService.addExperience(experienceData, session);
 
       if (result.success) {
         Alert.alert('Success', editingExperience ? 'Experience updated successfully' : 'Experience added successfully');
@@ -217,9 +279,31 @@ export default function ExperienceManagementScreen() {
 
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return 'Present';
-    const [year, month] = dateStr.split('-');
+    const parts = dateStr.split('-');
+    const year = parts[0];
+    const month = parts[1];
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return `${monthNames[parseInt(month) - 1]} ${year}`;
+  };
+
+  const confirmStartDate = () => {
+    setStartMonth(tempStartMonth);
+    setStartYear(tempStartYear);
+    setFormData(prev => ({
+      ...prev,
+      start_date: `${tempStartYear}-${String(tempStartMonth).padStart(2, '0')}`,
+    }));
+    setShowStartDatePicker(false);
+  };
+
+  const confirmEndDate = () => {
+    setEndMonth(tempEndMonth);
+    setEndYear(tempEndYear);
+    setFormData(prev => ({
+      ...prev,
+      end_date: `${tempEndYear}-${String(tempEndMonth).padStart(2, '0')}`,
+    }));
+    setShowEndDatePicker(false);
   };
 
   const renderExperience = ({ item }: { item: ExperienceEntry }) => (
@@ -313,7 +397,10 @@ export default function ExperienceManagementScreen() {
         transparent
         onRequestClose={() => setShowForm(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}>
               <Text style={[styles.modalTitle, { color: theme.colors.text }]}>
@@ -324,7 +411,7 @@ export default function ExperienceManagementScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <View style={styles.formGroup}>
                 <Text style={[styles.label, { color: theme.colors.text }]}>Title *</Text>
                 <TextInput
@@ -347,36 +434,48 @@ export default function ExperienceManagementScreen() {
                 />
               </View>
 
+              {/* Start Date */}
               <View style={styles.formGroup}>
                 <Text style={[styles.label, { color: theme.colors.text }]}>Start Date</Text>
                 <TouchableOpacity
                   style={[styles.dateButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-                  onPress={() => setShowStartDatePicker(true)}
+                  onPress={() => {
+                    setTempStartMonth(startMonth);
+                    setTempStartYear(startYear);
+                    setShowStartDatePicker(true);
+                  }}
                 >
                   <Text style={[styles.dateButtonText, { color: theme.colors.text }]}>
-                    {formData.start_date || formatDate(`${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`)}
+                    {formData.start_date ? formatDate(formData.start_date) : `${MONTHS[startMonth - 1]} ${startYear}`}
                   </Text>
                   <Ionicons name="calendar-outline" size={20} color={theme.colors.textSecondary} />
                 </TouchableOpacity>
+
                 {showStartDatePicker && (
-                  <DateTimePicker
-                    value={startDate}
-                    mode="date"
-                    display="default"
-                    onChange={(event, selectedDate) => {
-                      setShowStartDatePicker(false);
-                      if (selectedDate) {
-                        setStartDate(selectedDate);
-                        setFormData(prev => ({
-                          ...prev,
-                          start_date: `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`,
-                        }));
-                      }
-                    }}
-                  />
+                  <View style={[styles.pickerWrapper, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                    <View style={[styles.pickerToolbar, { borderBottomColor: theme.colors.border }]}>
+                      <TouchableOpacity onPress={() => setShowStartDatePicker(false)} style={styles.pickerToolbarBtn}>
+                        <Text style={[styles.pickerCancelText, { color: theme.colors.textSecondary }]}>Cancel</Text>
+                      </TouchableOpacity>
+                      <Text style={[styles.pickerToolbarTitle, { color: theme.colors.text }]}>Start Date</Text>
+                      <TouchableOpacity onPress={confirmStartDate} style={styles.pickerToolbarBtn}>
+                        <Ionicons name="checkmark" size={22} color={theme.colors.primary} />
+                      </TouchableOpacity>
+                    </View>
+                    <MonthYearPicker
+                      month={tempStartMonth}
+                      year={tempStartYear}
+                      maxYear={nowYear}
+                      onMonthChange={setTempStartMonth}
+                      onYearChange={setTempStartYear}
+                      textColor={theme.colors.text}
+                      backgroundColor={theme.colors.card}
+                    />
+                  </View>
                 )}
               </View>
 
+              {/* Currently work here toggle */}
               <View style={styles.formGroup}>
                 <View style={styles.switchRow}>
                   <Text style={[styles.label, { color: theme.colors.text }]}>Currently work here</Text>
@@ -391,43 +490,49 @@ export default function ExperienceManagementScreen() {
                 </View>
               </View>
 
+              {/* End Date */}
               {!formData.is_current && (
                 <View style={styles.formGroup}>
                   <Text style={[styles.label, { color: theme.colors.text }]}>End Date</Text>
                   <TouchableOpacity
                     style={[styles.dateButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-                    onPress={() => setShowEndDatePicker(true)}
+                    onPress={() => {
+                      setTempEndMonth(endMonth);
+                      setTempEndYear(endYear);
+                      setShowEndDatePicker(true);
+                    }}
                   >
                     <Text style={[styles.dateButtonText, { color: theme.colors.text }]}>
-                      {formData.end_date || formatDate(`${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}`)}
+                      {formData.end_date ? formatDate(formData.end_date) : `${MONTHS[endMonth - 1]} ${endYear}`}
                     </Text>
                     <Ionicons name="calendar-outline" size={20} color={theme.colors.textSecondary} />
                   </TouchableOpacity>
+
                   {showEndDatePicker && (
-                    <DateTimePicker
-                      value={endDate}
-                      mode="date"
-                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                      onChange={(event, selectedDate) => {
-                        if (Platform.OS === 'android') {
-                          setShowEndDatePicker(false);
-                        }
-                        if (selectedDate) {
-                          setEndDate(selectedDate);
-                          setFormData(prev => ({
-                            ...prev,
-                            end_date: `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`,
-                          }));
-                        }
-                        if (Platform.OS === 'ios') {
-                          setShowEndDatePicker(false);
-                        }
-                      }}
-                    />
+                    <View style={[styles.pickerWrapper, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                      <View style={[styles.pickerToolbar, { borderBottomColor: theme.colors.border }]}>
+                        <TouchableOpacity onPress={() => setShowEndDatePicker(false)} style={styles.pickerToolbarBtn}>
+                          <Text style={[styles.pickerCancelText, { color: theme.colors.textSecondary }]}>Cancel</Text>
+                        </TouchableOpacity>
+                        <Text style={[styles.pickerToolbarTitle, { color: theme.colors.text }]}>End Date</Text>
+                        <TouchableOpacity onPress={confirmEndDate} style={styles.pickerToolbarBtn}>
+                          <Ionicons name="checkmark" size={22} color={theme.colors.primary} />
+                        </TouchableOpacity>
+                      </View>
+                      <MonthYearPicker
+                        month={tempEndMonth}
+                        year={tempEndYear}
+                        onMonthChange={setTempEndMonth}
+                        onYearChange={setTempEndYear}
+                        textColor={theme.colors.text}
+                        backgroundColor={theme.colors.card}
+                      />
+                    </View>
                   )}
                 </View>
               )}
 
+              {/* Description */}
               <View style={styles.formGroup}>
                 <Text style={[styles.label, { color: theme.colors.text }]}>Description</Text>
                 <TextInput
@@ -441,6 +546,9 @@ export default function ExperienceManagementScreen() {
                   textAlignVertical="top"
                 />
               </View>
+
+              {/* Bottom padding so description isn't hidden behind footer */}
+              <View style={{ height: 16 }} />
             </ScrollView>
 
             <View style={[styles.modalFooter, { borderTopColor: theme.colors.border }]}>
@@ -463,7 +571,7 @@ export default function ExperienceManagementScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -485,8 +593,9 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   headerTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
   },
   addButton: {
     width: 40,
@@ -502,13 +611,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   emptyText: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtext: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     textAlign: 'center',
     marginBottom: 24,
   },
@@ -519,7 +631,9 @@ const styles = StyleSheet.create({
   },
   addFirstButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
   },
   listContent: {
@@ -540,16 +654,22 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   experienceTitle: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginBottom: 4,
   },
   experienceCompany: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     marginBottom: 4,
   },
   experienceDate: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
   },
   experienceActions: {
     flexDirection: 'row',
@@ -563,6 +683,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   experienceDescription: {
+    ...Typography.label,
     fontSize: 14,
     lineHeight: 20,
     marginTop: 8,
@@ -575,7 +696,7 @@ const styles = StyleSheet.create({
   modalContent: {
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '90%',
+    maxHeight: '92%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -585,18 +706,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   modalTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
   },
   modalBody: {
     padding: 16,
-    maxHeight: 500,
   },
   formGroup: {
     marginBottom: 16,
   },
   label: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     fontWeight: '500',
     marginBottom: 8,
   },
@@ -604,13 +727,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 8,
     padding: 12,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   textArea: {
     borderWidth: 1,
     borderRadius: 8,
     padding: 12,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     minHeight: 100,
   },
   switchRow: {
@@ -627,7 +754,36 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   dateButtonText: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
+  },
+  pickerWrapper: {
+    borderWidth: 1,
+    borderRadius: 12,
+    marginTop: 8,
+    overflow: 'hidden',
+  },
+  pickerToolbar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  pickerToolbarBtn: {
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  pickerToolbarTitle: {
+    ...Typography.label,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  pickerCancelText: {
+    ...Typography.label,
+    fontSize: 15,
   },
   modalFooter: {
     flexDirection: 'row',
@@ -644,7 +800,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cancelButtonText: {
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
   },
   saveButton: {
@@ -655,8 +813,9 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
   },
 });
-

@@ -85,8 +85,8 @@ export default function TrackSelectionModal({
               Choose 3 Tracks to Keep Public
             </Text>
             <Text style={[styles.instructionsText, { color: theme.colors.textSecondary }]}>
-              Your account will be downgraded to Free tier, which includes 3 track uploads. 
-              Select which 3 tracks you'd like to keep visible. The remaining tracks will be set to private (not deleted).
+              Your account will be downgraded to Free tier (250MB storage).
+              Select up to 3 tracks to keep visible during the grace period. The remaining tracks will be set to private (not deleted).
             </Text>
           </View>
         </View>

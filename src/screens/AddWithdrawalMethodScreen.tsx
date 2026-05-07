@@ -100,11 +100,21 @@ export default function AddWithdrawalMethodScreen() {
   // Handler for CountryAwareBankForm
   const handleAddMethod = async (methodData: any) => {
     try {
+      if (!session) {
+        Alert.alert('Error', 'You must be logged in to add a withdrawal method');
+        return;
+      }
       setSubmitting(true);
       
-      const result = await walletService.addWithdrawalMethod(session!, methodData);
-      
-      if (result.success) {
+      const result = await walletService.addWithdrawalMethod(session, methodData);
+
+      if (result.success && result.pending_verification) {
+        Alert.alert(
+          'Account Saved',
+          'Your bank details have been saved. Bank name verification is temporarily unavailable — your account will be verified automatically once the service is restored.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+      } else if (result.success) {
         Alert.alert('Success', 'Withdrawal method added successfully!');
         navigation.goBack();
       } else {
@@ -454,54 +464,61 @@ export default function AddWithdrawalMethodScreen() {
         {renderMethodSelection()}
 
         {selectedMethod === 'bank_transfer' && (
-          <CountryAwareBankForm
-            session={session!}
-            onSubmit={handleAddMethod}
-            setMakeDefault={setMakeDefault}
-          />
+          session ? (
+            <CountryAwareBankForm
+              session={session}
+              onSubmit={handleAddMethod}
+              setAsDefault={makeDefault}
+            />
+          ) : (
+            <View style={[styles.infoBox, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+              <Ionicons name="alert-circle" size={20} color={theme.colors.warning} />
+              <Text style={[styles.infoText, { color: theme.colors.text }]}>
+                Please sign in again to add a bank transfer method.
+              </Text>
+            </View>
+          )
         )}
         {selectedMethod === 'paypal' && renderPayPalForm()}
         {selectedMethod === 'crypto' && renderCryptoForm()}
 
-        {selectedMethod && selectedMethod !== 'bank_transfer' && (
-          <>
-            {/* Make Default Option */}
-            <View style={[styles.defaultSection, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-              <View style={styles.defaultOption}>
-                <View style={styles.defaultInfo}>
-                  <Text style={[styles.defaultTitle, { color: theme.colors.text }]}>Set as Default</Text>
-                  <Text style={[styles.defaultDescription, { color: theme.colors.textSecondary }]}>
-                    Use this method for all future withdrawals by default
-                  </Text>
-                </View>
-                <Switch
-                  value={makeDefault}
-                  onValueChange={setMakeDefault}
-                  trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
-                  thumbColor={makeDefault ? theme.colors.primary : theme.colors.textSecondary}
-                />
+        {selectedMethod && (
+          <View style={[styles.defaultSection, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <View style={styles.defaultOption}>
+              <View style={styles.defaultInfo}>
+                <Text style={[styles.defaultTitle, { color: theme.colors.text }]}>Set as Default</Text>
+                <Text style={[styles.defaultDescription, { color: theme.colors.textSecondary }]}>
+                  Use this method for all future withdrawals by default
+                </Text>
               </View>
+              <Switch
+                value={makeDefault}
+                onValueChange={setMakeDefault}
+                trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+                thumbColor={makeDefault ? theme.colors.primary : theme.colors.textSecondary}
+              />
             </View>
+          </View>
+        )}
 
-            {/* Submit Button */}
-            <TouchableOpacity
-              style={[
-                styles.submitButton,
-                { backgroundColor: theme.colors.primary }
-              ]}
-              onPress={handleSubmit}
-              disabled={submitting}
-            >
-              {submitting ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <>
-                  <Ionicons name="add-circle" size={20} color="#FFFFFF" />
-                  <Text style={styles.submitButtonText}>Add Withdrawal Method</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </>
+        {selectedMethod && selectedMethod !== 'bank_transfer' && (
+          <TouchableOpacity
+            style={[
+              styles.submitButton,
+              { backgroundColor: theme.colors.primary }
+            ]}
+            onPress={handleSubmit}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Ionicons name="add-circle" size={20} color="#FFFFFF" />
+                <Text style={styles.submitButtonText}>Add Withdrawal Method</Text>
+              </>
+            )}
+          </TouchableOpacity>
         )}
       </ScrollView>
       </SafeAreaView>

@@ -3,7 +3,7 @@
  * Discovery interface for live and upcoming audio sessions
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,28 +12,44 @@ import {
   RefreshControl,
   StatusBar,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { dbHelpers } from '../lib/supabase';
+import { dbHelpers, supabase } from '../lib/supabase';
 import { LiveSession } from '../types/liveSession';
 import SessionCard from '../components/live-sessions/SessionCard';
+import { SystemTypography as Typography } from '../constants/Typography';
+import RequestRoomBanner from '../components/RequestRoomBanner';
+import RadioLabCard from '../components/RadioLabCard';
 
 export default function LiveSessionsScreen({ navigation }: any) {
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
   const { theme } = useTheme();
-  
+  const isAdmin = userProfile?.is_admin === true;
+
   const [activeTab, setActiveTab] = useState<'live' | 'upcoming'>('live');
   const [liveSessions, setLiveSessions] = useState<LiveSession[]>([]);
   const [upcomingSessions, setUpcomingSessions] = useState<LiveSession[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Ref for real-time subscription
+  const sessionsSubscriptionRef = useRef<any>(null);
+
   useEffect(() => {
     loadSessions();
+    subscribeToSessionChanges();
+
+    return () => {
+      // Cleanup subscription on unmount
+      if (sessionsSubscriptionRef.current) {
+        supabase.removeChannel(sessionsSubscriptionRef.current);
+      }
+    };
   }, []);
 
   const loadSessions = async () => {
@@ -65,6 +81,68 @@ export default function LiveSessionsScreen({ navigation }: any) {
     loadSessions();
   }, []);
 
+  const subscribeToSessionChanges = () => {
+    console.log('📡 [LiveSessionsScreen] Subscribing to live session status changes');
+
+    // Subscribe to all live_sessions table changes
+    sessionsSubscriptionRef.current = supabase
+      .channel('live_sessions_status')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'live_sessions',
+        },
+        (payload) => {
+          console.log('📡 [LiveSessionsScreen] Session change:', payload);
+
+          if (payload.eventType === 'DELETE' && payload.old) {
+            setLiveSessions(prev => prev.filter(session => session.id !== payload.old.id));
+            setUpcomingSessions(prev => prev.filter(session => session.id !== payload.old.id));
+            return;
+          }
+
+          // When a session status changes to 'ended', remove it from liveSessions
+          if (payload.new && payload.new.status === 'ended') {
+            setLiveSessions(prev => prev.filter(session => session.id !== payload.new.id));
+            console.log('✅ [LiveSessionsScreen] Removed ended session from list:', payload.new.id);
+            return;
+          }
+
+          // For inserts/updates (new live or scheduled sessions), reload to get joined data
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            loadSessions();
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 [LiveSessionsScreen] Subscription status:', status);
+      });
+  };
+
+  const handleAdminEnd = (session: LiveSession) => {
+    Alert.alert(
+      'End Session',
+      `End "${session.title}" by @${session.creator?.username || 'unknown'}? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'End Session',
+          style: 'destructive',
+          onPress: async () => {
+            const { success, error } = await dbHelpers.adminEndLiveSession(session.id);
+            if (!success) {
+              Alert.alert('Error', 'Could not end the session. Check your admin permissions.');
+              console.error('Admin end session error:', error);
+            }
+            // Real-time subscription will remove it from the list automatically
+          },
+        },
+      ]
+    );
+  };
+
   const handleSessionPress = (session: LiveSession) => {
     if (session.status === 'live') {
       // Navigate to LiveSessionRoomScreen
@@ -73,8 +151,11 @@ export default function LiveSessionsScreen({ navigation }: any) {
         session: session,
       });
     } else {
-      // Show session details or set reminder
-      console.log('Scheduled session:', session.id);
+      Alert.alert(
+        'Session Scheduled',
+        'This session is not live yet. We will add reminders and details soon.',
+        [{ text: 'OK' }]
+      );
     }
   };
 
@@ -83,6 +164,8 @@ export default function LiveSessionsScreen({ navigation }: any) {
       session={item}
       onPress={() => handleSessionPress(item)}
       currentUserId={user?.id}
+      isAdmin={isAdmin}
+      onAdminEnd={handleAdminEnd}
     />
   );
 
@@ -110,16 +193,22 @@ export default function LiveSessionsScreen({ navigation }: any) {
   };
 
   const renderHeader = () => (
-    <View style={styles.listHeader}>
-      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-        {activeTab === 'live' ? '🔴 Live Now' : '📅 Coming Up'}
-      </Text>
-      <Text style={[styles.sectionSubtitle, { color: theme.colors.textSecondary }]}>
-        {activeTab === 'live' 
-          ? `${liveSessions.length} active ${liveSessions.length === 1 ? 'session' : 'sessions'}`
-          : `${upcomingSessions.length} scheduled ${upcomingSessions.length === 1 ? 'session' : 'sessions'}`
-        }
-      </Text>
+    <View>
+      <RadioLabCard />
+      <RequestRoomBanner />
+      {currentSessions.length > 0 && (
+        <View style={styles.listHeader}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+            {activeTab === 'live' ? '🔴 Live Now' : '📅 Coming Up'}
+          </Text>
+          <Text style={[styles.sectionSubtitle, { color: theme.colors.textSecondary }]}>
+            {activeTab === 'live'
+              ? `${liveSessions.length} active ${liveSessions.length === 1 ? 'session' : 'sessions'}`
+              : `${upcomingSessions.length} scheduled ${upcomingSessions.length === 1 ? 'session' : 'sessions'}`
+            }
+          </Text>
+        </View>
+      )}
     </View>
   );
 
@@ -245,7 +334,7 @@ export default function LiveSessionsScreen({ navigation }: any) {
               colors={[theme.colors.primary]}
             />
           }
-          ListHeaderComponent={currentSessions.length > 0 ? renderHeader : null}
+          ListHeaderComponent={renderHeader}
           ListEmptyComponent={!loading ? renderEmptyState : null}
         />
       </SafeAreaView>
@@ -289,11 +378,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 34,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    lineHeight: 40,
+    fontFamily: Typography.body.fontFamily,
     marginBottom: 2,
   },
   headerSubtitle: {
+    ...Typography.label,
     fontSize: 13,
   },
   headerButton: {
@@ -337,8 +430,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   tabText: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '500',
   },
   badge: {
     minWidth: 20,
@@ -351,8 +444,8 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     color: '#FFFFFF',
+    ...Typography.label,
     fontSize: 11,
-    fontWeight: 'bold',
   },
   sessionsList: {
     paddingVertical: 8,
@@ -363,11 +456,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   sectionTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
     marginBottom: 4,
   },
   sectionSubtitle: {
+    ...Typography.label,
     fontSize: 13,
   },
   emptyState: {
@@ -378,12 +472,13 @@ const styles = StyleSheet.create({
     paddingVertical: 60,
   },
   emptyStateTitle: {
+    ...Typography.headerMedium,
     fontSize: 20,
-    fontWeight: 'bold',
     marginTop: 16,
     marginBottom: 8,
   },
   emptyStateText: {
+    ...Typography.body,
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,

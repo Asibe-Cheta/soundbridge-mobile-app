@@ -21,6 +21,8 @@ export interface CreateTipResponse {
   platformFee: number;
   creatorEarnings: number;
   message?: string;
+  customer_id?: string;
+  ephemeral_key_secret?: string;
 }
 
 export interface ConfirmTipResponse {

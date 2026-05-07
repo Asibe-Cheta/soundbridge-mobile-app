@@ -110,22 +110,31 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
         sessionData = data;
         setSession(data);
       }
-      
-      // 2. Determine user's role
+
+      // 2. Check if session is still live
+      if (sessionData.status === 'ended') {
+        throw new Error('This session has ended');
+      }
+
+      if (sessionData.status !== 'live') {
+        throw new Error('This session is not currently live');
+      }
+
+      // 3. Determine user's role
       const isHost = sessionData.creator_id === user?.id;
       let userRole: 'listener' | 'speaker' | 'host' = isHost ? 'host' : 'listener';
-      
+
       // Check if user already has a different role (e.g., previously promoted to speaker)
       // This would happen if they rejoin the session
       // For Phase 4, we'll always start as listener or host
-      
+
       setMyRole(userRole);
       console.log('👤 Joining as:', userRole);
-      
-      // 3. Initialize Agora engine
+
+      // 4. Initialize Agora engine
       await agoraService.initialize();
-      
-      // 4. Generate Agora token (token service will check authentication)
+
+      // 5. Generate Agora token (token service will check authentication)
       console.log('🔑 [ROOM] Generating Agora token...');
       const agoraRole = (userRole === 'host' || userRole === 'speaker') ? 'broadcaster' : 'audience';
       const tokenData = await generateAgoraTokenWithRetry(sessionId, agoraRole);
@@ -141,7 +150,7 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
       if (!tokenData.success || !tokenData.token || !tokenData.channelName || !tokenData.uid) {
         throw new Error(tokenData.error || 'Failed to generate token');
       }
-      
+
       // 6. Join Agora channel with appropriate role
       setIsJoining(true);
       if (userRole === 'host' || userRole === 'speaker') {
@@ -150,34 +159,39 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
       } else {
         await agoraService.joinAsListener(tokenData.token, tokenData.channelName, tokenData.uid);
       }
-      
+
       // 7. Create participant record in database
       if (user) {
         await dbHelpers.joinLiveSession(sessionId, user.id, userRole);
       }
-      
+
       // 8. Load initial data
       await Promise.all([
         loadParticipants(),
         loadComments(),
       ]);
-      
+
       // 9. Subscribe to real-time updates
       subscribeToUpdates();
-      
+
       // 10. Setup Agora event listeners for speaking indicators
       setupAgoraListeners();
       
       console.log('✅ Session initialized successfully');
       
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to join session';
-      console.error('❌ Session initialization error:', errorMessage);
-      setError(errorMessage);
-      
+      const rawError = err instanceof Error ? err.message : 'Failed to join session';
+      console.error('❌ Session initialization error:', rawError);
+
+      // Show user-friendly message instead of raw technical errors
+      const userMessage = rawError.includes('JSON') || rawError.includes('parse') || rawError.includes('network') || rawError.includes('fetch')
+        ? 'Unable to connect to the live session service. Please check your connection and try again.'
+        : rawError;
+      setError(userMessage);
+
       Alert.alert(
-        'Failed to Join',
-        errorMessage,
+        'Unable to Join Session',
+        userMessage,
         [
           {
             text: 'Go Back',
@@ -389,7 +403,7 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
     }
   };
 
-  const handleSendTip = async (amount: number, message?: string) => {
+  const handleSendTip = async (amount: number, message?: string, paymentIntentId?: string) => {
     if (!session?.creator_id) {
       Alert.alert('Error', 'Creator information not available');
       return;
@@ -401,6 +415,7 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
         creatorId: session.creator_id,
         amount,
         message,
+        stripePaymentIntentId: paymentIntentId,
       });
       
       console.log('✅ Tip sent successfully');
@@ -573,7 +588,7 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
           }
         } else if (newRole === 'listener' && (previousRole === 'speaker' || previousRole === 'host')) {
           agoraService.demoteToListener().then(() => {
-            setIsMuted(false);
+            setIsMuted(true);
             setHandRaised(false);
             Alert.alert(
               'Demoted to Listener',

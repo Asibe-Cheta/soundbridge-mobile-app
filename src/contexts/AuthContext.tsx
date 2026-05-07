@@ -1,12 +1,14 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { Linking, AppState, AppStateStatus } from 'react-native';
+import { Linking, AppState, AppStateStatus, Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import type { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import type { CreatorType } from '../types';
 import { fetchCreatorTypes } from '../services/creatorExpansionService';
 import RevenueCatService from '../services/RevenueCatService';
 import { config } from '../config/environment';
+import { notificationService } from '../services/NotificationService';
 
 // CRITICAL: Complete the auth session after OAuth redirect
 WebBrowser.maybeCompleteAuthSession();
@@ -24,6 +26,14 @@ interface UserProfile {
   created_at: string;
   creator_types?: CreatorType[];
   primary_creator_type?: CreatorType | null;
+  is_admin?: boolean;
+  nudge_event_30day_dismissed?: boolean;
+  nudge_event_never_dismissed?: boolean;
+  nudge_first_track_dismissed?: boolean;
+  nudge_venue_search_dismissed?: boolean;
+  nudge_gig_post_dismissed?: boolean;
+  nudge_collaborator_dismissed?: boolean;
+  onboarding_user_type?: string;
 }
 
 interface AuthContextType {
@@ -39,6 +49,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, metadata?: any) => Promise<{ success: boolean; error?: any; needsEmailVerification?: boolean }>;
   signOut: () => Promise<{ success: boolean; error?: any }>;
   signInWithGoogle: () => Promise<{ success: boolean; error?: any }>;
+  signInWithApple: () => Promise<{ success: boolean; error?: any }>;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: any }>;
   updatePassword: (newPassword: string) => Promise<{ success: boolean; error?: any }>;
   resendConfirmation: (email: string) => Promise<{ success: boolean; error?: any }>;
@@ -46,6 +57,8 @@ interface AuthContextType {
   updateUserProfile: (updates: Partial<UserProfile>) => Promise<{ success: boolean; error?: any }>;
   completeOnboarding: () => Promise<{ success: boolean; error?: any }>;
   checkOnboardingStatus: () => Promise<{ needsOnboarding: boolean; profile?: any; onboarding?: any }>;
+  pendingPasswordReset: boolean;
+  clearPendingPasswordReset: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -62,6 +75,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [error, setError] = useState<string | null>(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [isChecking2FA, setIsChecking2FA] = useState(false); // Web team's recommended flag name
+  const [pendingPasswordReset, setPendingPasswordReset] = useState(false);
   
   // ✅ CRITICAL: Use ref to store current value so onAuthStateChange handler can access latest value
   const isChecking2FARef = React.useRef(false);
@@ -137,6 +151,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return;
         }
         
+        // Handle password recovery deep link
+        if (event === 'PASSWORD_RECOVERY' && session) {
+          console.log('🔐 Password recovery session active');
+          setSession(session);
+          setUser(session.user);
+          setPendingPasswordReset(true);
+          setLoading(false);
+          return;
+        }
+
         // Handle sign in (Claude's solution)
         if (event === 'SIGNED_IN' && session) {
           console.log('✅ User signed in:', session.user.email);
@@ -168,36 +192,53 @@ export function AuthProvider({ children }: AuthProviderProps) {
     );
 
         // Handle deep linking for auth callbacks
-        const handleDeepLink = (url: string) => {
+        const handleDeepLink = async (url: string) => {
           console.log('Deep link received:', url);
-          
-          // Handle both custom scheme and Expo development URLs
-          if (url.includes('soundbridge://auth/callback') || url.includes('exp://') && url.includes('/auth/callback')) {
-            console.log('Auth callback received via deep link');
-            
-            // Extract parameters from URL
-            let urlParams: URLSearchParams;
-            if (url.includes('?')) {
-              urlParams = new URLSearchParams(url.split('?')[1]);
-            } else {
-              urlParams = new URLSearchParams();
+
+          const isAuthCallback = url.includes('soundbridge://auth/callback') ||
+            (url.includes('exp://') && url.includes('/auth/callback'));
+
+          if (!isAuthCallback) return;
+
+          console.log('Auth callback received via deep link');
+
+          // Supabase puts tokens in the hash fragment; fallback to query string
+          let paramString = '';
+          if (url.includes('#')) {
+            paramString = url.split('#')[1];
+          } else if (url.includes('?')) {
+            paramString = url.split('?')[1];
+          }
+
+          if (!paramString) return;
+
+          const params = new URLSearchParams(paramString);
+          const access_token = params.get('access_token');
+          const refresh_token = params.get('refresh_token');
+          const type = params.get('type'); // 'signup' | 'recovery' | 'magiclink'
+
+          if (access_token && refresh_token) {
+            console.log('🔑 Auth tokens found in deep link, type:', type);
+            try {
+              const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+              if (error) {
+                console.error('❌ Error setting session from deep link:', error.message);
+              } else {
+                console.log('✅ Session set from deep link');
+                // Mark as pending password reset so App.tsx can navigate
+                if (type === 'recovery') {
+                  setPendingPasswordReset(true);
+                }
+              }
+            } catch (err) {
+              console.error('❌ Unexpected error setting session from deep link:', err);
             }
-            
-            const verified = urlParams.get('verified');
-            const next = urlParams.get('next');
-            
+          } else {
+            // Legacy ?verified=true fallback
+            const verified = params.get('verified');
             if (verified === 'true') {
               console.log('Email verification completed via deep link');
-              // The user is already verified, we can proceed
               setLoading(false);
-              
-              // If there's a next parameter, we could handle navigation here
-              if (next) {
-                console.log('Next destination:', next);
-              }
-            } else {
-              // Handle regular auth callback - Supabase will automatically process this
-              console.log('Regular auth callback processing');
             }
           }
         };
@@ -272,7 +313,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       console.log('🔍 Checking onboarding status via API...');
-      const response = await fetch('https://www.soundbridge.live/api/user/onboarding-status', {
+      const response = await fetch(`${config.apiUrl}/user/onboarding-status`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -312,10 +353,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
     
     try {
-      console.log('🔐 Attempting login for:', email);
+      const normalizedEmail = email.trim().toLowerCase();
+      const normalizedPassword = password;
+      console.log('🔐 Attempting login for:', normalizedEmail);
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+        email: normalizedEmail,
+        password: normalizedPassword,
       });
       
       if (error) {
@@ -362,12 +405,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
     
     try {
-      console.log('📝 Starting registration for:', email);
+      const normalizedEmail = email.trim().toLowerCase();
+      const normalizedPassword = password;
+      console.log('📝 Starting registration for:', normalizedEmail);
       const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
+        email: normalizedEmail,
+        password: normalizedPassword,
         options: {
           data: metadata,
+          emailRedirectTo: 'soundbridge://auth/callback',
         },
       });
       
@@ -384,7 +430,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const needsEmailVerification = !data.session;
         
         if (needsEmailVerification) {
-          console.log('📧 Confirmation email sent to:', email);
+          console.log('📧 Confirmation email sent to:', normalizedEmail);
         }
         
         setLoading(false);
@@ -410,6 +456,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setLoading(true);
 
     try {
+      try {
+        await notificationService.unregisterPushToken();
+        notificationService.cleanup();
+      } catch (notificationError) {
+        console.warn('⚠️ Failed to unregister push token (non-critical):', notificationError);
+      }
+
       const { error } = await supabase.auth.signOut();
 
       if (error) {
@@ -527,6 +580,44 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
+  const signInWithApple = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      if (!credential.identityToken) {
+        throw new Error('No identity token received from Apple');
+      }
+
+      const { error } = await supabase.auth.signInWithIdToken({
+        provider: 'apple',
+        token: credential.identityToken,
+      });
+
+      if (error) throw error;
+
+      console.log('✅ Apple Sign In successful');
+      setLoading(false);
+      return { success: true };
+    } catch (err: any) {
+      if (err.code === 'ERR_REQUEST_CANCELED') {
+        setLoading(false);
+        return { success: false, error: { message: 'Sign in cancelled' } };
+      }
+      const friendlyError = mapAuthError(err.message || 'Apple sign in failed');
+      console.error('❌ Apple Sign In error:', friendlyError);
+      setError(friendlyError);
+      setLoading(false);
+      return { success: false, error: { message: friendlyError } };
+    }
+  };
+
   const resetPassword = async (email: string) => {
     setLoading(true);
     setError(null);
@@ -534,7 +625,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       console.log('📧 Requesting password reset for:', email);
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: 'https://www.soundbridge.live/update-password',
+        redirectTo: 'soundbridge://auth/callback',
       });
       
       if (error) {
@@ -673,7 +764,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
             try {
               console.log('💰 Initializing RevenueCat for user:', userId);
               if (!RevenueCatService.isReady()) {
-                const initialized = await RevenueCatService.initialize(config.revenueCatApiKey, userId);
+                const rcApiKey = Platform.OS === 'android' ? config.revenueCatAndroidApiKey : config.revenueCatApiKey;
+                if (!rcApiKey || rcApiKey.trim().length === 0) {
+                  console.warn('⚠️ RevenueCat API key not configured for platform:', Platform.OS, '— skipping initialization.');
+                  return;
+                }
+                const initialized = await RevenueCatService.initialize(rcApiKey, userId);
                 if (initialized) {
                   console.log('✅ RevenueCat initialized successfully');
                 } else {
@@ -794,6 +890,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
+  const clearPendingPasswordReset = () => setPendingPasswordReset(false);
+
   const value: AuthContextType = {
     user,
     userProfile,
@@ -807,6 +905,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     signUp,
     signOut,
     signInWithGoogle,
+    signInWithApple,
     resetPassword,
     updatePassword,
     resendConfirmation,
@@ -814,6 +913,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     updateUserProfile,
     completeOnboarding,
     checkOnboardingStatus,
+    pendingPasswordReset,
+    clearPendingPasswordReset,
   };
 
   return (

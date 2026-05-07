@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TouchableOpacity, ActivityIndicator, Alert, StyleSheet } from 'react-native';
+import { TouchableOpacity, Alert, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -22,7 +22,6 @@ export default function PostSaveButton({
   const { user } = useAuth();
   const [isSaved, setIsSaved] = useState(initialIsSaved);
   const [isLoading, setIsLoading] = useState(false);
-  const [isChecking, setIsChecking] = useState(false);
 
   useEffect(() => {
     if (user && postId && !initialIsSaved) {
@@ -32,19 +31,11 @@ export default function PostSaveButton({
 
   const checkSaveStatus = async () => {
     if (!user) return;
-
-    setIsChecking(true);
     try {
-      const { data: saved } = await socialService.isBookmarked(
-        user.id,
-        postId,
-        'post'
-      );
+      const { data: saved } = await socialService.isBookmarked(user.id, postId, 'post');
       setIsSaved(saved);
     } catch (error) {
       console.error('Error checking bookmark status:', error);
-    } finally {
-      setIsChecking(false);
     }
   };
 
@@ -93,14 +84,6 @@ export default function PostSaveButton({
     return null; // Don't show save button if not logged in
   }
 
-  if (isChecking) {
-    return (
-      <TouchableOpacity style={styles.button} disabled>
-        <ActivityIndicator size="small" color={theme.colors.textSecondary} />
-      </TouchableOpacity>
-    );
-  }
-
   return (
     <TouchableOpacity
       onPress={handleToggle}
@@ -108,15 +91,11 @@ export default function PostSaveButton({
       style={styles.button}
       activeOpacity={0.7}
     >
-      {isLoading ? (
-        <ActivityIndicator size="small" color={theme.colors.primary} />
-      ) : (
         <Ionicons
-          name={isSaved ? 'bookmark' : 'bookmark-outline'}
-          size={size}
-          color={isSaved ? theme.colors.primary : theme.colors.textSecondary}
-        />
-      )}
+        name={isSaved ? 'bookmark' : 'bookmark-outline'}
+        size={size}
+        color={isSaved ? theme.colors.primary : theme.colors.textSecondary}
+      />
     </TouchableOpacity>
   );
 }

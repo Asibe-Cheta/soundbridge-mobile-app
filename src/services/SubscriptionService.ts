@@ -1,7 +1,7 @@
 import { Session } from '@supabase/supabase-js';
 import { config } from '../config/environment';
 
-const API_BASE_URL = __DEV__ ? 'http://192.168.1.122:3000' : 'https://soundbridge.live';
+const API_BASE_URL = config.apiUrl;
 
 export interface SubscriptionStatus {
   tier: 'free' | 'premium' | 'unlimited';
@@ -130,6 +130,9 @@ export interface RevenueData {
 }
 
 class SubscriptionService {
+  private cachedUsageLimits: UsageLimits | null = null;
+  private lastUsageLimitsFetchedAt: number | null = null;
+  private usageLimitsCacheMs = 60 * 1000;
   private getAuthHeaders(session: Session) {
     return {
       'Content-Type': 'application/json',
@@ -328,13 +331,21 @@ class SubscriptionService {
    */
   async getUsageLimits(session: Session): Promise<UsageLimits> {
     try {
+      if (this.cachedUsageLimits && this.lastUsageLimitsFetchedAt) {
+        const age = Date.now() - this.lastUsageLimitsFetchedAt;
+        if (age < this.usageLimitsCacheMs) {
+          console.log('📦 Using cached usage limits');
+          return this.cachedUsageLimits;
+        }
+      }
+
       console.log('📊 Fetching usage limits...');
       const response = await this.makeRequest('/api/user/usage-limits', session);
       console.log('✅ Usage limits response:', response);
 
       const data = response?.data || {};
 
-      return {
+      const limits: UsageLimits = {
         uploads: {
           used: data.uploads?.used || 0,
           limit: data.uploads?.limit || 0,
@@ -361,39 +372,46 @@ class SubscriptionService {
           is_unlimited: data.storage?.is_unlimited || false,
         },
       };
+
+      this.cachedUsageLimits = limits;
+      this.lastUsageLimitsFetchedAt = Date.now();
+
+      return limits;
     } catch (error) {
-      console.error('❌ Error fetching usage limits:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Check if user can send a message (based on tier limits)
-   * Returns { canSend: boolean, reason?: string, usageLimits?: UsageLimits }
-   */
-  async canSendMessage(session: Session): Promise<{ canSend: boolean; reason?: string; usageLimits?: UsageLimits }> {
-    try {
-      const limits = await this.getUsageLimits(session);
-
-      // Premium/Unlimited users have unlimited messages
-      if (limits.messages.is_unlimited) {
-        return { canSend: true, usageLimits: limits };
-      }
-
-      // Free users: Check if they have messages remaining
-      if (limits.messages.remaining > 0) {
-        return { canSend: true, usageLimits: limits };
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('timeout') || errorMessage.includes('Network request failed')) {
+        console.warn('⚠️ Usage limits request failed, returning safe defaults');
+      } else {
+        console.error('❌ Error fetching usage limits:', error);
       }
 
       return {
-        canSend: false,
-        reason: `You've reached your message limit (${limits.messages.limit} per month). Upgrade to Premium for unlimited messaging.`,
-        usageLimits: limits,
+        uploads: {
+          used: 0,
+          limit: 0,
+          remaining: 0,
+          is_unlimited: false,
+          period: 'monthly',
+        },
+        messages: {
+          used: 0,
+          limit: 0,
+          remaining: 0,
+          is_unlimited: true, // Messaging is unlimited — always fail open
+        },
+        searches: {
+          used: 0,
+          limit: 0,
+          remaining: 0,
+          is_unlimited: false,
+        },
+        storage: {
+          used: 0,
+          limit: 0,
+          remaining: 0,
+          is_unlimited: false,
+        },
       };
-    } catch (error) {
-      console.error('❌ Error checking message limits:', error);
-      // On error, allow sending (fail open)
-      return { canSend: true };
     }
   }
 

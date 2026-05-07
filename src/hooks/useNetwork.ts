@@ -9,6 +9,81 @@ import { realtimeService } from '../services/realtime/realtimeService';
 import { useAuth } from '../contexts/AuthContext';
 import { mockConnections, mockConnectionRequests, mockConnectionSuggestions } from '../utils/mockNetworkData';
 import { networkCacheService } from '../services/networkCacheService';
+import { supabase } from '../lib/supabase';
+
+/**
+ * Fallback: build connections list from mutual follows in Supabase.
+ * A "connection" = someone you follow who also follows you back.
+ * If no mutual follows exist, returns everyone you follow.
+ */
+async function loadConnectionsFromSupabase(): Promise<Connection[]> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user?.id) return [];
+    const userId = session.user.id;
+
+    // People I follow
+    const { data: following } = await supabase
+      .from('follows')
+      .select('following_id, created_at')
+      .eq('follower_id', userId)
+      .limit(50);
+
+    if (!following || following.length === 0) return [];
+
+    const followingIds = following.map(f => f.following_id);
+
+    // Who among them follows me back (mutual)
+    const { data: mutualFollows } = await supabase
+      .from('follows')
+      .select('follower_id')
+      .eq('following_id', userId)
+      .in('follower_id', followingIds);
+
+    const mutualIds = new Set(mutualFollows?.map(f => f.follower_id) || []);
+    // Use mutual follows if any, else fall back to all following
+    const connectionIds = mutualIds.size > 0
+      ? followingIds.filter(id => mutualIds.has(id))
+      : followingIds;
+
+    // Fetch profiles
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, username, display_name, avatar_url, professional_headline, role, is_verified')
+      .in('id', connectionIds);
+
+    if (!profiles) return [];
+
+    const profileMap = new Map(profiles.map(p => [p.id, p]));
+
+    return following
+      .filter(f => connectionIds.includes(f.following_id))
+      .map(f => {
+        const p = profileMap.get(f.following_id);
+        if (!p) return null;
+        return {
+          id: f.following_id,
+          user_id: userId,
+          connected_user_id: f.following_id,
+          connected_at: f.created_at,
+          status: 'accepted' as const,
+          user: {
+            id: p.id,
+            username: p.username,
+            display_name: p.display_name,
+            avatar_url: p.avatar_url,
+            headline: p.professional_headline,
+            is_verified: p.is_verified ?? false,
+            role: p.role,
+          },
+        };
+      })
+      .filter(Boolean) as Connection[];
+  } catch (e) {
+    console.error('❌ loadConnectionsFromSupabase failed:', e);
+    return [];
+  }
+}
 
 export const useNetwork = () => {
   const { user, session, loading: authLoading } = useAuth();
@@ -35,13 +110,26 @@ export const useNetwork = () => {
 
     try {
       const { connections: data } = await networkService.getConnections(1, 50);
+
+      // If API returns empty, fall back to mutual follows from Supabase
+      if (data.length === 0) {
+        console.log('⚠️ API returned 0 connections — falling back to mutual follows');
+        const fallback = await loadConnectionsFromSupabase();
+        if (fallback.length > 0) {
+          setConnections(fallback);
+          await networkCacheService.saveConnections(fallback);
+          return;
+        }
+      }
+
       setConnections(data);
       await networkCacheService.saveConnections(data);
     } catch (err: any) {
       if (err?.status === 404) {
-        console.warn('Network API endpoint not available (404). Showing mock connections.');
-        setConnections(mockConnections);
-        await networkCacheService.saveConnections(mockConnections);
+        console.warn('Network API endpoint not available (404). Falling back to mutual follows.');
+        const fallback = await loadConnectionsFromSupabase();
+        setConnections(fallback.length > 0 ? fallback : mockConnections);
+        await networkCacheService.saveConnections(fallback.length > 0 ? fallback : mockConnections);
         setError(null);
       } else {
         setError(err instanceof Error ? err.message : 'Failed to load connections');

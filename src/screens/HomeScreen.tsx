@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'; // useCallback used by useFocusEffect
+import FirstActionPromptModal from '../components/FirstActionPromptModal';
 import {
   View,
   Text,
@@ -10,7 +11,10 @@ import {
   RefreshControl,
   Alert,
   StatusBar,
+  Modal,
+  Linking,
 } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -19,7 +23,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../contexts/AuthContext';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { supabase, dbHelpers } from '../lib/supabase';
 import { 
   loadQueriesInParallel, 
@@ -28,7 +32,6 @@ import {
   CancellableQuery,
   withQueryTimeout
 } from '../utils/dataLoading';
-import AdBanner from '../components/AdBanner';
 import ValuePropCard from '../components/ValuePropCard';
 import FirstTimeTooltip from '../components/FirstTimeTooltip';
 import { useUserPreferences } from '../hooks/useUserPreferences';
@@ -38,6 +41,8 @@ import TipModal from '../components/TipModal';
 import CollaborationRequestForm from '../components/CollaborationRequestForm';
 import { contentCacheService } from '../services/contentCacheService';
 import { ModerationBadge } from '../components/ModerationBadge';
+import NudgeModal from '../components/NudgeModal';
+import { useNudges } from '../hooks/useNudges';
 
 const { width, height } = Dimensions.get('window');
 
@@ -111,6 +116,7 @@ export default function HomeScreen() {
   const navigation = useNavigation<any>();
   const [refreshing, setRefreshing] = useState(false);
   const { preferences } = useUserPreferences();
+  const { activeConfig, dismiss: dismissNudge } = useNudges();
   
   // Content states
   const [featuredCreator, setFeaturedCreator] = useState<Creator | null>(null);
@@ -119,6 +125,9 @@ export default function HomeScreen() {
   const [hotCreators, setHotCreators] = useState<Creator[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   
+  // First action prompt (shown once after onboarding)
+  const [showFirstActionPrompt, setShowFirstActionPrompt] = useState(false);
+
   // UI states
   const [isTrendingExpanded, setIsTrendingExpanded] = useState(false);
   const [showEventsTooltip, setShowEventsTooltip] = useState(false);
@@ -263,6 +272,19 @@ export default function HomeScreen() {
     });
     return unsubscribe;
   }, []);
+
+  // Show first action prompt once after onboarding
+  useEffect(() => {
+    if (authLoading || !user?.id) return;
+    const key = `first_action_prompt_shown_${user.id}`;
+    AsyncStorage.getItem(key).then((seen) => {
+      if (!seen) {
+        // Small delay so the home screen renders first
+        setTimeout(() => setShowFirstActionPrompt(true), 800);
+        AsyncStorage.setItem(key, '1');
+      }
+    });
+  }, [authLoading, user?.id]);
 
   // Initial cache load - show cached data immediately
   useEffect(() => {
@@ -777,8 +799,6 @@ export default function HomeScreen() {
         )}
       </View>
 
-      {/* Ad Banner - Only show for free users */}
-      <AdBanner />
 
       {/* Recent Uploads */}
       <View style={styles.section}>
@@ -1182,11 +1202,11 @@ export default function HomeScreen() {
             <View style={styles.loadingContainer}>
               <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading events...</Text>
             </View>
-          ) : (
+          ) : events.length > 0 || !user?.id ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
               {/* Events Column 1 */}
               <View style={styles.eventsColumn}>
-                {(events.length > 0 ? events.slice(0, 2) : [
+                {(events.length > 0 ? events.slice(0, 2) : (!user?.id ? [
                   {
                     id: 'mock-event-1',
                     title: 'Virtual Music Showcase',
@@ -1211,7 +1231,7 @@ export default function HomeScreen() {
                     cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-2', username: 'jazz_events', display_name: 'Jazz Collective', avatar_url: undefined },
                   }
-                ]).map((event) => (
+                ] : [])).map((event) => (
                   <TouchableOpacity
                     key={event.id}
                     style={[styles.eventCard, { backgroundColor: 'transparent', borderBottomColor: theme.colors.border }]}
@@ -1255,7 +1275,7 @@ export default function HomeScreen() {
 
               {/* Events Column 2 */}
               <View style={styles.eventsColumn}>
-                {[
+                {(events.length > 0 ? events.slice(2, 4) : (!user?.id ? [
                   {
                     id: 'mock-event-3',
                     title: 'Electronic Music Festival',
@@ -1282,7 +1302,7 @@ export default function HomeScreen() {
                     cover_art_url: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-4', username: 'acoustic_nights', display_name: 'Acoustic Vibes', avatar_url: undefined },
                   }
-                ].map((event) => (
+                ] : [])).map((event) => (
                   <TouchableOpacity
                     key={event.id}
                     style={[styles.eventCard, { backgroundColor: 'transparent', borderBottomColor: theme.colors.border }]}
@@ -1320,7 +1340,7 @@ export default function HomeScreen() {
 
               {/* Events Column 3 */}
               <View style={styles.eventsColumn}>
-                {[
+                {(events.length > 0 ? events.slice(4, 6) : (!user?.id ? [
                   {
                     id: 'mock-event-5',
                     title: 'Hip-Hop Cypher Night',
@@ -1347,7 +1367,7 @@ export default function HomeScreen() {
                     cover_art_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
                     organizer: { id: 'organizer-6', username: 'classical_music', display_name: 'City Orchestra', avatar_url: undefined },
                   }
-                ].map((event) => (
+                ] : [])).map((event) => (
                   <TouchableOpacity
                     key={event.id}
                     style={[styles.eventCard, { backgroundColor: 'transparent', borderBottomColor: theme.colors.border }]}
@@ -1383,6 +1403,13 @@ export default function HomeScreen() {
                 ))}
               </View>
             </ScrollView>
+          ) : (
+            <View style={styles.emptyState}>
+              <Ionicons name="calendar-outline" size={48} color={theme.colors.textSecondary} />
+              <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
+                No personalized events yet
+              </Text>
+            </View>
           )}
         </View>
 
@@ -1420,6 +1447,31 @@ export default function HomeScreen() {
         />
       )}
       </SafeAreaView>
+
+      <FirstActionPromptModal
+        visible={showFirstActionPrompt}
+        userType={(userProfile?.onboarding_user_type as any) ?? null}
+        onDismiss={() => setShowFirstActionPrompt(false)}
+      />
+
+      {activeConfig && (
+        <NudgeModal
+          visible={true}
+          icon={activeConfig.icon}
+          title={activeConfig.title}
+          body={activeConfig.body}
+          primaryLabel={activeConfig.primaryLabel}
+          secondaryLabel={activeConfig.secondaryLabel}
+          onPrimary={() => {
+            dismissNudge();
+            if (activeConfig.navigateTo) {
+              navigation.navigate(activeConfig.navigateTo as never);
+            }
+          }}
+          onSecondary={dismissNudge}
+        />
+      )}
+
     </View>
   );
 }

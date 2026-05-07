@@ -65,24 +65,90 @@ export class FeedService {
           return this.getFeedPostsFromSupabase(page, limit, fallbackSession);
         }
       }
+
+      // Fetch user's reactions, all reaction counts, comment counts, and author verified status from Supabase.
+      // The REST API may omit is_verified and subscription_tier — Supabase profiles is authoritative.
+      const postIds = rawPosts.map((p: any) => p.id).filter(Boolean);
+      const authorIds = [...new Set(rawPosts.map((p: any) => p.author?.id).filter(Boolean))];
+      const [
+        { data: userReactionRows, error: userReactionError },
+        { data: allReactionRows },
+        { data: commentCountRows },
+        { data: authorRows },
+      ] = await Promise.all([
+        postIds.length > 0
+          ? supabase
+              .from('post_reactions')
+              .select('post_id, reaction_type')
+              .in('post_id', postIds)
+              .eq('user_id', session.user.id)
+          : Promise.resolve({ data: [] }),
+        postIds.length > 0
+          ? supabase
+              .from('post_reactions')
+              .select('post_id, reaction_type')
+              .in('post_id', postIds)
+          : Promise.resolve({ data: [] }),
+        postIds.length > 0
+          ? supabase
+              .from('post_comments')
+              .select('post_id')
+              .in('post_id', postIds)
+          : Promise.resolve({ data: [] }),
+        authorIds.length > 0
+          ? supabase
+              .from('profiles')
+              .select('id, is_verified, subscription_tier')
+              .in('id', authorIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      if (userReactionError) {
+        console.warn('⚠️ FeedService: user reactions query failed (reactions will fall back to cache):', userReactionError.message);
+      }
+
+      const authorVerifiedMap = new Map<string, { is_verified: boolean; subscription_tier: string | null }>();
+      (authorRows ?? []).forEach((a: any) => authorVerifiedMap.set(a.id, { is_verified: !!a.is_verified, subscription_tier: a.subscription_tier }));
+
+      const userReactionMap = new Map<string, string>();
+      (userReactionRows ?? []).forEach((r: any) => userReactionMap.set(r.post_id, r.reaction_type));
+
+      // Build per-post reaction counts from Supabase rows
+      const reactionCountMap = new Map<string, { support: number; love: number; fire: number; congrats: number }>();
+      (allReactionRows ?? []).forEach((r: any) => {
+        const existing = reactionCountMap.get(r.post_id) ?? { support: 0, love: 0, fire: 0, congrats: 0 };
+        const type = r.reaction_type as 'support' | 'love' | 'fire' | 'congrats';
+        if (type in existing) existing[type] += 1;
+        reactionCountMap.set(r.post_id, existing);
+      });
+
+      // Build per-post comment counts from Supabase rows
+      const commentCountMap = new Map<string, number>();
+      (commentCountRows ?? []).forEach((r: any) => {
+        commentCountMap.set(r.post_id, (commentCountMap.get(r.post_id) ?? 0) + 1);
+      });
       
       // Transform API response to match our Post type
       // API returns: { author: { name, ... }, attachments: [...], reactions: { user_reaction, ... } }
       // Our Post type expects: { author: { display_name, ... }, image_url, audio_url, reactions_count, user_reaction }
       const posts: Post[] = rawPosts.map((apiPost: any) => {
-        // Extract image and audio from attachments array
-        const imageAttachment = apiPost.attachments?.find((a: any) => a.attachment_type === 'image');
-        const audioAttachment = apiPost.attachments?.find((a: any) => a.attachment_type === 'audio');
+        // DEBUG: log attachment structure from feed API
+        if (apiPost.attachments?.length > 0 || apiPost.image_urls?.length > 0) {
+          console.log(`🖼️ Feed post ${apiPost.id} - attachments:`, JSON.stringify(apiPost.attachments?.slice(0,3)), '| image_urls:', apiPost.image_urls);
+        }
+
+        // Extract image(s) and audio from attachments array
+        const imageAttachments = apiPost.attachments?.filter((a: any) =>
+          a.attachment_type === 'image' || a.type === 'image'
+        ) || [];
+        const imageAttachment = imageAttachments[0];
+        const audioAttachment = apiPost.attachments?.find((a: any) =>
+          a.attachment_type === 'audio' || a.type === 'audio'
+        );
         
-        // Extract reactions
-        const reactions = apiPost.reactions || {};
-        const userReaction = reactions.user_reaction || null;
-        const reactionsCount = {
-          support: reactions.support || 0,
-          love: reactions.love || 0,
-          fire: reactions.fire || 0,
-          congrats: reactions.congrats || 0,
-        };
+        // Use Supabase as authoritative source for all counts and user_reaction.
+        const userReaction = userReactionMap.get(apiPost.id) || null;
+        const reactionsCount = reactionCountMap.get(apiPost.id) ?? { support: 0, love: 0, fire: 0, congrats: 0 };
         
         return {
           id: apiPost.id,
@@ -94,21 +160,81 @@ export class FeedService {
             role: apiPost.author?.role,
             headline: apiPost.author?.headline,
             bio: apiPost.author?.bio,
+            is_verified: authorVerifiedMap.get(apiPost.author?.id)?.is_verified ?? apiPost.author?.is_verified,
+            subscription_tier: authorVerifiedMap.get(apiPost.author?.id)?.subscription_tier ?? apiPost.author?.subscription_tier,
           },
           content: apiPost.content || '',
           post_type: apiPost.post_type || 'update',
           visibility: apiPost.visibility || 'public',
-          image_url: imageAttachment?.file_url,
-          audio_url: audioAttachment?.file_url,
+          image_url: imageAttachment?.file_url || imageAttachment?.url,
+          image_urls: imageAttachments.length > 1
+            ? imageAttachments.map((a: any) => a.file_url || a.url).filter(Boolean)
+            : (apiPost.image_urls?.length > 0 ? apiPost.image_urls : undefined),
+          audio_url: audioAttachment?.file_url || audioAttachment?.url,
           event_id: apiPost.event_id,
           reactions_count: reactionsCount,
-          comments_count: apiPost.comment_count || 0,
+          comments_count: commentCountMap.get(apiPost.id) ?? apiPost.comment_count ?? apiPost.comments_count ?? 0,
           user_reaction: userReaction,
           created_at: apiPost.created_at,
           updated_at: apiPost.updated_at || apiPost.created_at,
+          reposted_from_id: apiPost.reposted_from_id || null,
+          reposted_from: apiPost.reposted_from
+            ? {
+                ...apiPost.reposted_from,
+                // Normalize author shape — API may return null or a different shape
+                author: apiPost.reposted_from.author
+                  ? {
+                      id: apiPost.reposted_from.author.id || '',
+                      username: apiPost.reposted_from.author.username || '',
+                      display_name: apiPost.reposted_from.author.name || apiPost.reposted_from.author.display_name || apiPost.reposted_from.author.username || 'Unknown',
+                      avatar_url: apiPost.reposted_from.author.avatar_url || undefined,
+                      role: apiPost.reposted_from.author.role,
+                      headline: apiPost.reposted_from.author.headline,
+                      is_verified: apiPost.reposted_from.author.is_verified,
+                      subscription_tier: apiPost.reposted_from.author.subscription_tier,
+                    }
+                  : null, // backfill will patch this below
+              }
+            : null,
         };
       });
       
+      // For any repost missing its nested reposted_from object (or author), fetch from Supabase
+      const missingRepostIds = posts
+        .filter(p => p.reposted_from_id && (!p.reposted_from || !p.reposted_from.author))
+        .map(p => p.reposted_from_id as string);
+
+      if (missingRepostIds.length > 0) {
+        try {
+          const { data: originalPosts } = await supabase
+            .from('posts')
+            .select('id, user_id, content, post_type, visibility, created_at')
+            .in('id', missingRepostIds);
+
+          if (originalPosts && originalPosts.length > 0) {
+            const authorIds = [...new Set(originalPosts.map(p => p.user_id))];
+            const { data: authors } = await supabase
+              .from('profiles')
+              .select('id, username, display_name, avatar_url, role')
+              .in('id', authorIds);
+
+            const authorsMap = new Map(authors?.map(a => [a.id, a]) || []);
+            const originalsMap = new Map(originalPosts.map(p => [p.id, {
+              ...p,
+              author: authorsMap.get(p.user_id) || { id: p.user_id, username: 'unknown', display_name: 'Unknown User', avatar_url: undefined, role: undefined },
+            }]));
+
+            posts.forEach(p => {
+              if (p.reposted_from_id && (!p.reposted_from || !p.reposted_from.author) && originalsMap.has(p.reposted_from_id)) {
+                p.reposted_from = originalsMap.get(p.reposted_from_id);
+              }
+            });
+          }
+        } catch (e) {
+          console.warn('⚠️ Could not backfill reposted_from data:', e);
+        }
+      }
+
       return {
         posts,
         hasMore: feedData.pagination?.has_more || false,
@@ -256,16 +382,18 @@ export class FeedService {
         // Continue without attachments - better to show posts without media than no posts
       }
 
-      // Build attachments map
-      const attachmentsMap = new Map<string, { image_url?: string; audio_url?: string }>();
+      // Build attachments map — collect ALL image URLs per post
+      const attachmentsMap = new Map<string, { image_url?: string; image_urls?: string[]; audio_url?: string }>();
       postIds.forEach(postId => {
-        attachmentsMap.set(postId, {});
+        attachmentsMap.set(postId, { image_urls: [] });
       });
-      
+
       attachmentsData?.forEach(attachment => {
-        const current = attachmentsMap.get(attachment.post_id) || {};
-        if (attachment.attachment_type === 'image') {
-          current.image_url = attachment.file_url;
+        const current = attachmentsMap.get(attachment.post_id) || { image_urls: [] };
+        if (attachment.attachment_type === 'image' && attachment.file_url) {
+          current.image_urls = [...(current.image_urls || []), attachment.file_url];
+          // Keep image_url as the first image for backwards compat
+          if (!current.image_url) current.image_url = attachment.file_url;
         } else if (attachment.attachment_type === 'audio') {
           current.audio_url = attachment.file_url;
         }
@@ -351,6 +479,7 @@ export class FeedService {
           post_type: post.post_type || 'update',
           visibility: post.visibility || 'public',
           image_url: attachments.image_url || undefined,
+          image_urls: (attachments.image_urls?.length ?? 0) > 1 ? attachments.image_urls : undefined,
           audio_url: attachments.audio_url || undefined,
           event_id: post.event_id || undefined,
           reactions_count: reactionsMap.get(post.id) || { support: 0, love: 0, fire: 0, congrats: 0 },
@@ -621,47 +750,47 @@ export class FeedService {
    * Add reaction to post
    */
   async addReaction(postId: string, reactionType: 'support' | 'love' | 'fire' | 'congrats'): Promise<void> {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Not authenticated');
-      }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
 
-      await apiFetch(
-        `/api/posts/${postId}/reactions`,
-        {
-          method: 'POST',
-          session,
-          body: JSON.stringify({ reaction_type: reactionType }),
-        }
+    // Write directly to Supabase — this is the source of truth for the mobile read path.
+    // The REST API may not return user_reaction correctly, so we own persistence here.
+    const { error } = await supabase
+      .from('post_reactions')
+      .upsert(
+        { post_id: postId, user_id: session.user.id, reaction_type: reactionType },
+        { onConflict: 'post_id,user_id' }
       );
-    } catch (error) {
-      console.error('FeedService.addReaction:', error);
-      throw error;
-    }
+    if (error) throw error;
+
+    // Notify web API in background (non-blocking — no throw on failure)
+    apiFetch(`/api/posts/${postId}/reactions`, {
+      method: 'POST',
+      session,
+      body: JSON.stringify({ reaction_type: reactionType }),
+    }).catch(() => {});
   }
 
   /**
    * Remove reaction from post
    */
   async removeReaction(postId: string): Promise<void> {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Not authenticated');
-      }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
 
-      await apiFetch(
-        `/api/posts/${postId}/reactions`,
-        {
-          method: 'DELETE',
-          session,
-        }
-      );
-    } catch (error) {
-      console.error('FeedService.removeReaction:', error);
-      throw error;
-    }
+    // Delete directly from Supabase
+    const { error } = await supabase
+      .from('post_reactions')
+      .delete()
+      .eq('post_id', postId)
+      .eq('user_id', session.user.id);
+    if (error) throw error;
+
+    // Notify web API in background
+    apiFetch(`/api/posts/${postId}/reactions`, {
+      method: 'DELETE',
+      session,
+    }).catch(() => {});
   }
 
   /**
@@ -753,7 +882,7 @@ export class FeedService {
         throw new Error('Not authenticated');
       }
 
-      const response = await apiFetch<CommentsResponse>(
+      const response = await apiFetch<{ success: boolean; data: CommentsResponse } | CommentsResponse>(
         `/api/posts/${postId}/comments?page=${page}&limit=${limit}`,
         {
           method: 'GET',
@@ -761,9 +890,39 @@ export class FeedService {
         }
       );
 
+      // Handle both { success, data: { comments, pagination } } and direct { comments, pagination }
+      const commentsData = (response as any).success ? (response as any).data : response;
+      const rawComments: any[] = commentsData.comments || [];
+
+      // Enrich comment authors with is_verified from Supabase (REST API omits it)
+      const commentUserIds = [...new Set(rawComments.map((c: any) => (c.user ?? c.author)?.id ?? c.user_id).filter(Boolean))];
+      const { data: commentAuthorRows } = commentUserIds.length > 0
+        ? await supabase.from('profiles').select('id, is_verified').in('id', commentUserIds)
+        : { data: [] };
+      const commentVerifiedMap = new Map<string, boolean>();
+      (commentAuthorRows ?? []).forEach((a: any) => commentVerifiedMap.set(a.id, !!a.is_verified));
+
+      // Normalize user object — backend may use 'author' or 'user', different field names
+      const comments: Comment[] = rawComments.map((c: any) => {
+        const raw = c.user ?? c.author ?? null;
+        const userId = raw?.id ?? c.user_id ?? '';
+        return {
+          ...c,
+          user: raw
+            ? {
+                id: userId,
+                display_name: raw.display_name ?? raw.name ?? raw.username ?? 'Unknown',
+                username: raw.username ?? raw.name ?? '',
+                avatar_url: raw.avatar_url ?? raw.avatar ?? null,
+                is_verified: commentVerifiedMap.get(userId) ?? raw.is_verified,
+              }
+            : { id: userId, display_name: 'Unknown', username: '', avatar_url: null },
+        };
+      });
+
       return {
-        comments: response.comments || [],
-        hasMore: response.pagination?.has_more || false,
+        comments,
+        hasMore: commentsData.pagination?.has_more || false,
       };
     } catch (error) {
       console.error('FeedService.getComments:', error);
@@ -774,14 +933,14 @@ export class FeedService {
   /**
    * Add comment to post
    */
-  async addComment(postId: string, content: string, parentCommentId?: string): Promise<Comment> {
+  async addComment(postId: string, content: string, parentCommentId?: string, imageUrl?: string): Promise<Comment> {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         throw new Error('Not authenticated');
       }
 
-      const response = await apiFetch<{ comment: Comment }>(
+      const response = await apiFetch<any>(
         `/api/posts/${postId}/comments`,
         {
           method: 'POST',
@@ -789,11 +948,29 @@ export class FeedService {
           body: JSON.stringify({
             content,
             parent_comment_id: parentCommentId,
+            ...(imageUrl ? { image_url: imageUrl } : {}),
           }),
         }
       );
 
-      return response.comment;
+      // Unwrap { success, data: { comment } } or { success, data: {...} } or direct comment
+      const rawComment = response?.success
+        ? (response.data?.comment ?? response.data)
+        : (response?.comment ?? response);
+
+      // Normalize author/user — same logic as getComments
+      const raw = rawComment?.user ?? rawComment?.author ?? null;
+      return {
+        ...rawComment,
+        user: raw
+          ? {
+              id: raw.id ?? rawComment.user_id ?? '',
+              display_name: raw.display_name ?? raw.name ?? raw.username ?? 'Unknown',
+              username: raw.username ?? raw.name ?? '',
+              avatar_url: raw.avatar_url ?? raw.avatar ?? null,
+            }
+          : { id: rawComment?.user_id ?? '', display_name: 'Unknown', username: '', avatar_url: null },
+      } as Comment;
     } catch (error) {
       console.error('FeedService.addComment:', error);
       throw error;
@@ -847,6 +1024,65 @@ export class FeedService {
   }
 
   /**
+   * Delete a comment (own comment or post author deleting any comment)
+   */
+  async deleteComment(commentId: string): Promise<void> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+      await apiFetch(`/api/comments/${commentId}`, { method: 'DELETE', session });
+    } catch (error) {
+      console.error('FeedService.deleteComment:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get replies for a comment
+   */
+  async getReplies(commentId: string): Promise<Comment[]> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const response = await apiFetch<any>(
+        `/api/comments/${commentId}/replies`,
+        { method: 'GET', session }
+      );
+
+      const data = response?.success ? response.data : response;
+      const rawReplies: any[] = data?.replies ?? data?.comments ?? (Array.isArray(data) ? data : []);
+
+      const replyUserIds = [...new Set(rawReplies.map((c: any) => (c.user ?? c.author)?.id ?? c.user_id).filter(Boolean))];
+      const { data: replyAuthorRows } = replyUserIds.length > 0
+        ? await supabase.from('profiles').select('id, is_verified').in('id', replyUserIds)
+        : { data: [] };
+      const replyVerifiedMap = new Map<string, boolean>();
+      (replyAuthorRows ?? []).forEach((a: any) => replyVerifiedMap.set(a.id, !!a.is_verified));
+
+      return rawReplies.map((c: any) => {
+        const raw = c.user ?? c.author ?? null;
+        const userId = raw?.id ?? c.user_id ?? '';
+        return {
+          ...c,
+          user: raw
+            ? {
+                id: userId,
+                display_name: raw.display_name ?? raw.name ?? raw.username ?? 'Unknown',
+                username: raw.username ?? raw.name ?? '',
+                avatar_url: raw.avatar_url ?? raw.avatar ?? null,
+                is_verified: replyVerifiedMap.get(userId) ?? raw.is_verified,
+              }
+            : { id: userId, display_name: 'Unknown', username: '', avatar_url: null },
+        };
+      });
+    } catch (error) {
+      console.error('FeedService.getReplies:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Update a post
    */
   async updatePost(postId: string, postData: Partial<CreatePostDto>): Promise<Post> {
@@ -859,7 +1095,7 @@ export class FeedService {
       const response = await apiFetch<{ post: Post }>(
         `/api/posts/${postId}`,
         {
-          method: 'PATCH',
+          method: 'PUT',
           session,
           body: JSON.stringify(postData),
         }
@@ -964,7 +1200,8 @@ export class FeedService {
         if (rawPosts.length > 0) {
           // Transform API response (same as getFeedPosts)
           const posts: Post[] = rawPosts.map((apiPost: any) => {
-            const imageAttachment = apiPost.attachments?.find((a: any) => a.attachment_type === 'image');
+            const imageAttachments2 = apiPost.attachments?.filter((a: any) => a.attachment_type === 'image') || [];
+            const imageAttachment = imageAttachments2[0];
             const audioAttachment = apiPost.attachments?.find((a: any) => a.attachment_type === 'audio');
 
             const reactions = apiPost.reactions || {};
@@ -991,8 +1228,11 @@ export class FeedService {
               content: apiPost.content,
               post_type: apiPost.post_type,
               visibility: apiPost.visibility,
-              image_url: imageAttachment?.url,
-              audio_url: audioAttachment?.url,
+              image_url: imageAttachment?.url || imageAttachment?.file_url,
+              image_urls: imageAttachments2.length > 1
+                ? imageAttachments2.map((a: any) => a.url || a.file_url).filter(Boolean)
+                : undefined,
+              audio_url: audioAttachment?.url || audioAttachment?.file_url,
               reactions_count: reactionsCount,
               user_reaction: userReaction,
               comments_count: apiPost.comments_count || 0,
@@ -1147,7 +1387,8 @@ export class FeedService {
       // Transform to Post type
       const transformedPosts: Post[] = postsData.map((post: any) => {
         const attachments = attachmentsMap.get(post.id) || [];
-        const imageAttachment = attachments.find((a: any) => a.attachment_type === 'image');
+        const imageAttachments3 = attachments.filter((a: any) => a.attachment_type === 'image');
+        const imageAttachment = imageAttachments3[0];
         const audioAttachment = attachments.find((a: any) => a.attachment_type === 'audio');
 
         return {
@@ -1171,6 +1412,9 @@ export class FeedService {
           post_type: post.post_type,
           visibility: post.visibility,
           image_url: imageAttachment?.file_url || null,
+          image_urls: imageAttachments3.length > 1
+            ? imageAttachments3.map((a: any) => a.file_url).filter(Boolean)
+            : undefined,
           audio_url: audioAttachment?.file_url || null,
           reactions_count: reactionsMap.get(post.id) || { support: 0, love: 0, fire: 0, congrats: 0 },
           comments_count: commentsMap.get(post.id) || 0,
@@ -1250,7 +1494,8 @@ export class FeedService {
         console.log('📦 Extracted postData:', postData ? `id: ${postData.id}` : 'null');
 
         if (postData && postData.id) {
-          const imageAttachment = postData.attachments?.find((a: any) => a.attachment_type === 'image');
+          const imageAttachments4 = postData.attachments?.filter((a: any) => a.attachment_type === 'image') || [];
+          const imageAttachment = imageAttachments4[0];
           const audioAttachment = postData.attachments?.find((a: any) => a.attachment_type === 'audio');
 
           const reactions = postData.reactions || {};
@@ -1277,6 +1522,9 @@ export class FeedService {
             post_type: postData.post_type || 'update',
             visibility: postData.visibility || 'public',
             image_url: imageAttachment?.file_url,
+            image_urls: imageAttachments4.length > 1
+              ? imageAttachments4.map((a: any) => a.file_url || a.url).filter(Boolean)
+              : undefined,
             audio_url: audioAttachment?.file_url,
             event_id: postData.event_id,
             reactions_count: reactionsCount,
@@ -1385,7 +1633,8 @@ export class FeedService {
         }
       }
 
-      const imageAttachment = attachments?.find((a: any) => a.file_type?.startsWith('image/'));
+      const imageAttachments5 = attachments?.filter((a: any) => a.file_type?.startsWith('image/')) || [];
+      const imageAttachment = imageAttachments5[0];
       const audioAttachment = attachments?.find((a: any) => a.file_type?.startsWith('audio/'));
 
       console.log('✅ FeedService: Post fetched from Supabase');
@@ -1405,6 +1654,9 @@ export class FeedService {
         post_type: postData.post_type || 'update',
         visibility: postData.visibility || 'public',
         image_url: imageAttachment?.file_url || null,
+        image_urls: imageAttachments5.length > 1
+          ? imageAttachments5.map((a: any) => a.file_url).filter(Boolean)
+          : undefined,
         audio_url: audioAttachment?.file_url || null,
         event_id: postData.event_id || null,
         reactions_count: reactionsCount,

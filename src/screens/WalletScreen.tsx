@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   StatusBar,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,9 +18,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { SystemTypography as Typography } from '../constants/Typography';
 import { walletService, WalletBalance, WalletTransaction } from '../services/WalletService';
 import { currencyService } from '../services/CurrencyService';
 import { payoutService, CreatorRevenue } from '../services/PayoutService';
+import { opportunityService, OpportunityProject } from '../services/OpportunityService';
 
 export default function WalletScreen() {
   const navigation = useNavigation();
@@ -29,6 +32,7 @@ export default function WalletScreen() {
   const [walletData, setWalletData] = useState<WalletBalance | null>(null);
   const [recentTransactions, setRecentTransactions] = useState<WalletTransaction[]>([]);
   const [creatorRevenue, setCreatorRevenue] = useState<CreatorRevenue | null>(null);
+  const [completedGigEarnings, setCompletedGigEarnings] = useState<OpportunityProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -40,22 +44,36 @@ export default function WalletScreen() {
     try {
       if (!session) {
         Alert.alert('Error', 'You must be logged in to view your wallet');
+        setLoading(false);
         return;
       }
 
       setLoading(true);
       console.log('📱 Loading wallet data...');
 
-      // Load wallet balance, recent transactions, and creator revenue in parallel
-      const [balanceResult, transactionsResult, revenueResult] = await Promise.all([
+      // Load wallet balance, recent transactions, creator revenue, and gig projects in parallel
+      const [balanceResult, transactionsResult, revenueResult, gigProjects] = await Promise.all([
         walletService.getWalletBalanceSafe(session),
         walletService.getWalletTransactionsSafe(session, 5, 0),
         payoutService.getCreatorRevenue(session).catch(() => null), // Graceful fallback if no revenue yet
+        opportunityService.getMyProjects('creator').catch(() => [] as OpportunityProject[]),
       ]);
 
       setWalletData(balanceResult);
       setRecentTransactions(transactionsResult.transactions);
       setCreatorRevenue(revenueResult);
+
+      // Completed gig projects = real earnings even if wallet_transaction was never created
+      // De-dup against wallet_transactions that have reference_type=opportunity_project
+      const existingProjectRefs = new Set(
+        transactionsResult.transactions
+          .filter(t => t.reference_type === 'opportunity_project')
+          .map(t => t.reference_id)
+      );
+      const completedGigs = (gigProjects as OpportunityProject[]).filter(
+        p => p.status === 'completed' && !existingProjectRefs.has(p.id)
+      );
+      setCompletedGigEarnings(completedGigs);
 
       console.log('💰 Wallet balance:', balanceResult);
       console.log('📊 Recent transactions:', transactionsResult.transactions.length);
@@ -168,48 +186,74 @@ export default function WalletScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Wallet Balance Card */}
-        <View style={[styles.walletCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <LinearGradient
+          colors={['#4C1D95', '#9D174D']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[styles.walletCard, { borderColor: theme.colors.border }]}
+        >
+          <View style={styles.walletAccentTopRight} />
+          <View style={styles.walletAccentBottomLeft} />
+
           <View style={styles.walletHeader}>
-            <Ionicons name="wallet" size={28} color="#8B5CF6" />
-            <Text style={[styles.walletTitle, { color: theme.colors.text }]}>Digital Wallet</Text>
+            <Image
+              source={require('../../assets/images/logos/logo-white.png')}
+              style={styles.walletLogo}
+              resizeMode="contain"
+            />
           </View>
 
-          <View style={styles.balanceContainer}>
-            <Text style={[styles.balanceLabel, { color: theme.colors.textSecondary }]}>Available Balance</Text>
-            <Text style={[styles.balanceAmount, { color: theme.colors.text }]}>
-              {walletData ? currencyService.formatAmount(walletData.balance, walletData.currency) : '$0.00'}
-            </Text>
-          </View>
-
-          <View style={styles.statusContainer}>
-            <Text style={[styles.statusLabel, { color: theme.colors.textSecondary }]}>Status</Text>
-            <View style={styles.statusBadge}>
-              <View style={[styles.statusDot, { backgroundColor: getStatusColor() }]} />
-              <Text style={[styles.statusValue, { color: getStatusColor() }]}>
-                {getWalletStatus()}
+          <View style={styles.cardContent}>
+            <View>
+              <Text style={styles.balanceLabel}>Balance</Text>
+              <Text style={styles.balanceAmount}>
+                {walletData ? currencyService.formatAmount(walletData.balance, walletData.currency) : '$0.00'}
               </Text>
+            </View>
+            <View style={styles.walletIconBadge}>
+              <Ionicons name="wallet" size={18} color="#FFFFFF" />
             </View>
           </View>
 
-          {/* Action Buttons */}
-          <View style={styles.actionButtons}>
-            <TouchableOpacity
-              style={[styles.actionButton, { backgroundColor: theme.colors.primary }]}
-              onPress={navigateToWithdrawal}
-              disabled={!walletData || walletData.balance <= 0}
+          <View style={styles.cardFooter}>
+            <View>
+              <Text style={styles.cardFooterLabel}>My Wallet</Text>
+              <Text style={styles.cardFooterNumber}>**** **** **** 0000</Text>
+            </View>
+            <View style={styles.cardBrandDots}>
+              <View style={styles.cardBrandDot} />
+              <View style={[styles.cardBrandDot, styles.cardBrandDotOffset]} />
+            </View>
+          </View>
+        </LinearGradient>
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          <TouchableOpacity
+            style={styles.withdrawButton}
+            onPress={navigateToWithdrawal}
+            disabled={!walletData || walletData.balance <= 0}
+            activeOpacity={0.85}
+          >
+            <LinearGradient
+              colors={['#DC2626', '#EC4899']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.withdrawButtonGradient}
             >
               <Ionicons name="arrow-up-circle" size={20} color="#FFFFFF" />
               <Text style={styles.actionButtonText}>Withdraw</Text>
-            </TouchableOpacity>
+            </LinearGradient>
+          </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.actionButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderWidth: 1 }]}
-              onPress={navigateToTransactionHistory}
-            >
-              <Ionicons name="list" size={20} color={theme.colors.text} />
-              <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>History</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={[styles.actionButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderWidth: 1 }]}
+            onPress={navigateToTransactionHistory}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="list" size={20} color={theme.colors.text} />
+            <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>History</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Creator Revenue Card */}
@@ -262,6 +306,49 @@ export default function WalletScreen() {
           </View>
         )}
 
+        {/* Completed Gig Earnings (from opportunity projects — shown even if wallet_transaction not yet created) */}
+        {completedGigEarnings.length > 0 && (
+          <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="flash" size={20} color="#10B981" style={{ marginRight: 8 }} />
+              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Gig Earnings</Text>
+            </View>
+            <View style={styles.transactionsList}>
+              {completedGigEarnings.map((project) => (
+                <TouchableOpacity
+                  key={project.id}
+                  style={[styles.transactionItem, { borderBottomColor: theme.colors.border }]}
+                  activeOpacity={0.75}
+                  onPress={() => navigation.navigate('OpportunityProject' as never, { projectId: project.id } as never)}
+                >
+                  <View style={[styles.transactionIcon, { backgroundColor: '#10B98120' }]}>
+                    <Ionicons name="checkmark-circle" size={24} color="#10B981" />
+                  </View>
+                  <View style={styles.transactionDetails}>
+                    <Text style={[styles.transactionType, { color: theme.colors.text }]}>
+                      Gig Payment
+                    </Text>
+                    <Text style={[styles.transactionDescription, { color: theme.colors.textSecondary }]}>
+                      {project.opportunity?.title ?? project.title ?? 'Completed gig'}
+                    </Text>
+                    <Text style={[styles.transactionDate, { color: theme.colors.textSecondary }]}>
+                      {new Date(project.completed_at ?? project.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </Text>
+                  </View>
+                  <View style={styles.transactionAmount}>
+                    <Text style={[styles.amountText, { color: theme.colors.success }]}>
+                      +{project.currency === 'GBP' ? '£' : '$'}{(project.creator_payout_amount ?? project.agreed_amount ?? 0).toFixed(2)}
+                    </Text>
+                    <View style={[styles.statusBadgeSmall, { backgroundColor: '#10B98120' }]}>
+                      <Text style={[styles.statusTextSmall, { color: '#10B981' }]}>EARNED</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
         {/* Recent Transactions */}
         <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
           <View style={styles.sectionHeader}>
@@ -273,19 +360,31 @@ export default function WalletScreen() {
 
           {recentTransactions.length > 0 ? (
             <View style={styles.transactionsList}>
-              {recentTransactions.map((transaction) => (
-                <View key={transaction.id} style={[styles.transactionItem, { borderBottomColor: theme.colors.border }]}>
+              {recentTransactions.map((transaction) => {
+                const isProjectRef = transaction.reference_type === 'opportunity_project' && !!transaction.reference_id;
+                return (
+                <TouchableOpacity
+                  key={transaction.id}
+                  style={[styles.transactionItem, { borderBottomColor: theme.colors.border }]}
+                  disabled={!isProjectRef}
+                  activeOpacity={isProjectRef ? 0.75 : 1}
+                  onPress={() => {
+                    if (isProjectRef) {
+                      navigation.navigate('OpportunityProject' as never, { projectId: transaction.reference_id } as never);
+                    }
+                  }}
+                >
                   <View style={styles.transactionIcon}>
-                    <Ionicons 
-                      name={walletService.getTransactionIcon(transaction.transaction_type) as any} 
-                      size={24} 
-                      color={walletService.getStatusColor(transaction.status)} 
+                    <Ionicons
+                      name={walletService.getTransactionIcon(transaction.transaction_type) as any}
+                      size={24}
+                      color={walletService.getStatusColor(transaction.status)}
                     />
                   </View>
-                  
+
                   <View style={styles.transactionDetails}>
                     <Text style={[styles.transactionType, { color: theme.colors.text }]}>
-                      {walletService.getTransactionTypeDisplay(transaction.transaction_type)}
+                      {walletService.getTransactionLabel(transaction)}
                     </Text>
                     <Text style={[styles.transactionDescription, { color: theme.colors.textSecondary }]}>
                       {transaction.description || 'Wallet transaction'}
@@ -293,8 +392,13 @@ export default function WalletScreen() {
                     <Text style={[styles.transactionDate, { color: theme.colors.textSecondary }]}>
                       {walletService.formatDate(transaction.created_at)}
                     </Text>
+                    {isProjectRef && (
+                      <Text style={[styles.transactionDate, { color: theme.colors.primary, marginTop: 2 }]}>
+                        View project →
+                      </Text>
+                    )}
                   </View>
-                  
+
                   <View style={styles.transactionAmount}>
                     <Text style={[
                       styles.amountText,
@@ -308,8 +412,9 @@ export default function WalletScreen() {
                       </Text>
                     </View>
                   </View>
-                </View>
-              ))}
+                </TouchableOpacity>
+                );
+              })}
             </View>
           ) : (
             <View style={styles.emptyState}>
@@ -331,14 +436,14 @@ export default function WalletScreen() {
             <Text style={[styles.infoTitle, { color: theme.colors.text }]}>About Digital Wallet</Text>
           </View>
           <Text style={[styles.infoText, { color: theme.colors.textSecondary }]}>
-            Your digital wallet securely stores tips and earnings from your content. 
-            You can withdraw funds to your bank account, PayPal, or other supported methods.
+            Your digital wallet securely stores earnings from gigs, tips, and content sales. Once funds are in your wallet, you can request a withdrawal to your local bank account at any time (minimum $25).
           </Text>
           <View style={styles.infoFeatures}>
-            <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Secure storage for tips and earnings</Text>
-            <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Multiple withdrawal methods</Text>
+            <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Gig payments land in your wallet on completion</Text>
+            <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Withdraw to your local bank via Wise (1–3 business days)</Text>
+            <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Supports 40+ currencies across Africa, Asia & Latin America</Text>
             <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Real-time transaction tracking</Text>
-            <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Legal compliance and reporting</Text>
+            <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Minimum withdrawal: $25</Text>
           </View>
         </View>
       </ScrollView>
@@ -370,28 +475,26 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   loadingText: {
-    fontSize: 16,
-    fontWeight: '500',
+    ...Typography.body,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingTop: 8,
     borderBottomWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
   backButton: {
     padding: 8,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 34,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    lineHeight: 40,
+    fontFamily: Typography.body.fontFamily,
   },
   refreshButton: {
     padding: 8,
@@ -402,65 +505,103 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   walletCard: {
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
     marginBottom: 24,
     borderWidth: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 6,
+    overflow: 'hidden',
   },
   walletHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
-  },
-  walletTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginLeft: 12,
-  },
-  balanceContainer: {
     marginBottom: 16,
   },
+  walletLogo: {
+    width: 28,
+    height: 28,
+  },
+  walletAccentTopRight: {
+    position: 'absolute',
+    top: -50,
+    right: -50,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  walletAccentBottomLeft: {
+    position: 'absolute',
+    bottom: -40,
+    left: -40,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  cardContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 24,
+  },
   balanceLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 4,
+    ...Typography.label,
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginBottom: 6,
   },
   balanceAmount: {
-    fontSize: 32,
-    fontWeight: 'bold',
+    fontSize: 28,
+    color: '#FFFFFF',
+    fontFamily: Typography.headerLarge.fontFamily,
   },
-  statusContainer: {
+  walletIconBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
   },
-  statusLabel: {
+  cardFooterLabel: {
+    ...Typography.label,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginBottom: 4,
+  },
+  cardFooterNumber: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '500',
+    color: '#FFFFFF',
+    letterSpacing: 1,
   },
-  statusBadge: {
+  cardBrandDots: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
   },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  cardBrandDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
   },
-  statusValue: {
-    fontSize: 14,
-    fontWeight: '600',
+  cardBrandDotOffset: {
+    marginLeft: -6,
   },
   actionButtons: {
     flexDirection: 'row',
     gap: 12,
+    marginBottom: 16,
   },
   actionButton: {
     flex: 1,
@@ -469,12 +610,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    borderRadius: 8,
+    borderRadius: 24,
+    gap: 8,
+  },
+  withdrawButton: {
+    flex: 1,
+  },
+  withdrawButtonGradient: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 24,
     gap: 8,
   },
   actionButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.button,
     color: '#FFFFFF',
   },
   section: {
@@ -490,12 +643,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   sectionTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
   },
   viewAllText: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
   },
   transactionsList: {
     gap: 12,
@@ -519,15 +672,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   transactionType: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
     marginBottom: 2,
   },
   transactionDescription: {
+    ...Typography.body,
     fontSize: 14,
     marginBottom: 2,
   },
   transactionDate: {
+    ...Typography.label,
     fontSize: 12,
   },
   transactionAmount: {
@@ -535,8 +690,8 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   amountText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: 'bold',
   },
   statusBadgeSmall: {
     paddingHorizontal: 8,
@@ -544,8 +699,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   statusTextSmall: {
+    ...Typography.button,
     fontSize: 10,
-    fontWeight: '600',
     textTransform: 'uppercase',
   },
   emptyState: {
@@ -554,10 +709,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   emptyStateText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
   },
   emptyStateSubtext: {
+    ...Typography.body,
     fontSize: 14,
     textAlign: 'center',
   },
@@ -573,11 +729,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   infoTitle: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
     marginLeft: 8,
   },
   infoText: {
+    ...Typography.body,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 12,
@@ -586,6 +743,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   featureItem: {
+    ...Typography.label,
     fontSize: 12,
     lineHeight: 18,
   },
@@ -606,8 +764,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   revenueTitle: {
+    ...Typography.headerMedium,
     fontSize: 20,
-    fontWeight: 'bold',
     marginLeft: 12,
   },
   revenueStats: {
@@ -620,14 +778,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   revenueStatLabel: {
+    ...Typography.label,
     fontSize: 12,
-    fontWeight: '500',
     marginBottom: 4,
     textAlign: 'center',
   },
   revenueStatAmount: {
+    ...Typography.button,
     fontSize: 18,
-    fontWeight: 'bold',
     textAlign: 'center',
   },
   requestPayoutButton: {
@@ -641,11 +799,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   requestPayoutButtonText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: 'bold',
     color: '#FFFFFF',
   },
   minPayoutText: {
+    ...Typography.label,
     fontSize: 12,
     textAlign: 'center',
     marginTop: 8,

@@ -40,11 +40,26 @@ import { contentCacheService } from '../services/contentCacheService';
 import { getServiceCategoryLabel } from '../utils/serviceCategoryLabels';
 import subscriptionService from '../services/SubscriptionService';
 import RevenueCatService from '../services/RevenueCatService';
-import type { PublicProfile } from '../types/database';
+import type { ServiceProviderCard } from '../types';
 import { ModerationBadge } from '../components/ModerationBadge';
+import NotificationBellButton from '../components/NotificationBellButton';
 import { walkthroughable } from 'react-native-copilot';
+import { SystemTypography as Typography } from '../constants/Typography';
+import UploadPromptCard from '../components/UploadPromptCard';
+import { SkeletonHtmlCardRow, SkeletonAlbumCardRow, SkeletonRowCards } from '../components/SkeletonLoader';
+import { venueService, VenueDisplayItem } from '../services/VenueService';
+import VenuePreferencesModal from '../components/VenuePreferencesModal';
 
 const { width } = Dimensions.get('window');
+
+type ModerationStatus =
+  | 'pending_check'
+  | 'checking'
+  | 'clean'
+  | 'flagged'
+  | 'approved'
+  | 'rejected'
+  | 'appealed';
 
 interface AudioTrack {
   id: string;
@@ -59,6 +74,11 @@ interface AudioTrack {
   plays_count?: number;
   likes_count?: number;
   genre?: string;
+  creator_id?: string;
+  moderation_status?: ModerationStatus | null;
+  moderation_flagged?: boolean | null;
+  flag_reasons?: string[] | null;
+  moderation_confidence?: number | null;
   created_at: string;
   creator?: {
     id: string;
@@ -91,6 +111,14 @@ interface Event {
   category?: string;
   price_gbp?: number;
   price_ngn?: number;
+  price_usd?: number;
+  price_eur?: number;
+  price_cad?: number;
+  price_aud?: number;
+  price_inr?: number;
+  price_jpy?: number;
+  price_brl?: number;
+  price_mxn?: number;
   max_attendees?: number;
   current_attendees?: number;
   likes_count?: number;
@@ -98,6 +126,8 @@ interface Event {
   cover_art_url?: string;
   creator_id?: string;
   created_at?: string;
+  genres?: string[];
+  distance_miles?: number;
   organizer: {
     id: string;
     username: string;
@@ -124,7 +154,7 @@ interface Playlist {
   };
 }
 
-type TabType = 'Music' | 'Albums' | 'Artists' | 'Events' | 'Playlists' | 'Services' | 'Venues';
+type TabType = 'Music' | 'Albums' | 'Podcasts' | 'Mixtapes' | 'Artists' | 'Events' | 'Playlists' | 'Services' | 'Venues';
 
 const DISCOVER_MOCK_TRACKS: AudioTrack[] = [
   {
@@ -249,84 +279,72 @@ const DISCOVER_MOCK_EVENTS: Event[] = [
   },
 ];
 
-const DISCOVER_MOCK_SERVICES: PublicProfile[] = [
+const DISCOVER_MOCK_SERVICES: ServiceProviderCard[] = [
   {
-    user_id: 'service-provider-1',
-    username: 'studiomix_pro',
+    provider_id: 'service-provider-1',
     display_name: 'Studio Mix Pro',
-    bio: 'Professional mixing & mastering services. Over 10 years experience working with major labels.',
-    avatar_url: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop',
-    location: 'London, UK',
+    headline: 'Professional mixing & mastering services',
+    image_url: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop',
+    categories: ['mixing_mastering'],
+    average_rating: 4.9,
+    review_count: 124,
+    price_band: '$75/hr',
     is_verified: true,
-    services_offered: ['Mixing', 'Mastering', 'Audio Engineering'],
-    service_category: 'audio-engineering',
-    portfolio_tracks_count: 47,
-    avg_rating: 4.9,
   },
   {
-    user_id: 'service-provider-2',
-    username: 'beatmaker_studios',
+    provider_id: 'service-provider-2',
     display_name: 'Beatmaker Studios',
-    bio: 'Custom beat production for hip hop, R&B, and pop artists. Fast turnaround guaranteed.',
-    avatar_url: 'https://images.unsplash.com/photo-1571902943202-507ec2618e8f?w=200&h=200&fit=crop',
-    location: 'Manchester, UK',
+    headline: 'Custom beat production with fast turnaround',
+    image_url: 'https://images.unsplash.com/photo-1571902943202-507ec2618e8f?w=200&h=200&fit=crop',
+    categories: ['sound_engineering'],
+    average_rating: 4.8,
+    review_count: 89,
+    price_band: '$60/hr',
     is_verified: true,
-    services_offered: ['Beat Production', 'Music Production'],
-    service_category: 'production',
-    portfolio_tracks_count: 89,
-    avg_rating: 4.8,
   },
   {
-    user_id: 'service-provider-3',
-    username: 'vocalcoach_emma',
+    provider_id: 'service-provider-3',
     display_name: 'Emma Clarke - Vocal Coach',
-    bio: 'Certified vocal coach specializing in pop, soul, and R&B. One-on-one and group sessions available.',
-    avatar_url: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200&h=200&fit=crop',
-    location: 'Birmingham, UK',
+    headline: 'Certified vocal coach for pop, soul, and R&B',
+    image_url: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200&h=200&fit=crop',
+    categories: ['music_lessons'],
+    average_rating: 5.0,
+    review_count: 23,
+    price_band: '$50/hr',
     is_verified: false,
-    services_offered: ['Vocal Coaching', 'Recording Sessions'],
-    service_category: 'coaching',
-    portfolio_tracks_count: 23,
-    avg_rating: 5.0,
   },
   {
-    user_id: 'service-provider-4',
-    username: 'session_guitar',
+    provider_id: 'service-provider-4',
     display_name: 'Session Guitarist Pro',
-    bio: 'Professional session guitarist for hire. Rock, blues, jazz, and acoustic styles.',
-    avatar_url: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200&h=200&fit=crop',
-    location: 'Leeds, UK',
+    headline: 'Session guitarist for rock, blues, and jazz',
+    image_url: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200&h=200&fit=crop',
+    categories: ['session_musician'],
+    average_rating: 4.7,
+    review_count: 62,
+    price_band: '$90/hr',
     is_verified: true,
-    services_offered: ['Session Musician', 'Guitar Lessons'],
-    service_category: 'session-musician',
-    portfolio_tracks_count: 62,
-    avg_rating: 4.7,
   },
   {
-    user_id: 'service-provider-5',
-    username: 'graphics_soundwave',
+    provider_id: 'service-provider-5',
     display_name: 'Soundwave Graphics',
-    bio: 'Album artwork, music video design, and branding for artists. Let\'s bring your vision to life!',
-    avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop',
-    location: 'Bristol, UK',
+    headline: 'Album artwork, branding, and visual design',
+    image_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop',
+    categories: ['other'],
+    average_rating: 4.9,
+    review_count: 112,
+    price_band: '$120/project',
     is_verified: true,
-    services_offered: ['Graphic Design', 'Album Artwork', 'Branding'],
-    service_category: 'design',
-    portfolio_tracks_count: 112,
-    avg_rating: 4.9,
   },
   {
-    user_id: 'service-provider-6',
-    username: 'promo_music_uk',
+    provider_id: 'service-provider-6',
     display_name: 'Music Promo UK',
-    bio: 'Social media marketing and PR for independent musicians. Grow your fanbase organically.',
-    avatar_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop',
-    location: 'London, UK',
+    headline: 'Social media marketing and PR for musicians',
+    image_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop',
+    categories: ['other'],
+    average_rating: 4.6,
+    review_count: 34,
+    price_band: '$200/campaign',
     is_verified: true,
-    services_offered: ['Marketing', 'Social Media Management', 'PR'],
-    service_category: 'marketing',
-    portfolio_tracks_count: 34,
-    avg_rating: 4.6,
   },
 ];
 
@@ -397,13 +415,37 @@ const DISCOVER_MOCK_PLAYLISTS: Playlist[] = [
 ];
 
 // Create walkthroughable components for tour
-const WalkthroughableView = walkthroughable(View);
+const WalkthroughableView = walkthroughable(View) as React.ComponentType<any>;
+
+function VenueThumb({ uri, thumbStyle, placeholderBg, placeholderIcon }: {
+  uri?: string | null;
+  thumbStyle: any;
+  placeholderBg: string;
+  placeholderIcon: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (uri && !failed) {
+    return (
+      <Image
+        source={{ uri }}
+        style={thumbStyle}
+        resizeMode="cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <View style={[thumbStyle, { justifyContent: 'center', alignItems: 'center', backgroundColor: placeholderBg }]}>
+      <Ionicons name={placeholderIcon as any} size={28} color="#6B7280" />
+    </View>
+  );
+}
 
 function DiscoverScreen() {
   const { user, userProfile, loading: authLoading, session } = useAuth();
   const { play, addToQueue } = useAudioPlayer();
   const { theme } = useTheme();
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const [activeTab, setActiveTab] = useState<TabType>('Music');
   const { searchQuery, setSearchQuery, searchResults, isSearching, searchError } = useSearch();
   const [refreshing, setRefreshing] = useState(false);
@@ -431,9 +473,15 @@ function DiscoverScreen() {
   const [featuredArtists, setFeaturedArtists] = useState<Creator[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [serviceProviders, setServiceProviders] = useState<PublicProfile[]>([]);
+  const [serviceProviders, setServiceProviders] = useState<ServiceProviderCard[]>([]);
   const [venues, setVenues] = useState<any[]>([]);
-  
+  const [sbVenues, setSbVenues] = useState<VenueDisplayItem[]>([]);
+  const [gpVenues, setGpVenues] = useState<VenueDisplayItem[]>([]);
+  const [loadingSbVenues, setLoadingSbVenues] = useState(false);
+  const [loadingGpVenues, setLoadingGpVenues] = useState(false);
+  const [venueLocationDenied, setVenueLocationDenied] = useState(false);
+  const [showVenuePrefs, setShowVenuePrefs] = useState(false);
+
   // Loading state management
   const loadingManager = useRef(new LoadingStateManager()).current;
   const cancellableQuery = useRef(new CancellableQuery()).current;
@@ -447,11 +495,15 @@ function DiscoverScreen() {
   const [loadingPlaylists, setLoadingPlaylists] = useState(false);
   const [loadingServices, setLoadingServices] = useState(false);
   const [loadingVenues, setLoadingVenues] = useState(false);
+  const [loadingPodcasts, setLoadingPodcasts] = useState(false);
+  const [loadingMixtapes, setLoadingMixtapes] = useState(false);
+  const [podcasts, setPodcasts] = useState<AudioTrack[]>([]);
+  const [mixtapes, setMixtapes] = useState<AudioTrack[]>([]);
   
   // Track if initial cache load has happened
   const initialCacheLoadRef = useRef(false);
 
-  const tabs: TabType[] = ['Music', 'Albums', 'Artists', 'Events', 'Playlists', 'Services', 'Venues'];
+  const tabs: TabType[] = ['Music', 'Albums', 'Podcasts', 'Mixtapes', 'Artists', 'Events', 'Playlists', 'Services', 'Venues'];
 
   // Track tier check attempts to prevent repeated failed requests
   const tierCheckAttemptedRef = useRef(false);
@@ -591,7 +643,9 @@ function DiscoverScreen() {
       setLoadingEvents(loadingManager.isLoading('events'));
       setLoadingPlaylists(loadingManager.isLoading('playlists'));
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // Initial cache load - show cached data immediately
@@ -687,19 +741,22 @@ function DiscoverScreen() {
             recent: {
               name: 'recent',
               query: () => withQueryTimeout(
-                supabase
-                  .from('audio_tracks')
-                  .select(`
-                    id, title, description, audio_url, file_url,
-                    cover_art_url, artwork_url, duration, play_count,
-                    likes_count, created_at, creator_id,
-                    moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
-                    creator:profiles!creator_id(id, username, display_name, avatar_url)
-                  `)
-                  .eq('is_public', true)
-                  .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
-                  .order('created_at', { ascending: false })
-                  .limit(10),
+                Promise.resolve(
+                  supabase
+                    .from('audio_tracks')
+                    .select(`
+                      id, title, description, audio_url, file_url,
+                      cover_art_url, artwork_url, duration, play_count,
+                      likes_count, created_at, creator_id,
+                      moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
+                      creator:profiles!creator_id(id, username, display_name, avatar_url)
+                    `)
+                    .eq('is_public', true)
+                    .not('content_type', 'in', '(podcast,mixtape)')
+                    .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
+                    .order('created_at', { ascending: false })
+                    .limit(10)
+                ),
                 { timeout: 5000, fallback: [] }
               ),
               timeout: 5000,
@@ -740,6 +797,56 @@ function DiscoverScreen() {
           loadingManager.setLoading('albums', false, 0);
           break;
 
+        case 'Podcasts':
+          setLoadingPodcasts(true);
+          try {
+            const { data: podcastData } = await supabase
+              .from('audio_tracks')
+              .select(`
+                id, title, description, audio_url, file_url,
+                cover_art_url, artwork_url, duration, play_count,
+                likes_count, created_at, creator_id,
+                moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
+                creator:profiles!creator_id(id, username, display_name, avatar_url)
+              `)
+              .eq('is_public', true)
+              .eq('content_type', 'podcast')
+              .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
+              .order('created_at', { ascending: false })
+              .limit(20);
+            setPodcasts(podcastData || []);
+          } catch (e) {
+            setPodcasts([]);
+          } finally {
+            setLoadingPodcasts(false);
+          }
+          break;
+
+        case 'Mixtapes':
+          setLoadingMixtapes(true);
+          try {
+            const { data: mixtapeData } = await supabase
+              .from('audio_tracks')
+              .select(`
+                id, title, description, audio_url, file_url,
+                cover_art_url, artwork_url, duration, play_count,
+                likes_count, created_at, creator_id,
+                moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
+                creator:profiles!creator_id(id, username, display_name, avatar_url)
+              `)
+              .eq('is_public', true)
+              .eq('is_mixtape', true)
+              .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
+              .order('created_at', { ascending: false })
+              .limit(20);
+            setMixtapes(mixtapeData || []);
+          } catch (e) {
+            setMixtapes([]);
+          } finally {
+            setLoadingMixtapes(false);
+          }
+          break;
+
         case 'Artists':
           loadingManager.setLoading('artists', true, 8000);
           const artistsResult = await loadQueriesInParallel({
@@ -754,7 +861,7 @@ function DiscoverScreen() {
           loadingManager.setLoading('artists', false, 0);
           break;
 
-        case 'Events':
+        case 'Events': {
           loadingManager.setLoading('events', true, 6000);
           const eventsResult = await loadQueriesInParallel({
             events: {
@@ -763,12 +870,14 @@ function DiscoverScreen() {
                 ? dbHelpers.getPersonalizedEvents(user.id, 10)
                 : dbHelpers.getEvents(10),
               timeout: 6000,
-              fallback: [],
+              fallback: user?.id ? [] : DISCOVER_MOCK_EVENTS,
             },
           });
-          setEvents(eventsResult.events?.data || eventsResult.events || DISCOVER_MOCK_EVENTS);
+          const eventsData = eventsResult.events?.data || eventsResult.events || [];
+          setEvents(user?.id ? eventsData : (eventsData.length > 0 ? eventsData : DISCOVER_MOCK_EVENTS));
           loadingManager.setLoading('events', false, 0);
           break;
+        }
 
         case 'Playlists':
           loadingManager.setLoading('playlists', true, 5000);
@@ -786,17 +895,34 @@ function DiscoverScreen() {
 
         case 'Services':
           loadingManager.setLoading('services', true, 5000);
-          // Services tab - using mock data until API is ready
+          // Services tab - using mock data until web alignment is ready
           setServiceProviders(DISCOVER_MOCK_SERVICES);
           loadingManager.setLoading('services', false, 0);
           break;
 
         case 'Venues':
-          // Venues tab - using mock data until API is ready
-          setVenues(DISCOVER_MOCK_VENUES);
+          setLoadingSbVenues(true);
+          setLoadingGpVenues(true);
+          venueService.requestLocation().then((loc) => {
+            if (!loc) {
+              setVenueLocationDenied(true);
+              setLoadingSbVenues(false);
+              setLoadingGpVenues(false);
+              return;
+            }
+            setVenueLocationDenied(false);
+            venueService.getSoundbridgeVenues(loc.lat, loc.lng, 20).then((v) => {
+              setSbVenues(v);
+              setLoadingSbVenues(false);
+            });
+            venueService.getNearbyPlacesVenues(loc.lat, loc.lng, 20).then((v) => {
+              setGpVenues(v);
+              setLoadingGpVenues(false);
+            });
+          });
           break;
 
-        default:
+        default: {
           // Load all content for main discover page
           const allResults = await loadQueriesInParallel({
             trending: {
@@ -810,19 +936,21 @@ function DiscoverScreen() {
             recent: {
               name: 'recent',
               query: () => withQueryTimeout(
-                supabase
-                  .from('audio_tracks')
-                  .select(`
-                    id, title, description, audio_url, file_url,
-                    cover_art_url, artwork_url, duration, play_count,
-                    likes_count, created_at, creator_id,
-                    moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
-                    creator:profiles!creator_id(id, username, display_name, avatar_url)
-                  `)
-                  .eq('is_public', true)
-                  .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
-                  .order('created_at', { ascending: false })
-                  .limit(10),
+                Promise.resolve(
+                  supabase
+                    .from('audio_tracks')
+                    .select(`
+                      id, title, description, audio_url, file_url,
+                      cover_art_url, artwork_url, duration, play_count,
+                      likes_count, created_at, creator_id,
+                      moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
+                      creator:profiles!creator_id(id, username, display_name, avatar_url)
+                    `)
+                    .eq('is_public', true)
+                    .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
+                    .order('created_at', { ascending: false })
+                    .limit(10)
+                ),
                 { timeout: 5000, fallback: [] }
               ),
               timeout: 5000,
@@ -840,7 +968,7 @@ function DiscoverScreen() {
                 ? dbHelpers.getPersonalizedEvents(user.id, 10)
                 : dbHelpers.getEvents(10),
               timeout: 6000,
-              fallback: DISCOVER_MOCK_EVENTS,
+              fallback: user?.id ? [] : DISCOVER_MOCK_EVENTS,
             },
             playlists: {
               name: 'playlists',
@@ -852,9 +980,11 @@ function DiscoverScreen() {
           setTrendingTracks(allResults.trending?.data || allResults.trending || DISCOVER_MOCK_TRACKS);
           setRecentTracks(allResults.recent?.data || allResults.recent || DISCOVER_MOCK_TRACKS);
           setFeaturedArtists(allResults.artists?.data || allResults.artists || DISCOVER_MOCK_ARTISTS);
-          setEvents(allResults.events?.data || allResults.events || DISCOVER_MOCK_EVENTS);
+          const eventsData = allResults.events?.data || allResults.events || [];
+          setEvents(user?.id ? eventsData : (eventsData.length > 0 ? eventsData : DISCOVER_MOCK_EVENTS));
           setPlaylists(allResults.playlists?.data || allResults.playlists || DISCOVER_MOCK_PLAYLISTS);
           break;
+        }
       }
 
       console.log('✅ DiscoverScreen: Content loaded');
@@ -864,7 +994,7 @@ function DiscoverScreen() {
       setTrendingTracks(DISCOVER_MOCK_TRACKS);
       setRecentTracks(DISCOVER_MOCK_TRACKS);
       setFeaturedArtists(DISCOVER_MOCK_ARTISTS);
-      setEvents(DISCOVER_MOCK_EVENTS);
+      setEvents(user?.id ? [] : DISCOVER_MOCK_EVENTS);
       setPlaylists(DISCOVER_MOCK_PLAYLISTS);
     } finally {
       loadingManager.setLoading('discover', false, 0);
@@ -1175,29 +1305,44 @@ function DiscoverScreen() {
 
       if (data && data.length > 0 && !error) {
         console.log('✅ DiscoverScreen: Events loaded from Supabase:', data.length);
-        
+
         // Transform the data to match our Event interface
-        const transformedEvents: Event[] = data.map(event => ({
-          id: event.id,
-          title: event.title,
-          description: event.description,
-          event_date: event.event_date,
-          location: event.location,
-          image_url: event.image_url,
-          organizer: {
-            id: 'event-organizer',
-            username: 'event_organizer',
-            display_name: 'Event Organizer',
-            avatar_url: undefined,
-          }
-        }));
-        
+        const transformedEvents: Event[] = data.map(event => {
+          const organizer =
+            event.organizer ||
+            event.creator ||
+            (event.creator_id ? { id: event.creator_id, username: '', display_name: 'Event Organizer', avatar_url: undefined } : null);
+
+          return {
+            id: event.id,
+            title: event.title,
+            description: event.description,
+            event_date: event.event_date,
+            location: event.location,
+            image_url: event.image_url,
+            organizer: organizer || {
+              id: 'event-organizer',
+              username: 'event_organizer',
+              display_name: 'Event Organizer',
+              avatar_url: undefined,
+            }
+          };
+        });
+
         setEvents(transformedEvents);
         await contentCacheService.saveCache('EVENTS', cacheKey, transformedEvents);
         console.log('✅ DiscoverScreen: Successfully set events:', transformedEvents.length);
+      } else if (user?.id) {
+        // Strict personalization: do not fallback to unfiltered or mock events for logged-in users
+        if (error) {
+          console.log('⚠️ DiscoverScreen: Personalized events error:', error.message);
+        } else {
+          console.log('ℹ️ DiscoverScreen: No personalized events found');
+        }
+        setEvents([]);
       } else if (error) {
         console.log('❌ DiscoverScreen: Database error, using mock events:', error.message);
-        // Use mock data on error
+        // Use mock data on error for anonymous users
         const fallback = DISCOVER_MOCK_EVENTS;
         setEvents(fallback);
         if (events.length === 0) {
@@ -1206,7 +1351,7 @@ function DiscoverScreen() {
         console.log('✅ DiscoverScreen: Using mock events data');
       } else {
         console.log('ℹ️ DiscoverScreen: No events found, using mock data');
-        // Use mock data if no events found
+        // Use mock data if no events found for anonymous users
         const fallback = DISCOVER_MOCK_EVENTS;
         setEvents(fallback);
         if (events.length === 0) {
@@ -1216,28 +1361,33 @@ function DiscoverScreen() {
       }
     } catch (error) {
       console.error('❌ DiscoverScreen: Error loading events:', error);
-      // Always provide fallback data
-      const fallbackEvents: Event[] = [
-        {
-          id: 'fallback-event-1',
-          title: 'Music Discovery Event',
-          description: 'Explore new sounds and connect with artists',
-          event_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-          location: 'SoundBridge Platform',
-          image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
-          organizer: {
-            id: 'fallback-organizer',
-            username: 'soundbridge_events',
-            display_name: 'SoundBridge Events',
-            avatar_url: undefined,
+      if (user?.id) {
+        // Strict personalization: do not show fallback events for logged-in users
+        setEvents([]);
+      } else {
+        // Provide fallback data for anonymous users
+        const fallbackEvents: Event[] = [
+          {
+            id: 'fallback-event-1',
+            title: 'Music Discovery Event',
+            description: 'Explore new sounds and connect with artists',
+            event_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+            location: 'SoundBridge Platform',
+            image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop',
+            organizer: {
+              id: 'fallback-organizer',
+              username: 'soundbridge_events',
+              display_name: 'SoundBridge Events',
+              avatar_url: undefined,
+            },
           },
-        },
-      ];
-      setEvents(fallbackEvents);
-      if (events.length === 0) {
-        await contentCacheService.saveCache('EVENTS', cacheKey, fallbackEvents);
+        ];
+        setEvents(fallbackEvents);
+        if (events.length === 0) {
+          await contentCacheService.saveCache('EVENTS', cacheKey, fallbackEvents);
+        }
+        console.log('✅ DiscoverScreen: Using fallback events due to error');
       }
-      console.log('✅ DiscoverScreen: Using fallback events due to error');
     } finally {
       setLoadingEvents(false);
       console.log('🏁 DiscoverScreen: Events loading completed');
@@ -1344,8 +1494,7 @@ function DiscoverScreen() {
       loadEvents(true),
       loadTrendingTracks(true),
       loadRecentTracks(true),
-      loadPlaylists(true),
-      loadServiceProviders(true)
+      loadPlaylists(true)
     ]);
     setRefreshing(false);
   };
@@ -1400,6 +1549,57 @@ function DiscoverScreen() {
       return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getEventPrice = (eventData: Event): { currency: string; amount: number } | null => {
+    const currencyOrder = [
+      'GBP',
+      'NGN',
+      'USD',
+      'EUR',
+      'CAD',
+      'AUD',
+      'INR',
+      'JPY',
+      'BRL',
+      'MXN',
+    ];
+
+    for (const currency of currencyOrder) {
+      const fieldName = `price_${currency.toLowerCase()}` as keyof Event;
+      const value = eventData[fieldName];
+      if (typeof value === 'number' && value >= 0) {
+        return { currency, amount: value };
+      }
+    }
+
+    return null;
+  };
+
+  const formatEventPrice = (eventData: Event) => {
+    const priceInfo = getEventPrice(eventData);
+    if (!priceInfo) return null;
+    if (priceInfo.amount === 0) return 'FREE';
+
+    const symbols: Record<string, string> = {
+      GBP: '£',
+      NGN: '₦',
+      USD: '$',
+      EUR: '€',
+      CAD: '$',
+      AUD: '$',
+      INR: '₹',
+      JPY: '¥',
+      BRL: 'R$',
+      MXN: '$',
+    };
+
+    const symbol = symbols[priceInfo.currency] || `${priceInfo.currency} `;
+    const formattedAmount = priceInfo.currency === 'NGN'
+      ? priceInfo.amount.toLocaleString()
+      : priceInfo.amount.toString();
+
+    return `${symbol}${formattedAmount}`;
   };
 
   // Helper to check if track is new (uploaded < 7 days ago)
@@ -1505,9 +1705,12 @@ function DiscoverScreen() {
               <Ionicons name="options-outline" size={18} color={theme.colors.primary} style={{ marginLeft: 8 }} />
             </TouchableOpacity>
               </View>
-          <TouchableOpacity onPress={() => navigation.navigate('Messages' as never)}>
-            <Ionicons name="chatbubbles-outline" size={24} color={theme.isDark ? "white" : theme.colors.text} />
-          </TouchableOpacity>
+          <View style={styles.headerIcons}>
+            <NotificationBellButton size={24} color={theme.isDark ? "white" : theme.colors.text} />
+            <TouchableOpacity onPress={() => navigation.navigate('Messages' as never)} style={{ marginLeft: 12 }}>
+              <Ionicons name="chatbubbles-outline" size={24} color={theme.isDark ? "white" : theme.colors.text} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Main Header - HTML: px-6 mt-8 mb-6 */}
@@ -1703,15 +1906,13 @@ function DiscoverScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center' }}
                   onPress={() => navigation.navigate('AllTracks', { category: 'trending', title: 'Trending This Week' })}
                 >
-                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Text style={[Typography.label, { color: theme.colors.primary, fontSize: 14, marginRight: 4 }]}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
         {loadingTracks ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color={theme.colors.primary} />
-                </View>
+                <SkeletonHtmlCardRow count={3} />
         ) : trendingTracks.length > 0 ? (
                 <FlatList
                   horizontal
@@ -1799,31 +2000,8 @@ function DiscoverScreen() {
         )}
             </View>
 
-            {/* Step 13: Upload Music - 3 FREE Tracks Call-to-Action */}
-            <WalkthroughableView
-              order={13}
-              name="upload_music_prompt"
-              text="Tap here to upload your first track! Free users get 3 uploads, Premium 10, Unlimited UNLIMITED. Upload now, distribute FREE (unlike DistroKid's £20/year), and keep 95% of tips. Your music goes live instantly on SoundBridge."
-              style={[styles.section, { marginTop: 16 }]}
-            >
-              <TouchableOpacity
-                style={[styles.uploadPromptCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.primary }]}
-                onPress={() => navigation.navigate('Upload' as never)}
-              >
-                <View style={styles.uploadPromptIcon}>
-                  <Ionicons name="cloud-upload-outline" size={40} color={theme.colors.primary} />
-                </View>
-                <View style={styles.uploadPromptContent}>
-                  <Text style={[styles.uploadPromptTitle, { color: theme.colors.text }]}>
-                    Upload Your Music
-                  </Text>
-                  <Text style={[styles.uploadPromptSubtitle, { color: theme.colors.textSecondary }]}>
-                    Free: 30MB • Premium: 2GB • Unlimited: 10GB
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={24} color={theme.colors.primary} />
-              </TouchableOpacity>
-            </WalkthroughableView>
+            {/* Upload Music - FREE Storage Call-to-Action */}
+            <UploadPromptCard />
 
       {/* Featured Artists */}
             <View style={styles.section}>
@@ -1836,15 +2014,13 @@ function DiscoverScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center' }}
                   onPress={() => navigation.navigate('AllCreators', { category: 'featured', title: 'Featured Artists' })}
                 >
-                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Text style={[Typography.label, { color: theme.colors.primary, fontSize: 14, marginRight: 4 }]}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
         {loadingArtists ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color={theme.colors.primary} />
-                </View>
+                <SkeletonHtmlCardRow count={3} />
         ) : featuredArtists.length > 0 ? (
                 <FlatList
                   horizontal
@@ -1926,7 +2102,7 @@ function DiscoverScreen() {
                             // Follow logic here
                           }}
                         >
-                          <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>Follow</Text>
+                          <Text style={[Typography.label, { color: '#FFFFFF', fontSize: 14, fontWeight: '600' }]}>Follow</Text>
                         </TouchableOpacity>
                       </View>
                 </TouchableOpacity>
@@ -1983,15 +2159,13 @@ function DiscoverScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center' }}
                   onPress={() => navigation.navigate('AllTracks', { category: 'recent', title: 'Recent Music' })}
                 >
-                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Text style={[Typography.label, { color: theme.colors.primary, fontSize: 14, marginRight: 4 }]}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
         {loadingTracks ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="small" color={theme.colors.primary} />
-                </View>
+                <SkeletonRowCards count={5} />
         ) : recentTracks.length > 0 ? (
                 <View style={styles.recentMusicContainer}>
             {recentTracks.slice(0, 5).map((track) => (
@@ -2091,16 +2265,13 @@ function DiscoverScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center' }}
                   onPress={() => navigation.navigate('AllAlbums', { category: 'featured', title: 'Featured Albums' })}
                 >
-                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Text style={[Typography.label, { color: theme.colors.primary, fontSize: 14, marginRight: 4 }]}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
               {loadingAlbums ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color={theme.colors.primary} />
-                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading albums...</Text>
-                </View>
+                <SkeletonAlbumCardRow count={4} />
               ) : featuredAlbums.length > 0 ? (
                 <ScrollView 
                   horizontal 
@@ -2169,15 +2340,13 @@ function DiscoverScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center' }}
                   onPress={() => navigation.navigate('AllAlbums', { category: 'recent', title: 'Recent Releases' })}
                 >
-                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Text style={[Typography.label, { color: theme.colors.primary, fontSize: 14, marginRight: 4 }]}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
               {loadingAlbums ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color={theme.colors.primary} />
-                </View>
+                <SkeletonAlbumCardRow count={4} />
               ) : recentAlbums.length > 0 ? (
                 <View style={styles.recentTracksContainer}>
                   {recentAlbums.map((album, index) => (
@@ -2240,6 +2409,147 @@ function DiscoverScreen() {
           </>
         )}
 
+        {activeTab === 'Podcasts' && (
+          <>
+            <View style={[styles.section, styles.firstSection]}>
+              <View style={styles.sectionHeader}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="mic" size={20} color="#8B5CF6" style={{ marginRight: 8 }} />
+                  <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Latest Podcasts</Text>
+                </View>
+              </View>
+              {loadingPodcasts ? (
+                <SkeletonHtmlCardRow count={3} />
+              ) : podcasts.length > 0 ? (
+                <FlatList
+                  horizontal
+                  data={podcasts}
+                  keyExtractor={(item) => item.id}
+                  showsHorizontalScrollIndicator={false}
+                  renderItem={({ item: track, index }) => (
+                    <TouchableOpacity
+                      style={[styles.htmlCard, index === 0 && { marginLeft: 24 }]}
+                      onPress={() => handleTrackPress(track)}
+                      activeOpacity={0.9}
+                    >
+                      <View style={[StyleSheet.absoluteFill, { overflow: 'hidden', borderRadius: 24 }]}>
+                        {track.cover_art_url ? (
+                          <Image source={{ uri: track.cover_art_url }} style={styles.htmlCardImage} />
+                        ) : (
+                          <View style={[styles.htmlCardImage, { backgroundColor: '#8B5CF620', justifyContent: 'center', alignItems: 'center' }]}>
+                            <Ionicons name="mic" size={60} color="#8B5CF6" />
+                          </View>
+                        )}
+                        <LinearGradient
+                          colors={['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.9)']}
+                          style={styles.htmlCardGradient}
+                        />
+                      </View>
+                      <Pressable
+                        style={styles.htmlPlayButton}
+                        onPress={(e: any) => { e.stopPropagation(); handleTrackPlay(track); }}
+                      >
+                        <BlurView intensity={20} tint={theme.isDark ? 'dark' : 'light'} style={styles.htmlPlayButtonBlur}>
+                          <Ionicons name="play-circle-outline" size={36} color={theme.isDark ? '#FFFFFF' : theme.colors.text} />
+                        </BlurView>
+                      </Pressable>
+                      <View style={styles.htmlCardContent}>
+                        <Text style={styles.htmlCardTitle} numberOfLines={2}>{track.title}</Text>
+                        <Text style={styles.htmlCardArtist} numberOfLines={1}>
+                          {track.creator?.display_name || track.creator?.username || 'Unknown'}
+                        </Text>
+                        <View style={styles.htmlCardMeta}>
+                          <Ionicons name="mic-outline" size={12} color="rgba(255,255,255,0.4)" />
+                          <Text style={styles.htmlCardMetaText}>Podcast</Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                />
+              ) : (
+                <View style={{ paddingHorizontal: 24, paddingVertical: 32, alignItems: 'center' }}>
+                  <Ionicons name="mic-outline" size={48} color={theme.colors.textSecondary} />
+                  <Text style={{ color: theme.colors.textSecondary, marginTop: 12, textAlign: 'center' }}>
+                    No podcasts yet. Be the first to upload one.
+                  </Text>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+
+        {activeTab === 'Mixtapes' && (
+          <>
+            <View style={[styles.section, styles.firstSection]}>
+              <View style={styles.sectionHeader}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="disc" size={20} color="#F59E0B" style={{ marginRight: 8 }} />
+                  <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>DJ Mixes</Text>
+                </View>
+              </View>
+              {loadingMixtapes ? (
+                <SkeletonHtmlCardRow count={3} />
+              ) : mixtapes.length > 0 ? (
+                <FlatList
+                  horizontal
+                  data={mixtapes}
+                  keyExtractor={(item) => item.id}
+                  showsHorizontalScrollIndicator={false}
+                  renderItem={({ item: track, index }) => (
+                    <TouchableOpacity
+                      style={[styles.htmlCard, index === 0 && { marginLeft: 24 }]}
+                      onPress={() => handleTrackPress(track)}
+                      activeOpacity={0.9}
+                    >
+                      <View style={{ position: 'absolute', top: 8, left: 8, zIndex: 10, backgroundColor: '#F59E0B', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>MIX</Text>
+                      </View>
+                      <View style={[StyleSheet.absoluteFill, { overflow: 'hidden', borderRadius: 24 }]}>
+                        {track.cover_art_url ? (
+                          <Image source={{ uri: track.cover_art_url }} style={styles.htmlCardImage} />
+                        ) : (
+                          <View style={[styles.htmlCardImage, { backgroundColor: '#F59E0B20', justifyContent: 'center', alignItems: 'center' }]}>
+                            <Ionicons name="disc" size={60} color="#F59E0B" />
+                          </View>
+                        )}
+                        <LinearGradient
+                          colors={['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.9)']}
+                          style={styles.htmlCardGradient}
+                        />
+                      </View>
+                      <Pressable
+                        style={styles.htmlPlayButton}
+                        onPress={(e: any) => { e.stopPropagation(); handleTrackPlay(track); }}
+                      >
+                        <BlurView intensity={20} tint={theme.isDark ? 'dark' : 'light'} style={styles.htmlPlayButtonBlur}>
+                          <Ionicons name="play-circle-outline" size={36} color={theme.isDark ? '#FFFFFF' : theme.colors.text} />
+                        </BlurView>
+                      </Pressable>
+                      <View style={styles.htmlCardContent}>
+                        <Text style={styles.htmlCardTitle} numberOfLines={2}>{track.title}</Text>
+                        <Text style={styles.htmlCardArtist} numberOfLines={1}>
+                          {track.creator?.display_name || track.creator?.username || 'Unknown DJ'}
+                        </Text>
+                        <View style={styles.htmlCardMeta}>
+                          <Ionicons name="disc-outline" size={12} color="rgba(255,255,255,0.4)" />
+                          <Text style={styles.htmlCardMetaText}>DJ Mix</Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                />
+              ) : (
+                <View style={{ paddingHorizontal: 24, paddingVertical: 32, alignItems: 'center' }}>
+                  <Ionicons name="disc-outline" size={48} color={theme.colors.textSecondary} />
+                  <Text style={{ color: theme.colors.textSecondary, marginTop: 12, textAlign: 'center' }}>
+                    No mixes yet. Be the first to upload one.
+                  </Text>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+
         {activeTab === 'Artists' && (
           <>
             {/* Featured Artists */}
@@ -2253,16 +2563,13 @@ function DiscoverScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center' }}
                   onPress={() => navigation.navigate('AllCreators', { category: 'all', title: 'All Artists' })}
                 >
-                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Text style={[Typography.label, { color: theme.colors.primary, fontSize: 14, marginRight: 4 }]}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
         {loadingArtists ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color={theme.colors.primary} />
-                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading artists...</Text>
-                </View>
+                <SkeletonHtmlCardRow count={3} />
         ) : featuredArtists.length > 0 ? (
                 <View style={styles.artistsGridContainer}>
             {featuredArtists.map((artist) => (
@@ -2323,15 +2630,13 @@ function DiscoverScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center' }}
                   onPress={() => navigation.navigate('AllCreators', { category: 'top', title: 'Top Artists' })}
                 >
-                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Text style={[Typography.label, { color: theme.colors.primary, fontSize: 14, marginRight: 4 }]}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
               </TouchableOpacity>
           </View>
               
               {loadingArtists ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="small" color={theme.colors.primary} />
-                </View>
+                <SkeletonRowCards count={3} />
               ) : featuredArtists.length > 0 ? (
                 <View style={styles.topArtistsContainer}>
                   {featuredArtists
@@ -2404,16 +2709,13 @@ function DiscoverScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center' }}
                   onPress={() => navigation.navigate('AllEvents', { title: 'Upcoming Events' })}
                 >
-                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Text style={[Typography.label, { color: theme.colors.primary, fontSize: 14, marginRight: 4 }]}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
               {loadingEvents ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color={theme.colors.primary} />
-                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading events...</Text>
-                </View>
+                <SkeletonRowCards count={3} />
               ) : events.length > 0 ? (
                 <View style={styles.eventsContainer}>
                   {events.map((event) => (
@@ -2456,9 +2758,9 @@ function DiscoverScreen() {
                         <Text style={[styles.eventOrganizer, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                           by {event.organizer?.display_name || event.organizer?.username || 'Unknown Organizer'}
                         </Text>
-                        {(event.price_gbp || event.price_ngn) && (
+                        {formatEventPrice(event) && (
                           <Text style={[styles.eventPrice, { color: theme.colors.primary }]}>
-                            {event.price_gbp ? `£${event.price_gbp}` : event.price_ngn ? `₦${event.price_ngn}` : 'Free'}
+                            {formatEventPrice(event)}
                           </Text>
                         )}
                       </View>
@@ -2488,16 +2790,13 @@ function DiscoverScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center' }}
                   onPress={() => navigation.navigate('AllPlaylists', { title: 'Public Playlists' })}
                 >
-                  <Text style={{ color: theme.colors.primary, fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Text style={[Typography.label, { color: theme.colors.primary, fontSize: 14, marginRight: 4 }]}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
               {loadingPlaylists ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color={theme.colors.primary} />
-                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading playlists...</Text>
-                </View>
+                <SkeletonRowCards count={3} />
               ) : playlists.length > 0 ? (
                 <View style={styles.playlistsContainer}>
                   {playlists.map((playlist) => (
@@ -2593,27 +2892,24 @@ function DiscoverScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center' }}
                   onPress={() => navigation.navigate('AllServices', { title: 'Service Providers' })}
                 >
-                  <Text style={{ color: '#DC2626', fontSize: 14, marginRight: 4 }}>See all</Text>
+                  <Text style={[Typography.label, { color: '#DC2626', fontSize: 14, marginRight: 4 }]}>See all</Text>
                   <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
               
               {loadingServices ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color={theme.colors.primary} />
-                  <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading services...</Text>
-                </View>
+                <SkeletonRowCards count={3} />
               ) : serviceProviders.length > 0 ? (
                 <View style={styles.servicesContainer}>
                   {serviceProviders.map((provider) => (
                     <TouchableOpacity
-                      key={provider.user_id}
+                      key={provider.provider_id}
                       style={[styles.serviceCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-                      onPress={() => (navigation as any).navigate('CreatorProfile', { userId: provider.user_id })}
+                      onPress={() => navigation.navigate('CreatorProfile', { creatorId: provider.provider_id })}
                     >
                       <View style={styles.serviceHeader}>
-                        {provider.avatar_url ? (
-                          <Image source={{ uri: provider.avatar_url }} style={styles.serviceAvatar} />
+                        {(provider.image_url || provider.cover_image_url) ? (
+                          <Image source={{ uri: provider.image_url || provider.cover_image_url || '' }} style={styles.serviceAvatar} />
                         ) : (
                           <View style={[styles.serviceAvatarPlaceholder, { backgroundColor: theme.colors.surface }]}>
                             <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
@@ -2621,7 +2917,7 @@ function DiscoverScreen() {
                         )}
                         <View style={styles.serviceInfo}>
                           <Text style={[styles.serviceName, { color: theme.colors.text }]} numberOfLines={1}>
-                            {provider.display_name || provider.username || 'Service Provider'}
+                            {provider.display_name || 'Service Provider'}
                           </Text>
                           {provider.headline && (
                             <Text style={[styles.serviceHeadline, { color: theme.colors.textSecondary }]} numberOfLines={1}>
@@ -2672,66 +2968,162 @@ function DiscoverScreen() {
 
         {activeTab === 'Venues' && (
           <>
-            <View style={[styles.section, styles.firstSection]}>
-              <View style={styles.sectionHeader}>
-                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                  <Ionicons name="location" size={20} color="#DC2626" style={{ marginRight: 8 }} />
-                  <Text style={[styles.sectionTitle, { color: '#FFFFFF' }]}>Popular Venues</Text>
-                </View>
-                <TouchableOpacity
-                  style={{ flexDirection: 'row', alignItems: 'center' }}
-                  onPress={() => navigation.navigate('AllVenues', { title: 'Popular Venues' })}
-                >
-                  <Text style={{ color: '#DC2626', fontSize: 14, marginRight: 4 }}>See all</Text>
-                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
-                </TouchableOpacity>
+            {venueLocationDenied ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="location-outline" size={48} color={theme.colors.textSecondary} />
+                <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>Location access needed</Text>
+                <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
+                  Enable location permissions to discover nearby venues
+                </Text>
               </View>
-              {venues.length > 0 ? (
-                <View style={styles.venuesContainer}>
-                  {venues.map((venue) => (
+            ) : (
+              <>
+                {/* SoundBridge Venues */}
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: '#059669' }} />
+                      <Text style={[Typography.headerMedium, { color: theme.colors.text, fontSize: 18 }]}>On SoundBridge</Text>
+                    </View>
                     <TouchableOpacity
-                      key={venue.id}
-                      style={[styles.venueCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-                      activeOpacity={0.7}
+                      style={{ flexDirection: 'row', alignItems: 'center' }}
+                      onPress={() => navigation.navigate('AllVenues', { source: 'soundbridge' })}
                     >
-                      <Image
-                        source={{ uri: venue.image_url }}
-                        style={styles.venueImage}
-                        resizeMode="cover"
-                      />
-                      <View style={styles.venueInfo}>
-                        <Text style={[styles.venueName, { color: theme.colors.text }]} numberOfLines={1}>
-                          {venue.name}
-                        </Text>
-                        <View style={styles.venueMetaRow}>
-                          <Ionicons name="location" size={14} color={theme.colors.textSecondary} />
-                          <Text style={[styles.venueLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                            {venue.location}
-                          </Text>
-                        </View>
-                        <View style={styles.venueMetaRow}>
-                          <Ionicons name="people" size={14} color={theme.colors.textSecondary} />
-                          <Text style={[styles.venueCapacity, { color: theme.colors.textSecondary }]}>
-                            Capacity: {venue.capacity.toLocaleString()}
-                          </Text>
-                        </View>
-                        <View style={styles.venueMetaRow}>
-                          <Ionicons name="calendar" size={14} color={theme.colors.primary} />
-                          <Text style={[styles.venueEvents, { color: theme.colors.primary }]}>
-                            {venue.upcoming_events} upcoming events
-                          </Text>
-                        </View>
-                      </View>
+                      <Text style={[Typography.button, { color: theme.colors.primary, fontSize: 14, marginRight: 4 }]}>See all</Text>
+                      <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
                     </TouchableOpacity>
-                  ))}
+                  </View>
+                  {loadingSbVenues ? (
+                    <SkeletonRowCards count={3} />
+                  ) : sbVenues.length > 0 ? (
+                    <View style={styles.venuesContainer}>
+                      {sbVenues.slice(0, 4).map((venue, idx) => (
+                        <TouchableOpacity
+                          key={venue.id || `sb-${idx}`}
+                          style={[styles.venueCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                          activeOpacity={0.85}
+                          onPress={() => navigation.navigate('VenueDetail', { venue })}
+                        >
+                          <VenueThumb
+                            uri={venue.photo_url}
+                            thumbStyle={styles.venueHero}
+                            placeholderBg={theme.colors.surface}
+                            placeholderIcon="business-outline"
+                          />
+                          <View style={styles.venueInfo}>
+                            <Text style={[styles.venueName, { color: theme.colors.text }]} numberOfLines={1}>{venue.name}</Text>
+                            {venue.address ? (
+                              <View style={styles.venueMetaRow}>
+                                <Ionicons name="location-outline" size={13} color={theme.colors.textSecondary} />
+                                <Text style={[styles.venueLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>{venue.address}</Text>
+                              </View>
+                            ) : null}
+                            <View style={styles.venueBottomRow}>
+                              {(venue.daily_rate != null || venue.hourly_rate != null) && (
+                                <View style={styles.venueMetaRow}>
+                                  <Ionicons name="cash-outline" size={13} color={theme.colors.primary} />
+                                  <Text style={[styles.venueRate, { color: theme.colors.primary }]}>
+                                    {venueService.formatRate(venue.daily_rate, venue.hourly_rate, venue.currency) ?? ''}
+                                  </Text>
+                                </View>
+                              )}
+                              {venue.distance_km != null && (
+                                <View style={styles.venueMetaRow}>
+                                  <Ionicons name="navigate-outline" size={13} color={theme.colors.textSecondary} />
+                                  <Text style={[styles.venueDist, { color: theme.colors.textSecondary }]}>
+                                    {venue.distance_km < 1 ? `${Math.round(venue.distance_km * 1000)}m away` : `${venue.distance_km.toFixed(1)}km away`}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ) : (
+                    <View style={styles.emptyState}>
+                      <Ionicons name="business-outline" size={40} color={theme.colors.textSecondary} />
+                      <Text style={[Typography.button, styles.emptyStateText, { color: theme.colors.text }]}>No SoundBridge venues nearby</Text>
+                      <Text style={[Typography.body, styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>Go to Profile → Settings → Venues to list yours</Text>
+                    </View>
+                  )}
                 </View>
-              ) : (
-                <View style={styles.emptyState}>
-                  <Ionicons name="location-outline" size={48} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No Venues Found</Text>
+
+                {/* Google Places Venues */}
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: '#2563EB' }} />
+                      <Text style={[Typography.headerMedium, { color: theme.colors.text, fontSize: 18 }]}>Nearby Venues</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={{ flexDirection: 'row', alignItems: 'center' }}
+                      onPress={() => navigation.navigate('AllVenues', { source: 'google_places' })}
+                    >
+                      <Text style={[Typography.button, { color: theme.colors.primary, fontSize: 14, marginRight: 4 }]}>See all</Text>
+                      <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
+                    </TouchableOpacity>
+                  </View>
+                  {loadingGpVenues ? (
+                    <SkeletonRowCards count={3} />
+                  ) : gpVenues.length > 0 ? (
+                    <View style={styles.venuesContainer}>
+                      {gpVenues.slice(0, 6).map((venue, idx) => (
+                        <TouchableOpacity
+                          key={venue.id || `gp-${idx}`}
+                          style={[styles.venueCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                          activeOpacity={0.85}
+                          onPress={() => navigation.navigate('VenueDetail', { venue })}
+                        >
+                          <VenueThumb
+                            uri={venue.photo_url}
+                            thumbStyle={styles.venueHero}
+                            placeholderBg={theme.colors.surface}
+                            placeholderIcon="business-outline"
+                          />
+                          <View style={styles.venueInfo}>
+                            <Text style={[styles.venueName, { color: theme.colors.text }]} numberOfLines={1}>{venue.name}</Text>
+                            {venue.address ? (
+                              <View style={styles.venueMetaRow}>
+                                <Ionicons name="location-outline" size={13} color={theme.colors.textSecondary} />
+                                <Text style={[styles.venueLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>{venue.address}</Text>
+                              </View>
+                            ) : null}
+                            <View style={styles.venueBottomRow}>
+                              {venue.rating != null && (
+                                <View style={styles.venueMetaRow}>
+                                  <Ionicons name="star" size={13} color="#FBBF24" />
+                                  <Text style={[styles.venueDist, { color: theme.colors.textSecondary }]}>
+                                    {venue.rating.toFixed(1)}{venue.rating_count ? ` (${venue.rating_count.toLocaleString()})` : ''}
+                                  </Text>
+                                </View>
+                              )}
+                              {venue.distance_km != null && (
+                                <View style={styles.venueMetaRow}>
+                                  <Ionicons name="navigate-outline" size={13} color={theme.colors.textSecondary} />
+                                  <Text style={[styles.venueDist, { color: theme.colors.textSecondary }]}>
+                                    {venue.distance_km < 1 ? `${Math.round(venue.distance_km * 1000)}m away` : `${venue.distance_km.toFixed(1)}km away`}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ) : (
+                    <View style={styles.emptyState}>
+                      <Ionicons name="search-outline" size={40} color={theme.colors.textSecondary} />
+                      <Text style={[Typography.button, styles.emptyStateText, { color: theme.colors.text }]}>No nearby venues found</Text>
+                      <Text style={[Typography.body, styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
+                        Google Places data is loading — ensure the API is configured
+                      </Text>
+                    </View>
+                  )}
                 </View>
-              )}
-            </View>
+              </>
+            )}
+
           </>
         )}
           </>
@@ -2765,7 +3157,7 @@ function DiscoverScreen() {
         />
       )}
 
-      {/* Search Modal */}
+      {/* Search Modal - Now shows search results */}
       <Modal
         visible={searchModalVisible}
         animationType="fade"
@@ -2774,24 +3166,154 @@ function DiscoverScreen() {
       >
         <BlurView intensity={90} tint={theme.isDark ? "dark" : "light"} style={StyleSheet.absoluteFill}>
           <SafeAreaView style={{ flex: 1 }}>
-            <View style={{ padding: 24 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 32 }}>
+            <View style={{ padding: 24, flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
                 <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: theme.isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)', borderRadius: 16, paddingHorizontal: 16 }}>
                   <Ionicons name="search" size={20} color={theme.isDark ? "rgba(255,255,255,0.6)" : theme.colors.textSecondary} />
                   <TextInput
-                    style={{ flex: 1, color: theme.colors.text, fontSize: 18, paddingVertical: 16, marginLeft: 12 }}
-                    placeholder="Search creators, music, events..."
+                    style={[Typography.body, { flex: 1, color: theme.colors.text, fontSize: 18, paddingVertical: 16, marginLeft: 12 }]}
+                    placeholder="Search people, music, events..."
                     placeholderTextColor={theme.isDark ? "rgba(255,255,255,0.4)" : theme.colors.textSecondary}
                     value={searchQuery}
                     onChangeText={setSearchQuery}
                     autoFocus
                   />
+                  {searchQuery.length > 0 && (
+                    <TouchableOpacity onPress={() => setSearchQuery('')}>
+                      <Ionicons name="close-circle" size={20} color={theme.colors.textSecondary} />
+                    </TouchableOpacity>
+                  )}
                 </View>
                 <TouchableOpacity onPress={() => setSearchModalVisible(false)} style={{ marginLeft: 16 }}>
                   <Ionicons name="close" size={28} color={theme.colors.text} />
                 </TouchableOpacity>
               </View>
-              {/* Search results would go here */}
+
+              {/* Search Results */}
+              <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+                {isSearching ? (
+                  <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                    <ActivityIndicator size="large" color={theme.colors.primary} />
+                    <Text style={{ color: theme.colors.textSecondary, marginTop: 12 }}>Searching...</Text>
+                  </View>
+                ) : searchQuery.length < 2 ? (
+                  <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                    <Ionicons name="search" size={48} color={theme.colors.textSecondary} />
+                    <Text style={{ color: theme.colors.textSecondary, marginTop: 12, textAlign: 'center' }}>
+                      Type at least 2 characters to search
+                    </Text>
+                  </View>
+                ) : (searchResults.artists.length === 0 && searchResults.tracks.length === 0 && (searchResults.events?.length || 0) === 0) ? (
+                  <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                    <Ionicons name="search-outline" size={48} color={theme.colors.textSecondary} />
+                    <Text style={[Typography.body, { color: theme.colors.text, fontSize: 18, fontWeight: '600', marginTop: 12 }]}>No results found</Text>
+                    <Text style={{ color: theme.colors.textSecondary, marginTop: 4 }}>Try different keywords</Text>
+                  </View>
+                ) : (
+                  <>
+                    {/* People Results */}
+                    {searchResults.artists.length > 0 && (
+                      <View style={{ marginBottom: 24 }}>
+                        <Text style={[Typography.body, { color: theme.colors.text, fontSize: 16, fontWeight: '600', marginBottom: 12 }]}>People</Text>
+                        {searchResults.artists.slice(0, 5).map((artist: any) => (
+                          <TouchableOpacity
+                            key={artist.id}
+                            style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}
+                            onPress={() => {
+                              setSearchModalVisible(false);
+                              navigation.navigate('CreatorProfile' as never, { creatorId: artist.id } as never);
+                            }}
+                          >
+                            {artist.avatar_url ? (
+                              <Image source={{ uri: artist.avatar_url }} style={{ width: 44, height: 44, borderRadius: 22, marginRight: 12 }} />
+                            ) : (
+                              <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: theme.colors.primary, justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                                <Ionicons name="person" size={22} color="#FFF" />
+                              </View>
+                            )}
+                            <View style={{ flex: 1 }}>
+                              <Text style={[Typography.label, { color: theme.colors.text, fontSize: 15, fontWeight: '500' }]}>{artist.display_name || artist.username}</Text>
+                              <Text style={[Typography.label, { color: theme.colors.textSecondary, fontSize: 13 }]}>@{artist.username} · {artist.role === 'creator' ? 'Creator' : 'Listener'}</Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* Tracks Results */}
+                    {searchResults.tracks.length > 0 && (
+                      <View style={{ marginBottom: 24 }}>
+                        <Text style={[Typography.body, { color: theme.colors.text, fontSize: 16, fontWeight: '600', marginBottom: 12 }]}>Tracks</Text>
+                        {searchResults.tracks.slice(0, 5).map((track: any) => (
+                          <TouchableOpacity
+                            key={track.id}
+                            style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}
+                            onPress={() => {
+                              setSearchModalVisible(false);
+                              navigation.navigate('TrackDetails' as never, { trackId: track.id, track } as never);
+                            }}
+                          >
+                            {track.cover_art_url ? (
+                              <Image source={{ uri: track.cover_art_url }} style={{ width: 44, height: 44, borderRadius: 8, marginRight: 12 }} />
+                            ) : (
+                              <View style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: theme.colors.primary, justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                                <Ionicons name="musical-notes" size={22} color="#FFF" />
+                              </View>
+                            )}
+                            <View style={{ flex: 1 }}>
+                              <Text style={[Typography.label, { color: theme.colors.text, fontSize: 15, fontWeight: '500' }]} numberOfLines={1}>{track.title}</Text>
+                              <Text style={[Typography.label, { color: theme.colors.textSecondary, fontSize: 13 }]}>{track.creator?.display_name || track.creator?.username || 'Unknown Artist'}</Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* Events Results */}
+                    {searchResults.events && searchResults.events.length > 0 && (
+                      <View style={{ marginBottom: 24 }}>
+                        <Text style={[Typography.body, { color: theme.colors.text, fontSize: 16, fontWeight: '600', marginBottom: 12 }]}>Events</Text>
+                        {searchResults.events.slice(0, 5).map((event: any) => (
+                          <TouchableOpacity
+                            key={event.id}
+                            style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}
+                            onPress={() => {
+                              setSearchModalVisible(false);
+                              navigation.navigate('EventDetails' as never, { eventId: event.id, event } as never);
+                            }}
+                          >
+                            {event.image_url ? (
+                              <Image source={{ uri: event.image_url }} style={{ width: 44, height: 44, borderRadius: 8, marginRight: 12 }} />
+                            ) : (
+                              <View style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: theme.colors.primary, justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                                <Ionicons name="calendar" size={22} color="#FFF" />
+                              </View>
+                            )}
+                            <View style={{ flex: 1 }}>
+                              <Text style={[Typography.label, { color: theme.colors.text, fontSize: 15, fontWeight: '500' }]} numberOfLines={1}>{event.title}</Text>
+                              <Text style={[Typography.label, { color: theme.colors.textSecondary, fontSize: 13 }]}>{event.location || event.venue || 'Event'}</Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* View All Results Button */}
+                    <TouchableOpacity
+                      style={{ backgroundColor: theme.colors.primary, paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 8 }}
+                      onPress={() => {
+                        setSearchModalVisible(false);
+                        navigation.navigate('Search' as never, { initialQuery: searchQuery } as never);
+                      }}
+                    >
+                      <Text style={[Typography.label, { color: '#FFF', fontSize: 15, fontWeight: '600' }]}>View All Results</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </ScrollView>
             </View>
           </SafeAreaView>
         </BlurView>
@@ -2802,7 +3324,7 @@ function DiscoverScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create<any>({
   container: {
     flex: 1,
   },
@@ -2832,13 +3354,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerTitle: {
+    ...Typography.body,
     fontSize: 20,
     fontWeight: '700',
   },
   headerSubtitle: {
+    ...Typography.label,
     marginTop: 4,
     fontSize: 13,
     fontWeight: '500',
+  },
+  headerIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   searchHeader: {
     paddingHorizontal: 16,
@@ -2856,6 +3384,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   searchInput: {
+    ...Typography.body,
     flex: 1,
     fontSize: 16,
     height: '100%',
@@ -2898,6 +3427,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#DC2626',
   },
   tabText: {
+    ...Typography.body,
     fontSize: 16,
     fontWeight: '500',
   },
@@ -2931,6 +3461,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#DC2626',
   },
   inlineTabText: {
+    ...Typography.body,
     fontSize: 16,
     fontWeight: '500',
   },
@@ -2952,6 +3483,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,        // mb-4
   },
   sectionTitle: {
+    ...Typography.body,
     fontSize: 18,
     fontWeight: '700',
   },
@@ -2991,15 +3523,18 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   trendingTitle: {
+    ...Typography.body,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
   },
   trendingArtist: {
+    ...Typography.label,
     fontSize: 14,
     marginBottom: 2,
   },
   trendingDuration: {
+    ...Typography.label,
     fontSize: 12,
   },
   recentMusicContainer: {
@@ -3035,11 +3570,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   recentTrackTitle: {
+    ...Typography.body,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
   },
   recentTrackArtist: {
+    ...Typography.label,
     fontSize: 14,
   },
   recentTrackActions: {
@@ -3056,6 +3593,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   recentTrackDuration: {
+    ...Typography.label,
     fontSize: 12,
   },
   loadingContainer: {
@@ -3065,6 +3603,7 @@ const styles = StyleSheet.create({
     paddingVertical: 50,
   },
   loadingText: {
+    ...Typography.body,
     marginTop: 12,
     fontSize: 16,
   },
@@ -3073,6 +3612,7 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
   },
   emptyStateText: {
+    ...Typography.body,
     fontSize: 16,
     marginTop: 12,
     textAlign: 'center',
@@ -3084,6 +3624,7 @@ const styles = StyleSheet.create({
     paddingVertical: 100,
   },
   tabContentText: {
+    ...Typography.body,
     fontSize: 18,
     fontWeight: '500',
   },
@@ -3112,12 +3653,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   artistCardName: {
+    ...Typography.label,
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: 4,
   },
   artistCardStats: {
+    ...Typography.label,
     fontSize: 12,
     textAlign: 'center',
   },
@@ -3156,22 +3699,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   artistGridName: {
+    ...Typography.label,
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: 2,
   },
   artistGridUsername: {
+    ...Typography.label,
     fontSize: 12,
     textAlign: 'center',
     marginBottom: 4,
   },
   artistGridStats: {
+    ...Typography.label,
     fontSize: 11,
     textAlign: 'center',
     marginBottom: 2,
   },
   artistGridTracks: {
+    ...Typography.label,
     fontSize: 11,
     textAlign: 'center',
   },
@@ -3192,6 +3739,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   topArtistRankText: {
+    ...Typography.body,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -3218,21 +3766,25 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   topArtistName: {
+    ...Typography.body,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 2,
   },
   topArtistUsername: {
+    ...Typography.label,
     fontSize: 14,
   },
   topArtistStats: {
     alignItems: 'flex-end',
   },
   topArtistFollowers: {
+    ...Typography.body,
     fontSize: 16,
     fontWeight: '600',
   },
   topArtistFollowersLabel: {
+    ...Typography.label,
     fontSize: 12,
   },
   // Search Results Styles
@@ -3245,11 +3797,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   searchResultsTitle: {
+    ...Typography.body,
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 4,
   },
   searchResultsCount: {
+    ...Typography.label,
     fontSize: 14,
   },
   searchLoadingContainer: {
@@ -3259,6 +3813,7 @@ const styles = StyleSheet.create({
     paddingVertical: 100,
   },
   searchLoadingText: {
+    ...Typography.body,
     fontSize: 16,
     marginTop: 12,
   },
@@ -3282,6 +3837,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#DC2626',
   },
   searchTabText: {
+    ...Typography.label,
     fontSize: 14,
     fontWeight: '500',
   },
@@ -3295,12 +3851,14 @@ const styles = StyleSheet.create({
     paddingVertical: 100,
   },
   noResultsTitle: {
+    ...Typography.body,
     fontSize: 18,
     fontWeight: '600',
     marginTop: 16,
     marginBottom: 8,
   },
   noResultsText: {
+    ...Typography.label,
     fontSize: 14,
     textAlign: 'center',
   },
@@ -3308,6 +3866,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   searchSectionTitle: {
+    ...Typography.body,
     fontSize: 16,
     fontWeight: '600',
     paddingHorizontal: 16,
@@ -3345,15 +3904,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   searchArtistName: {
+    ...Typography.body,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 2,
   },
   searchArtistUsername: {
+    ...Typography.label,
     fontSize: 14,
     marginBottom: 2,
   },
   searchArtistStats: {
+    ...Typography.label,
     fontSize: 12,
   },
   // Search Track Item Styles
@@ -3388,11 +3950,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   searchTrackTitle: {
+    ...Typography.body,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 2,
   },
   searchTrackArtist: {
+    ...Typography.label,
     fontSize: 14,
     marginBottom: 2,
   },
@@ -3403,10 +3967,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   searchTrackGenre: {
+    ...Typography.label,
     fontSize: 12,
     fontWeight: '500',
   },
   searchTrackStats: {
+    ...Typography.label,
     fontSize: 12,
   },
   searchTrackPlayButton: {
@@ -3452,28 +4018,34 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   eventTitle: {
+    ...Typography.body,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
   },
   eventDate: {
+    ...Typography.label,
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 4,
   },
   eventLocation: {
+    ...Typography.label,
     fontSize: 12,
     marginBottom: 2,
   },
   eventVenue: {
+    ...Typography.label,
     fontSize: 12,
     marginBottom: 2,
   },
   eventOrganizer: {
+    ...Typography.label,
     fontSize: 12,
     marginBottom: 4,
   },
   eventPrice: {
+    ...Typography.label,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -3490,6 +4062,7 @@ const styles = StyleSheet.create({
     paddingVertical: 64,
   },
   notImplementedTitle: {
+    ...Typography.headerMedium,
     fontSize: 24,
     fontWeight: '700',
     marginTop: 24,
@@ -3497,6 +4070,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   notImplementedText: {
+    ...Typography.body,
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 32,
@@ -3507,6 +4081,7 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   featureTitle: {
+    ...Typography.body,
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 16,
@@ -3519,10 +4094,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   featureText: {
+    ...Typography.body,
     fontSize: 16,
     marginLeft: 12,
   },
   notImplementedNote: {
+    ...Typography.label,
     fontSize: 14,
     textAlign: 'center',
     fontStyle: 'italic',
@@ -3561,11 +4138,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   playlistName: {
+    ...Typography.body,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
   },
   playlistCreator: {
+    ...Typography.label,
     fontSize: 14,
     marginBottom: 8,
   },
@@ -3574,15 +4153,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   playlistStat: {
+    ...Typography.label,
     fontSize: 12,
     marginRight: 6,
   },
   emptyStateSubtext: {
+    ...Typography.label,
     fontSize: 14,
     marginTop: 4,
     textAlign: 'center',
   },
   emptyStateNote: {
+    ...Typography.label,
     fontSize: 12,
     marginTop: 8,
     textAlign: 'center',
@@ -3608,6 +4190,7 @@ const styles = StyleSheet.create({
     borderWidth: 0,
   },
   emptyStateButtonText: {
+    ...Typography.label,
     fontSize: 12,
     fontWeight: '600',
     color: '#FFFFFF',
@@ -3618,6 +4201,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   sectionSubtitle: {
+    ...Typography.label,
     fontSize: 12,
     marginTop: 2,
   },
@@ -3633,6 +4217,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   trendingBadgeText: {
+    ...Typography.label,
     fontSize: 10,
   },
   newBadge: {
@@ -3642,6 +4227,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   newBadgeText: {
+    ...Typography.label,
     fontSize: 10,
   },
   newBadgeSmall: {
@@ -3652,6 +4238,7 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   newBadgeTextSmall: {
+    ...Typography.label,
     fontSize: 8,
   },
   trendingCardMeta: {
@@ -3662,10 +4249,12 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   trendingGenre: {
+    ...Typography.label,
     fontSize: 12,
     fontWeight: '500',
   },
   trendingPlays: {
+    ...Typography.label,
     fontSize: 12,
   },
   recentTrackHeader: {
@@ -3679,10 +4268,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   recentTrackGenre: {
+    ...Typography.label,
     fontSize: 12,
     fontWeight: '500',
   },
   recentTrackPlays: {
+    ...Typography.label,
     fontSize: 12,
   },
   artistCardMeta: {
@@ -3695,10 +4286,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   artistCardGenre: {
+    ...Typography.label,
     fontSize: 11,
     fontWeight: '500',
   },
   artistCardLocation: {
+    ...Typography.label,
     fontSize: 11,
   },
   artistGridMeta: {
@@ -3711,10 +4304,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   artistGridGenre: {
+    ...Typography.label,
     fontSize: 11,
     fontWeight: '500',
   },
   artistGridLocation: {
+    ...Typography.label,
     fontSize: 11,
   },
   inlineTabIcon: {
@@ -3753,11 +4348,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   serviceName: {
+    ...Typography.body,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
   },
   serviceHeadline: {
+    ...Typography.label,
     fontSize: 14,
     marginBottom: 4,
   },
@@ -3767,6 +4364,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   serviceRatingText: {
+    ...Typography.label,
     fontSize: 12,
   },
   serviceCategories: {
@@ -3781,9 +4379,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   categoryText: {
+    ...Typography.label,
     fontSize: 12,
   },
   servicePrice: {
+    ...Typography.label,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -3792,38 +4392,78 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   venueCard: {
-    borderRadius: 12,
+    borderRadius: 18,
     overflow: 'hidden',
     borderWidth: 1,
   },
-  venueImage: {
+  venueHero: {
     width: '100%',
-    height: 160,
+    height: 180,
+  },
+  venueThumbPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   venueInfo: {
-    padding: 12,
+    padding: 14,
+    gap: 6,
   },
   venueName: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 8,
+    ...Typography.button,
+    fontSize: 17,
+    marginBottom: 2,
   },
   venueMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 4,
   },
   venueLocation: {
-    fontSize: 14,
+    ...Typography.label,
+    fontSize: 13,
     flex: 1,
   },
-  venueCapacity: {
-    fontSize: 14,
+  venueBottomRow: {
+    gap: 6,
+    marginTop: 2,
   },
-  venueEvents: {
+  venueRatingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  venueRate: {
+    ...Typography.button,
+    fontSize: 13,
+  },
+  venueDist: {
+    ...Typography.label,
+    fontSize: 13,
+  },
+  venueBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginBottom: 4,
+  },
+  venueBadgeText: {
+    ...Typography.label,
+    fontSize: 11,
+  },
+  venueActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  venueActionBtnText: {
+    color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   albumCard: {
     width: 160,
@@ -3847,10 +4487,12 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   albumTitle: {
+    ...Typography.label,
     fontSize: 14,
     fontWeight: '600',
   },
   albumArtist: {
+    ...Typography.label,
     fontSize: 12,
   },
   albumStats: {
@@ -3864,6 +4506,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   albumStatText: {
+    ...Typography.label,
     fontSize: 11,
   },
 
@@ -3898,6 +4541,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   pillSearchText: {
+    ...Typography.label,
     fontSize: 15,
     flex: 1,
   },
@@ -3966,6 +4610,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.2)',
   },
   htmlBadgeText: {
+    ...Typography.label,
     fontSize: 10,
     fontWeight: '700',
     color: 'white',
@@ -3998,6 +4643,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   htmlCardTitle: {
+    ...Typography.headerMedium,
     fontSize: 24,
     fontWeight: '700',
     color: 'white',
@@ -4005,6 +4651,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   htmlCardArtist: {
+    ...Typography.body,
     fontSize: 16,
     color: 'rgba(255,255,255,0.7)',
     marginBottom: 12,
@@ -4014,6 +4661,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   htmlCardMetaText: {
+    ...Typography.label,
     fontSize: 12,
     color: 'rgba(255,255,255,0.4)',
     fontWeight: '500',
@@ -4031,6 +4679,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   htmlEmptyStateTitle: {
+    ...Typography.body,
     fontSize: 18,
     fontWeight: '600',
     color: 'white',
@@ -4038,12 +4687,14 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   htmlEmptyStateText: {
+    ...Typography.label,
     fontSize: 14,
     color: 'rgba(255,255,255,0.5)',
     textAlign: 'center',
     marginBottom: 16,
   },
   htmlLearnMoreLink: {
+    ...Typography.label,
     fontSize: 14,
     color: '#DC2626',
     fontWeight: '600',
@@ -4069,11 +4720,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   uploadPromptTitle: {
+    ...Typography.body,
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 4,
   },
   uploadPromptSubtitle: {
+    ...Typography.label,
     fontSize: 13,
     fontWeight: '500',
   },

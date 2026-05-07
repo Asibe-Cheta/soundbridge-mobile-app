@@ -14,18 +14,22 @@ export type AccountDeletionRequest = {
 };
 
 class AccountDeletionService {
-  private baseUrl = `${config.apiUrl}/account-deletion`;
+  private basePath = '/api/account-deletion';
 
   async getReasons(): Promise<AccountDeletionReason[]> {
-    const response = await apiFetch<{ reasons: AccountDeletionReason[] }>(`${this.baseUrl}/reasons`);
-    return response.reasons || [];
+    const response = await apiFetch<{ reasons: AccountDeletionReason[] }>(`${this.basePath}/reasons`);
+    const reasons = response.reasons || [];
+    return reasons.map((r, i) => ({
+      ...r,
+      id: r.id || r.label?.toLowerCase().replace(/\s+/g, '_') || String(i),
+    }));
   }
 
   async requestDeletion(session: Session, payload: AccountDeletionRequest) {
-    return apiFetch<{ success: boolean; message?: string }>(`${this.baseUrl}`, {
+    return apiFetch<{ success: boolean; message?: string }>(`${this.basePath}`, {
       method: 'POST',
       session,
-      body: payload,
+      body: JSON.stringify(payload),
     });
   }
 }

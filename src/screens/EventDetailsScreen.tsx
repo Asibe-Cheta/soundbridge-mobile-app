@@ -20,8 +20,10 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { apiFetch } from '../lib/apiClient';
 import { useStripe } from '@stripe/stripe-react-native';
 import EventTicketService, { EventTicket } from '../services/EventTicketService';
+import { deepLinkingService } from '../services/DeepLinkingService';
 
 interface Event {
   id: string;
@@ -33,6 +35,14 @@ interface Event {
   category: string;
   price_gbp?: number;
   price_ngn?: number;
+  price_usd?: number;
+  price_eur?: number;
+  price_cad?: number;
+  price_aud?: number;
+  price_inr?: number;
+  price_jpy?: number;
+  price_brl?: number;
+  price_mxn?: number;
   max_attendees?: number;
   current_attendees?: number;
   image_url?: string;
@@ -77,28 +87,51 @@ export default function EventDetailsScreen() {
     if (initialEvent) return; // Skip if we already have event data
 
     try {
-      console.log('🔧 Loading event details:', eventId);
+      console.log('🔧 Loading event details for eventId:', eventId);
+      console.log('🔧 eventId type:', typeof eventId);
+      console.log('🔧 Full route.params:', JSON.stringify(route.params));
+
+      // Validate eventId before querying
+      if (!eventId || eventId === 'undefined' || eventId === 'null') {
+        console.error('❌ Invalid eventId received:', eventId);
+        Alert.alert('Error', `Invalid event ID received: "${eventId}"`);
+        setLoading(false);
+        return;
+      }
       
-      const { data, error } = await supabase
+      // First, get the event data
+      const { data: eventData, error: eventError } = await supabase
         .from('events')
-        .select(`
-          *,
-          organizer:profiles!organizer_id (
-            id,
-            username,
-            display_name,
-            avatar_url
-          )
-        `)
+        .select('*')
         .eq('id', eventId)
         .single();
 
-      if (error) throw error;
+      if (eventError) throw eventError;
 
-      setEvent(data);
-      console.log('✅ Event details loaded:', data.title);
-    } catch (error) {
+      // Then fetch organizer profile separately to avoid schema cache issues
+      let organizer = null;
+      if (eventData?.organizer_id) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('id, username, display_name, avatar_url')
+          .eq('id', eventData.organizer_id)
+          .single();
+
+        organizer = profileData;
+      }
+
+      const fullEventData = {
+        ...eventData,
+        organizer,
+      };
+
+      setEvent(fullEventData);
+      console.log('✅ Event details loaded:', fullEventData.title);
+    } catch (error: any) {
       console.error('❌ Error loading event details:', error);
+      console.error('❌ Error message:', error?.message);
+      console.error('❌ Error code:', error?.code);
+      console.error('❌ eventId that failed:', eventId);
       Alert.alert('Error', 'Failed to load event details');
     } finally {
       setLoading(false);
@@ -191,11 +224,20 @@ export default function EventDetailsScreen() {
     if (!event) return;
 
     // Determine currency and price
-    const currency = event.price_gbp ? 'GBP' : 'NGN';
-    const amount = event.price_gbp || event.price_ngn || 0;
+    const priceInfo = getEventPrice(event);
+    const amount = priceInfo?.amount || 0;
+    const currency = priceInfo?.currency || 'GBP';
 
     if (amount === 0) {
       Alert.alert('Free Event', 'This event is free. Just tap "Attend Event" to register.');
+      return;
+    }
+
+    if (currency !== 'GBP' && currency !== 'NGN') {
+      Alert.alert(
+        'Unsupported Currency',
+        `Ticket purchase is not available for ${currency} yet. Please check back later.`
+      );
       return;
     }
 
@@ -204,7 +246,7 @@ export default function EventDetailsScreen() {
       console.log('🎟️ Starting ticket purchase:', { eventId: event.id, amount, currency });
 
       // Create payment intent
-      const { clientSecret, paymentIntentId } = await EventTicketService.createTicketPaymentIntent({
+      const { clientSecret, paymentIntentId, customerId, customerEphemeralKeySecret } = await EventTicketService.createTicketPaymentIntent({
         eventId: event.id,
         quantity: 1,
         priceGbp: event.price_gbp,
@@ -218,6 +260,13 @@ export default function EventDetailsScreen() {
       const { error: initError } = await initPaymentSheet({
         paymentIntentClientSecret: clientSecret,
         merchantDisplayName: 'SoundBridge',
+        ...(customerId && customerEphemeralKeySecret
+          ? { customerId, customerEphemeralKeySecret }
+          : {}),
+        defaultBillingDetails: {
+          name: user?.display_name || user?.email || undefined,
+          email: user?.email || undefined,
+        },
       });
 
       if (initError) {
@@ -250,11 +299,14 @@ export default function EventDetailsScreen() {
 
       console.log('🎟️ Ticket purchased:', ticket.ticket_code);
 
-      Alert.alert(
-        'Ticket Purchased!',
-        `Your ticket has been confirmed.\n\nTicket Code: ${ticket.ticket_code}\n\nYou can view your ticket in your profile.`,
-        [{ text: 'OK', onPress: () => loadUserTickets() }]
-      );
+      navigation.navigate('TicketConfirmation' as never, {
+        ticket,
+        eventTitle: event.title,
+        eventDate: event.event_date,
+        eventLocation: event.location,
+        eventVenue: event.venue,
+      } as never);
+      loadUserTickets();
     } catch (error: any) {
       console.error('❌ Error purchasing ticket:', error);
       Alert.alert('Purchase Failed', error.message || 'Failed to purchase ticket. Please try again.');
@@ -263,8 +315,9 @@ export default function EventDetailsScreen() {
     }
   };
 
-  const handleShare = () => {
-    Alert.alert('Share Event', 'Share this event with your friends!');
+  const handleShare = async () => {
+    if (!event) return;
+    await deepLinkingService.shareEvent(event.id, event.title, event.location);
   };
 
   const handleGetDirections = () => {
@@ -301,18 +354,17 @@ export default function EventDetailsScreen() {
               }
 
               // Call API to delete event (handles all cleanup)
-              const response = await fetch(`https://www.soundbridge.live/api/events/${event.id}`, {
-                method: 'DELETE',
-                headers: {
-                  'Authorization': `Bearer ${session.access_token}`,
-                  'Content-Type': 'application/json',
-                },
-              });
+      const result = await apiFetch<{ success?: boolean; error?: string }>(
+        `/api/events/${event.id}`,
+        {
+          method: 'DELETE',
+          session,
+        }
+      );
 
-              if (!response.ok) {
-                const result = await response.json();
-                throw new Error(result.error || 'Failed to delete event');
-              }
+      if (result && result.success === false) {
+        throw new Error(result.error || 'Failed to delete event');
+      }
 
               console.log('✅ Event deleted successfully');
 
@@ -363,11 +415,57 @@ export default function EventDetailsScreen() {
     });
   };
 
-  const formatPrice = (priceGbp?: number, priceNgn?: number) => {
-    if (priceGbp === 0 || priceNgn === 0) return 'Free';
-    if (priceGbp) return `£${priceGbp}`;
-    if (priceNgn) return `₦${priceNgn.toLocaleString()}`;
-    return 'Price TBA';
+  const getEventPrice = (eventData: Event | null): { currency: string; amount: number } | null => {
+    if (!eventData) return null;
+
+    const currencyOrder = [
+      'GBP',
+      'NGN',
+      'USD',
+      'EUR',
+      'CAD',
+      'AUD',
+      'INR',
+      'JPY',
+      'BRL',
+      'MXN',
+    ];
+
+    for (const currency of currencyOrder) {
+      const fieldName = `price_${currency.toLowerCase()}` as keyof Event;
+      const value = eventData[fieldName];
+      if (typeof value === 'number' && value >= 0) {
+        return { currency, amount: value };
+      }
+    }
+
+    return null;
+  };
+
+  const formatPrice = (eventData: Event | null) => {
+    const priceInfo = getEventPrice(eventData);
+    if (!priceInfo) return 'Price TBA';
+    if (priceInfo.amount === 0) return 'Free';
+
+    const symbols: Record<string, string> = {
+      GBP: '£',
+      NGN: '₦',
+      USD: '$',
+      EUR: '€',
+      CAD: '$',
+      AUD: '$',
+      INR: '₹',
+      JPY: '¥',
+      BRL: 'R$',
+      MXN: '$',
+    };
+
+    const symbol = symbols[priceInfo.currency] || `${priceInfo.currency} `;
+    const formattedAmount = priceInfo.currency === 'NGN'
+      ? priceInfo.amount.toLocaleString()
+      : priceInfo.amount.toString();
+
+    return `${symbol}${formattedAmount}`;
   };
 
   if (loading) {
@@ -407,7 +505,6 @@ export default function EventDetailsScreen() {
             <Ionicons name="calendar-outline" size={64} color={theme.colors.textSecondary} />
             <Text style={[styles.errorText, { color: theme.colors.text }]}>Event not found</Text>
             <BackButton
-              label="Go Back"
               style={{ marginTop: 24 }}
               onPress={() => navigation.goBack()}
               accessibilityLabel="Return to previous screen"
@@ -524,7 +621,7 @@ export default function EventDetailsScreen() {
               <View style={styles.infoContent}>
                 <Text style={[styles.infoTitle, { color: theme.colors.text }]}>Price</Text>
                 <Text style={[styles.priceText, { color: theme.colors.text }]}>
-                  {formatPrice(event.price_gbp, event.price_ngn)}
+                  {formatPrice(event)}
                 </Text>
               </View>
             </View>
@@ -589,7 +686,7 @@ export default function EventDetailsScreen() {
                   Ticket Purchased ({userTickets.length})
                 </Text>
               </View>
-            ) : (event.price_gbp || event.price_ngn) ? (
+            ) : getEventPrice(event)?.amount ? (
               // Paid event - show buy ticket button
               <TouchableOpacity
                 style={[styles.buyTicketButton, { backgroundColor: theme.colors.primary }]}
@@ -602,7 +699,7 @@ export default function EventDetailsScreen() {
                   <>
                     <Ionicons name="ticket" size={20} color="#FFFFFF" />
                     <Text style={styles.buyTicketButtonText}>
-                      Buy Ticket - {formatPrice(event.price_gbp, event.price_ngn)}
+                      Buy Ticket - {formatPrice(event)}
                     </Text>
                   </>
                 )}

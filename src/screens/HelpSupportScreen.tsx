@@ -84,7 +84,7 @@ export default function HelpSupportScreen() {
       'Contact Support',
       'Choose how you\'d like to reach us',
       [
-        { text: 'Email', onPress: () => Linking.openURL('mailto:support@soundbridge.live') },
+        { text: 'Email', onPress: () => Linking.openURL('mailto:contact@soundbridge.live') },
         { text: 'Twitter', onPress: () => Linking.openURL('https://twitter.com/soundbridge') },
         { text: 'Discord', onPress: () => Linking.openURL('https://discord.gg/soundbridge') },
         { text: 'Cancel', style: 'cancel' },
@@ -230,14 +230,14 @@ export default function HelpSupportScreen() {
             
             <TouchableOpacity
               style={styles.contactButton}
-              onPress={() => Linking.openURL('mailto:support@soundbridge.live')}
+              onPress={() => Linking.openURL('mailto:contact@soundbridge.live')}
             >
               <Ionicons name="mail" size={20} color="#FFFFFF" />
               <Text style={styles.contactButtonText}>Email Support</Text>
             </TouchableOpacity>
 
             <View style={styles.contactInfo}>
-              <Text style={styles.contactInfoText}>📧 support@soundbridge.live</Text>
+              <Text style={styles.contactInfoText}>📧 contact@soundbridge.live</Text>
               <Text style={styles.contactInfoText}>🕒 Response time: 24-48 hours</Text>
               <Text style={styles.contactInfoText}>🌍 Available worldwide</Text>
             </View>

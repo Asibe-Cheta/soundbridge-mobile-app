@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { dbHelpers } from '../lib/supabase';
+import { dbHelpers, supabase } from '../lib/supabase';
 
 /**
- * Hook to get the total unread messages count for the current user
- * Used for displaying the badge on the messages icon in the header
+ * Hook to get the total unread messages count for the current user.
+ * Uses Supabase realtime for instant updates when new messages arrive.
  */
 export function useUnreadMessages() {
   const { user } = useAuth();
@@ -21,9 +21,7 @@ export function useUnreadMessages() {
     const loadUnreadCount = async () => {
       try {
         const { success, data } = await dbHelpers.getConversations(user.id);
-        
         if (success && data && data.length > 0) {
-          // Sum up all unread counts from conversations
           const totalUnread = data.reduce((sum: number, conv: any) => {
             return sum + (conv.unreadCount || 0);
           }, 0);
@@ -41,11 +39,27 @@ export function useUnreadMessages() {
 
     loadUnreadCount();
 
-    // Refresh unread count every 30 seconds
-    const interval = setInterval(loadUnreadCount, 30000);
+    // Realtime subscription — re-count whenever a new message arrives for this user
+    const channel = supabase
+      .channel(`unread-messages-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `receiver_id=eq.${user.id}`,
+        },
+        () => {
+          loadUnreadCount();
+        }
+      )
+      .subscribe();
 
-    return () => clearInterval(interval);
-  }, [user]);
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [user?.id]);
 
   return { unreadCount, loading };
 }

@@ -18,16 +18,53 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import BackButton from '../components/BackButton';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 interface Notification {
   id: string;
   user_id: string;
-  type: 'moderation' | 'tip' | 'message' | 'event' | 'collaboration_request' | 'collaboration_accepted' | 'track_approved' | 'track_featured';
+  type:
+    | 'moderation'
+    | 'tip'
+    | 'message'
+    | 'event'
+    | 'event_reminder'
+    | 'collaboration_request'
+    | 'collaboration_accepted'
+    | 'collaboration_declined'
+    | 'collaboration_confirmed'
+    | 'track_approved'
+    | 'track_featured'
+    | 'withdrawal'
+    | 'creator_post'
+    | 'live_session'
+    | 'new_follower'
+    | 'content_purchase'
+    | 'reaction'
+    | 'like'
+    | 'comment'
+    | 'comment_reply'
+    | 'post_reaction'
+    | 'connection_request'
+    | 'connection_accepted'
+    | string;
   title: string;
   body: string;
   data: {
     trackId?: string;
+    eventId?: string;
+    conversationId?: string;
+    creatorId?: string;
+    sessionId?: string;
+    tipId?: string;
+    withdrawalId?: string;
+    requestId?: string;
+    postId?: string;
+    followerId?: string;
+    purchaseId?: string;
     action?: string;
+    deepLink?: string;
+    url?: string;
     [key: string]: any;
   };
   read: boolean;
@@ -196,13 +233,101 @@ export default function NotificationsScreen() {
       await markAsRead(notification.id);
     }
 
-    // Navigate based on notification type
-    if (notification.type === 'moderation' && notification.data?.trackId) {
-      navigation.navigate('TrackDetails' as never, { trackId: notification.data.trackId } as never);
-    } else if (notification.data?.trackId) {
-      navigation.navigate('TrackDetails' as never, { trackId: notification.data.trackId } as never);
-    } else if (notification.data?.eventId) {
-      navigation.navigate('EventDetails' as never, { eventId: notification.data.eventId } as never);
+    console.log('🔔 Notification tapped:', notification.type, notification.data);
+
+    // Navigate based on notification type and data
+    const { type, data } = notification;
+
+    switch (type) {
+      // Event notifications
+      case 'event':
+      case 'event_reminder':
+        if (data?.eventId) {
+          navigation.navigate('EventDetails' as never, { eventId: data.eventId } as never);
+        }
+        break;
+
+      // Message notifications
+      case 'message':
+        if (data?.conversationId) {
+          navigation.navigate('Chat' as never, { conversationId: data.conversationId } as never);
+        } else {
+          navigation.navigate('Messages' as never);
+        }
+        break;
+
+      // Track/content notifications
+      case 'moderation':
+      case 'track_approved':
+      case 'track_featured':
+      case 'content_purchase':
+        if (data?.trackId) {
+          navigation.navigate('TrackDetails' as never, { trackId: data.trackId } as never);
+        }
+        break;
+
+      // Tip/wallet notifications
+      case 'tip':
+      case 'withdrawal':
+        navigation.navigate('Wallet' as never, { tab: 'tips' } as never);
+        break;
+
+      // Collaboration notifications
+      case 'collaboration_request':
+      case 'collaboration_accepted':
+      case 'collaboration_declined':
+      case 'collaboration_confirmed':
+        navigation.navigate('CollaborationRequests' as never);
+        break;
+
+      // Social notifications — navigate to the post
+      case 'reaction':
+      case 'like':
+      case 'post_reaction':
+      case 'comment':
+      case 'comment_reply':
+        if (data?.postId) {
+          navigation.navigate('PostDetail' as never, { postId: data.postId } as never);
+        }
+        break;
+
+      // Connection / follow notifications
+      case 'connection_request':
+      case 'connection_accepted':
+      case 'new_follower':
+        if (data?.followerId) {
+          navigation.navigate('CreatorProfile' as never, { creatorId: data.followerId } as never);
+        } else if (data?.creatorId) {
+          navigation.navigate('CreatorProfile' as never, { creatorId: data.creatorId } as never);
+        } else if (data?.requesterId) {
+          navigation.navigate('CreatorProfile' as never, { creatorId: data.requesterId } as never);
+        }
+        break;
+
+      // Creator/profile notifications
+      case 'creator_post':
+        if (data?.creatorId) {
+          navigation.navigate('CreatorProfile' as never, { creatorId: data.creatorId } as never);
+        }
+        break;
+
+      // Live session notifications
+      case 'live_session':
+        if (data?.sessionId) {
+          navigation.navigate('LiveSessionRoom' as never, { sessionId: data.sessionId } as never);
+        } else {
+          navigation.navigate('LiveSessions' as never);
+        }
+        break;
+
+      // Default: try to use trackId or eventId if present
+      default:
+        if (data?.trackId) {
+          navigation.navigate('TrackDetails' as never, { trackId: data.trackId } as never);
+        } else if (data?.eventId) {
+          navigation.navigate('EventDetails' as never, { eventId: data.eventId } as never);
+        }
+        break;
     }
   };
 
@@ -220,15 +345,38 @@ export default function NotificationsScreen() {
       case 'message':
         return 'chatbubble';
       case 'event':
+      case 'event_reminder':
         return 'calendar';
       case 'collaboration_request':
         return 'people';
       case 'collaboration_accepted':
+      case 'collaboration_confirmed':
         return 'checkmark-circle';
+      case 'collaboration_declined':
+        return 'close-circle';
       case 'track_approved':
         return 'checkmark-done';
       case 'track_featured':
         return 'star';
+      case 'withdrawal':
+        return 'wallet';
+      case 'creator_post':
+        return 'megaphone';
+      case 'live_session':
+        return 'radio';
+      case 'new_follower':
+      case 'connection_request':
+      case 'connection_accepted':
+        return 'person-add';
+      case 'content_purchase':
+        return 'cart';
+      case 'reaction':
+      case 'like':
+      case 'post_reaction':
+        return 'heart';
+      case 'comment':
+      case 'comment_reply':
+        return 'chatbubble-ellipses';
       default:
         return 'notifications';
     }
@@ -239,19 +387,39 @@ export default function NotificationsScreen() {
       case 'moderation':
         return '#3B82F6';
       case 'tip':
+      case 'content_purchase':
         return '#10B981';
       case 'message':
         return '#8B5CF6';
       case 'event':
+      case 'event_reminder':
         return '#F59E0B';
       case 'collaboration_request':
+      case 'new_follower':
+      case 'connection_request':
+      case 'connection_accepted':
         return '#EC4899';
+      case 'reaction':
+      case 'like':
+      case 'post_reaction':
+        return '#EF4444';
+      case 'comment':
+      case 'comment_reply':
+        return '#8B5CF6';
       case 'collaboration_accepted':
-        return '#10B981';
+      case 'collaboration_confirmed':
       case 'track_approved':
         return '#10B981';
+      case 'collaboration_declined':
+        return '#EF4444';
       case 'track_featured':
         return '#F59E0B';
+      case 'withdrawal':
+        return '#6366F1';
+      case 'creator_post':
+        return '#F97316';
+      case 'live_session':
+        return '#EF4444';
       default:
         return theme.colors.primary;
     }
@@ -509,8 +677,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
+    fontFamily: Typography.body.fontFamily,
     marginTop: 16,
     fontSize: 16,
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   header: {
     flexDirection: 'row',
@@ -520,8 +691,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   headerTitle: {
+    fontFamily: Typography.body.fontFamily,
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: '600',
+    letterSpacing: -0.4,
     flex: 1,
     marginLeft: 16,
   },
@@ -530,8 +703,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   markAllText: {
+    fontFamily: Typography.body.fontFamily,
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   filterContainer: {
     flexDirection: 'row',
@@ -545,8 +720,10 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   filterTabText: {
+    fontFamily: Typography.body.fontFamily,
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   listContent: {
     padding: 16,
@@ -581,8 +758,10 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   title: {
+    fontFamily: Typography.body.fontFamily,
     fontSize: 16,
     fontWeight: '600',
+    letterSpacing: -0.4,
     flex: 1,
   },
   unreadDot: {
@@ -592,12 +771,18 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   body: {
+    fontFamily: Typography.body.fontFamily,
     fontSize: 14,
     lineHeight: 20,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginBottom: 4,
   },
   timestamp: {
+    fontFamily: Typography.body.fontFamily,
     fontSize: 12,
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   deleteButton: {
     padding: 4,
@@ -610,12 +795,17 @@ const styles = StyleSheet.create({
     paddingVertical: 80,
   },
   emptyStateText: {
+    fontFamily: Typography.body.fontFamily,
     fontSize: 18,
     fontWeight: '600',
+    letterSpacing: -0.4,
     marginTop: 16,
   },
   emptyStateSubtext: {
+    fontFamily: Typography.body.fontFamily,
     fontSize: 14,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginTop: 8,
     textAlign: 'center',
   },

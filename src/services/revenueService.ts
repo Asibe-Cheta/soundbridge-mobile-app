@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { config } from '../config/environment';
 
 export interface BankAccount {
   id: string;
@@ -91,24 +92,25 @@ class RevenueService {
   async getBankAccount(userId: string): Promise<BankAccount | null> {
     try {
       const { data, error } = await supabase
-        .from('bank_accounts')
+        .from('creator_bank_accounts')
         .select('*')
         .eq('user_id', userId)
         .eq('is_active', true)
-        .single();
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
       if (error) {
-        if (error.code === 'PGRST116') {
-          // No rows returned
-          return null;
-        }
-        throw error;
+        // Return null for any error (missing table, RLS, no rows) so the UI
+        // shows the empty/setup state instead of an error dialog.
+        console.error('Error fetching bank account (returning null):', error);
+        return null;
       }
 
       return data;
     } catch (error) {
-      console.error('Error fetching bank account:', error);
-      throw error;
+      console.error('Error fetching bank account (returning null):', error);
+      return null;
     }
   }
 
@@ -130,7 +132,7 @@ class RevenueService {
       };
 
       const { error } = await supabase
-        .from('bank_accounts')
+        .from('creator_bank_accounts')
         .upsert(bankAccountData, {
           onConflict: 'user_id',
           ignoreDuplicates: false
@@ -172,7 +174,7 @@ class RevenueService {
       }
 
       // Get subscription from API endpoint (updated to new endpoint structure)
-      const response = await fetch('https://www.soundbridge.live/api/subscription/status', {
+      const response = await fetch(`${config.apiUrl}/subscription/status`, {
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',

@@ -47,8 +47,9 @@ export default function AllPlaylistsScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
 
-  const params = route.params as { title?: string } | undefined;
+  const params = route.params as { title?: string; userId?: string } | undefined;
   const screenTitle = params?.title || 'All Playlists';
+  const userId = params?.userId;
 
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [filteredPlaylists, setFilteredPlaylists] = useState<Playlist[]>([]);
@@ -81,7 +82,7 @@ export default function AllPlaylistsScreen() {
       setError(null);
       console.log('🔄 Loading playlists from Supabase...');
 
-      const { data, error } = await supabase
+      let query = supabase
         .from('playlists')
         .select(`
           id,
@@ -93,16 +94,23 @@ export default function AllPlaylistsScreen() {
           followers_count,
           is_public,
           created_at,
-          creator:profiles!playlists_user_id_fkey (
+          creator:profiles!playlists_creator_id_fkey (
             id,
             username,
             display_name,
             avatar_url
           )
         `)
-        .eq('is_public', true)
         .order('created_at', { ascending: false })
         .limit(50);
+
+      if (userId) {
+        query = query.eq('creator_id', userId);
+      } else {
+        query = query.eq('is_public', true);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         console.error('❌ Error loading playlists:', error);

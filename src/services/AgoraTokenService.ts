@@ -5,8 +5,9 @@
 
 import { supabase } from '../lib/supabase';
 import { AgoraTokenResponse } from '../types/liveSession';
+import { config } from '../config/environment';
 
-const TOKEN_API_URL = 'https://www.soundbridge.live/api/live-sessions/generate-token';
+const TOKEN_API_URL = `${config.apiUrl}/live-sessions/generate-token`;
 
 /**
  * Generate Agora token for joining a live session
@@ -55,26 +56,45 @@ export async function generateAgoraToken(
 
     console.log('📥 [TOKEN SERVICE] API response status:', response.status);
 
-    // Parse response
-    const data: AgoraTokenResponse = await response.json();
-    console.log('📦 [TOKEN SERVICE] API response data:', { 
-      success: data.success, 
-      hasToken: !!data.token,
-      error: data.error 
-    });
-
-    // Handle HTTP errors
+    // Check HTTP status before parsing
     if (!response.ok) {
-      console.error('❌ [TOKEN SERVICE] Token API HTTP error:', { 
-        status: response.status, 
+      console.error('❌ [TOKEN SERVICE] Token API HTTP error:', {
+        status: response.status,
         statusText: response.statusText,
-        error: data.error 
       });
+
+      // Try to parse error body safely
+      let errorMessage = 'Unable to connect to the live session service';
+      try {
+        const errorData = await response.json();
+        if (errorData?.error) errorMessage = errorData.error;
+      } catch {
+        // Response body was empty or not JSON — use default message
+      }
+
       return {
         success: false,
-        error: data.error || `API error: ${response.status} ${response.statusText}`,
+        error: errorMessage,
       };
     }
+
+    // Parse response safely
+    let data: AgoraTokenResponse;
+    try {
+      data = await response.json();
+    } catch {
+      console.error('❌ [TOKEN SERVICE] Failed to parse response');
+      return {
+        success: false,
+        error: 'Received an invalid response from the server',
+      };
+    }
+
+    console.log('📦 [TOKEN SERVICE] API response data:', {
+      success: data.success,
+      hasToken: !!data.token,
+      error: data.error,
+    });
 
     // Handle unsuccessful response
     if (!data.success) {
@@ -97,7 +117,7 @@ export async function generateAgoraToken(
     console.error('❌ [TOKEN SERVICE] Exception occurred:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred',
+      error: 'Something went wrong while connecting to the live session. Please check your internet connection and try again.',
     };
   }
 }

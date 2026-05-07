@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { Clipboard } from 'react-native';
 import BackButton from '../components/BackButton';
 import AppealModal from '../components/AppealModal';
+import PurchaseModal from '../components/PurchaseModal';
+import ReportContentModal from '../modals/ReportContentModal';
+import PricingControls from '../components/PricingControls';
 import {
   View,
   Text,
@@ -11,8 +15,8 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
-  Share,
   StatusBar,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -22,6 +26,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { supabase } from '../lib/supabase';
+import { contentPurchaseService } from '../services/ContentPurchaseService';
+import { deepLinkingService } from '../services/DeepLinkingService';
 
 interface Track {
   id: string;
@@ -35,8 +41,18 @@ interface Track {
   genre?: string;
   created_at: string;
   creator_id?: string;
+  // Paid content fields
+  is_paid?: boolean;
+  price?: number;
+  currency?: string;
+  total_sales_count?: number;
+  total_revenue?: number;
+  // ISRC / copyright fields
+  isrc_code?: string | null;
+  isrc_source?: 'acrcloud_detected' | 'user_provided' | 'soundbridge_generated' | null;
+  is_cover?: boolean;
   // Moderation fields
-  moderation_status?: 'pending_check' | 'checking' | 'clean' | 'flagged' | 'approved' | 'rejected' | 'appealed';
+  moderation_status?: 'pending_check' | 'checking' | 'clean' | 'flagged' | 'approved' | 'rejected' | 'appealed' | 'taken_down';
   moderation_flagged?: boolean;
   flag_reasons?: string[];
   moderation_confidence?: number;
@@ -68,11 +84,24 @@ export default function TrackDetailsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
   const [showAppealModal, setShowAppealModal] = useState(false);
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [ownsContent, setOwnsContent] = useState(false);
+  const [checkingOwnership, setCheckingOwnership] = useState(false);
+  const [showPricingModal, setShowPricingModal] = useState(false);
+  const [pricingIsPaid, setPricingIsPaid] = useState(false);
+  const [pricingPrice, setPricingPrice] = useState('');
+  const [pricingCurrency, setPricingCurrency] = useState<'USD' | 'GBP' | 'EUR'>('USD');
+  const [savingPricing, setSavingPricing] = useState(false);
 
   useEffect(() => {
     loadTrackDetails();
     checkLikeStatus();
   }, [trackId]);
+
+  useEffect(() => {
+    checkContentOwnership();
+  }, [trackId, track?.is_paid, track?.creator_id, user?.id]);
 
   // Sync track data with currentTrack from AudioPlayerContext
   useEffect(() => {
@@ -103,6 +132,11 @@ export default function TrackDetailsScreen() {
           genre,
           created_at,
           creator_id,
+          is_paid,
+          price,
+          currency,
+          total_sales_count,
+          total_revenue,
           moderation_status,
           moderation_flagged,
           flag_reasons,
@@ -113,6 +147,9 @@ export default function TrackDetailsScreen() {
           appeal_text,
           appeal_status,
           appeal_submitted_at,
+          isrc_code,
+          isrc_source,
+          is_cover,
           creator:profiles!creator_id (
             id,
             username,
@@ -136,15 +173,116 @@ export default function TrackDetailsScreen() {
     }
   };
 
+  const openPricingModal = () => {
+    if (!track) return;
+    setPricingIsPaid(track.is_paid || false);
+    setPricingPrice(track.price ? String(track.price) : '');
+    setPricingCurrency((track.currency as 'USD' | 'GBP' | 'EUR') || 'USD');
+    setShowPricingModal(true);
+  };
+
+  const handleSavePricing = async () => {
+    if (!track || !user) return;
+    if (pricingIsPaid && (!pricingPrice || parseFloat(pricingPrice) < 0.99)) {
+      Alert.alert('Invalid Price', 'Please set a price of at least $0.99.');
+      return;
+    }
+    setSavingPricing(true);
+    try {
+      const { error } = await supabase
+        .from('audio_tracks')
+        .update({
+          is_paid: pricingIsPaid,
+          price: pricingIsPaid ? parseFloat(pricingPrice) : null,
+          currency: pricingIsPaid ? pricingCurrency : null,
+        })
+        .eq('id', track.id)
+        .eq('creator_id', user.id);
+      if (error) throw error;
+      setShowPricingModal(false);
+      await loadTrackDetails();
+      Alert.alert(
+        'Pricing Updated',
+        pricingIsPaid
+          ? `Your track is now available for purchase at ${pricingCurrency} ${pricingPrice}.`
+          : 'Your track is now available for free.'
+      );
+    } catch (error) {
+      console.error('❌ Error saving pricing:', error);
+      Alert.alert('Error', 'Failed to update pricing. Please try again.');
+    } finally {
+      setSavingPricing(false);
+    }
+  };
+
   const checkLikeStatus = async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setIsLiked(false);
+      return;
+    }
 
     try {
-      // Simplified approach - just set to false for now
-      // This avoids database conflicts while maintaining UI functionality
-      setIsLiked(false);
+      const { data, error } = await supabase
+        .from('likes')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('content_id', trackId)
+        .eq('content_type', 'track')
+        .maybeSingle();
+
+      if (error) {
+        console.error('❌ Error checking like status:', error);
+        setIsLiked(false);
+        return;
+      }
+
+      setIsLiked(!!data);
     } catch (error) {
       console.error('❌ Error checking like status:', error);
+    }
+  };
+
+  const checkContentOwnership = async () => {
+    if (!track) {
+      return;
+    }
+
+    if (!track.is_paid) {
+      setOwnsContent(true);
+      return;
+    }
+
+    if (!user?.id) {
+      setOwnsContent(false);
+      return;
+    }
+
+    // Creator owns their own content
+    if (track.creator_id === user.id) {
+      setOwnsContent(true);
+      return;
+    }
+
+    setCheckingOwnership(true);
+    try {
+      const session = await supabase.auth.getSession();
+      if (!session.data.session) {
+        setOwnsContent(false);
+        return;
+      }
+
+      const ownership = await contentPurchaseService.checkOwnership(
+        session.data.session,
+        trackId,
+        'track'
+      );
+      setOwnsContent(ownership.owns);
+      console.log('✅ Ownership check:', ownership.owns);
+    } catch (error) {
+      console.error('❌ Error checking ownership:', error);
+      setOwnsContent(false);
+    } finally {
+      setCheckingOwnership(false);
     }
   };
 
@@ -158,7 +296,31 @@ export default function TrackDetailsScreen() {
       const newLikeStatus = !isLiked;
       setIsLiked(newLikeStatus);
       
-      // Update likes count in audio_tracks table only (safer approach)
+      // Persist like in likes table
+      if (newLikeStatus) {
+        const { error } = await supabase
+          .from('likes')
+          .insert({
+            user_id: user.id,
+            content_id: trackId,
+            content_type: 'track',
+          });
+        if (error) {
+          throw error;
+        }
+      } else {
+        const { error } = await supabase
+          .from('likes')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('content_id', trackId)
+          .eq('content_type', 'track');
+        if (error) {
+          throw error;
+        }
+      }
+
+      // Update likes count in audio_tracks table
       const likeIncrement = newLikeStatus ? 1 : -1;
       const newLikesCount = Math.max(0, (track?.likes_count || 0) + likeIncrement);
       
@@ -230,15 +392,11 @@ export default function TrackDetailsScreen() {
 
   const handleShare = async () => {
     if (!track) return;
-
-    try {
-      await Share.share({
-        message: `Check out "${track.title}" by ${track.creator?.display_name || 'Unknown Artist'} on SoundBridge!`,
-        title: track.title,
-      });
-    } catch (error) {
-      console.error('❌ Error sharing track:', error);
-    }
+    await deepLinkingService.shareTrack(
+      track.id,
+      track.title,
+      track.creator?.display_name,
+    );
   };
 
   const handleCreatorPress = () => {
@@ -271,6 +429,18 @@ export default function TrackDetailsScreen() {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const formatPrice = (amount?: number, curr?: string) => {
+    if (!amount) return '';
+    const symbol = curr === 'GBP' ? '£' : curr === 'USD' ? '$' : curr === 'EUR' ? '€' : curr || '$';
+    return `${symbol}${amount.toFixed(2)}`;
+  };
+
+  const handlePurchaseSuccess = () => {
+    setOwnsContent(true);
+    checkContentOwnership();
+    loadTrackDetails();
   };
 
   const formatDate = (dateString: string) => {
@@ -404,6 +574,34 @@ export default function TrackDetailsScreen() {
             )}
           </View>
 
+          {/* Price Badge & Purchase Button for Paid Content */}
+          {track.is_paid && (
+            <View style={styles.pricingSection}>
+              {ownsContent ? (
+                <View style={[styles.ownedBadge, { backgroundColor: '#10B98120', borderColor: '#10B981' }]}>
+                  <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                  <Text style={[styles.ownedText, { color: '#10B981' }]}>Owned</Text>
+                </View>
+              ) : (
+                <>
+                  <View style={styles.priceInfo}>
+                    <Text style={[styles.priceLabel, { color: theme.colors.textSecondary }]}>Price:</Text>
+                    <Text style={[styles.priceAmount, { color: theme.colors.primary }]}>
+                      {formatPrice(track.price, track.currency)}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.purchaseButton, { backgroundColor: theme.colors.primary }]}
+                    onPress={() => setShowPurchaseModal(true)}
+                  >
+                    <Ionicons name="cart" size={18} color="#FFFFFF" />
+                    <Text style={styles.purchaseButtonText}>Purchase Track</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          )}
+
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
             <TouchableOpacity
@@ -443,6 +641,16 @@ export default function TrackDetailsScreen() {
             >
               <Ionicons name="share-outline" size={20} color={theme.colors.textSecondary} />
             </TouchableOpacity>
+
+            {/* Report button — non-owners only */}
+            {user && track.creator_id !== user.id && (
+              <TouchableOpacity
+                style={[styles.shareButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                onPress={() => setShowReportModal(true)}
+              >
+                <Ionicons name="flag-outline" size={20} color={theme.colors.textSecondary} />
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Stats */}
@@ -487,6 +695,45 @@ export default function TrackDetailsScreen() {
             </Text>
           </View>
 
+          {/* ISRC Information (Owner Only) */}
+          {user && track.creator_id === user.id && track.isrc_code && (
+            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <View style={styles.moderationHeader}>
+                <Ionicons name="barcode-outline" size={20} color={theme.colors.primary} />
+                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }]}>ISRC</Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => {
+                  Clipboard.setString(track.isrc_code!);
+                  Alert.alert('Copied', 'ISRC code copied to clipboard.');
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.moderationRow, { alignItems: 'center' }]}>
+                  <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary, flex: 1 }]}>
+                    {track.isrc_code}
+                  </Text>
+                  <Ionicons name="copy-outline" size={16} color={theme.colors.textSecondary} />
+                </View>
+              </TouchableOpacity>
+
+              <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary, marginTop: 4 }]}>
+                {track.isrc_source === 'soundbridge_generated'
+                  ? 'Assigned by SoundBridge (PPL Registered)'
+                  : track.isrc_source === 'user_provided'
+                  ? 'Provided by you'
+                  : 'Detected by ACRCloud'}
+              </Text>
+
+              {track.is_cover && (
+                <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary, marginTop: 6, fontStyle: 'italic' }]}>
+                  This is a cover recording. The original ISRC is shown for reference.
+                </Text>
+              )}
+            </View>
+          )}
+
           {/* Moderation Information (Owner Only) */}
           {user && track.creator_id === user.id && track.moderation_status && (
             <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
@@ -500,24 +747,26 @@ export default function TrackDetailsScreen() {
                 <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary }]}>Status:</Text>
                 <View style={[
                   styles.statusBadge,
-                  { 
-                    backgroundColor: 
+                  {
+                    backgroundColor:
                       track.moderation_status === 'clean' || track.moderation_status === 'approved' ? '#10B981' :
                       track.moderation_status === 'checking' ? '#3B82F6' :
                       track.moderation_status === 'flagged' ? '#F59E0B' :
                       track.moderation_status === 'rejected' ? '#EF4444' :
                       track.moderation_status === 'appealed' ? '#F59E0B' :
+                      track.moderation_status === 'taken_down' ? '#7C3AED' :
                       '#9CA3AF'
                   }
                 ]}>
                   <Text style={styles.statusBadgeText}>
-                    {track.moderation_status === 'pending_check' ? '⏳ Pending Check' :
+                    {track.moderation_status === 'pending_check' ? '⏳ Under Review' :
                      track.moderation_status === 'checking' ? '🔍 Checking...' :
                      track.moderation_status === 'clean' ? '✓ Verified' :
                      track.moderation_status === 'flagged' ? '⚠️ Under Review' :
                      track.moderation_status === 'approved' ? '✓ Approved' :
                      track.moderation_status === 'rejected' ? '✗ Not Approved' :
                      track.moderation_status === 'appealed' ? '📬 Appeal Pending' :
+                     track.moderation_status === 'taken_down' ? '⚖️ Copyright Removed' :
                      track.moderation_status}
                   </Text>
                 </View>
@@ -591,6 +840,8 @@ export default function TrackDetailsScreen() {
                     ? 'Your track did not pass moderation. You can appeal this decision if you believe it\'s a mistake.'
                     : track.moderation_status === 'appealed'
                     ? 'Your appeal is being reviewed by our team. We\'ll notify you of the decision.'
+                    : track.moderation_status === 'taken_down'
+                    ? 'Your track was removed following a copyright notice. If you believe this is a mistake, you may submit a counter-notice within 14 days.'
                     : 'Your track has been verified and is live on the platform.'}
                 </Text>
               </View>
@@ -605,23 +856,149 @@ export default function TrackDetailsScreen() {
                   <Text style={styles.appealButtonText}>Submit Appeal</Text>
                 </TouchableOpacity>
               )}
+
+              {/* Counter-Notice Button (Only for taken_down tracks) */}
+              {track.moderation_status === 'taken_down' && (
+                <TouchableOpacity
+                  style={[styles.appealButton, { backgroundColor: '#7C3AED' }]}
+                  onPress={() => setShowAppealModal(true)}
+                >
+                  <Ionicons name="scale" size={20} color="#FFFFFF" />
+                  <Text style={styles.appealButtonText}>Submit Counter-Notice</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          {/* Pricing Section — Creator Only */}
+          {user && track.creator_id === user.id && (
+            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <View style={styles.moderationHeader}>
+                <Ionicons name="pricetag-outline" size={20} color={theme.colors.primary} />
+                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }]}>Sell This Track</Text>
+              </View>
+              {track.is_paid ? (
+                <View>
+                  <View style={styles.moderationRow}>
+                    <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary }]}>Status:</Text>
+                    <Text style={[styles.moderationValue, { color: '#10B981', fontWeight: '600' }]}>For Sale</Text>
+                  </View>
+                  <View style={styles.moderationRow}>
+                    <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary }]}>Price:</Text>
+                    <Text style={[styles.moderationValue, { color: theme.colors.text }]}>
+                      {track.currency === 'GBP' ? '£' : track.currency === 'EUR' ? '€' : '$'}{track.price?.toFixed(2)}
+                    </Text>
+                  </View>
+                  {(track.total_sales_count ?? 0) > 0 && (
+                    <View style={styles.moderationRow}>
+                      <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary }]}>Sales:</Text>
+                      <Text style={[styles.moderationValue, { color: theme.colors.text }]}>{track.total_sales_count}</Text>
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <Text style={[styles.moderationInfoText, { color: theme.colors.textSecondary, marginBottom: 12 }]}>
+                  This track is currently free. Set a price to earn from every download.
+                </Text>
+              )}
+              <TouchableOpacity
+                style={[styles.appealButton, { backgroundColor: theme.colors.primary }]}
+                onPress={openPricingModal}
+              >
+                <Ionicons name="pricetag" size={20} color="#FFFFFF" />
+                <Text style={styles.appealButtonText}>
+                  {track.is_paid ? 'Edit Pricing' : 'Set a Price'}
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
         </View>
       </ScrollView>
 
-      {/* Appeal Modal */}
+      {/* Appeal / Counter-Notice Modal */}
       {track && (
         <AppealModal
           visible={showAppealModal}
           trackId={track.id}
           trackTitle={track.title}
           flagReasons={track.flag_reasons || []}
+          isTakedown={track.moderation_status === 'taken_down'}
           onClose={() => setShowAppealModal(false)}
           onSuccess={() => {
             setShowAppealModal(false);
-            loadTrackDetails(); // Reload track to show updated status
+            loadTrackDetails();
           }}
+        />
+      )}
+
+      {/* Report Modal — non-owners only */}
+      {track && user && track.creator_id !== user.id && (
+        <ReportContentModal
+          visible={showReportModal}
+          onClose={() => setShowReportModal(false)}
+          contentType="track"
+          contentId={track.id}
+          contentTitle={track.title}
+        />
+      )}
+
+      {/* Pricing Modal — Creator Only */}
+      <Modal
+        visible={showPricingModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowPricingModal(false)}
+      >
+        <View style={styles.pricingModalOverlay}>
+          <View style={[styles.pricingModalSheet, { backgroundColor: theme.colors.background }]}>
+            <View style={styles.pricingModalHeader}>
+              <Text style={[styles.pricingModalTitle, { color: theme.colors.text }]}>
+                {track?.is_paid ? 'Edit Pricing' : 'Set a Price'}
+              </Text>
+              <TouchableOpacity onPress={() => setShowPricingModal(false)}>
+                <Ionicons name="close" size={24} color={theme.colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView>
+              <PricingControls
+                isPaid={pricingIsPaid}
+                price={pricingPrice}
+                currency={pricingCurrency}
+                onIsPaidChange={setPricingIsPaid}
+                onPriceChange={setPricingPrice}
+                onCurrencyChange={setPricingCurrency}
+                disabled={savingPricing}
+              />
+              <TouchableOpacity
+                style={[styles.savePricingButton, { backgroundColor: theme.colors.primary, opacity: savingPricing ? 0.6 : 1 }]}
+                onPress={handleSavePricing}
+                disabled={savingPricing}
+              >
+                {savingPricing ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.savePricingButtonText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Purchase Modal */}
+      {track && track.is_paid && !ownsContent && user && (
+        <PurchaseModal
+          visible={showPurchaseModal}
+          onClose={() => setShowPurchaseModal(false)}
+          onSuccess={handlePurchaseSuccess}
+          session={user as any}
+          contentId={track.id}
+          contentType="track"
+          title={track.title}
+          creatorName={track.creator?.display_name || 'Unknown Artist'}
+          price={track.price || 0}
+          currency={track.currency || 'USD'}
+          coverImageUrl={track.cover_art_url}
         />
       )}
       </SafeAreaView>
@@ -903,5 +1280,83 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  pricingSection: {
+    marginBottom: 20,
+    padding: 16,
+    borderRadius: 12,
+    gap: 12,
+  },
+  priceInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  priceLabel: {
+    fontSize: 14,
+  },
+  priceAmount: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  purchaseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
+    borderRadius: 12,
+    gap: 8,
+  },
+  purchaseButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  ownedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
+  },
+  ownedText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  pricingModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  pricingModalSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  pricingModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  pricingModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  savePricingButton: {
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 24,
+  },
+  savePricingButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });

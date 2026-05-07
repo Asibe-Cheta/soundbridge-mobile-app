@@ -27,6 +27,7 @@ export interface Connection {
     display_name: string;
     avatar_url?: string;
     headline?: string;
+    is_verified?: boolean;
   };
 }
 

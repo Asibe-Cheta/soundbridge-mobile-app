@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { Connection } from '../types/network.types';
 import * as Haptics from 'expo-haptics';
+import VerifiedAvatar from './VerifiedAvatar';
 
 interface ConnectionsPreviewProps {
   connections: Connection[];
@@ -51,20 +52,15 @@ export default function ConnectionsPreview({ connections, totalCount }: Connecti
               styles.avatarContainer,
               {
                 zIndex: displayedConnections.length - index,
-                borderColor: theme.colors.card,
               },
             ]}
           >
-            {connection.user.avatar_url ? (
-              <Image
-                source={{ uri: connection.user.avatar_url }}
-                style={styles.avatar}
-              />
-            ) : (
-              <View style={[styles.avatar, { backgroundColor: theme.colors.surface }]}>
-                <Ionicons name="person" size={20} color={theme.colors.textSecondary} />
-              </View>
-            )}
+            <VerifiedAvatar
+              avatarUrl={connection.user.avatar_url}
+              isVerified={connection.user.is_verified}
+              size={44}
+              fallbackIconSize={20}
+            />
           </View>
         ))}
         {remainingCount > 0 && (
@@ -91,7 +87,6 @@ const styles = StyleSheet.create({
     marginVertical: 12,
     padding: 16,
     borderRadius: 16,
-    borderWidth: 1,
   },
   header: {
     flexDirection: 'row',
@@ -118,9 +113,6 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     marginLeft: -8,
-    borderWidth: 3,
-    borderRadius: 24,
-    overflow: 'hidden',
   },
   avatar: {
     width: 44,

@@ -18,10 +18,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { supabase } from '../lib/supabase';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 export default function ChangePasswordScreen() {
   const navigation = useNavigation();
-  const { updatePassword } = useAuth();
+  const { updatePassword, user } = useAuth();
   const { theme } = useTheme();
   
   const [currentPassword, setCurrentPassword] = useState('');
@@ -63,25 +65,46 @@ export default function ChangePasswordScreen() {
 
   const handleChangePassword = async () => {
     if (!validateForm()) return;
-    
+
+    // OAuth users (Google, etc.) have no password — direct them to reset flow
+    if (!user?.email) {
+      Alert.alert(
+        'Not Available',
+        'Password changes are not available for accounts signed in with Google or other providers.'
+      );
+      return;
+    }
+
     try {
       setIsLoading(true);
-      
-      await updatePassword(newPassword);
-      
+
+      // Step 1: Verify current password by re-authenticating
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword,
+      });
+
+      if (signInError) {
+        Alert.alert('Incorrect Password', 'The current password you entered is wrong. Please try again.');
+        return;
+      }
+
+      // Step 2: Update to the new password
+      const result = await updatePassword(newPassword);
+
+      if (!result.success) {
+        Alert.alert('Error', result.error?.message || 'Failed to update password. Please try again.');
+        return;
+      }
+
       Alert.alert(
-        'Success',
-        'Your password has been changed successfully',
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.goBack(),
-          },
-        ]
+        'Password Changed',
+        'Your password has been updated successfully.',
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     } catch (error) {
       console.error('Password change error:', error);
-      Alert.alert('Error', 'Failed to change password. Please try again.');
+      Alert.alert('Error', 'Something went wrong. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -265,7 +288,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   headerTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
+    lineHeight: 24,
     fontWeight: 'bold',
   },
   content: {
@@ -276,7 +301,9 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   subtitle: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     marginBottom: 32,
     textAlign: 'center',
   },
@@ -284,7 +311,9 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   label: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '500',
     marginBottom: 8,
   },
@@ -296,7 +325,9 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
@@ -304,7 +335,9 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   hint: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     marginTop: 4,
   },
   changeButton: {
@@ -318,7 +351,9 @@ const styles = StyleSheet.create({
   },
   changeButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: 'bold',
   },
   securityTips: {
@@ -327,7 +362,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   tipsTitle: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     fontWeight: 'bold',
     marginBottom: 12,
   },
@@ -337,7 +374,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   tipText: {
+    ...Typography.label,
     fontSize: 13,
+    lineHeight: 18,
     marginLeft: 8,
   },
 });

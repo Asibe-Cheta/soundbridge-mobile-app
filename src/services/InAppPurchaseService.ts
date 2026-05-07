@@ -1,4 +1,5 @@
 import { Platform, Alert } from 'react-native';
+import { config } from '../config/environment';
 
 // Graceful import for expo-iap that handles development environments
 let ExpoIAP: any = null;
@@ -37,15 +38,19 @@ class InAppPurchaseService {
   private products: any[] = [];
   private soundBridgeProducts: SoundBridgeProduct[] = [];
 
-  // Product IDs based on web team's configuration
+  // Product IDs matching App Store Connect and Google Play Console
   private readonly productIds = Platform.select({
     ios: [
       'com.soundbridge.premium.monthly',
       'com.soundbridge.premium.yearly',
+      'com.soundbridge.unlimited.monthly',
+      'com.soundbridge.unlimited.yearly',
     ],
     android: [
-      'soundbridge_pro_monthly',
-      'soundbridge_pro_yearly',
+      'soundbridge_premium:premium-monthly',
+      'soundbridge_premium:premium-yearly',
+      'soundbridge_unlimited:unlimited-monthly',
+      'soundbridge_unlimited:unlimited-yearly',
     ],
   }) || [];
 
@@ -112,7 +117,7 @@ class InAppPurchaseService {
       console.log('🌐 Loading SoundBridge product configurations...');
       
       const platform = Platform.OS === 'ios' ? 'apple' : 'google';
-      const response = await fetch(`https://soundbridge.live/api/subscriptions/products?platform=${platform}`, {
+      const response = await fetch(`${config.apiUrl}/subscriptions/products?platform=${platform}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -226,7 +231,7 @@ class InAppPurchaseService {
         },
         android: {
           platform: 'google',
-          packageName: 'com.soundbridge.app', // You may need to update this
+          packageName: 'com.soundbridge.mobile',
           productId: purchase.productId,
           purchaseToken: purchase.purchaseToken,
           transactionId: purchase.transactionId,
@@ -235,7 +240,7 @@ class InAppPurchaseService {
 
       console.log('📤 Sending verification request:', requestBody);
 
-      const response = await fetch('https://soundbridge.live/api/subscriptions/verify-iap', {
+      const response = await fetch(`${config.apiUrl}/subscriptions/verify-iap`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -282,7 +287,7 @@ class InAppPurchaseService {
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
         
-        const response = await fetch('https://soundbridge.live/api/subscription/status', {
+        const response = await fetch(`${config.apiUrl}/subscription/status`, {
           headers: {
             'Authorization': `Bearer ${userToken}`,
             'Content-Type': 'application/json',

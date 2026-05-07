@@ -16,10 +16,11 @@ export interface PostAuthor {
 export interface Post {
   id: string;
   author: PostAuthor;
-  content: string; // max 500 chars
+  content: string; // max 3000 chars
   post_type: PostType;
   visibility: PostVisibility;
   image_url?: string;
+  image_urls?: string[]; // multiple images — populated when backend returns image_urls array
   audio_url?: string; // short preview clips
   event_id?: string;
   reactions_count: {
@@ -44,6 +45,7 @@ export interface Comment {
   post_id: string;
   user: PostAuthor;
   content: string;
+  image_url?: string;
   likes_count: number;
   user_liked: boolean;
   replies_count: number;

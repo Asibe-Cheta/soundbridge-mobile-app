@@ -50,9 +50,10 @@ export function useSearch() {
       // Get current session for services search
       const currentSession = session || (await supabase.auth.getSession()).data.session;
 
+      // Search all users (creators AND listeners) instead of just creators
       const [tracksResult, artistsResult, eventsResult, venuesResult] = await Promise.all([
         dbHelpers.searchTracks(query.trim(), 20),
-        dbHelpers.searchProfiles(query.trim(), 10),
+        dbHelpers.searchAllUsers(query.trim(), 20), // Search all users, not just creators
         dbHelpers.searchEvents(query.trim(), 10).catch(() => ({ success: false, data: [], error: null })),
         dbHelpers.searchVenues(query.trim(), 10).catch(() => ({ success: false, data: [], error: null })),
       ]);
@@ -87,7 +88,7 @@ export function useSearch() {
       const opportunities: any[] = [];
 
       setSearchResults({ tracks, artists, events, services, venues, posts, opportunities });
-      console.log('✅ Search results:', tracks.length, 'tracks,', artists.length, 'artists,', events.length, 'events,', services.length, 'services,', venues.length, 'venues');
+      console.log('✅ Search results:', tracks.length, 'tracks,', artists.length, 'people (creators + listeners),', events.length, 'events,', services.length, 'services,', venues.length, 'venues');
     } catch (error: any) {
       console.error('Search error:', error);
 

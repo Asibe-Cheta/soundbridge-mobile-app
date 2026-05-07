@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -15,6 +16,18 @@ interface StorageIndicatorProps {
 export default function StorageIndicator({ storageQuota, onPress, compact = false }: StorageIndicatorProps) {
   const { theme } = useTheme();
   const navigation = useNavigation<any>();
+
+  const glassPalette = theme.isDark
+    ? {
+        bg: 'rgba(24, 8, 52, 0.55)',
+        inner: 'rgba(24, 8, 52, 0.38)',
+        border: 'rgba(255, 255, 255, 0.12)',
+      }
+    : {
+        bg: 'rgba(88, 36, 145, 0.18)',
+        inner: 'rgba(88, 36, 145, 0.12)',
+        border: 'rgba(88, 36, 145, 0.2)',
+      };
 
   const warningLevel = getStorageWarningLevel(storageQuota.storage_percent_used);
   const warningMessage = getStorageWarningMessage(storageQuota);
@@ -46,6 +59,18 @@ export default function StorageIndicator({ storageQuota, onPress, compact = fals
   const handleUpgradePress = () => {
     navigation.navigate('Upgrade' as never);
   };
+
+  const GlassContainer: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    <BlurView
+      intensity={theme.isDark ? 85 : 55}
+      tint={theme.isDark ? 'dark' : 'light'}
+      style={[styles.container, { backgroundColor: glassPalette.bg, borderColor: glassPalette.border }]}
+    >
+      <View style={[styles.inner, { backgroundColor: glassPalette.inner, borderColor: glassPalette.border }]}>
+        {children}
+      </View>
+    </BlurView>
+  );
 
   if (compact) {
     // Compact version for dashboard/profile
@@ -92,7 +117,7 @@ export default function StorageIndicator({ storageQuota, onPress, compact = fals
 
   // Full version for upload screen
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+    <GlassContainer>
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
@@ -168,28 +193,36 @@ export default function StorageIndicator({ storageQuota, onPress, compact = fals
           activeOpacity={0.9}
         >
           <LinearGradient
-            colors={['#EC4899', '#7C3AED']}
+            colors={['#DC2626', '#EC4899']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.upgradeGradient}
           >
-            <Ionicons name="arrow-up-circle-outline" size={20} color="#FFFFFF" />
             <Text style={styles.upgradeText}>{upgradeSuggestion}</Text>
-            <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
           </LinearGradient>
         </TouchableOpacity>
       )}
-    </View>
+    </GlassContainer>
   );
 }
 
 const styles = StyleSheet.create({
   // Full version styles
   container: {
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
-    padding: 16,
     marginBottom: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 4,
+  },
+  inner: {
+    padding: 16,
+    borderWidth: 1,
+    borderRadius: 20,
   },
   header: {
     flexDirection: 'row',
@@ -278,7 +311,7 @@ const styles = StyleSheet.create({
   },
   upgradeButton: {
     marginTop: 12,
-    borderRadius: 12,
+    borderRadius: 25,
     overflow: 'hidden',
   },
   upgradeGradient: {
@@ -287,14 +320,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 14,
     paddingHorizontal: 16,
-    gap: 8,
   },
   upgradeText: {
-    flex: 1,
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 17,
     fontWeight: '600',
-    lineHeight: 18,
+    lineHeight: 22,
+    textAlign: 'center',
   },
 
   // Compact version styles

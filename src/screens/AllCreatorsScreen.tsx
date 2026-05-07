@@ -18,7 +18,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, dbHelpers } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
+import { SystemTypography as Typography } from '../constants/Typography';
 import BackButton from '../components/BackButton';
 import TipModal from '../components/TipModal';
 
@@ -39,7 +40,7 @@ type SortOption = 'recent' | 'alphabetical';
 type FilterGenre = 'all' | 'hip-hop' | 'pop' | 'rock' | 'electronic' | 'jazz' | 'classical' | 'country' | 'r&b' | 'indie';
 
 export default function AllCreatorsScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const { theme } = useTheme();
   const { user } = useAuth();
 
@@ -89,7 +90,11 @@ export default function AllCreatorsScreen() {
       setError(null);
       console.log('🔄 Loading all creators from Supabase...');
       
-      const { data, error } = await dbHelpers.getCreators(50);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, username, display_name, bio, avatar_url, location, genre, role, created_at')
+        .eq('role', 'creator')
+        .order('created_at', { ascending: false });
       
       if (error) {
         console.error('❌ Error loading creators:', error);
@@ -145,7 +150,7 @@ export default function AllCreatorsScreen() {
 
   const handleCreatorPress = (creator: Creator) => {
     console.log('Navigate to creator profile:', creator.username);
-    navigation.navigate('CreatorProfile' as never, { creatorId: creator.id, creator: creator } as never);
+    navigation.navigate('CreatorProfile', { creatorId: creator.id, creator });
   };
 
   const handleFollowCreator = async (creator: Creator) => {
@@ -368,12 +373,14 @@ export default function AllCreatorsScreen() {
         
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
-        <BackButton onPress={() => navigation.goBack()} />
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
-          All Creators ({filteredCreators.length})
-        </Text>
-        <View style={{ width: 24 }} />
-      </View>
+          <BackButton onPress={() => navigation.goBack()} />
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
+            All Creators ({creators.length})
+          </Text>
+          <TouchableOpacity style={styles.refreshButton} onPress={onRefresh} disabled={refreshing}>
+            <Ionicons name="refresh" size={24} color={refreshing ? theme.colors.textSecondary : theme.colors.text} />
+          </TouchableOpacity>
+        </View>
 
       {/* Search Bar */}
       <View style={[styles.searchContainer, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
@@ -471,11 +478,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 16,
     backgroundColor: 'transparent',
   },
   loadingText: {
-    marginTop: 10,
-    fontSize: 16,
+    ...Typography.body,
   },
   errorContainer: {
     padding: 16,
@@ -484,22 +491,28 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   errorText: {
+    ...Typography.label,
     color: '#c62828',
     textAlign: 'center',
-    fontSize: 14,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 16,
+    paddingTop: 8,
     borderBottomWidth: 1,
   },
   headerTitle: {
-    flex: 1,
-    fontSize: 20,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    fontSize: 34,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    lineHeight: 40,
+    fontFamily: Typography.body.fontFamily,
+  },
+  refreshButton: {
+    padding: 8,
   },
   searchContainer: {
     paddingHorizontal: 20,
@@ -510,14 +523,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingVertical: 10,
+    borderRadius: 12,
     borderWidth: 1,
   },
   searchInput: {
+    ...Typography.body,
     flex: 1,
     marginLeft: 8,
-    fontSize: 16,
   },
   filtersContainer: {
     flexDirection: 'row',
@@ -527,8 +540,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   filterLabel: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.button,
     marginRight: 12,
   },
   filterOptions: {
@@ -536,14 +548,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   filterButton: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 6,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
     marginRight: 8,
   },
   filterButtonText: {
-    fontSize: 14,
+    ...Typography.label,
     fontWeight: '500',
   },
   listContainer: {
@@ -553,49 +565,44 @@ const styles = StyleSheet.create({
   creatorCard: {
     padding: 16,
     marginBottom: 12,
-    borderRadius: 12,
+    borderRadius: 16,
     borderWidth: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
     elevation: 3,
   },
   creatorHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   creatorHeaderActions: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  creatorHeaderActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 8,
   },
   followButton: {
     paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingVertical: 7,
+    borderRadius: 20,
     borderWidth: 1,
     marginLeft: 8,
   },
   followButtonText: {
-    fontSize: 12,
+    ...Typography.label,
     fontWeight: '600',
   },
   creatorAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     marginRight: 12,
   },
   defaultAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -605,37 +612,42 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   creatorName: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.button,
+    fontSize: 15,
     marginBottom: 2,
   },
   creatorUsername: {
-    fontSize: 14,
+    ...Typography.label,
     marginBottom: 2,
   },
   creatorLocation: {
+    ...Typography.label,
     fontSize: 12,
   },
   creatorBio: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 12,
+    ...Typography.body,
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 10,
   },
   creatorFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginTop: 4,
   },
   genreTag: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
   },
   genreText: {
+    ...Typography.label,
     fontSize: 12,
     fontWeight: '500',
   },
   joinDate: {
+    ...Typography.label,
     fontSize: 12,
   },
   tipButton: {
@@ -645,7 +657,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 7,
     marginLeft: 8,
     gap: 4,
   },
@@ -654,7 +666,7 @@ const styles = StyleSheet.create({
   },
   tipButtonText: {
     color: '#FACC15',
-    fontSize: 12,
+    ...Typography.label,
     fontWeight: '700',
   },
   emptyContainer: {
@@ -664,13 +676,13 @@ const styles = StyleSheet.create({
     paddingVertical: 64,
   },
   emptyTitle: {
+    ...Typography.headerMedium,
     fontSize: 20,
-    fontWeight: 'bold',
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtitle: {
-    fontSize: 16,
+    ...Typography.body,
     textAlign: 'center',
   },
 });

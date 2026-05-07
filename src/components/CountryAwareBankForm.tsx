@@ -7,17 +7,179 @@ import {
   ActivityIndicator,
   StyleSheet,
   ScrollView,
+  KeyboardAvoidingView,
   TouchableOpacity,
   Modal,
   FlatList,
   Platform,
 } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
 import { Session } from '@supabase/supabase-js';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService, CountryBankingInfo, Country } from '../services/WalletService';
 import { locationService, LocationDetectionResult } from '../services/LocationService';
 import { currencyService } from '../services/CurrencyService';
+import { config } from '../config/environment';
+
+// Currencies where Fincra provides a bank picker via /api/payouts/bank-options.
+// Backend only supports NGN, GHS, KES on Fincra rails — other African currencies
+// (ZAR, TZS, UGX, etc.) fall back to free-text / Stripe Connect flow.
+const FINCRA_BANK_DROPDOWN_CURRENCIES = new Set(['NGN', 'GHS', 'KES']);
+
+
+// Built-in bank lists used as fallback when the /api/banks endpoint returns nothing.
+// Covers major countries where users need a picker rather than free-text.
+// GB/GH: BIC/SWIFT codes. NG: CBN bank codes. CA: institution numbers. US: SWIFT codes.
+// Code field may be empty for institutions without a published BIC — keyExtractor handles this.
+const BUILTIN_BANKS: Record<string, { name: string; code: string }[]> = {
+  GB: [
+    { name: 'Barclays', code: 'BUKBGB22' },
+    { name: 'Lloyds Bank', code: 'LOYDGB21' },
+    { name: 'HSBC UK', code: 'HBUKGB4B' },
+    { name: 'NatWest', code: 'NWBKGB2L' },
+    { name: 'Santander UK', code: 'ABBYGB2L' },
+    { name: 'Halifax', code: 'HLFXGB21' },
+    { name: 'Nationwide Building Society', code: 'NAIAGB21' },
+    { name: 'TSB Bank', code: 'TSBSGB2A' },
+    { name: 'Monzo', code: 'MONZGB2L' },
+    { name: 'Starling Bank', code: 'SRLGGB3L' },
+    { name: 'First Direct', code: 'MIDLGB22' },
+    { name: 'Metro Bank', code: 'MYMBGB2L' },
+    { name: 'Co-operative Bank', code: 'CPBKGB22' },
+    { name: 'Virgin Money', code: 'NRNBGB21' },
+    { name: 'Bank of Scotland', code: 'BOFSGB21' },
+    { name: 'Royal Bank of Scotland', code: 'RBSSGB2L' },
+    { name: 'Revolut', code: 'REVOGB21' },
+    { name: 'Wise (TransferWise)', code: 'TRWIGB22' },
+    { name: 'Chase UK', code: 'CHASDEFX' },
+    { name: 'Clydesdale Bank', code: 'CLYDGB21' },
+    { name: 'Standard Chartered UK', code: 'SCBLGB2L' },
+    { name: 'Investec Bank UK', code: 'INVSGB2X' },
+    { name: 'Handelsbanken UK', code: 'HANSGB22' },
+    { name: 'Triodos Bank UK', code: 'TRIOGB21' },
+    { name: 'Yorkshire Building Society', code: '' },
+    { name: 'Skipton Building Society', code: '' },
+    { name: 'Coventry Building Society', code: '' },
+    { name: 'Leeds Building Society', code: '' },
+    { name: 'Atom Bank', code: '' },
+    { name: 'Tandem Bank', code: '' },
+    { name: 'Marcus by Goldman Sachs', code: '' },
+    { name: 'Aldermore Bank', code: '' },
+    { name: 'Shawbrook Bank', code: '' },
+    { name: 'OakNorth Bank', code: '' },
+    { name: 'Paragon Bank', code: '' },
+    { name: 'Tesco Bank', code: '' },
+  ],
+  NG: [
+    // Heritage Bank removed — CBN revoked licence June 2024
+    { name: 'Access Bank', code: '044' },
+    { name: 'Zenith Bank', code: '057' },
+    { name: 'GTBank (Guaranty Trust)', code: '058' },
+    { name: 'First Bank of Nigeria', code: '011' },
+    { name: 'UBA (United Bank for Africa)', code: '033' },
+    { name: 'Fidelity Bank', code: '070' },
+    { name: 'FCMB (First City Monument Bank)', code: '214' },
+    { name: 'Union Bank', code: '032' },
+    { name: 'Sterling Bank', code: '232' },
+    { name: 'Stanbic IBTC Bank', code: '221' },
+    { name: 'Ecobank Nigeria', code: '050' },
+    { name: 'Keystone Bank', code: '082' },
+    { name: 'Polaris Bank', code: '076' },
+    { name: 'Wema Bank', code: '035' },
+    { name: 'Unity Bank', code: '215' },
+    { name: 'Citibank Nigeria', code: '023' },
+    { name: 'Standard Chartered Nigeria', code: '068' },
+    { name: 'JAIZ Bank', code: '301' },
+    { name: 'SunTrust Bank', code: '100' },
+    { name: 'Providus Bank', code: '101' },
+    { name: 'Titan Trust Bank', code: '102' },
+    { name: 'Globus Bank', code: '103' },
+    { name: 'Lotus Bank', code: '303' },
+    { name: 'Opay', code: '304' },
+    { name: 'Kuda Bank', code: '090267' },
+    { name: 'Moniepoint', code: '090405' },
+    { name: 'PalmPay', code: '999991' },
+  ],
+  GH: [
+    { name: 'Ghana Commercial Bank', code: 'GHCBGHAC' },
+    { name: 'Ecobank Ghana', code: 'ECOCGHAC' },
+    { name: 'Absa Bank Ghana', code: 'BARCGHAC' },
+    { name: 'Standard Chartered Ghana', code: 'SCBLGHAC' },
+    { name: 'Fidelity Bank Ghana', code: 'FBLIGHAC' },
+    { name: 'Stanbic Bank Ghana', code: 'SBICGHAC' },
+    { name: 'Zenith Bank Ghana', code: 'ZEBLGHAC' },
+    { name: 'Access Bank Ghana', code: 'ABNGGHAC' },
+    { name: 'Prudential Bank Ghana', code: 'PBGHGHAC' },
+    { name: 'UBA Ghana', code: 'UNAFGHAC' },
+    { name: 'CalBank Ghana', code: 'CALBGHAC' },
+    { name: 'Societe Generale Ghana', code: 'SGBFGHAC' },
+    { name: 'GTBank Ghana', code: 'GTBIGHAC' },
+    { name: 'Bank of Africa Ghana', code: 'BOAFGHAC' },
+    { name: 'Republic Bank Ghana', code: '' },
+    { name: 'Agricultural Development Bank (ADB)', code: '' },
+    { name: 'National Investment Bank (NIB)', code: '' },
+    { name: 'OmniBSIC Bank Ghana', code: '' },
+    { name: 'First Atlantic Bank Ghana', code: '' },
+    { name: 'Consolidated Bank Ghana', code: '' },
+    { name: 'ARB Apex Bank', code: '' },
+  ],
+  IN: [
+    { name: 'State Bank of India', code: 'SBIN' },
+    { name: 'HDFC Bank', code: 'HDFC' },
+    { name: 'ICICI Bank', code: 'ICIC' },
+    { name: 'Punjab National Bank', code: 'PUNB' },
+    { name: 'Bank of Baroda', code: 'BARB' },
+    { name: 'Canara Bank', code: 'CNRB' },
+    { name: 'Axis Bank', code: 'UTIB' },
+    { name: 'Kotak Mahindra Bank', code: 'KKBK' },
+    { name: 'IndusInd Bank', code: 'INDB' },
+    { name: 'Yes Bank', code: 'YESB' },
+    { name: 'Paytm Payments Bank', code: 'PYTM' },
+  ],
+  CA: [
+    // Institution numbers (3-digit) used by Canadian Payments Association
+    { name: 'Royal Bank of Canada (RBC)', code: '003' },
+    { name: 'TD Canada Trust', code: '004' },
+    { name: 'Scotiabank', code: '002' },
+    { name: 'Bank of Montreal (BMO)', code: '001' },
+    { name: 'CIBC', code: '010' },
+    { name: 'National Bank of Canada', code: '006' },
+    { name: 'Laurentian Bank', code: '039' },
+    { name: 'Canadian Western Bank', code: '030' },
+    { name: 'Desjardins Group', code: '815' },
+    { name: 'ATB Financial', code: '219' },
+    { name: 'Manulife Bank', code: '540' },
+    { name: 'EQ Bank (Equitable)', code: '623' },
+    { name: 'Tangerine Bank', code: '614' },
+    { name: 'Coast Capital Savings', code: '809' },
+    { name: 'Meridian Credit Union', code: '837' },
+  ],
+  US: [
+    { name: 'JPMorgan Chase', code: 'CHASUS33' },
+    { name: 'Bank of America', code: 'BOFAUS3N' },
+    { name: 'Wells Fargo', code: 'WFBIUS6S' },
+    { name: 'Citibank', code: 'CITIUS33' },
+    { name: 'U.S. Bancorp (US Bank)', code: 'USBKUS44' },
+    { name: 'Truist Bank', code: 'BRBTUS33' },
+    { name: 'Goldman Sachs Bank', code: 'GSUSUS33' },
+    { name: 'TD Bank US', code: 'NRTHUS33' },
+    { name: 'PNC Bank', code: 'PNCCUS33' },
+    { name: 'Capital One', code: 'HIBKUS44' },
+    { name: 'Charles Schwab Bank', code: 'SWIBUS33' },
+    { name: 'Ally Bank', code: 'ALLBUS33' },
+    { name: 'Citizens Bank', code: 'CTZNUS33' },
+    { name: 'Fifth Third Bank', code: 'FTBCUS3C' },
+    { name: 'KeyBank', code: 'KEYCUS33' },
+    { name: 'Huntington Bank', code: 'HUNTUS33' },
+    { name: 'Regions Bank', code: '' },
+    { name: 'BMO Bank (BMO Harris)', code: '' },
+    { name: 'Comerica Bank', code: '' },
+    { name: 'Navy Federal Credit Union', code: '' },
+    { name: 'USAA Bank', code: '' },
+    { name: 'SoFi Bank', code: '' },
+    { name: 'Discover Bank', code: '' },
+    { name: 'Chime', code: '' },
+  ],
+};
 
 interface CountryAwareBankFormProps {
   session: Session;
@@ -41,6 +203,11 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
   const [detectingLocation, setDetectingLocation] = useState(true);
   const [showCountryModal, setShowCountryModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showBankModal, setShowBankModal] = useState(false);
+  const [bankSearch, setBankSearch] = useState('');
+  const [availableBanks, setAvailableBanks] = useState<{ name: string; code: string }[]>([]);
+  const [loadingBanks, setLoadingBanks] = useState(false);
+  const [showAccountTypeModal, setShowAccountTypeModal] = useState(false);
 
   useEffect(() => {
     loadSupportedCountries();
@@ -53,19 +220,67 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
     }
   }, [selectedCountry]);
 
+  // Fetch bank list for the selected country. Uses the backend API first; falls back
+  // to a built-in list (BUILTIN_BANKS) so the picker always shows for supported countries.
+  useEffect(() => {
+    if (!selectedCountry) return;
+    const currency = countries.find(c => c.country_code === selectedCountry)?.currency;
+    if (!currency) return;
+
+    setAvailableBanks([]);
+    setLoadingBanks(true);
+
+    // For Wise-supported currencies, fetch bank options from the Wise-backed endpoint.
+    // This gives us Wise's own internal bank codes, which are required for correct
+    // recipient creation when the admin triggers a payout via Wise.
+    if (FINCRA_BANK_DROPDOWN_CURRENCIES.has(currency)) {
+      fetch(`${config.apiUrl}/payouts/bank-options?currency=${currency}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data?.banks?.length > 0) {
+            setAvailableBanks(data.banks); // { name, code } — Wise internal codes
+            return;
+          }
+          // Fallback to built-in if endpoint not ready yet
+          const curated = BUILTIN_BANKS[selectedCountry];
+          if (curated) setAvailableBanks(curated);
+        })
+        .catch(() => {
+          const curated = BUILTIN_BANKS[selectedCountry];
+          if (curated) setAvailableBanks(curated);
+        })
+        .finally(() => setLoadingBanks(false));
+      return;
+    }
+
+    // For non-Wise currencies, use curated built-in list first, then API fallback.
+    const curated = BUILTIN_BANKS[selectedCountry];
+    if (curated) {
+      setAvailableBanks(curated);
+      setLoadingBanks(false);
+      return;
+    }
+    walletService.getCountryBanksSafe(session, selectedCountry, currency)
+      .then(banks => {
+        if (banks.length > 0) {
+          setAvailableBanks(banks);
+        }
+      })
+      .finally(() => setLoadingBanks(false));
+  }, [selectedCountry, countries]);
+
   const loadSupportedCountries = async () => {
     try {
       setLoading(true);
       const result = await walletService.getSupportedCountriesSafe(session);
-      setCountries(result.countries || []);
-      
-      // IMPORTANT: Only include Stripe Connect supported countries
-      // Verified as of Dec 2025 - Stripe Connect supports limited countries
-      // NOT SUPPORTED: Nigeria, Ghana, Kenya, Egypt, and most African countries
-      // For unsupported countries, users should use alternative withdrawal methods
-      if (result.countries.length === 0) {
-        setCountries([
-          // ✅ CONFIRMED STRIPE CONNECT SUPPORTED COUNTRIES
+      // Always use the comprehensive built-in country list so all countries (Nigeria, Ghana,
+      // Kenya, etc.) are always available regardless of what the backend returns.
+      // Any backend countries not in the built-in list are merged in at the end.
+      {
+        const allBuiltin = [
+          // ✅ All supported countries (Stripe Connect + Wise)
 
           // Major Markets (Tier 1) - Fully Supported
           { country_code: 'US', country_name: 'United States', currency: 'USD', banking_system: 'ACH' },
@@ -154,13 +369,10 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
 
           // Europe (Non-EU/EEA - already covered above)
           { country_code: 'UA', country_name: 'Ukraine', currency: 'UAH', banking_system: 'Ukrainian Banks' },
-
-          // ⚠️ NOTE: Dual payment provider system
-          // - Stripe Connect: US, UK, EU, Canada, Australia, Singapore, Japan, Hong Kong, NZ, UAE, etc.
-          // - Wise API: All countries listed above (50 currencies, 160+ destinations)
-          // Backend automatically routes to correct provider based on creator location
-          // See PAYOUT_SYSTEM_DECISIONS.md for full details
-        ]);
+        ];
+        const builtinCodes = new Set(allBuiltin.map(c => c.country_code));
+        const extras = (result.countries || []).filter((c: any) => !builtinCodes.has(c.country_code));
+        setCountries([...allBuiltin, ...extras].sort((a, b) => a.country_name.localeCompare(b.country_name)));
       }
     } catch (error) {
       console.error('Error loading countries:', error);
@@ -391,10 +603,10 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
           account_holder_name: { required: true, label: 'Account Holder Name' },
           bank_name: { required: true, label: 'Bank Name' },
           account_number: { required: true, label: 'Account Number (NUBAN)', placeholder: '0123456789' },
-          bank_code: { required: true, label: 'Bank Code', placeholder: '044' },
+          bank_code: { required: true, label: 'Bank Code (CBN)', placeholder: 'e.g. 033 — Google "[your bank] CBN code Nigeria" (not a USSD code)' },
           account_type: { required: true, label: 'Account Type' },
         },
-        field_validation: { account_number: '^\\d{10}$', bank_code: '^\\d{3}$' },
+        field_validation: { account_number: '^\\d{10}$', bank_code: '^\\d{3,6}$' },
       },
       GH: {
         country_code: 'GH', country_name: 'Ghana', currency: 'GHS', banking_system: 'GhIPSS',
@@ -716,10 +928,37 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
     setFormData({});
   };
 
-  const handleFieldChange = (fieldName: string, value: string) => {
+  const handleFieldChange = (fieldName: string, text: string) => {
+    let formatted = text;
+
+    // Auto-format sort_code → XX-XX-XX (UK)
+    if (fieldName === 'sort_code') {
+      const digits = text.replace(/\D/g, '').slice(0, 6);
+      const prevDigits = (formData.sort_code || '').replace(/\D/g, '');
+      // If user deleted a char and digit count is unchanged, they hit backspace on
+      // an auto-inserted dash — remove the preceding digit too
+      const final = (text.length < (formData.sort_code || '').length && digits.length === prevDigits.length)
+        ? digits.slice(0, -1)
+        : digits;
+      if (final.length <= 2) formatted = final;
+      else if (final.length <= 4) formatted = `${final.slice(0, 2)}-${final.slice(2)}`;
+      else formatted = `${final.slice(0, 2)}-${final.slice(2, 4)}-${final.slice(4)}`;
+    }
+
+    // Auto-format bsb_code → XXX-XXX (Australia)
+    if (fieldName === 'bsb_code') {
+      const digits = text.replace(/\D/g, '').slice(0, 6);
+      const prevDigits = (formData.bsb_code || '').replace(/\D/g, '');
+      const final = (text.length < (formData.bsb_code || '').length && digits.length === prevDigits.length)
+        ? digits.slice(0, -1)
+        : digits;
+      if (final.length <= 3) formatted = final;
+      else formatted = `${final.slice(0, 3)}-${final.slice(3)}`;
+    }
+
     setFormData(prev => ({
       ...prev,
-      [fieldName]: value
+      [fieldName]: formatted,
     }));
   };
 
@@ -755,8 +994,15 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
       const methodData = {
         method_type: 'bank_transfer',
         method_name: `${formData.account_holder_name}'s ${countryInfo?.country_name} Account`,
+        // Top-level fields expected by creator_bank_accounts columns
+        account_holder_name: formData.account_holder_name || '',
+        bank_name: formData.bank_name || '',
+        account_number: formData.account_number || formData.iban || '',
+        account_type: formData.account_type || 'checking',
+        bank_code: formData.bank_code || formData.swift_code || formData.branch_code || formData.routing_number || '',
         country: selectedCountry,
-        currency: countryInfo?.currency,
+        currency: countryInfo?.currency || '',
+        // Full form data also sent for backend flexibility
         bank_details: formData,
         is_default: setAsDefault,
       };
@@ -772,29 +1018,190 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
 
   const renderField = (fieldName: string, fieldInfo: any) => {
     const value = formData[fieldName] || '';
-    
-    if (fieldName === 'account_type') {
+
+    // If we have a bank list for this country, bank_name becomes a searchable picker
+    // that also auto-fills bank_code (or branch_code / swift_code depending on country schema).
+    // This works for ANY country once the backend returns banks from /api/banks.
+    if (fieldName === 'bank_name' && availableBanks.length > 0) {
+      const filteredBanks = availableBanks.filter(b =>
+        b.name.toLowerCase().includes(bankSearch.toLowerCase())
+      );
       return (
         <View key={fieldName} style={styles.fieldContainer}>
           <Text style={[styles.fieldLabel, { color: theme.colors.text }]}>
             {fieldInfo.label} {fieldInfo.required && <Text style={styles.required}>*</Text>}
           </Text>
-          <View style={[styles.pickerContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-            <Picker
-              selectedValue={value}
-              onValueChange={(itemValue) => handleFieldChange(fieldName, itemValue)}
-              style={[styles.picker, { color: theme.colors.text }]}
+          <TouchableOpacity
+            style={[
+              styles.input,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: value ? theme.colors.primary : theme.colors.border,
+                justifyContent: 'center',
+              }
+            ]}
+            onPress={() => { setBankSearch(''); setShowBankModal(true); }}
+          >
+            {loadingBanks ? (
+              <ActivityIndicator size="small" color={theme.colors.primary} />
+            ) : (
+              <Text style={{ color: value ? theme.colors.text : theme.colors.textSecondary, fontSize: 16 }}>
+                {value || 'Select your bank...'}
+              </Text>
+            )}
+          </TouchableOpacity>
+
+          <Modal visible={showBankModal} transparent animationType="slide">
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              style={{ flex: 1 }}
             >
-              <Picker.Item label="Select account type..." value="" />
-              <Picker.Item label="Checking" value="checking" />
-              <Picker.Item label="Savings" value="savings" />
-              <Picker.Item label="Business" value="business" />
-            </Picker>
+              <View style={styles.modalOverlay}>
+                <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}>
+                  <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}>
+                    <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Select Bank</Text>
+                    <TouchableOpacity onPress={() => setShowBankModal(false)}>
+                      <Text style={[styles.modalClose, { color: theme.colors.primary }]}>Done</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TextInput
+                    placeholder="Search banks..."
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={bankSearch}
+                    onChangeText={setBankSearch}
+                    style={[styles.searchInput, { color: theme.colors.text, backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                    autoFocus
+                  />
+                  <FlatList
+                    data={filteredBanks}
+                    keyExtractor={(item, index) => item.code || `${item.name}-${index}`}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity
+                        style={[
+                          styles.countryItem,
+                          { borderBottomColor: theme.colors.border },
+                          formData.bank_name === item.name && { backgroundColor: theme.colors.primary + '20' },
+                        ]}
+                        onPress={() => {
+                          // Select bank name AND auto-fill the associated code field
+                          const codeField = countryInfo?.required_fields.bank_code ? 'bank_code'
+                            : countryInfo?.required_fields.branch_code ? 'branch_code'
+                            : countryInfo?.required_fields.swift_code ? 'swift_code'
+                            : null;
+                          setFormData(prev => ({
+                            ...prev,
+                            bank_name: item.name,
+                            ...(codeField ? { [codeField]: item.code } : {}),
+                          }));
+                          setShowBankModal(false);
+                        }}
+                      >
+                        <Text style={[styles.countryName, { color: theme.colors.text }]}>{item.name}</Text>
+                        {item.code ? (
+                          <Text style={[styles.countryCode, { color: theme.colors.textSecondary }]}>Code: {item.code}</Text>
+                        ) : null}
+                      </TouchableOpacity>
+                    )}
+                    ListEmptyComponent={
+                      <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>No banks found</Text>
+                    }
+                  />
+                </View>
+              </View>
+            </KeyboardAvoidingView>
+          </Modal>
+        </View>
+      );
+    }
+
+    // If a bank was chosen from the picker, the code field is auto-filled — show it read-only
+    const codeFieldAutoFilled =
+      availableBanks.length > 0 &&
+      (fieldName === 'bank_code' || fieldName === 'branch_code' || fieldName === 'swift_code') &&
+      !!formData.bank_name;
+
+    if (codeFieldAutoFilled) {
+      return (
+        <View key={fieldName} style={styles.fieldContainer}>
+          <Text style={[styles.fieldLabel, { color: theme.colors.text }]}>
+            {fieldInfo.label}
+            <Text style={{ color: theme.colors.textSecondary, fontWeight: 'normal' }}> (auto-filled)</Text>
+          </Text>
+          <View style={[styles.input, { backgroundColor: theme.colors.surface + '80', borderColor: theme.colors.border, justifyContent: 'center' }]}>
+            <Text style={{ color: value ? theme.colors.text : theme.colors.textSecondary, fontSize: 16 }}>
+              {value || 'Select a bank above to fill this'}
+            </Text>
           </View>
         </View>
       );
     }
-    
+
+    if (fieldName === 'account_type') {
+      const accountTypes = [
+        { label: 'Checking', value: 'checking' },
+        { label: 'Savings', value: 'savings' },
+        { label: 'Business', value: 'business' },
+      ];
+      const selectedLabel = accountTypes.find(t => t.value === value)?.label;
+      return (
+        <View key={fieldName} style={styles.fieldContainer}>
+          <Text style={[styles.fieldLabel, { color: theme.colors.text }]}>
+            {fieldInfo.label} {fieldInfo.required && <Text style={styles.required}>*</Text>}
+          </Text>
+          <TouchableOpacity
+            style={[
+              styles.input,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: value ? theme.colors.primary : theme.colors.border,
+                justifyContent: 'space-between',
+                flexDirection: 'row',
+                alignItems: 'center',
+              }
+            ]}
+            onPress={() => setShowAccountTypeModal(true)}
+          >
+            <Text style={{ color: selectedLabel ? theme.colors.text : theme.colors.textSecondary, fontSize: 16 }}>
+              {selectedLabel || 'Select account type...'}
+            </Text>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>▼</Text>
+          </TouchableOpacity>
+
+          <Modal visible={showAccountTypeModal} transparent animationType="slide">
+            <View style={styles.modalOverlay}>
+              <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}>
+                <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}>
+                  <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Account Type</Text>
+                  <TouchableOpacity onPress={() => setShowAccountTypeModal(false)}>
+                    <Text style={[styles.modalClose, { color: theme.colors.primary }]}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                {accountTypes.map((type) => (
+                  <TouchableOpacity
+                    key={type.value}
+                    style={[
+                      styles.countryItem,
+                      { borderBottomColor: theme.colors.border },
+                      value === type.value && { backgroundColor: theme.colors.primary + '20' },
+                    ]}
+                    onPress={() => {
+                      handleFieldChange(fieldName, type.value);
+                      setShowAccountTypeModal(false);
+                    }}
+                  >
+                    <Text style={[styles.countryName, { color: theme.colors.text }]}>{type.label}</Text>
+                    {value === type.value && (
+                      <Text style={{ color: theme.colors.primary, fontSize: 16 }}>✓</Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </Modal>
+        </View>
+      );
+    }
+
     return (
       <View key={fieldName} style={styles.fieldContainer}>
         <Text style={[styles.fieldLabel, { color: theme.colors.text }]}>
@@ -860,7 +1267,15 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
   }
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1 }}
+    >
+    <ScrollView
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
       {/* Location Detection Status */}
       {(detectingLocation || locationDetection) && (
         <View style={[styles.detectionContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
@@ -912,56 +1327,64 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         transparent={true}
         onRequestClose={() => setShowCountryModal(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Select Country</Text>
-              <TouchableOpacity onPress={() => setShowCountryModal(false)}>
-                <Text style={[styles.modalClose, { color: theme.colors.primary }]}>Done</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TextInput
-              style={[styles.searchInput, {
-                backgroundColor: theme.colors.surface,
-                borderColor: theme.colors.border,
-                color: theme.colors.text
-              }]}
-              placeholder="Search countries..."
-              placeholderTextColor={theme.colors.textSecondary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-
-            <FlatList
-              data={countries.filter(c =>
-                c.country_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                c.currency.toLowerCase().includes(searchQuery.toLowerCase())
-              )}
-              keyExtractor={(item) => item.country_code}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[
-                    styles.countryItem,
-                    selectedCountry === item.country_code && { backgroundColor: theme.colors.surface }
-                  ]}
-                  onPress={() => {
-                    setSelectedCountry(item.country_code);
-                    setShowCountryModal(false);
-                    setSearchQuery('');
-                  }}
-                >
-                  <Text style={[styles.countryName, { color: theme.colors.text }]}>
-                    {item.country_name}
-                  </Text>
-                  <Text style={[styles.countryCurrency, { color: theme.colors.textSecondary }]}>
-                    {item.currency}
-                  </Text>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]}>
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Select Country</Text>
+                <TouchableOpacity onPress={() => setShowCountryModal(false)}>
+                  <Text style={[styles.modalClose, { color: theme.colors.primary }]}>Done</Text>
                 </TouchableOpacity>
-              )}
-            />
+              </View>
+
+              <TextInput
+                style={[styles.searchInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text,
+                }]}
+                placeholder="Search countries..."
+                placeholderTextColor={theme.colors.textSecondary}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCorrect={false}
+                autoCapitalize="words"
+              />
+
+              <FlatList
+                data={countries.filter(c =>
+                  c.country_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  c.currency.toLowerCase().includes(searchQuery.toLowerCase())
+                )}
+                keyExtractor={(item) => item.country_code}
+                keyboardShouldPersistTaps="handled"
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[
+                      styles.countryItem,
+                      selectedCountry === item.country_code && { backgroundColor: theme.colors.surface }
+                    ]}
+                    onPress={() => {
+                      setSelectedCountry(item.country_code);
+                      setShowCountryModal(false);
+                      setSearchQuery('');
+                    }}
+                  >
+                    <Text style={[styles.countryName, { color: theme.colors.text }]}>
+                      {item.country_name}
+                    </Text>
+                    <Text style={[styles.countryCurrency, { color: theme.colors.textSecondary }]}>
+                      {item.currency}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Country-specific banking info */}
@@ -999,6 +1422,7 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         </View>
       )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -1035,15 +1459,7 @@ const styles = StyleSheet.create({
     padding: 16,
     fontSize: 16,
   },
-  pickerContainer: {
-    borderWidth: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  picker: {
-    height: 50,
-  },
-  infoContainer: {
+infoContainer: {
     padding: 16,
     borderRadius: 12,
     borderWidth: 1,
@@ -1106,6 +1522,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 18,
   },
+  pickerContainer: {
+    borderWidth: 1,
+    borderRadius: 12,
+  },
   pickerText: {
     fontSize: 16,
     paddingVertical: 12,
@@ -1161,6 +1581,22 @@ const styles = StyleSheet.create({
   },
   countryCurrency: {
     fontSize: 14,
+  },
+  // Nigerian bank picker modal
+  modalContainer: {
+    maxHeight: '80%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 20,
+  },
+  countryCode: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  emptyText: {
+    textAlign: 'center',
+    fontSize: 15,
+    paddingVertical: 32,
   },
 });
 

@@ -5,6 +5,7 @@ import { Linking, Share } from 'react-native';
 import { NavigationContainerRef } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { notificationService, NotificationData } from './NotificationService';
+import { supabase } from '../lib/supabase';
 
 export interface DeepLinkData {
   screen: string;
@@ -88,9 +89,9 @@ class DeepLinkingService {
 
   // ===== URL PROCESSING =====
 
-  private processUrl(url: string) {
+  private async processUrl(url: string) {
     try {
-      const deepLinkData = this.parseUrl(url);
+      const deepLinkData = await this.parseUrl(url);
       if (deepLinkData) {
         this.navigate(deepLinkData);
       }
@@ -99,7 +100,7 @@ class DeepLinkingService {
     }
   }
 
-  private parseUrl(url: string): DeepLinkData | null {
+  private async parseUrl(url: string): Promise<DeepLinkData | null> {
     try {
       // Handle different URL schemes
       // soundbridge://collaboration/requests/123
@@ -114,25 +115,60 @@ class DeepLinkingService {
 
       const [section, ...rest] = pathSegments;
 
+      // Handle @username profile links e.g. soundbridge.live/@asibe_cheta
+      if (section.startsWith('@')) {
+        const username = section.slice(1);
+        try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('username', username)
+            .single();
+          if (data?.id) {
+            return { screen: 'CreatorProfile', params: { creatorId: data.id } };
+          }
+        } catch (_) {}
+        // Fallback: navigate home if username not found
+        return { screen: 'Home' };
+      }
+
       switch (section) {
         case 'collaboration':
           return this.parseCollaborationUrl(rest, urlObj.searchParams);
-        
+
         case 'profile':
           return this.parseProfileUrl(rest, urlObj.searchParams);
-        
+
         case 'track':
           return this.parseTrackUrl(rest, urlObj.searchParams);
-        
+
+        case 'album':
+          return this.parseAlbumUrl(rest, urlObj.searchParams);
+
+        case 'playlist':
+          return this.parsePlaylistUrl(rest, urlObj.searchParams);
+
         case 'event':
           return this.parseEventUrl(rest, urlObj.searchParams);
-        
+
         case 'post':
           return this.parsePostUrl(rest, urlObj.searchParams);
-        
+
         case 'opportunity':
           return this.parseOpportunityUrl(rest, urlObj.searchParams);
-        
+
+        case 'messages':
+          return this.parseMessagesUrl(rest, urlObj.searchParams);
+
+        case 'wallet':
+          return this.parseWalletUrl(rest, urlObj.searchParams);
+
+        case 'live':
+          return this.parseLiveSessionUrl(rest, urlObj.searchParams);
+
+        case 'creator':
+          return this.parseCreatorUrl(rest, urlObj.searchParams);
+
         default:
           console.log('⚠️ Unknown deep link section:', section);
           return { screen: 'Home' };
@@ -205,6 +241,24 @@ class DeepLinkingService {
     };
   }
 
+  private parseAlbumUrl(pathSegments: string[], searchParams: URLSearchParams): DeepLinkData {
+    const [albumId] = pathSegments;
+
+    return {
+      screen: 'AlbumDetails',
+      params: { albumId }
+    };
+  }
+
+  private parsePlaylistUrl(pathSegments: string[], searchParams: URLSearchParams): DeepLinkData {
+    const [playlistId] = pathSegments;
+
+    return {
+      screen: 'PlaylistDetails',
+      params: { playlistId }
+    };
+  }
+
   private parseEventUrl(pathSegments: string[], searchParams: URLSearchParams): DeepLinkData {
     const [eventId] = pathSegments;
     
@@ -228,13 +282,78 @@ class DeepLinkingService {
 
   private parseOpportunityUrl(pathSegments: string[], searchParams: URLSearchParams): DeepLinkData {
     const [opportunityId] = pathSegments;
-    
+
     return {
       screen: 'Network',
-      params: { 
+      params: {
         tab: 'opportunities',
-        opportunityId 
+        opportunityId
       }
+    };
+  }
+
+  private parseMessagesUrl(pathSegments: string[], searchParams: URLSearchParams): DeepLinkData {
+    const [conversationIdOrUserId] = pathSegments;
+
+    if (conversationIdOrUserId) {
+      return {
+        screen: 'Chat',
+        params: {
+          conversationId: conversationIdOrUserId,
+          recipientId: searchParams.get('recipientId') || undefined,
+        }
+      };
+    }
+
+    return { screen: 'Messages' };
+  }
+
+  private parseWalletUrl(pathSegments: string[], searchParams: URLSearchParams): DeepLinkData {
+    const [section, id] = pathSegments;
+
+    switch (section) {
+      case 'tips':
+        return {
+          screen: 'Wallet',
+          params: { tab: 'tips', tipId: id }
+        };
+
+      case 'withdrawal':
+        return {
+          screen: 'Wallet',
+          params: { tab: 'withdrawals', withdrawalId: id }
+        };
+
+      case 'transactions':
+        return {
+          screen: 'Wallet',
+          params: { tab: 'transactions' }
+        };
+
+      default:
+        return { screen: 'Wallet' };
+    }
+  }
+
+  private parseLiveSessionUrl(pathSegments: string[], searchParams: URLSearchParams): DeepLinkData {
+    const [sessionId] = pathSegments;
+
+    if (sessionId) {
+      return {
+        screen: 'LiveSessionRoom',
+        params: { sessionId }
+      };
+    }
+
+    return { screen: 'LiveSessions' };
+  }
+
+  private parseCreatorUrl(pathSegments: string[], searchParams: URLSearchParams): DeepLinkData {
+    const [creatorId] = pathSegments;
+
+    return {
+      screen: 'CreatorProfile',
+      params: { creatorId }
     };
   }
 
@@ -247,29 +366,105 @@ class DeepLinkingService {
       let deepLinkData: DeepLinkData;
 
       switch (data.type) {
+        // ===== EVENT NOTIFICATIONS =====
+        case 'event':
+        case 'event_reminder':
+        case 'event_2_weeks':
+        case 'event_1_week':
+        case 'event_24_hours':
+        case 'event_day':
+          deepLinkData = {
+            screen: 'EventDetails',
+            params: {
+              eventId: data.eventId || data.entityId,
+            }
+          };
+          break;
+
+        // ===== MESSAGE NOTIFICATIONS =====
+        case 'message':
+          deepLinkData = {
+            screen: 'Conversation',
+            params: {
+              recipientId: data.senderId,
+              conversationId: data.conversationId,
+            }
+          };
+          break;
+
+        // ===== TIP NOTIFICATIONS =====
+        case 'tip':
+          deepLinkData = {
+            screen: 'Wallet',
+            params: {
+              tab: 'tips',
+              tipId: data.tipId || data.entityId,
+            }
+          };
+          break;
+
+        // ===== TRACK NOTIFICATIONS =====
+        case 'track_approved':
+        case 'track_featured':
+        case 'moderation':
+          deepLinkData = {
+            screen: 'TrackDetails',
+            params: {
+              trackId: data.trackId || data.entityId,
+            }
+          };
+          break;
+
+        // ===== LIVE SESSION NOTIFICATIONS =====
+        case 'live_session':
+          deepLinkData = {
+            screen: 'LiveSessionRoom',
+            params: {
+              sessionId: data.sessionId || data.entityId,
+            }
+          };
+          break;
+
+        // ===== WITHDRAWAL NOTIFICATIONS =====
+        case 'withdrawal':
+          deepLinkData = {
+            screen: 'Wallet',
+            params: {
+              tab: 'withdrawals',
+              withdrawalId: data.withdrawalId || data.entityId,
+            }
+          };
+          break;
+
+        // ===== COLLABORATION NOTIFICATIONS =====
+        case 'collaboration_request':
         case 'collaboration.request.received':
           deepLinkData = {
             screen: 'CollaborationRequests',
-            params: { 
+            params: {
               tab: 'received',
-              requestId: data.requestId,
+              requestId: data.requestId || data.entityId,
               highlightRequest: true
             }
           };
           break;
 
+        case 'collaboration_accepted':
+        case 'collaboration_declined':
+        case 'collaboration_confirmed':
         case 'collaboration.request.accepted':
         case 'collaboration.request.declined':
           deepLinkData = {
             screen: 'CollaborationRequests',
-            params: { 
+            params: {
               tab: 'sent',
-              requestId: data.requestId,
+              requestId: data.requestId || data.entityId,
               highlightRequest: true
             }
           };
           break;
 
+        // ===== CREATOR POST NOTIFICATIONS =====
         case 'creator_post':
           if (data.entityId) {
             deepLinkData = {
@@ -284,6 +479,7 @@ class DeepLinkingService {
           }
           break;
 
+        // ===== CONNECTION REQUEST NOTIFICATIONS =====
         case 'connection_request':
           deepLinkData = {
             screen: 'Network',
@@ -293,8 +489,28 @@ class DeepLinkingService {
           };
           break;
 
+        // ===== OPPORTUNITY NOTIFICATIONS =====
+        case 'opportunity_interest':
+          deepLinkData = {
+            screen: 'OpportunityInterestList',
+            params: {
+              opportunityId: data.opportunityId || data.entityId,
+              opportunityTitle: data.opportunityTitle || '',
+            },
+          };
+          break;
+
+        case 'opportunity_agreement_received':
+          deepLinkData = {
+            screen: 'OpportunityProject',
+            params: {
+              projectId: data.projectId || data.entityId,
+            },
+          };
+          break;
+
         default:
-          console.log('⚠️ Unknown notification type:', data.type);
+          console.log('⚠️ Unknown notification type:', data.type, '- navigating to Home');
           deepLinkData = { screen: 'Home' };
       }
 
@@ -381,6 +597,24 @@ class DeepLinkingService {
     return `soundbridge://event/${eventId}`;
   }
 
+  generateMessageUrl(conversationId: string, recipientId?: string): string {
+    const base = `soundbridge://messages/${conversationId}`;
+    return recipientId ? `${base}?recipientId=${recipientId}` : base;
+  }
+
+  generateWalletUrl(section?: 'tips' | 'withdrawals' | 'transactions', id?: string): string {
+    if (section && id) {
+      return `soundbridge://wallet/${section}/${id}`;
+    } else if (section) {
+      return `soundbridge://wallet/${section}`;
+    }
+    return 'soundbridge://wallet';
+  }
+
+  generateLiveSessionUrl(sessionId: string): string {
+    return `soundbridge://live/${sessionId}`;
+  }
+
   generatePostLink(postId: string): string {
     return `https://soundbridge.live/post/${postId}`;
   }
@@ -391,6 +625,22 @@ class DeepLinkingService {
 
   generateOpportunityLink(opportunityId: string): string {
     return `https://soundbridge.live/opportunity/${opportunityId}`;
+  }
+
+  generateTrackLink(trackId: string): string {
+    return `https://soundbridge.live/track/${trackId}`;
+  }
+
+  generateAlbumLink(albumId: string): string {
+    return `https://soundbridge.live/album/${albumId}`;
+  }
+
+  generatePlaylistLink(playlistId: string): string {
+    return `https://soundbridge.live/playlist/${playlistId}`;
+  }
+
+  generateEventLink(eventId: string): string {
+    return `https://soundbridge.live/event/${eventId}`;
   }
 
   // ===== SHARING =====
@@ -408,10 +658,19 @@ class DeepLinkingService {
 
   async shareProfile(creatorId: string, creatorName: string): Promise<void> {
     try {
-      const url = this.generateProfileUrl(creatorId);
-      const message = `Check out ${creatorName}'s profile on SoundBridge`;
-      
-      await Linking.openURL(`https://soundbridge.app/share?url=${encodeURIComponent(url)}&text=${encodeURIComponent(message)}`);
+      // Look up username so we can share the clean /@username URL
+      const { data } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', creatorId)
+        .single();
+      const link = data?.username
+        ? this.generateProfileLink(data.username)
+        : `https://soundbridge.live/profile/${creatorId}`;
+      await Share.share({
+        message: `Check out ${creatorName} on SoundBridge:\n${link}`,
+        url: link,
+      });
     } catch (error) {
       console.error('❌ Error sharing profile:', error);
     }
@@ -432,6 +691,32 @@ class DeepLinkingService {
       });
     } catch (error) {
       console.error('Error sharing post:', error);
+    }
+  }
+
+  async shareTrack(trackId: string, title: string, artistName?: string): Promise<void> {
+    const link = this.generateTrackLink(trackId);
+    try {
+      const byLine = artistName ? ` by ${artistName}` : '';
+      await Share.share({
+        message: `Check out "${title}"${byLine} on SoundBridge!\n${link}`,
+        url: link,
+      });
+    } catch (error) {
+      console.error('Error sharing track:', error);
+    }
+  }
+
+  async shareEvent(eventId: string, title: string, venueName?: string): Promise<void> {
+    const link = this.generateEventLink(eventId);
+    try {
+      const venueText = venueName ? ` at ${venueName}` : '';
+      await Share.share({
+        message: `Check out "${title}"${venueText} on SoundBridge!\n${link}`,
+        url: link,
+      });
+    } catch (error) {
+      console.error('Error sharing event:', error);
     }
   }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import BackButton from '../components/BackButton';
 import {
   View,
@@ -15,9 +15,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { notificationService, NotificationPreferences } from '../services/NotificationService';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 // Event genres from database
 const EVENT_GENRES = [
@@ -62,20 +63,22 @@ export default function NotificationPreferencesScreen() {
   const [tipNotifs, setTipNotifs] = useState(true);
   const [collaborationNotifs, setCollaborationNotifs] = useState(true);
   const [walletNotifs, setWalletNotifs] = useState(true);
+  const [urgentGigNotifs, setUrgentGigNotifs] = useState(true);
+  const [urgentGigActionButtons, setUrgentGigActionButtons] = useState(true);
+  const [commentsOnPosts, setCommentsOnPosts] = useState(true);
+  const [likesOnPosts, setLikesOnPosts] = useState(true);
+  const [newFollowers, setNewFollowers] = useState(true);
+  const [contentSales, setContentSales] = useState(true);
 
   // UI state
   const [showTimeWindow, setShowTimeWindow] = useState(false);
   const [showGenres, setShowGenres] = useState(false);
 
-  useEffect(() => {
-    loadPreferences();
-  }, []);
-
-  const loadPreferences = async () => {
+  const loadPreferences = useCallback(async () => {
     try {
       setLoading(true);
-      const prefs = notificationService.getPreferences();
-      
+      const prefs = await notificationService.refreshPreferences();
+
       if (prefs) {
         setMasterEnabled(prefs.notificationsEnabled);
         setStartHour(prefs.notificationStartHour);
@@ -86,6 +89,12 @@ export default function NotificationPreferencesScreen() {
         setTipNotifs(prefs.tipNotificationsEnabled);
         setCollaborationNotifs(prefs.collaborationNotificationsEnabled);
         setWalletNotifs(prefs.walletNotificationsEnabled);
+        setUrgentGigNotifs(prefs.urgentGigNotificationsEnabled);
+        setUrgentGigActionButtons(prefs.urgentGigActionButtonsEnabled);
+        setCommentsOnPosts(prefs.commentsOnPosts ?? true);
+        setLikesOnPosts(prefs.likesOnPosts ?? true);
+        setNewFollowers(prefs.newFollowers ?? true);
+        setContentSales(prefs.contentSales ?? true);
       }
     } catch (error) {
       console.error('Error loading preferences:', error);
@@ -93,7 +102,14 @@ export default function NotificationPreferencesScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Reload saved preferences from Supabase every time the screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      loadPreferences();
+    }, [loadPreferences])
+  );
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -115,6 +131,12 @@ export default function NotificationPreferencesScreen() {
         tipNotificationsEnabled: tipNotifs,
         collaborationNotificationsEnabled: collaborationNotifs,
         walletNotificationsEnabled: walletNotifs,
+        urgentGigNotificationsEnabled: urgentGigNotifs,
+        urgentGigActionButtonsEnabled: urgentGigActionButtons,
+        commentsOnPosts,
+        likesOnPosts,
+        newFollowers,
+        contentSales,
       };
 
       const success = await notificationService.updatePreferences(updates);
@@ -478,6 +500,130 @@ export default function NotificationPreferencesScreen() {
           </View>
         </View>
 
+        {/* Social & Engagement */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Social & Engagement</Text>
+
+          <View style={[styles.toggleCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLeft}>
+                <Ionicons name="chatbubble" size={20} color={commentsOnPosts ? '#4ECDC4' : theme.colors.textSecondary} />
+                <Text style={[styles.toggleText, { color: theme.colors.text }]}>Comments on my posts</Text>
+              </View>
+              <Switch
+                value={commentsOnPosts}
+                onValueChange={setCommentsOnPosts}
+                disabled={!masterEnabled}
+                trackColor={{ false: '#767577', true: '#4ECDC4' }}
+                thumbColor={commentsOnPosts ? '#fff' : '#f4f3f4'}
+              />
+            </View>
+            <Text style={[styles.toggleSubtext, { color: theme.colors.textSecondary }]}>
+              When someone comments on your drop
+            </Text>
+          </View>
+
+          <View style={[styles.toggleCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLeft}>
+                <Ionicons name="heart" size={20} color={likesOnPosts ? '#4ECDC4' : theme.colors.textSecondary} />
+                <Text style={[styles.toggleText, { color: theme.colors.text }]}>Reactions on my posts</Text>
+              </View>
+              <Switch
+                value={likesOnPosts}
+                onValueChange={setLikesOnPosts}
+                disabled={!masterEnabled}
+                trackColor={{ false: '#767577', true: '#4ECDC4' }}
+                thumbColor={likesOnPosts ? '#fff' : '#f4f3f4'}
+              />
+            </View>
+            <Text style={[styles.toggleSubtext, { color: theme.colors.textSecondary }]}>
+              Likes and reactions on your content
+            </Text>
+          </View>
+
+          <View style={[styles.toggleCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLeft}>
+                <Ionicons name="person-add" size={20} color={newFollowers ? '#4ECDC4' : theme.colors.textSecondary} />
+                <Text style={[styles.toggleText, { color: theme.colors.text }]}>New followers & connections</Text>
+              </View>
+              <Switch
+                value={newFollowers}
+                onValueChange={setNewFollowers}
+                disabled={!masterEnabled}
+                trackColor={{ false: '#767577', true: '#4ECDC4' }}
+                thumbColor={newFollowers ? '#fff' : '#f4f3f4'}
+              />
+            </View>
+            <Text style={[styles.toggleSubtext, { color: theme.colors.textSecondary }]}>
+              When someone follows you or sends a connection request
+            </Text>
+          </View>
+
+          <View style={[styles.toggleCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLeft}>
+                <Ionicons name="musical-note" size={20} color={contentSales ? '#4ECDC4' : theme.colors.textSecondary} />
+                <Text style={[styles.toggleText, { color: theme.colors.text }]}>Audio & content sales</Text>
+              </View>
+              <Switch
+                value={contentSales}
+                onValueChange={setContentSales}
+                disabled={!masterEnabled}
+                trackColor={{ false: '#767577', true: '#4ECDC4' }}
+                thumbColor={contentSales ? '#fff' : '#f4f3f4'}
+              />
+            </View>
+            <Text style={[styles.toggleSubtext, { color: theme.colors.textSecondary }]}>
+              When someone purchases your track or album
+            </Text>
+          </View>
+        </View>
+
+        {/* Urgent Gigs */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>🔥 Urgent Gigs</Text>
+
+          <View style={[styles.toggleCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLeft}>
+                <Ionicons name="flash" size={20} color={urgentGigNotifs ? '#DC2626' : theme.colors.textSecondary} />
+                <Text style={[styles.toggleText, { color: theme.colors.text }]}>Urgent Gig Alerts</Text>
+              </View>
+              <Switch
+                value={urgentGigNotifs}
+                onValueChange={setUrgentGigNotifs}
+                disabled={!masterEnabled}
+                trackColor={{ false: '#767577', true: '#DC2626' }}
+                thumbColor={urgentGigNotifs ? '#fff' : '#f4f3f4'}
+              />
+            </View>
+            <Text style={[styles.toggleSubtext, { color: theme.colors.textSecondary }]}>
+              Get notified when urgent gigs near you are posted
+            </Text>
+          </View>
+
+          <View style={[styles.toggleCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLeft}>
+                <Ionicons name="hand-left" size={20} color={urgentGigActionButtons ? '#DC2626' : theme.colors.textSecondary} />
+                <Text style={[styles.toggleText, { color: theme.colors.text }]}>Action Buttons</Text>
+              </View>
+              <Switch
+                value={urgentGigActionButtons}
+                onValueChange={setUrgentGigActionButtons}
+                disabled={!masterEnabled || !urgentGigNotifs}
+                trackColor={{ false: '#767577', true: '#DC2626' }}
+                thumbColor={urgentGigActionButtons ? '#fff' : '#f4f3f4'}
+              />
+            </View>
+            <Text style={[styles.toggleSubtext, { color: theme.colors.textSecondary }]}>
+              Show Accept / Decline buttons directly in the push notification
+            </Text>
+          </View>
+        </View>
+
         {/* Info Section */}
         <View style={[styles.infoSection, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
           <Ionicons name="information-circle" size={24} color={theme.colors.primary} />
@@ -511,7 +657,9 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   header: {
     flexDirection: 'row',
@@ -526,11 +674,15 @@ const styles = StyleSheet.create({
     minWidth: 60,
   },
   headerTitle: {
+    ...Typography.headerMedium,
     fontSize: 20,
+    lineHeight: 26,
     fontWeight: 'bold',
   },
   saveText: {
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
   },
   scrollView: {
@@ -544,7 +696,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   sectionTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
+    lineHeight: 24,
     fontWeight: '600',
     marginBottom: 12,
   },
@@ -562,12 +716,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   masterTitle: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginBottom: 4,
   },
   masterSubtitle: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
   },
   disabledNotice: {
     flexDirection: 'row',
@@ -579,7 +737,9 @@ const styles = StyleSheet.create({
   },
   disabledNoticeText: {
     marginLeft: 8,
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     flex: 1,
   },
   settingCard: {
@@ -601,12 +761,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   settingTitle: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginBottom: 4,
   },
   settingSubtitle: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
   },
   expandedContent: {
     padding: 16,
@@ -615,7 +779,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   expandedTitle: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginBottom: 12,
   },
@@ -631,11 +797,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   timeOptionText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     fontWeight: '500',
   },
   helpText: {
+    ...Typography.label,
     fontSize: 13,
+    lineHeight: 18,
     marginTop: 12,
     fontStyle: 'italic',
   },
@@ -651,7 +821,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   genreText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     fontWeight: '500',
   },
   clearButton: {
@@ -660,7 +832,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   clearButtonText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     fontWeight: '600',
   },
   toggleCard: {
@@ -681,11 +855,15 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   toggleText: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
   },
   toggleSubtext: {
+    ...Typography.label,
     fontSize: 13,
+    lineHeight: 18,
   },
   infoSection: {
     flexDirection: 'row',
@@ -700,11 +878,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   infoTitle: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     fontWeight: '600',
     marginBottom: 8,
   },
   infoText: {
+    ...Typography.label,
     fontSize: 14,
     lineHeight: 20,
   },

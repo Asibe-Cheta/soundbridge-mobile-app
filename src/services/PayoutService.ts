@@ -1,5 +1,6 @@
 import { Session } from '@supabase/supabase-js';
 import { config } from '../config/environment';
+import { supabase } from '../lib/supabase';
 
 const API_URL = config.apiUrl.replace('/api', ''); // Remove /api suffix if present
 
@@ -8,8 +9,10 @@ export interface CreatorRevenue {
   id: string;
   user_id: string;
   total_earned: number;
+  available_balance: number;
   pending_balance: number;
   lifetime_payout: number;
+  this_month_earnings: number;
   currency: string;
   created_at: string;
   updated_at: string;
@@ -39,6 +42,10 @@ export interface Payout {
   amount: number;
   currency: string;
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+  method?: 'stripe' | 'fincra';
+  // Legacy column name — holds the provider transfer id for both Stripe and Fincra rails.
+  // For Fincra payouts this contains the Fincra transfer id returned from createFincraTransfer.
+  stripe_transfer_id?: string;
   stripe_payout_id?: string;
   stripe_account_id?: string;
   failure_reason?: string;
@@ -73,6 +80,15 @@ export interface PayoutHistoryResponse {
  * - Premium content purchases
  */
 class PayoutService {
+  private async getFreshToken(session: Session): Promise<string> {
+    try {
+      const { data: { session: fresh } } = await supabase.auth.getSession();
+      return fresh?.access_token ?? session.access_token;
+    } catch {
+      return session.access_token;
+    }
+  }
+
   /**
    * Check if user is eligible for payout and get available balance
    */
@@ -80,13 +96,14 @@ class PayoutService {
     try {
       console.log('🔍 Checking payout eligibility...');
 
+      const token = await this.getFreshToken(session);
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
       const response = await fetch(`${API_URL}/api/payouts/eligibility`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         signal: controller.signal,
@@ -102,7 +119,19 @@ class PayoutService {
       const data = await response.json();
       console.log('✅ Payout eligibility:', data);
 
-      return data;
+      // Handle both flat { eligible, reasons } and nested { eligibility: { eligible, reasons } }
+      const e = data.eligibility ?? data;
+      return {
+        eligible: e.eligible ?? false,
+        minimum_amount: e.minimum_amount ?? e.minimumAmount ?? 25,
+        available_balance: e.available_balance ?? e.availableBalance ?? 0,
+        currency: e.currency ?? 'USD',
+        reasons: e.reasons ?? [],
+        has_bank_account: e.has_bank_account ?? e.hasBankAccount ?? false,
+        bank_account_verified: e.bank_account_verified ?? e.bankAccountVerified ?? false,
+        pending_payouts_count: e.pending_payouts_count ?? e.pendingPayoutsCount ?? 0,
+        next_eligible_date: e.next_eligible_date ?? e.nextEligibleDate,
+      };
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         throw new Error('Request timed out. Please check your connection and try again.');
@@ -122,13 +151,14 @@ class PayoutService {
     try {
       console.log('💸 Requesting payout:', payoutRequest);
 
+      const token = await this.getFreshToken(session);
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout for POST
 
       const response = await fetch(`${API_URL}/api/payouts/request`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payoutRequest),
@@ -140,7 +170,7 @@ class PayoutService {
       const data = await response.json();
 
       if (!response.ok) {
-        console.error('❌ Payout request failed:', data.error);
+        console.error('❌ Payout request failed:', data.error, '| eligibility:', JSON.stringify(data.eligibility ?? null));
         return {
           success: false,
           error: data.error || 'Failed to request payout',
@@ -178,6 +208,7 @@ class PayoutService {
     try {
       console.log(`📜 Fetching payout history (page ${page}, limit ${limit})...`);
 
+      const token = await this.getFreshToken(session);
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
@@ -186,7 +217,7 @@ class PayoutService {
         {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${session.access_token}`,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
           signal: controller.signal,
@@ -221,13 +252,14 @@ class PayoutService {
     try {
       console.log('💰 Fetching creator revenue...');
 
+      const token = await this.getFreshToken(session);
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
       const response = await fetch(`${API_URL}/api/revenue/balance`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         signal: controller.signal,
@@ -246,9 +278,27 @@ class PayoutService {
       }
 
       const data = await response.json();
-      console.log('✅ Creator revenue:', data);
+      console.log('✅ Creator revenue raw response:', JSON.stringify(data));
 
-      return data.revenue;
+      const r = data.revenue;
+      if (!r) {
+        console.warn('⚠️ Creator revenue: data.revenue is null/undefined. Full response:', JSON.stringify(data));
+        return null;
+      }
+
+      // API returns camelCase; map to snake_case for internal use
+      return {
+        id: r.id ?? '',
+        user_id: r.userId ?? r.user_id ?? '',
+        total_earned: parseFloat(r.totalEarned ?? r.total_earned ?? 0),
+        available_balance: parseFloat(r.availableBalance ?? r.available_balance ?? r.pendingBalance ?? r.pending_balance ?? 0),
+        pending_balance: parseFloat(r.pendingBalance ?? r.pending_balance ?? 0),
+        lifetime_payout: parseFloat(r.totalPaidOut ?? r.lifetime_payout ?? 0),
+        this_month_earnings: parseFloat(r.thisMonthEarnings ?? r.this_month_earnings ?? 0),
+        currency: r.currency ?? 'USD',
+        created_at: r.createdAt ?? r.created_at ?? '',
+        updated_at: r.updatedAt ?? r.updated_at ?? '',
+      };
     } catch (error) {
       // Handle network failures gracefully
       if (error instanceof Error) {

@@ -21,6 +21,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import { walletService, WalletBalance, WithdrawalMethod, WithdrawalRequest } from '../services/WalletService';
 import { currencyService } from '../services/CurrencyService';
 import { payoutService, PayoutEligibility, CreatorRevenue } from '../services/PayoutService';
+import { revenueService, BankAccount } from '../services/revenueService';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 interface WithdrawalMethodOption {
   type: 'bank_transfer' | 'paypal' | 'crypto' | 'prepaid_card';
@@ -69,13 +71,15 @@ export default function WithdrawalScreen() {
   const [walletData, setWalletData] = useState<WalletBalance | null>(null);
   const [savedMethods, setSavedMethods] = useState<WithdrawalMethod[]>([]);
   const [selectedMethod, setSelectedMethod] = useState<WithdrawalMethod | null>(null);
-  const [amount, setAmount] = useState('');
+  const [withdrawalAmountInput, setWithdrawalAmountInput] = useState('');
+  const [payoutAmountInput, setPayoutAmountInput] = useState('');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [agreeToFees, setAgreeToFees] = useState(false);
   const [payoutEligibility, setPayoutEligibility] = useState<PayoutEligibility | null>(null);
   const [creatorRevenue, setCreatorRevenue] = useState<CreatorRevenue | null>(null);
+  const [bankAccount, setBankAccount] = useState<BankAccount | null>(null);
   const [showPayoutForm, setShowPayoutForm] = useState(false);
 
   useEffect(() => {
@@ -86,27 +90,28 @@ export default function WithdrawalScreen() {
     try {
       if (!session) {
         Alert.alert('Error', 'You must be logged in to make withdrawals');
+        setLoading(false);
         return;
       }
 
       setLoading(true);
       console.log('💸 Loading withdrawal data...');
 
-      // Load wallet balance, withdrawal methods, payout eligibility, and creator revenue in parallel
-      const [balanceResult, methodsResult, eligibilityResult, revenueResult] = await Promise.all([
+      // Load wallet balance, bank account, payout eligibility, and creator revenue in parallel
+      const [balanceResult, bankResult, eligibilityResult, revenueResult] = await Promise.all([
         walletService.getWalletBalanceSafe(session),
-        walletService.getWithdrawalMethods(session).catch(() => ({ methods: [], count: 0 })),
+        revenueService.getBankAccount(session.user.id).catch(() => null),
         payoutService.checkEligibility(session).catch(() => null),
         payoutService.getCreatorRevenue(session).catch(() => null),
       ]);
 
       setWalletData(balanceResult);
-      setSavedMethods(methodsResult.methods || []);
+      setBankAccount(bankResult);
       setPayoutEligibility(eligibilityResult);
       setCreatorRevenue(revenueResult);
 
       console.log('💰 Wallet balance:', balanceResult);
-      console.log('🏦 Withdrawal methods:', methodsResult.methods?.length || 0);
+      console.log('🏦 Bank account:', bankResult ? `${bankResult.bank_name} (${bankResult.currency})` : 'None');
       console.log('✅ Payout eligibility:', eligibilityResult);
       console.log('💵 Creator revenue:', revenueResult);
     } catch (error) {
@@ -161,7 +166,7 @@ export default function WithdrawalScreen() {
         return;
       }
 
-      if (!validateAmount(amount)) {
+      if (!validateAmount(withdrawalAmountInput)) {
         return;
       }
 
@@ -170,7 +175,7 @@ export default function WithdrawalScreen() {
         return;
       }
 
-      const withdrawalAmount = parseFloat(amount);
+      const withdrawalAmount = parseFloat(withdrawalAmountInput);
       const { fee, net } = calculateFees(withdrawalAmount);
 
       // Show confirmation dialog
@@ -194,7 +199,7 @@ export default function WithdrawalScreen() {
       console.log('💸 Processing withdrawal...');
 
       const withdrawalData: WithdrawalRequest = {
-        amount: parseFloat(amount),
+        amount: parseFloat(withdrawalAmountInput),
         currency: walletData?.currency || 'USD',
         withdrawal_method_id: selectedMethod?.id || '',
         description: description || `Withdrawal via ${selectedMethod?.method_name}`,
@@ -251,16 +256,16 @@ export default function WithdrawalScreen() {
         return;
       }
 
-      if (!validatePayoutAmount(amount)) {
+      if (!validatePayoutAmount(payoutAmountInput)) {
         return;
       }
 
-      const payoutAmount = parseFloat(amount);
+      const payoutAmount = parseFloat(payoutAmountInput);
 
       // Show confirmation dialog
       Alert.alert(
         'Confirm Payout Request',
-        `Request payout of ${currencyService.formatAmount(payoutAmount, creatorRevenue?.currency || 'USD')}?\n\nEstimated processing: 2-7 business days\nNo platform fees for payouts.`,
+        `Request payout of ${currencyService.formatAmount(payoutAmount, creatorRevenue?.currency || 'USD')}?\n\nFunds sent via Fincra (Africa) or Stripe (UK/EU/US). Typically arrive within 1–3 business days.`,
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Request', onPress: () => processPayoutRequest(payoutAmount) }
@@ -288,13 +293,13 @@ export default function WithdrawalScreen() {
 
         Alert.alert(
           'Payout Requested',
-          `Your payout request has been submitted successfully!\n\nAmount: ${currencyService.formatAmount(payoutAmount, creatorRevenue?.currency || 'USD')}\nStatus: Pending\n\nYour funds will arrive in 2-7 business days. You'll receive a notification when the payout is processed.`,
+          `Your payout request has been submitted successfully!\n\nAmount: ${currencyService.formatAmount(payoutAmount, creatorRevenue?.currency || 'USD')}\nStatus: Pending\n\nFunds are sent via Fincra (Africa) or Stripe (UK/EU/US) and typically arrive in your local bank within 1–3 business days. You'll receive a notification when the payout is processed.`,
           [
             {
               text: 'OK',
               onPress: () => {
                 // Reset form and reload data
-                setAmount('');
+                setPayoutAmountInput('');
                 setDescription('');
                 setShowPayoutForm(false);
                 loadData();
@@ -320,10 +325,10 @@ export default function WithdrawalScreen() {
       return false;
     }
 
-    if (!creatorRevenue || numValue > creatorRevenue.pending_balance) {
+    if (!creatorRevenue || numValue > creatorRevenue.available_balance) {
       Alert.alert(
         'Insufficient Balance',
-        `Your available balance is ${currencyService.formatAmount(creatorRevenue?.pending_balance || 0, creatorRevenue?.currency || 'USD')}`
+        `Your available balance is ${currencyService.formatAmount(creatorRevenue?.available_balance || 0, creatorRevenue?.currency || 'USD')}`
       );
       return false;
     }
@@ -429,7 +434,7 @@ export default function WithdrawalScreen() {
     );
   }
 
-  const withdrawalAmount = parseFloat(amount) || 0;
+  const withdrawalAmount = parseFloat(withdrawalAmountInput) || 0;
   const { fee, net } = calculateFees(withdrawalAmount);
 
   return (
@@ -469,7 +474,7 @@ export default function WithdrawalScreen() {
         </View>
 
         {/* Creator Revenue Payout Section */}
-        {creatorRevenue && creatorRevenue.pending_balance > 0 && (
+        {creatorRevenue && creatorRevenue.available_balance > 0 && (
           <View style={[styles.payoutCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.primary }]}>
             <View style={styles.payoutHeader}>
               <Ionicons name="trending-up" size={24} color={theme.colors.primary} />
@@ -480,7 +485,7 @@ export default function WithdrawalScreen() {
               <View style={styles.payoutStat}>
                 <Text style={[styles.payoutStatLabel, { color: theme.colors.textSecondary }]}>Available</Text>
                 <Text style={[styles.payoutStatAmount, { color: theme.colors.primary }]}>
-                  {currencyService.formatAmount(creatorRevenue.pending_balance, creatorRevenue.currency)}
+                  {currencyService.formatAmount(creatorRevenue.available_balance, creatorRevenue.currency)}
                 </Text>
               </View>
               <View style={styles.payoutStat}>
@@ -491,28 +496,52 @@ export default function WithdrawalScreen() {
               </View>
             </View>
 
-            {payoutEligibility && !payoutEligibility.eligible && (
-              <View style={[styles.ineligibleBanner, { backgroundColor: theme.colors.warning + '20', borderColor: theme.colors.warning }]}>
-                <Ionicons name="alert-circle" size={20} color={theme.colors.warning} />
-                <View style={styles.ineligibleInfo}>
-                  <Text style={[styles.ineligibleTitle, { color: theme.colors.warning }]}>Payout Not Available</Text>
-                  {payoutEligibility.reasons.map((reason, index) => (
-                    <Text key={index} style={[styles.ineligibleReason, { color: theme.colors.textSecondary }]}>• {reason}</Text>
-                  ))}
+            {payoutEligibility && !payoutEligibility.eligible && (() => {
+              // Filter out RPC-failure reasons when we have reliable local data
+              const hasLocalData = creatorRevenue.available_balance > 0 && bankAccount?.is_verified;
+              const rpcOnlyFailure = payoutEligibility.reasons.every(r =>
+                r.toLowerCase().includes('unable to determine') || r.toLowerCase().includes('something went wrong')
+              );
+              if (hasLocalData && rpcOnlyFailure) return null;
+              const realReasons = payoutEligibility.reasons.filter(r =>
+                !r.toLowerCase().includes('unable to determine') && !r.toLowerCase().includes('something went wrong')
+              );
+              if (realReasons.length === 0) return null;
+              return (
+                <View style={[styles.ineligibleBanner, { backgroundColor: theme.colors.warning + '20', borderColor: theme.colors.warning }]}>
+                  <Ionicons name="alert-circle" size={20} color={theme.colors.warning} />
+                  <View style={styles.ineligibleInfo}>
+                    <Text style={[styles.ineligibleTitle, { color: theme.colors.warning }]}>Payout Not Available</Text>
+                    {realReasons.map((reason, index) => (
+                      <Text key={index} style={[styles.ineligibleReason, { color: theme.colors.textSecondary }]}>• {reason}</Text>
+                    ))}
+                  </View>
                 </View>
-              </View>
-            )}
+              );
+            })()}
 
-            {(!payoutEligibility || payoutEligibility.eligible) && (
+            {(
+              !payoutEligibility ||
+              payoutEligibility.eligible ||
+              (creatorRevenue.available_balance > 0 && bankAccount?.is_verified)
+            ) && (
               <TouchableOpacity
-                style={[styles.requestPayoutBtn, { backgroundColor: theme.colors.primary }]}
+                style={styles.requestPayoutBtn}
                 onPress={() => setShowPayoutForm(!showPayoutForm)}
-                disabled={creatorRevenue.pending_balance < 25}
+                disabled={creatorRevenue.available_balance < 25}
+                activeOpacity={0.85}
               >
-                <Ionicons name="cash" size={20} color="#FFFFFF" />
-                <Text style={styles.requestPayoutBtnText}>
-                  {creatorRevenue.pending_balance >= 25 ? 'Request Payout' : 'Minimum $25 Required'}
-                </Text>
+                <LinearGradient
+                  colors={['#DC2626', '#EC4899']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.requestPayoutBtnGradient}
+                >
+                  <Ionicons name="cash" size={20} color="#FFFFFF" />
+                  <Text style={styles.requestPayoutBtnText}>
+                    {creatorRevenue.available_balance >= 25 ? 'Request Payout' : 'Minimum $25 Required'}
+                  </Text>
+                </LinearGradient>
               </TouchableOpacity>
             )}
 
@@ -520,14 +549,15 @@ export default function WithdrawalScreen() {
               <View style={styles.payoutForm}>
                 <Text style={[styles.formLabel, { color: theme.colors.text }]}>Payout Amount</Text>
                 <View style={[styles.amountInputContainer, { borderColor: theme.colors.border }]}>
-                  <Text style={[styles.currencySymbol, { color: theme.colors.text }]}>$</Text>
+                    <Text style={[styles.currencySymbol, { color: theme.colors.text }]}>
+                      {currencyService.getCurrencySymbol(creatorRevenue?.currency || 'USD')}
+                    </Text>
                   <TextInput
-                    style={[styles.amountInput, { color: theme.colors.text }]
-}
+                    style={[styles.amountInput, { color: theme.colors.text }]}
                     placeholder="0.00"
                     placeholderTextColor={theme.colors.textSecondary}
-                    value={amount}
-                    onChangeText={setAmount}
+                    value={payoutAmountInput}
+                    onChangeText={setPayoutAmountInput}
                     keyboardType="decimal-pad"
                     maxLength={10}
                   />
@@ -538,194 +568,103 @@ export default function WithdrawalScreen() {
                     <TouchableOpacity
                       key={quickAmount}
                       style={[styles.quickAmountBtn, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-                      onPress={() => setAmount(Math.min(quickAmount, creatorRevenue.pending_balance).toString())}
+                      onPress={() => setPayoutAmountInput(Math.min(quickAmount, creatorRevenue.available_balance).toString())}
                     >
-                      <Text style={[styles.quickAmountText, { color: theme.colors.text }]}>${quickAmount}</Text>
+                    <Text style={[styles.quickAmountText, { color: theme.colors.text }]}>
+                      {currencyService.getCurrencySymbol(creatorRevenue?.currency || 'USD')}
+                      {quickAmount}
+                    </Text>
                     </TouchableOpacity>
                   ))}
                   <TouchableOpacity
                     style={[styles.quickAmountBtn, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-                    onPress={() => setAmount(creatorRevenue.pending_balance.toString())}
+                    onPress={() => setPayoutAmountInput(creatorRevenue.available_balance.toString())}
                   >
                     <Text style={[styles.quickAmountText, { color: theme.colors.text }]}>Max</Text>
                   </TouchableOpacity>
                 </View>
 
                 <TouchableOpacity
-                  style={[styles.submitPayoutBtn, { backgroundColor: theme.colors.primary }]}
+                  style={styles.submitPayoutBtn}
                   onPress={handlePayoutRequest}
-                  disabled={submitting || !amount || parseFloat(amount) <= 0}
+                  disabled={submitting || !payoutAmountInput || parseFloat(payoutAmountInput) <= 0}
+                  activeOpacity={0.85}
                 >
-                  {submitting ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <>
-                      <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
-                      <Text style={styles.submitPayoutBtnText}>Confirm Payout</Text>
-                    </>
-                  )}
+                  <LinearGradient
+                    colors={['#DC2626', '#EC4899']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.submitPayoutBtnGradient}
+                  >
+                    {submitting ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
+                        <Text style={styles.submitPayoutBtnText}>Confirm Payout</Text>
+                      </>
+                    )}
+                  </LinearGradient>
                 </TouchableOpacity>
 
                 <Text style={[styles.payoutNote, { color: theme.colors.textSecondary }]}>
-                  Funds will arrive in 2-7 business days. No fees charged.
+                  Funds are sent via Fincra (Africa) or Stripe (UK/EU/US) and typically arrive in your local bank within 1–3 business days. No SoundBridge fees charged.
                 </Text>
               </View>
             )}
           </View>
         )}
 
-        {/* Amount Input */}
-        <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Withdrawal Amount</Text>
-          <View style={[styles.amountInputContainer, { borderColor: theme.colors.border }]}>
-            <Text style={[styles.currencySymbol, { color: theme.colors.text }]}>$</Text>
-            <TextInput
-              style={[styles.amountInput, { color: theme.colors.text }]}
-              placeholder="0.00"
-              placeholderTextColor={theme.colors.textSecondary}
-              value={amount}
-              onChangeText={setAmount}
-              keyboardType="decimal-pad"
-              maxLength={10}
-            />
-          </View>
-          
-          {/* Quick Amount Buttons */}
-          <View style={styles.quickAmounts}>
-            {[25, 50, 100].map((quickAmount) => (
-              <TouchableOpacity
-                key={quickAmount}
-                style={[styles.quickAmountButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-                onPress={() => setAmount(quickAmount.toString())}
-                disabled={!walletData || quickAmount > walletData.balance}
-              >
-                <Text style={[styles.quickAmountText, { color: theme.colors.text }]}>${quickAmount}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity
-              style={[styles.quickAmountButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-              onPress={() => setAmount(walletData?.balance.toString() || '0')}
-              disabled={!walletData || walletData.balance <= 0}
-            >
-              <Text style={[styles.quickAmountText, { color: theme.colors.text }]}>Max</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Withdrawal Methods */}
+        {/* Payout Destination — sourced from creator_bank_accounts */}
         <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
           <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Withdrawal Method</Text>
-            <TouchableOpacity 
-              onPress={() => navigation.navigate('WithdrawalMethods' as never)}
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Payout Destination</Text>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('PaymentMethods' as never)}
               style={styles.manageButton}
             >
               <Text style={[styles.manageButtonText, { color: theme.colors.primary }]}>Manage</Text>
             </TouchableOpacity>
           </View>
-          
-          {savedMethods.length > 0 ? (
-            <View style={styles.methodsList}>
-              {savedMethods.map(renderWithdrawalMethod)}
+
+          {bankAccount ? (
+            <View style={[styles.bankAccountCard, { backgroundColor: theme.colors.surface, borderColor: bankAccount.is_verified ? theme.colors.success : theme.colors.border }]}>
+              <View style={styles.bankAccountRow}>
+                <View style={[styles.bankIcon, { backgroundColor: theme.colors.primary + '20' }]}>
+                  <Ionicons name="business" size={22} color={theme.colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.bankName, { color: theme.colors.text }]}>{bankAccount.bank_name}</Text>
+                  <Text style={[styles.bankDetail, { color: theme.colors.textSecondary }]}>
+                    {bankAccount.account_holder_name} · ****{bankAccount.account_number_encrypted?.slice(-4)} · {bankAccount.currency}
+                  </Text>
+                </View>
+                {bankAccount.is_verified && (
+                  <View style={[styles.verifiedBadge, { backgroundColor: theme.colors.success + '20' }]}>
+                    <Ionicons name="checkmark-circle" size={14} color={theme.colors.success} />
+                    <Text style={[styles.verifiedText, { color: theme.colors.success }]}>Verified</Text>
+                  </View>
+                )}
+              </View>
             </View>
           ) : (
             <View style={styles.noMethodsState}>
               <Ionicons name="card-outline" size={48} color={theme.colors.textSecondary} />
-              <Text style={[styles.noMethodsTitle, { color: theme.colors.text }]}>No Withdrawal Methods</Text>
+              <Text style={[styles.noMethodsTitle, { color: theme.colors.text }]}>No Bank Account</Text>
               <Text style={[styles.noMethodsText, { color: theme.colors.textSecondary }]}>
-                Add a withdrawal method to start receiving payments
+                Add your bank account in Payment Methods to receive payouts
               </Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.addMethodButton, { backgroundColor: theme.colors.primary }]}
-                onPress={() => navigation.navigate('AddWithdrawalMethod' as never)}
+                onPress={() => navigation.navigate('PaymentMethods' as never)}
               >
                 <Ionicons name="add" size={20} color="#FFFFFF" />
-                <Text style={styles.addMethodButtonText}>Add Method</Text>
+                <Text style={styles.addMethodButtonText}>Add Bank Account</Text>
               </TouchableOpacity>
             </View>
           )}
         </View>
 
-        {/* Description (Optional) */}
-        <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Description (Optional)</Text>
-          <TextInput
-            style={[styles.descriptionInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
-            placeholder="Add a note for this withdrawal..."
-            placeholderTextColor={theme.colors.textSecondary}
-            value={description}
-            onChangeText={setDescription}
-            multiline
-            maxLength={200}
-          />
-        </View>
-
-        {/* Fee Breakdown */}
-        {withdrawalAmount > 0 && (
-          <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Fee Breakdown</Text>
-            <View style={styles.feeBreakdown}>
-              <View style={styles.feeRow}>
-                <Text style={[styles.feeLabel, { color: theme.colors.textSecondary }]}>Withdrawal Amount</Text>
-                <Text style={[styles.feeValue, { color: theme.colors.text }]}>
-                  {currencyService.formatAmount(withdrawalAmount, walletData?.currency || 'USD')}
-                </Text>
-              </View>
-              <View style={styles.feeRow}>
-                <Text style={[styles.feeLabel, { color: theme.colors.textSecondary }]}>Processing Fee (2.5%)</Text>
-                <Text style={[styles.feeValue, { color: theme.colors.error }]}>
-                  -{currencyService.formatAmount(fee, walletData?.currency || 'USD')}
-                </Text>
-              </View>
-              <View style={[styles.feeRow, styles.totalRow, { borderTopColor: theme.colors.border }]}>
-                <Text style={[styles.feeLabel, styles.totalLabel, { color: theme.colors.text }]}>You'll Receive</Text>
-                <Text style={[styles.feeValue, styles.totalValue, { color: theme.colors.success }]}>
-                  {currencyService.formatAmount(net, walletData?.currency || 'USD')}
-                </Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* Agreement */}
-        <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-          <View style={styles.agreementContainer}>
-            <Switch
-              value={agreeToFees}
-              onValueChange={setAgreeToFees}
-              trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
-              thumbColor={agreeToFees ? theme.colors.primary : theme.colors.textSecondary}
-            />
-            <Text style={[styles.agreementText, { color: theme.colors.textSecondary }]}>
-              I agree to the processing fees and understand that withdrawals may take 1-3 business days to complete.
-            </Text>
-          </View>
-        </View>
-
-        {/* Submit Button */}
-        <TouchableOpacity
-          style={[
-            styles.submitButton,
-            {
-              backgroundColor: (selectedMethod && withdrawalAmount > 0 && agreeToFees) 
-                ? theme.colors.primary 
-                : theme.colors.textSecondary,
-            }
-          ]}
-          onPress={handleWithdrawal}
-          disabled={!selectedMethod || withdrawalAmount <= 0 || !agreeToFees || submitting}
-        >
-          {submitting ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <>
-              <Ionicons name="arrow-up-circle" size={20} color="#FFFFFF" />
-              <Text style={styles.submitButtonText}>
-                Submit Withdrawal
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
       </ScrollView>
       </SafeAreaView>
     </View>
@@ -755,8 +694,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   loadingText: {
-    fontSize: 16,
-    fontWeight: '500',
+    ...Typography.body,
   },
   header: {
     flexDirection: 'row',
@@ -775,8 +713,11 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 34,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    lineHeight: 40,
+    fontFamily: Typography.body.fontFamily,
   },
   placeholder: {
     width: 40,
@@ -798,13 +739,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   balanceTitle: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
     marginLeft: 8,
   },
   balanceAmount: {
+    ...Typography.button,
     fontSize: 24,
-    fontWeight: 'bold',
   },
   section: {
     borderRadius: 12,
@@ -813,8 +754,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   sectionTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
     marginBottom: 16,
   },
   sectionHeader: {
@@ -828,8 +769,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   manageButtonText: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
   },
   amountInputContainer: {
     flexDirection: 'row',
@@ -841,14 +782,14 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   currencySymbol: {
+    ...Typography.button,
     fontSize: 18,
-    fontWeight: 'bold',
     marginRight: 8,
   },
   amountInput: {
+    ...Typography.button,
     flex: 1,
     fontSize: 18,
-    fontWeight: '600',
   },
   quickAmounts: {
     flexDirection: 'row',
@@ -863,8 +804,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   quickAmountText: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
   },
   methodsList: {
     gap: 12,
@@ -890,12 +831,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   methodName: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
     marginBottom: 2,
   },
   methodDescription: {
-    fontSize: 14,
+    ...Typography.label,
     lineHeight: 18,
   },
   radioButton: {
@@ -917,8 +858,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   comingSoonText: {
+    ...Typography.label,
     fontSize: 10,
-    fontWeight: '600',
     textTransform: 'uppercase',
   },
   methodTitleRow: {
@@ -933,8 +874,8 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   defaultText: {
+    ...Typography.label,
     fontSize: 10,
-    fontWeight: '600',
     textTransform: 'uppercase',
   },
   pendingBadge: {
@@ -943,8 +884,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   pendingText: {
+    ...Typography.label,
     fontSize: 10,
-    fontWeight: '600',
     textTransform: 'uppercase',
   },
   noMethodsState: {
@@ -953,13 +894,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   noMethodsTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
   },
   noMethodsText: {
-    fontSize: 14,
+    ...Typography.label,
     textAlign: 'center',
-    lineHeight: 20,
   },
   addMethodButton: {
     flexDirection: 'row',
@@ -971,17 +911,56 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   addMethodButtonText: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
     color: '#FFFFFF',
   },
+  bankAccountCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+  },
+  bankAccountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  bankIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bankName: {
+    ...Typography.headerSmall,
+    fontSize: 15,
+  },
+  bankDetail: {
+    ...Typography.label,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  verifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  verifiedText: {
+    ...Typography.label,
+    fontSize: 12,
+    fontWeight: '600',
+  },
   descriptionInput: {
+    ...Typography.body,
     borderWidth: 1,
     borderRadius: 8,
     padding: 12,
     minHeight: 80,
     textAlignVertical: 'top',
-    fontSize: 16,
   },
   feeBreakdown: {
     gap: 8,
@@ -998,18 +977,18 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   feeLabel: {
-    fontSize: 14,
+    ...Typography.label,
   },
   totalLabel: {
-    fontWeight: '600',
+    ...Typography.button,
+    fontSize: 14,
   },
   feeValue: {
-    fontSize: 14,
-    fontWeight: '500',
+    ...Typography.label,
   },
   totalValue: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: 'bold',
   },
   agreementContainer: {
     flexDirection: 'row',
@@ -1017,9 +996,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   agreementText: {
+    ...Typography.label,
     flex: 1,
-    fontSize: 14,
-    lineHeight: 20,
   },
   submitButton: {
     flexDirection: 'row',
@@ -1032,8 +1010,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   submitButtonText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: 'bold',
     color: '#FFFFFF',
   },
   payoutCard: {
@@ -1048,8 +1026,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   payoutTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
     marginLeft: 12,
   },
   payoutStats: {
@@ -1062,13 +1040,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   payoutStatLabel: {
+    ...Typography.label,
     fontSize: 12,
-    fontWeight: '500',
     marginBottom: 4,
   },
   payoutStatAmount: {
+    ...Typography.button,
     fontSize: 18,
-    fontWeight: 'bold',
   },
   ineligibleBanner: {
     flexDirection: 'row',
@@ -1082,27 +1060,31 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   ineligibleTitle: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
     marginBottom: 4,
   },
   ineligibleReason: {
+    ...Typography.label,
     fontSize: 12,
     lineHeight: 16,
   },
   requestPayoutBtn: {
+    marginBottom: 8,
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  requestPayoutBtnGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 14,
     paddingHorizontal: 20,
-    borderRadius: 8,
     gap: 8,
-    marginBottom: 8,
   },
   requestPayoutBtnText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: 'bold',
     color: '#FFFFFF',
   },
   payoutForm: {
@@ -1112,8 +1094,8 @@ const styles = StyleSheet.create({
     borderTopColor: '#E5E7EB',
   },
   formLabel: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
     marginBottom: 8,
   },
   quickAmountBtn: {
@@ -1125,25 +1107,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   quickAmountText: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
   },
   submitPayoutBtn: {
+    marginTop: 16,
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  submitPayoutBtnGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 14,
     paddingHorizontal: 20,
-    borderRadius: 8,
     gap: 8,
-    marginTop: 16,
   },
   submitPayoutBtnText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: 'bold',
     color: '#FFFFFF',
   },
   payoutNote: {
+    ...Typography.label,
     fontSize: 12,
     textAlign: 'center',
     marginTop: 12,

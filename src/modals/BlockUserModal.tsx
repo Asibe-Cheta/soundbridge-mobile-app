@@ -20,7 +20,7 @@ import type { BlockStatus } from '../types/block.types';
 
 interface BlockUserModalProps {
   visible: boolean;
-  onClose: () => void;
+  onClose?: () => void;
   userId: string;
   userName: string;
   userAvatar?: string;
@@ -53,7 +53,7 @@ export default function BlockUserModal({
     try {
       await blockService.blockUser(userId, reason.trim() || undefined);
       onBlocked?.();
-      onClose();
+      onClose?.();
       setReason('');
       Alert.alert('Success', `You have blocked ${userName}`);
     } catch (err: any) {
@@ -70,7 +70,7 @@ export default function BlockUserModal({
     try {
       await blockService.unblockUser(userId);
       onUnblocked?.();
-      onClose();
+      onClose?.();
       Alert.alert('Success', `You have unblocked ${userName}`);
     } catch (err: any) {
       setError(err.message || 'Failed to unblock user');
@@ -83,7 +83,7 @@ export default function BlockUserModal({
     if (!loading) {
       setReason('');
       setError(null);
-      onClose();
+      onClose?.();
     }
   };
 

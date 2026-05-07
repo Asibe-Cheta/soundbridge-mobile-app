@@ -38,6 +38,7 @@ export default function WithdrawalMethodsScreen() {
     try {
       if (!session) {
         Alert.alert('Error', 'You must be logged in to view withdrawal methods');
+        setLoading(false);
         return;
       }
 
@@ -66,8 +67,11 @@ export default function WithdrawalMethodsScreen() {
     navigation.navigate('AddWithdrawalMethod' as never);
   };
 
-  const handleEditMethod = (method: WithdrawalMethod) => {
-    navigation.navigate('EditWithdrawalMethod' as never, { method } as never);
+  const handleEditMethod = () => {
+    Alert.alert(
+      'Edit Not Available',
+      'Editing withdrawal methods is not available yet. Please add a new method instead.'
+    );
   };
 
   const handleDeleteMethod = async (method: WithdrawalMethod) => {
@@ -229,7 +233,7 @@ export default function WithdrawalMethodsScreen() {
         
         <TouchableOpacity 
           style={[styles.actionButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-          onPress={() => handleEditMethod(method)}
+          onPress={handleEditMethod}
         >
           <Ionicons name="pencil" size={16} color={theme.colors.text} />
           <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>Edit</Text>

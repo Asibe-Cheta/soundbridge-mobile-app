@@ -15,6 +15,7 @@ export const useFeed = () => {
   const [error, setError] = useState<string | null>(null);
   const isInitialLoadRef = useRef(true);
   const backgroundRefreshRef = useRef(false);
+  const postsRef = useRef<Post[]>([]);
 
   // Load initial posts with instant cache loading
   const loadPosts = useCallback(async (pageNum: number = 1, forceRefresh: boolean = false) => {
@@ -66,9 +67,25 @@ export const useFeed = () => {
       );
 
       if (isFirstPage) {
-        setPosts(newPosts);
-        // Cache the fresh data
-        await feedCacheService.saveFeedCache(newPosts, pageNum, more);
+        // Merge reactions from current displayed posts into fresh API data.
+        // If the Supabase user-reactions query fails (silently returns null rows),
+        // fresh posts will have user_reaction: null — this preserves whatever the
+        // user last had on screen so reactions don't vanish on every refresh.
+        const prevReactionMap = new Map<string, string>(
+          postsRef.current
+            .filter((p): p is Post & { user_reaction: string } => p.user_reaction != null)
+            .map(p => [p.id, p.user_reaction])
+        );
+        const postsToSet = prevReactionMap.size === 0
+          ? newPosts
+          : newPosts.map(p =>
+              p.user_reaction != null
+                ? p
+                : { ...p, user_reaction: prevReactionMap.get(p.id) ?? null }
+            );
+        setPosts(postsToSet);
+        // Cache the merged data so reactions survive the next app restart too
+        await feedCacheService.saveFeedCache(postsToSet, pageNum, more);
       } else {
         setPosts((prev) => {
           const updated = [...prev, ...newPosts];
@@ -170,41 +187,48 @@ export const useFeed = () => {
         })
       );
 
-      try {
-        const currentPost = posts.find((p) => p.id === postId);
-        const isTogglingOff = currentPost?.user_reaction === reactionType;
+      // Capture pre-update state BEFORE any async work (avoids stale closure bugs)
+      const currentPost = posts.find((p) => p.id === postId);
+      const isTogglingOff = currentPost?.user_reaction === reactionType;
 
+      // Compute what the new state should be (mirrors the optimistic update above)
+      const newUserReaction = isTogglingOff ? null : reactionType;
+      const newReactionsCount = { ...(currentPost?.reactions_count ?? { support: 0, love: 0, fire: 0, congrats: 0 }) };
+      if (isTogglingOff) {
+        newReactionsCount[reactionType] = Math.max(0, (newReactionsCount[reactionType] || 0) - 1);
+      } else {
+        if (currentPost?.user_reaction) {
+          newReactionsCount[currentPost.user_reaction] = Math.max(0, (newReactionsCount[currentPost.user_reaction] || 0) - 1);
+        }
+        newReactionsCount[reactionType] = (newReactionsCount[reactionType] || 0) + 1;
+      }
+
+      try {
         if (isTogglingOff) {
           await feedService.removeReaction(postId);
         } else {
           await feedService.addReaction(postId, reactionType);
         }
-        
-        // Update cache with new reaction state
-        const updatedPost = posts.find((p) => p.id === postId);
-        if (updatedPost) {
-          await feedCacheService.updatePostInCache(postId, {
-            user_reaction: updatedPost.user_reaction,
-            reactions_count: updatedPost.reactions_count,
-          });
-        }
+
+        // Update cache with the correctly computed new state (not stale closure)
+        await feedCacheService.updatePostInCache(postId, {
+          user_reaction: newUserReaction,
+          reactions_count: newReactionsCount,
+        });
       } catch (err) {
-        // Revert on error - reload the post to get correct state
-        const currentPost = posts.find((p) => p.id === postId);
-        if (currentPost) {
-          setPosts((prev) =>
-            prev.map((post) => {
-              if (post.id === postId) {
-                return {
-                  ...post,
-                  user_reaction: currentPost.user_reaction,
-                  reactions_count: currentPost.reactions_count,
-                };
-              }
-              return post;
-            })
-          );
-        }
+        // Revert optimistic update using pre-captured state
+        setPosts((prev) =>
+          prev.map((post) => {
+            if (post.id === postId && currentPost) {
+              return {
+                ...post,
+                user_reaction: currentPost.user_reaction,
+                reactions_count: currentPost.reactions_count,
+              };
+            }
+            return post;
+          })
+        );
         throw err;
       }
     },
@@ -257,6 +281,11 @@ export const useFeed = () => {
       );
       throw err;
     }
+  }, [posts]);
+
+  // Keep postsRef in sync so loadPosts can read current posts without stale closure issues
+  useEffect(() => {
+    postsRef.current = posts;
   }, [posts]);
 
   // Subscribe to real-time updates

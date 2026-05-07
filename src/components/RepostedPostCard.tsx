@@ -1,6 +1,7 @@
 import React, { memo, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import VerifiedAvatar from './VerifiedAvatar';
 import VerifiedBadge from './VerifiedBadge';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,6 +33,11 @@ export const RepostedPostCard = memo(function RepostedPostCard({
   const [isConnecting, setIsConnecting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showSeeMore, setShowSeeMore] = useState(false);
+
+  // Guard: if post or author is missing (API returned incomplete repost data), render nothing
+  if (!post || !post.author) {
+    return null;
+  }
 
   const isOwnPost = user?.id === post.author.id;
   const CHAR_LIMIT = 200;
@@ -128,16 +134,12 @@ export const RepostedPostCard = memo(function RepostedPostCard({
           onPress={handleAuthorPress}
           activeOpacity={0.7}
         >
-          <View style={[styles.avatar, { borderColor: theme.colors.border }]}>
-            {post.author.avatar_url ? (
-              <Image
-                source={{ uri: post.author.avatar_url }}
-                style={styles.avatarImage}
-              />
-            ) : (
-              <Ionicons name="person" size={16} color={theme.colors.textSecondary} />
-            )}
-          </View>
+          <VerifiedAvatar
+            avatarUrl={post.author.avatar_url}
+            isVerified={post.author.is_verified}
+            size={40}
+            marginRight={10}
+          />
           <View style={styles.authorInfo}>
             <View style={styles.authorNameRow}>
               <Text style={[styles.authorName, { color: theme.colors.text }]} numberOfLines={1}>
@@ -302,6 +304,23 @@ const styles = StyleSheet.create({
     marginRight: 10,
     borderWidth: 1,
     overflow: 'hidden',
+  },
+  verifiedRing: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    padding: 2.5,
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verifiedRingInner: {
+    width: 41,
+    height: 41,
+    borderRadius: 20.5,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarImage: {
     width: 40,

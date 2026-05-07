@@ -15,11 +15,13 @@ import {
 import Slider from '@react-native-community/slider';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { brandingService, BrandingSettings } from '../services/BrandingService';
 import RevenueCatService from '../services/RevenueCatService';
+import { supabase } from '../lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
 
 const PREDEFINED_COLORS = [
@@ -62,6 +64,7 @@ export default function BrandingCustomizationScreen() {
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState<string | null>(null);
   const [hasPremiumAccess, setHasPremiumAccess] = useState(false);
+  const [hexInputValues, setHexInputValues] = useState<Record<string, string>>({});
 
   useEffect(() => {
     checkTierAccess();
@@ -70,13 +73,30 @@ export default function BrandingCustomizationScreen() {
 
   const checkTierAccess = async () => {
     try {
+      // Try RevenueCat first (works in production builds)
       if (RevenueCatService.isReady()) {
         const customerInfo = await RevenueCatService.getCustomerInfo();
         if (customerInfo) {
           const hasPremium = RevenueCatService.checkPremiumEntitlement(customerInfo);
           const hasUnlimited = RevenueCatService.checkUnlimitedEntitlement(customerInfo);
-          setHasPremiumAccess(hasPremium || hasUnlimited);
+          if (hasPremium || hasUnlimited) {
+            setHasPremiumAccess(true);
+            return;
+          }
         }
+      }
+
+      // Fallback: read subscription_tier directly from profiles (handles early adopters
+      // and cases where RevenueCat is unavailable, e.g. Expo Go)
+      if (user?.id) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('subscription_tier')
+          .eq('id', user.id)
+          .single();
+
+        const tier = (profile?.subscription_tier || 'free').toLowerCase();
+        setHasPremiumAccess(tier === 'premium' || tier === 'unlimited');
       }
     } catch (error) {
       console.error('Error checking tier access:', error);
@@ -101,7 +121,7 @@ export default function BrandingCustomizationScreen() {
           primary_color: '#EF4444',
           secondary_color: '#1F2937',
           accent_color: '#F59E0B',
-          show_powered_by: true,
+          show_powered_by: false,
           watermark_enabled: false,
           watermark_opacity: 30,
           watermark_position: 'bottom-right',
@@ -127,7 +147,6 @@ export default function BrandingCustomizationScreen() {
 
       if (result.success) {
         setBranding(updatedBranding);
-        Alert.alert('Success', 'Branding settings updated successfully');
       } else {
         Alert.alert('Error', result.error || 'Failed to update branding settings');
       }
@@ -139,10 +158,76 @@ export default function BrandingCustomizationScreen() {
     }
   };
 
-  const handleColorChange = (colorType: 'primary_color' | 'secondary_color' | 'accent_color', color: string) => {
+  const handleResetColors = () => {
+    Alert.alert(
+      'Reset Brand Colors',
+      'Reset primary, secondary, and accent colors to defaults?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => saveBranding({ primary_color: '#EF4444', secondary_color: '#1F2937', accent_color: '#F59E0B' }),
+        },
+      ]
+    );
+  };
+
+  const handleResetBorder = () => {
+    Alert.alert(
+      'Reset Border',
+      'Reset profile picture border to default?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => saveBranding({
+            avatar_border_type: 'single',
+            avatar_border_color: null,
+            avatar_border_gradient_start: null,
+            avatar_border_gradient_end: null,
+          }),
+        },
+      ]
+    );
+  };
+
+  const handleResetAll = () => {
+    Alert.alert(
+      'Reset All Branding',
+      'This will remove your custom logo and reset all colors, borders, and settings to defaults.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset Everything',
+          style: 'destructive',
+          onPress: () => saveBranding({
+            primary_color: '#EF4444',
+            secondary_color: '#1F2937',
+            accent_color: '#F59E0B',
+            custom_logo_url: null,
+            custom_logo_position: 'top-left',
+            layout_style: 'default',
+            show_powered_by: false,
+            watermark_enabled: false,
+            watermark_opacity: 30,
+            watermark_position: 'bottom-right',
+            avatar_border_type: 'single',
+            avatar_border_color: null,
+            avatar_border_gradient_start: null,
+            avatar_border_gradient_end: null,
+          }),
+        },
+      ]
+    );
+  };
+
+  const handleColorChange = (colorType: 'primary_color' | 'secondary_color' | 'accent_color', color: string, keepPickerOpen = false) => {
     if (!branding) return;
     saveBranding({ [colorType]: color });
-    setShowColorPicker(null);
+    setHexInputValues(prev => ({ ...prev, [colorType]: undefined as any }));
+    if (!keepPickerOpen) setShowColorPicker(null);
   };
 
   const handleLogoUpload = async () => {
@@ -279,7 +364,7 @@ export default function BrandingCustomizationScreen() {
                     { backgroundColor: color },
                     currentColor === color && styles.selectedSwatch,
                   ]}
-                  onPress={() => handleColorChange(colorType, color)}
+                  onPress={() => handleColorChange(colorType, color, true)}
                 >
                   {currentColor === color && (
                     <Ionicons name="checkmark" size={16} color="#FFFFFF" />
@@ -293,15 +378,80 @@ export default function BrandingCustomizationScreen() {
               <Text style={[styles.hexLabel, { color: theme.colors.textSecondary }]}>Or enter hex code:</Text>
               <TextInput
                 style={[styles.hexInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
-                value={currentColor}
+                value={hexInputValues[colorType] !== undefined ? hexInputValues[colorType] : currentColor}
                 placeholder="#EF4444"
                 placeholderTextColor={theme.colors.textMuted}
                 onChangeText={(text) => {
-                  if (text.match(/^#[0-9A-Fa-f]{0,6}$/)) {
-                    handleColorChange(colorType, text);
+                  // Allow partial typing without saving
+                  if (text.match(/^#?[0-9A-Fa-f]{0,6}$/)) {
+                    const normalized = text.startsWith('#') ? text : `#${text}`;
+                    setHexInputValues(prev => ({ ...prev, [colorType]: normalized }));
+                    // Only save when we have a complete valid hex
+                    if (normalized.match(/^#[0-9A-Fa-f]{6}$/)) {
+                      handleColorChange(colorType, normalized, false); // false = close picker
+                    }
                   }
                 }}
+                onBlur={() => {
+                  // On blur, if partial, revert display to current saved color
+                  setHexInputValues(prev => ({ ...prev, [colorType]: undefined as any }));
+                }}
                 maxLength={7}
+                autoCapitalize="characters"
+              />
+            </View>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderBorderColorPicker = (field: string, label: string, currentColor: string) => {
+    const isOpen = showColorPicker === field;
+    return (
+      <View style={styles.colorSection}>
+        <Text style={[styles.label, { color: theme.colors.text }]}>{label}</Text>
+        <TouchableOpacity
+          style={[styles.colorButton, { borderColor: theme.colors.border }]}
+          onPress={() => setShowColorPicker(isOpen ? null : field)}
+        >
+          <View style={[styles.colorPreview, { backgroundColor: currentColor }]} />
+          <Text style={[styles.colorValue, { color: theme.colors.text }]}>{currentColor}</Text>
+          <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+        {isOpen && (
+          <View style={[styles.colorPickerContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <View style={styles.colorSwatches}>
+              {PREDEFINED_COLORS.map((color) => (
+                <TouchableOpacity
+                  key={color}
+                  style={[styles.colorSwatch, { backgroundColor: color }, currentColor === color && styles.selectedSwatch]}
+                  onPress={() => { saveBranding({ [field]: color }); setShowColorPicker(null); }}
+                >
+                  {currentColor === color && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.hexInputContainer}>
+              <Text style={[styles.hexLabel, { color: theme.colors.textSecondary }]}>Or enter hex code:</Text>
+              <TextInput
+                style={[styles.hexInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
+                value={hexInputValues[field] !== undefined ? hexInputValues[field] : currentColor}
+                placeholder="#FFFFFF"
+                placeholderTextColor={theme.colors.textMuted}
+                onChangeText={(text) => {
+                  if (text.match(/^#?[0-9A-Fa-f]{0,6}$/)) {
+                    const normalized = text.startsWith('#') ? text : `#${text}`;
+                    setHexInputValues(prev => ({ ...prev, [field]: normalized }));
+                    if (normalized.match(/^#[0-9A-Fa-f]{6}$/)) {
+                      saveBranding({ [field]: normalized });
+                      setShowColorPicker(null);
+                    }
+                  }
+                }}
+                onBlur={() => setHexInputValues(prev => ({ ...prev, [field]: undefined as any }))}
+                maxLength={7}
+                autoCapitalize="characters"
               />
             </View>
           </View>
@@ -346,7 +496,13 @@ export default function BrandingCustomizationScreen() {
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Colors Section */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Brand Colors</Text>
+          <View style={styles.sectionTitleRow}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text, marginBottom: 0 }]}>Brand Colors</Text>
+            <TouchableOpacity onPress={handleResetColors} style={styles.sectionResetButton}>
+              <Ionicons name="refresh-outline" size={16} color={theme.colors.textSecondary} />
+              <Text style={[styles.sectionResetText, { color: theme.colors.textSecondary }]}>Reset</Text>
+            </TouchableOpacity>
+          </View>
           {renderColorPicker('primary_color', 'Primary Color')}
           {renderColorPicker('secondary_color', 'Secondary Color')}
           {renderColorPicker('accent_color', 'Accent Color')}
@@ -548,6 +704,92 @@ export default function BrandingCustomizationScreen() {
           </View>
         )}
 
+        {/* Profile Picture Border */}
+        <View style={styles.section}>
+          <View style={styles.sectionTitleRow}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text, marginBottom: 0 }]}>Profile Picture Border</Text>
+            <TouchableOpacity onPress={handleResetBorder} style={styles.sectionResetButton}>
+              <Ionicons name="refresh-outline" size={16} color={theme.colors.textSecondary} />
+              <Text style={[styles.sectionResetText, { color: theme.colors.textSecondary }]}>Reset</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Live preview */}
+          <View style={styles.borderPreviewRow}>
+            {(branding.avatar_border_type ?? 'single') === 'gradient' ? (
+              <LinearGradient
+                colors={[
+                  branding.avatar_border_gradient_start || '#7C3AED',
+                  branding.avatar_border_gradient_end || '#EC4899',
+                ]}
+                style={styles.avatarBorderPreviewGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <View style={[styles.avatarBorderPreviewInner, { backgroundColor: theme.colors.surface }]}>
+                  <Ionicons name="person" size={20} color={theme.colors.textSecondary} />
+                </View>
+              </LinearGradient>
+            ) : (
+              <View style={[
+                styles.avatarBorderPreviewCircle,
+                {
+                  borderColor: (branding.avatar_border_type ?? 'single') === 'none'
+                    ? 'transparent'
+                    : (branding.avatar_border_color || '#FFFFFF'),
+                  backgroundColor: theme.colors.surface,
+                },
+              ]}>
+                <Ionicons name="person" size={20} color={theme.colors.textSecondary} />
+              </View>
+            )}
+            <Text style={[styles.borderPreviewLabel, { color: theme.colors.textSecondary }]}>Live preview</Text>
+          </View>
+
+          {/* Border type selector */}
+          <Text style={[styles.label, { color: theme.colors.text }]}>Border Style</Text>
+          <View style={styles.borderTypeRow}>
+            {[
+              { value: 'none', label: 'None', icon: 'ban-outline' },
+              { value: 'single', label: 'Single Color', icon: 'ellipse-outline' },
+              { value: 'gradient', label: 'Gradient', icon: 'color-filter-outline' },
+            ].map((opt) => {
+              const isActive = (branding.avatar_border_type ?? 'single') === opt.value;
+              return (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[
+                    styles.borderTypeButton,
+                    {
+                      backgroundColor: isActive ? theme.colors.primary + '20' : theme.colors.surface,
+                      borderColor: isActive ? theme.colors.primary : theme.colors.border,
+                    },
+                  ]}
+                  onPress={() => saveBranding({ avatar_border_type: opt.value as any })}
+                >
+                  <Ionicons name={opt.icon as any} size={14} color={isActive ? theme.colors.primary : theme.colors.textSecondary} />
+                  <Text style={[styles.borderTypeText, { color: isActive ? theme.colors.primary : theme.colors.text }]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Single color picker */}
+          {(branding.avatar_border_type ?? 'single') === 'single' &&
+            renderBorderColorPicker('avatar_border_color', 'Border Color', branding.avatar_border_color || '#FFFFFF')
+          }
+
+          {/* Gradient pickers */}
+          {(branding.avatar_border_type ?? 'single') === 'gradient' && (
+            <>
+              {renderBorderColorPicker('avatar_border_gradient_start', 'Gradient Start', branding.avatar_border_gradient_start || '#7C3AED')}
+              {renderBorderColorPicker('avatar_border_gradient_end', 'Gradient End', branding.avatar_border_gradient_end || '#EC4899')}
+            </>
+          )}
+        </View>
+
         {/* Powered By Toggle */}
         <View style={styles.section}>
           <View style={styles.settingRow}>
@@ -561,7 +803,7 @@ export default function BrandingCustomizationScreen() {
               </View>
             </View>
             <Switch
-              value={branding.show_powered_by !== false}
+              value={branding.show_powered_by === true}
               onValueChange={(value) => {
                 if (!hasPremiumAccess && !value) {
                   Alert.alert('Required', 'Free accounts must show "Powered by SoundBridge"');
@@ -570,10 +812,24 @@ export default function BrandingCustomizationScreen() {
                 saveBranding({ show_powered_by: value });
               }}
               trackColor={{ false: theme.colors.border, true: theme.colors.primary + '80' }}
-              thumbColor={branding.show_powered_by !== false ? theme.colors.primary : theme.colors.textSecondary}
+              thumbColor={branding.show_powered_by === true ? theme.colors.primary : theme.colors.textSecondary}
               disabled={!hasPremiumAccess}
             />
           </View>
+        </View>
+        {/* Reset All */}
+        <View style={styles.resetAllSection}>
+          <TouchableOpacity
+            style={[styles.resetAllButton, { borderColor: theme.colors.error + '60' }]}
+            onPress={handleResetAll}
+            disabled={saving}
+          >
+            <Ionicons name="refresh-circle-outline" size={20} color={theme.colors.error} />
+            <Text style={[styles.resetAllText, { color: theme.colors.error }]}>Reset All Branding</Text>
+          </TouchableOpacity>
+          <Text style={[styles.resetAllSubtext, { color: theme.colors.textSecondary }]}>
+            Removes custom logo and restores all settings to defaults
+          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -830,6 +1086,99 @@ const styles = StyleSheet.create({
     height: 40,
     marginTop: 8,
     marginBottom: 16,
+  },
+  borderPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: 20,
+  },
+  avatarBorderPreviewGradient: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    padding: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarBorderPreviewInner: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarBorderPreviewCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  borderPreviewLabel: {
+    fontSize: 12,
+  },
+  borderTypeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  borderTypeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 5,
+  },
+  borderTypeText: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  sectionResetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  sectionResetText: {
+    fontSize: 12,
+  },
+  resetAllSection: {
+    marginTop: 8,
+    marginBottom: 32,
+    alignItems: 'center',
+    gap: 8,
+  },
+  resetAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+    borderWidth: 1,
+    width: '100%',
+  },
+  resetAllText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  resetAllSubtext: {
+    fontSize: 12,
+    textAlign: 'center',
   },
 });
 

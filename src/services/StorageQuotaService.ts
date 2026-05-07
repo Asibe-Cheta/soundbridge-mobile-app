@@ -9,23 +9,23 @@ import { config } from '../config/environment';
 
 // Storage limits in bytes
 export const STORAGE_LIMITS = {
-  free: 30 * 1024 * 1024,       // 30MB
+  free: 250 * 1024 * 1024,       // 250MB
   premium: 2 * 1024 * 1024 * 1024,  // 2GB
   unlimited: 10 * 1024 * 1024 * 1024, // 10GB
 } as const;
 
 // Human-readable storage limits
 export const STORAGE_LIMITS_FORMATTED = {
-  free: '30MB',
+  free: '250MB',
   premium: '2GB',
   unlimited: '10GB',
 } as const;
 
-// Approximate track counts (assuming 10MB per track average)
+// Approximate track counts (assuming 8MB per track average for high quality)
 export const APPROXIMATE_TRACK_COUNTS = {
-  free: '~3 tracks',
-  premium: '~200 tracks',
-  unlimited: '~1000 tracks',
+  free: '~30-40 tracks',
+  premium: '~250 tracks',
+  unlimited: '~1000+ tracks',
 } as const;
 
 export type StorageTier = 'free' | 'premium' | 'unlimited';
@@ -118,16 +118,46 @@ export async function getGracePeriodStatus(userId: string): Promise<{
   try {
     const { data: profile, error } = await supabase
       .from('profiles')
-      .select('grace_period_ends, downgraded_at, storage_at_downgrade')
+      .select('grace_period_ends, downgraded_at, storage_at_downgrade, subscription_tier, subscription_status')
       .eq('id', userId)
       .single();
 
     if (error || !profile) {
       console.warn('⚠️ Could not fetch grace period status:', error);
-      return null;
+      // Return active subscription status by default (don't block users)
+      return {
+        in_grace_period: false,
+        grace_period_ends: null,
+        grace_days_remaining: 0,
+        storage_status: 'active_subscription',
+        storage_at_downgrade: null,
+      };
     }
 
-    // No grace period active
+    console.log('📋 Profile grace period data:', {
+      grace_period_ends: profile.grace_period_ends,
+      downgraded_at: profile.downgraded_at,
+      subscription_tier: profile.subscription_tier,
+      subscription_status: profile.subscription_status,
+    });
+
+    // If user has an active subscription (premium/unlimited), they're not in grace period
+    const isActiveSubscriber = profile.subscription_tier &&
+      profile.subscription_tier !== 'free' &&
+      (!profile.subscription_status || profile.subscription_status === 'active');
+
+    if (isActiveSubscriber) {
+      console.log('✅ User has active subscription - not in grace period');
+      return {
+        in_grace_period: false,
+        grace_period_ends: null,
+        grace_days_remaining: 0,
+        storage_status: 'active_subscription',
+        storage_at_downgrade: null,
+      };
+    }
+
+    // No grace period active (field is null)
     if (!profile.grace_period_ends) {
       return {
         in_grace_period: false,
@@ -163,7 +193,14 @@ export async function getGracePeriodStatus(userId: string): Promise<{
     };
   } catch (error) {
     console.error('❌ Exception checking grace period status:', error);
-    return null;
+    // Return active subscription status by default (don't block users due to errors)
+    return {
+      in_grace_period: false,
+      grace_period_ends: null,
+      grace_days_remaining: 0,
+      storage_status: 'active_subscription',
+      storage_at_downgrade: null,
+    };
   }
 }
 
@@ -231,11 +268,30 @@ export async function getStorageQuota(
   // Check grace period status
   const gracePeriodStatus = await getGracePeriodStatus(userId);
 
+  // Log storage calculation for debugging
+  console.log('📊 Storage quota calculation:', {
+    tier: effectiveTier,
+    storageLimit: formatBytes(storageLimit),
+    storageUsed: formatBytes(storageUsed),
+    storageAvailable: formatBytes(storageAvailable),
+    storagePercentUsed: storagePercentUsed.toFixed(1) + '%',
+    gracePeriodStatus: gracePeriodStatus?.storage_status || 'no_grace_period',
+  });
+
   // Can upload if:
   // 1. Storage available > 0 (under limit)
   // 2. NOT in grace period (even if under limit during grace, can't upload)
-  const canUpload = storageAvailable > 0 &&
-    (!gracePeriodStatus || gracePeriodStatus.storage_status === 'active_subscription');
+  const isNotInGracePeriod = !gracePeriodStatus ||
+    gracePeriodStatus.storage_status === 'active_subscription' ||
+    gracePeriodStatus.storage_status === undefined;
+
+  const canUpload = storageAvailable > 0 && isNotInGracePeriod;
+
+  console.log('📊 can_upload decision:', {
+    storageAvailable: storageAvailable > 0,
+    isNotInGracePeriod,
+    canUpload,
+  });
 
   return {
     tier: effectiveTier,

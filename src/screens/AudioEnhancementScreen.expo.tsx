@@ -21,6 +21,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { config } from '../config/environment';
 
 export default function AudioEnhancementScreen() {
   const { theme } = useTheme();
@@ -45,7 +46,7 @@ export default function AudioEnhancementScreen() {
         let tier: 'free' | 'pro' = 'free';
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
-          const response = await fetch('https://www.soundbridge.live/api/subscription/status', {
+          const response = await fetch(`${config.apiUrl}/subscription/status`, {
             headers: {
               'Authorization': `Bearer ${session.access_token}`,
               'Content-Type': 'application/json',

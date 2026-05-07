@@ -79,7 +79,7 @@ export class RealtimeService {
         {
           event: 'INSERT',
           schema: 'public',
-          table: 'comments',
+          table: 'post_comments',
           filter: `post_id=eq.${postId}`,
         },
         (payload) => {

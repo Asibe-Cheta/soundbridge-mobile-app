@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Audio } from 'expo-av';
 import {
   View,
   Text,
@@ -7,6 +8,7 @@ import {
   TextInput,
   ScrollView,
   Alert,
+  Modal,
   StatusBar,
   Dimensions,
   Image,
@@ -15,16 +17,19 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { WebView } from 'react-native-webview';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { supabase, dbHelpers } from '../lib/supabase';
-import UploadLimitCard from '../components/UploadLimitCard';
-import StorageIndicator from '../components/StorageIndicator';
-import { getUploadQuota, UploadQuota } from '../services/UploadQuotaService';
+import { SystemTypography as Typography } from '../constants/Typography';
+import { config } from '../config/environment';
+import PricingControls from '../components/PricingControls';
+import { getUploadQuota, UploadQuota, invalidateQuotaCache } from '../services/UploadQuotaService';
 import { uploadAudioFile, uploadImage, createAudioTrack } from '../services/UploadService';
 import subscriptionService from '../services/SubscriptionService';
 import { walkthroughable } from 'react-native-copilot';
@@ -37,7 +42,7 @@ import { collectDeviceInfo } from '../utils/deviceInfo';
 
 const { width } = Dimensions.get('window');
 
-type ContentType = 'music' | 'podcast';
+type ContentType = 'music' | 'podcast' | 'mixtape';
 type UploadMode = 'single' | 'album';
 
 // ACRCloud TypeScript Interfaces
@@ -87,6 +92,9 @@ interface UploadFormData {
   // Podcast-specific fields
   episodeNumber: string;
   podcastCategory: string;
+  // Mixtape-specific fields
+  djName: string;
+  tracklist: string;
   // Common fields
   tags: string;
   lyrics: string;
@@ -95,7 +103,11 @@ interface UploadFormData {
   publishOption: 'now' | 'schedule' | 'draft';
   scheduleDate: string;
   coverImage: { uri: string; name: string; type: string } | null;
-  audioFile: { uri: string; name: string; type: string } | null;
+  audioFile: { uri: string; name: string; type: string; size?: number } | null;
+  // Paid content fields
+  isPaid: boolean;
+  price: string;
+  currency: 'USD' | 'GBP' | 'EUR';
 }
 
 interface AlbumTrack {
@@ -119,7 +131,7 @@ interface AlbumFormData {
 }
 
 // Create walkthroughable components for tour
-const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
+const WalkthroughableTouchable = walkthroughable(TouchableOpacity) as React.ComponentType<any>;
 const WalkthroughableView = walkthroughable(View);
 
 export default function UploadScreen() {
@@ -130,11 +142,23 @@ export default function UploadScreen() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadQuota, setUploadQuota] = useState<UploadQuota | null>(null);
   const [quotaLoading, setQuotaLoading] = useState(true);
+  const storageAlertActiveRef = useRef(false);
+  const lastStorageAlertRef = useRef<string | null>(null);
+  const lastStorageAlertAtRef = useRef<number | null>(null);
+  const [showStorageModal, setShowStorageModal] = useState(false);
+  const [storagePromptKind, setStoragePromptKind] = useState<'near' | 'full'>('near');
+  const [storagePromptPercent, setStoragePromptPercent] = useState(0);
   const [uploadMode, setUploadMode] = useState<UploadMode>('single');
   const [agreedToCopyright, setAgreedToCopyright] = useState(false);
+  const [agreedToMixtapeTerms, setAgreedToMixtapeTerms] = useState(false);
+
+  // Audio duration (seconds) extracted from the picked file before upload
+  const [audioDuration, setAudioDuration] = useState<number>(0);
 
   // Cover song ISRC verification state
   const [isCover, setIsCover] = useState(false);
+  const [originalArtistName, setOriginalArtistName] = useState('');
+  const [originalSongTitle, setOriginalSongTitle] = useState('');
   const [isrcCode, setIsrcCode] = useState('');
   const [isrcVerificationStatus, setIsrcVerificationStatus] = useState<
     'idle' | 'loading' | 'success' | 'error'
@@ -163,6 +187,8 @@ export default function UploadScreen() {
     description: '',
     artistName: '',
     genre: '',
+    djName: '',
+    tracklist: '',
     episodeNumber: '',
     podcastCategory: '',
     tags: '',
@@ -173,6 +199,9 @@ export default function UploadScreen() {
     scheduleDate: '',
     coverImage: null,
     audioFile: null,
+    isPaid: false,
+    price: '',
+    currency: 'USD',
   });
   
   // Album-specific state
@@ -198,14 +227,36 @@ export default function UploadScreen() {
     'Sports', 'Health', 'Science', 'Arts', 'Comedy', 'True Crime', 'History', 'Other'
   ];
 
-  // Supported audio file types (matching web app)
+  // Supported audio file types — must stay in sync with UploadService.ts ALLOWED_AUDIO_TYPES.
+  // iOS document picker returns 'audio/x-m4a' for M4A and 'audio/x-wav' for WAV; omitting
+  // these caused "Unsupported file type" for the most common iPhone export formats.
+  // Android can return 'audio/wave' or 'audio/vnd.wave' for WAV files depending on device/OS.
   const supportedAudioTypes = [
-    'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/m4a', 
-    'audio/aac', 'audio/ogg', 'audio/flac'
+    'audio/mpeg', 'audio/mp3',
+    'audio/wav',  'audio/x-wav', 'audio/wave', 'audio/vnd.wave',
+    'audio/m4a',  'audio/x-m4a',
+    'audio/aac',  'audio/ogg',
+    'audio/webm', 'audio/flac',
   ];
 
-  const maxFileSize = 100 * 1024 * 1024; // 100MB limit for audio
+  const maxFileSize = formData.contentType === 'mixtape'
+    ? 200 * 1024 * 1024  // 200MB for DJ mixtapes
+    : 100 * 1024 * 1024; // 100MB for tracks and podcasts
   const maxImageSize = 5 * 1024 * 1024; // 5MB limit for images
+
+  const loadUploadQuota = async (forceRefresh = false) => {
+    if (!session) {
+      setUploadQuota(null);
+      setQuotaLoading(false);
+      return null;
+    }
+
+    setQuotaLoading(true);
+    const quota = await getUploadQuota(session, forceRefresh);
+    setUploadQuota(quota);
+    setQuotaLoading(false);
+    return quota;
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -238,9 +289,87 @@ export default function UploadScreen() {
     };
   }, [session]);
 
+  // Refresh quota when screen gains focus to ensure tier and storage are up-to-date
+  // This fixes discrepancies between screens (Upload vs Upgrade, Upload vs Storage Management)
+  useFocusEffect(
+    React.useCallback(() => {
+      let isMounted = true;
+
+      const refreshQuota = async () => {
+        if (!session) return;
+
+        // Invalidate cache first to ensure fresh data
+        invalidateQuotaCache();
+
+        // Force refresh to get latest subscription tier and storage usage
+        const refreshedQuota = await loadUploadQuota(true);
+
+        if (isMounted && refreshedQuota) {
+          console.log('✅ Quota refreshed on focus:', {
+            tier: refreshedQuota.tier,
+            storageUsed: refreshedQuota.storage?.storage_used_formatted,
+            storageLimit: refreshedQuota.storage?.storage_limit_formatted,
+          });
+        }
+      };
+
+      refreshQuota();
+
+      return () => {
+        isMounted = false;
+      };
+    }, [session])
+  );
+
   const handleUpgradePress = () => {
     navigation.navigate('Upgrade' as never);
   };
+
+  const handleOpenStorage = () => {
+    navigation.navigate('StorageManagement' as never);
+  };
+
+  useEffect(() => {
+    const storage = uploadQuota?.storage;
+    if (!storage || storage.is_unlimited_tier) {
+      return;
+    }
+
+    const percentUsed = Number(storage.storage_percent_used);
+    if (!Number.isFinite(percentUsed)) {
+      return;
+    }
+
+    if (percentUsed < 80) {
+      lastStorageAlertRef.current = null;
+      return;
+    }
+
+    const storageAvailable = Number(storage.storage_available ?? 0);
+    const isStorageEmpty = Number.isFinite(storageAvailable) && storageAvailable <= 0;
+    const alertKind = isStorageEmpty || percentUsed >= 95 ? 'full' : percentUsed >= 85 ? 'near' : null;
+    if (!alertKind) {
+      return;
+    }
+
+    const now = Date.now();
+    if (lastStorageAlertAtRef.current && now - lastStorageAlertAtRef.current < 5 * 60 * 1000) {
+      return;
+    }
+
+    const alertKey = `${alertKind}-${Math.floor(percentUsed)}`;
+    if (storageAlertActiveRef.current || lastStorageAlertRef.current === alertKey) {
+      return;
+    }
+
+    storageAlertActiveRef.current = true;
+    lastStorageAlertRef.current = alertKey;
+    lastStorageAlertAtRef.current = now;
+
+    setStoragePromptKind(alertKind);
+    setStoragePromptPercent(Math.round(percentUsed));
+    setShowStorageModal(true);
+  }, [uploadQuota]);
 
   const handleInputChange = (field: keyof UploadFormData, value: string | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -278,8 +407,8 @@ export default function UploadScreen() {
 
   // ISRC Format Validation (Client-Side)
   const validateISRCFormat = (isrc: string): { valid: boolean; normalized?: string; error?: string } => {
-    if (!isrc || typeof isrc !== 'string') {
-      return { valid: false, error: 'ISRC code is required' };
+    if (!isrc || typeof isrc !== 'string' || isrc.trim() === '') {
+      return { valid: false, error: 'Please enter an ISRC code to verify, or leave the field blank.' };
     }
 
     // Remove hyphens and spaces, convert to uppercase
@@ -289,7 +418,7 @@ export default function UploadScreen() {
     if (normalized.length !== 12) {
       return {
         valid: false,
-        error: 'Invalid ISRC format. Should be 12 characters (XX-XXX-YY-NNNNN)'
+        error: 'Invalid ISRC — must be 12 characters, e.g. GB-KTZ-26-00001'
       };
     }
 
@@ -297,7 +426,7 @@ export default function UploadScreen() {
     if (!/^[A-Z0-9]{2}[A-Z0-9]{3}[A-Z0-9]{2}[0-9]{5}$/.test(normalized)) {
       return {
         valid: false,
-        error: 'Invalid ISRC format. Should be XX-XXX-YY-NNNNN (alphanumeric, last 5 digits)'
+        error: 'Invalid ISRC format. Expected XX-XXX-YY-NNNNN, e.g. GB-KTZ-26-00001'
       };
     }
 
@@ -317,6 +446,20 @@ export default function UploadScreen() {
     setIsrcVerificationError(null);
 
     try {
+      const formatCheck = validateISRCFormat(isrc);
+      if (!formatCheck.valid) {
+        // Don't show an error while user is still typing
+        const normalized = isrc.trim().replace(/[-\s]/g, '').toUpperCase();
+        if (normalized.length < 12) {
+          setIsrcVerificationStatus('idle');
+          return;
+        }
+        setIsrcVerificationStatus('error');
+        setIsrcVerificationError(formatCheck.error || 'Invalid ISRC format');
+        setIsrcVerificationData(null);
+        return;
+      }
+
       // Normalize ISRC (remove hyphens, uppercase)
       const normalizedInput = isrc.trim().replace(/-/g, '').toUpperCase();
 
@@ -345,8 +488,19 @@ export default function UploadScreen() {
         return;
       }
 
-      // For manual cover songs (no ACRCloud match), verify ISRC via MusicBrainz API
-      const response = await fetch('https://www.soundbridge.live/api/upload/verify-isrc', {
+      // For original songs (non-cover), just accept the ISRC — format is already validated above.
+      // ISRCs for original/unreleased music won't be in MusicBrainz, so don't check there.
+      if (!isCover) {
+        console.log('✅ ISRC accepted for original song (format valid, no MusicBrainz check needed)');
+        setIsrcVerificationStatus('success');
+        setIsrcVerificationError(null);
+        setIsrcVerificationData({ title: 'ISRC format valid' });
+        return;
+      }
+
+      // For cover songs with no ACRCloud match, verify ISRC via MusicBrainz API
+      // to confirm the ISRC matches the original recording being covered.
+      const response = await fetch(`${config.apiUrl}/api/upload/verify-isrc`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -354,15 +508,34 @@ export default function UploadScreen() {
         body: JSON.stringify({ isrc: isrc.trim() }),
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get('content-type');
+      let data: any = null;
+      try {
+        if (contentType && contentType.includes('application/json')) {
+          data = await response.json();
+        } else {
+          const text = await response.text();
+          data = { error: text || 'ISRC verification failed' };
+        }
+      } catch (parseError) {
+        data = { error: 'Invalid response from ISRC verification service' };
+      }
 
-      if (data.success && data.verified) {
+      if (!response.ok) {
+        // If MusicBrainz can't find it, don't hard-block — just warn
+        setIsrcVerificationStatus('error');
+        setIsrcVerificationError(data?.error || 'ISRC not found — make sure the original recording is released and distributed.');
+        setIsrcVerificationData(null);
+        return;
+      }
+
+      if (data?.success && data?.verified) {
         setIsrcVerificationStatus('success');
         setIsrcVerificationError(null);
         setIsrcVerificationData(data.recording);
       } else {
         setIsrcVerificationStatus('error');
-        setIsrcVerificationError(data.error || 'ISRC verification failed');
+        setIsrcVerificationError(data?.error || 'ISRC not found — make sure the original recording is released and distributed.');
         setIsrcVerificationData(null);
       }
     } catch (error: any) {
@@ -407,8 +580,22 @@ export default function UploadScreen() {
 
   // ACRCloud: Fingerprint Audio File (Storage-first approach to bypass Vercel 4.5MB limit)
   const fingerprintAudio = async (file: { uri: string; name: string; type: string; size?: number }) => {
+    // Skip fingerprinting for files over 15MB — ACRCloud's API rejects large files
+    // (it only needs a short sample to identify a track). Large files are likely
+    // high-quality WAVs or long recordings; treat them as original/no-match.
+    const FINGERPRINT_MAX_SIZE = 15 * 1024 * 1024; // 15MB
+    if (file.size && file.size > FINGERPRINT_MAX_SIZE) {
+      console.log(`⏭️ Skipping ACRCloud — file is ${(file.size / 1024 / 1024).toFixed(1)}MB (>${FINGERPRINT_MAX_SIZE / 1024 / 1024}MB threshold)`);
+      setAcrcloudStatus('no_match');
+      setAcrcloudData({ success: true, matchFound: false } as any);
+      return;
+    }
+
     setAcrcloudStatus('checking');
     setAcrcloudError(null);
+    setAcrcloudData(null);
+    setIsOriginalConfirmed(false);
+    let cleanupPath: string | null = null;
 
     try {
       console.log('🎵 Starting ACRCloud fingerprinting...');
@@ -443,6 +630,8 @@ export default function UploadScreen() {
       }
 
       // Get public URL
+      cleanupPath = uploadData.path;
+
       const { data: urlData } = supabase.storage
         .from('audio-tracks')
         .getPublicUrl(uploadData.path);
@@ -453,7 +642,7 @@ export default function UploadScreen() {
       // Step 2: Send URL to fingerprint API (small JSON payload - no size limit)
       console.log('📤 Sending URL to fingerprint API...');
 
-      const response = await fetch('https://www.soundbridge.live/api/upload/fingerprint', {
+      const response = await fetch(`${config.apiUrl}/api/upload/fingerprint`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -495,11 +684,6 @@ export default function UploadScreen() {
       if (!data.success) {
         // Handle error
         handleAcrcloudError(data);
-
-        // Cleanup temp file from storage
-        if (uploadData?.path) {
-          await cleanupTempFile(uploadData.path);
-        }
         return;
       }
 
@@ -511,14 +695,13 @@ export default function UploadScreen() {
         handleNoMatch(data);
       }
 
-      // Cleanup temp file from storage (fingerprinting complete)
-      if (uploadData?.path) {
-        await cleanupTempFile(uploadData.path);
-      }
-
     } catch (error: any) {
       console.error('❌ ACRCloud error:', error);
       handleAcrcloudError({ error: error.message, errorCode: 'API_ERROR' });
+    } finally {
+      if (cleanupPath) {
+        await cleanupTempFile(cleanupPath);
+      }
     }
   };
 
@@ -545,9 +728,9 @@ export default function UploadScreen() {
     setAcrcloudStatus('match');
     setAcrcloudData(data);
 
-    // DO NOT auto-fill ISRC - user must manually input it to prove ownership
-    // DO NOT auto-check "cover song" - user must consciously decide
-    // The detected ISRC will be shown as a hint/reference in the UI
+    // Auto-populate original artist/title from ACRCloud — user can edit if needed
+    if (data.detectedArtist) setOriginalArtistName(data.detectedArtist);
+    if (data.detectedTitle) setOriginalSongTitle(data.detectedTitle);
   };
 
   // Handle No Match
@@ -560,9 +743,18 @@ export default function UploadScreen() {
 
   // Handle ACRCloud Errors
   const handleAcrcloudError = (error: any) => {
-    console.log('⚠️ ACRCloud error:', error.error || 'Fingerprinting failed');
+    const msg: string = error.error || '';
+    // If ACRCloud rejects because the file is too large, treat as no_match (original music).
+    // ACRCloud only needs a short sample — large files hitting their limit are not a copyright concern.
+    if (msg.toLowerCase().includes('too large') || msg.toLowerCase().includes('exceed')) {
+      console.log('⏭️ ACRCloud file-too-large — treating as no match');
+      setAcrcloudStatus('no_match');
+      setAcrcloudData({ success: true, matchFound: false } as any);
+      return;
+    }
+    console.log('⚠️ ACRCloud error:', msg || 'Fingerprinting failed');
     setAcrcloudStatus('error');
-    setAcrcloudError(error.error || 'Fingerprinting failed');
+    setAcrcloudError(msg || 'Fingerprinting failed');
 
     // Allow upload to proceed but flag for review
     setAcrcloudData({
@@ -616,34 +808,42 @@ export default function UploadScreen() {
       }
 
       if (acrcloudStatus === 'match') {
-        // Match found - require ISRC verification
-        if (!isrcCode || isrcCode.trim() === '') {
-          errors.push('ISRC code is required. This track appears to be a released song.');
+        // ACRCloud detected a released track — require original artist/title for the cover record
+        if (!originalArtistName.trim()) {
+          errors.push('Please enter the original artist name for this track.');
         }
-
-        if (isrcVerificationStatus !== 'success') {
-          errors.push('ISRC code must be verified before uploading');
+        if (!originalSongTitle.trim()) {
+          errors.push('Please enter the original song title for this track.');
         }
-
-        // Check artist name match
-        if (acrcloudData?.matchFound &&
-            'artistMatch' in acrcloudData &&
-            acrcloudData.artistMatch &&
-            !acrcloudData.artistMatch.match) {
-          errors.push(`This track belongs to "${acrcloudData.detectedArtist}". If this is you, ensure your profile name matches.`);
+        // ISRC for match: ACRCloud detected one — user-entered ISRC is optional extra verification
+        if (isrcCode.trim() && isrcVerificationStatus !== 'success') {
+          errors.push('The ISRC code you entered could not be verified. Please check it or leave the field blank.');
         }
       }
 
-      if (acrcloudStatus === 'no_match' && !isOriginalConfirmed) {
-        errors.push('Please confirm this is your original/unreleased music');
+      if (acrcloudStatus === 'no_match') {
+        if (!isCover && !isOriginalConfirmed) {
+          errors.push('Please confirm this is your original/unreleased music');
+        }
+        // Cover fields required when user declares it's a cover
+        if (isCover) {
+          if (!originalArtistName.trim()) {
+            errors.push('Please enter the original artist name for this cover.');
+          }
+          if (!originalSongTitle.trim()) {
+            errors.push('Please enter the original song title for this cover.');
+          }
+        }
+        // ISRC is optional — SoundBridge auto-assigns one if not provided.
+        // Only block if verification is still running (not on error — ISRC errors are non-blocking)
+        if (isrcCode.trim() && isrcVerificationStatus === 'loading') {
+          errors.push('Please wait for ISRC verification to complete');
+        }
       }
 
-      // Cover song validation (manual cover song marking)
-      if (isCover && !isrcCode.trim()) {
-        errors.push('ISRC code is required for cover songs');
-      }
-      if (isCover && isrcVerificationStatus !== 'success') {
-        errors.push('ISRC code must be verified before uploading a cover song');
+      // ISRC is optional — only block if still loading
+      if (isCover && !acrcloudStatus && isrcCode.trim() && isrcVerificationStatus === 'loading') {
+        errors.push('Please wait for ISRC verification to complete');
       }
     } else if (formData.contentType === 'podcast') {
       if (!formData.episodeNumber) {
@@ -655,6 +855,21 @@ export default function UploadScreen() {
       if (!formData.podcastCategory) {
         errors.push('Podcast category is required');
       }
+    } else if (formData.contentType === 'mixtape') {
+      if (!formData.djName.trim()) {
+        errors.push('DJ / Artist name is required');
+      }
+      if (!formData.tracklist.trim()) {
+        errors.push('Tracklist is required — list the tracks included in your mix');
+      }
+      if (!formData.genre) {
+        errors.push('Genre is required for mixtapes');
+      }
+    }
+
+    // Cover art validation
+    if (!formData.coverImage) {
+      errors.push('Cover art is required');
     }
 
     // Description validation
@@ -708,16 +923,7 @@ export default function UploadScreen() {
       errors.push('Please add at least one track to the album');
     }
     
-    // Check tier limits
-    if (uploadQuota) {
-      const tier = uploadQuota.tier?.toLowerCase() || 'free';
-      
-      if (tier === 'free') {
-        errors.push('Albums are only available for Premium and Unlimited users');
-      } else if (tier === 'premium' && albumFormData.tracks.length > 7) {
-        errors.push(`Premium users can add up to 7 tracks per album. You have ${albumFormData.tracks.length} tracks.`);
-      }
-    }
+    // No tier restrictions on albums — only storage quota applies
     
     // Validate each track
     albumFormData.tracks.forEach((track, index) => {
@@ -806,16 +1012,6 @@ export default function UploadScreen() {
         
         if (!validation.isValid) {
           Alert.alert('Invalid File', validation.errors.join('\n'));
-          return;
-        }
-        
-        // Check track limit for premium users
-        const tier = uploadQuota?.tier?.toLowerCase() || 'free';
-        if (tier === 'premium' && albumFormData.tracks.length >= 7) {
-          Alert.alert(
-            'Track Limit Reached',
-            'Premium users can add up to 7 tracks per album. Upgrade to Unlimited for unlimited tracks!'
-          );
           return;
         }
         
@@ -912,6 +1108,20 @@ export default function UploadScreen() {
     }
   };
 
+  const extractAudioDuration = async (uri: string): Promise<number> => {
+    try {
+      const { sound, status } = await Audio.Sound.createAsync(
+        { uri },
+        { shouldPlay: false }
+      );
+      const durationMs = (status as any).durationMillis ?? 0;
+      await sound.unloadAsync();
+      return Math.floor(durationMs / 1000);
+    } catch {
+      return 0;
+    }
+  };
+
   const pickAudioFile = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -944,11 +1154,30 @@ export default function UploadScreen() {
           size: asset.size // Include file size for ACRCloud validation
         };
 
+        // Reset verification state for new audio selection
+        setIsCover(false);
+        setOriginalArtistName('');
+        setOriginalSongTitle('');
+        setIsrcCode('');
+        setIsrcVerificationStatus('idle');
+        setIsrcVerificationError(null);
+        setIsrcVerificationData(null);
+        setAcrcloudStatus('idle');
+        setAcrcloudData(null);
+        setAcrcloudError(null);
+        setIsOriginalConfirmed(false);
+        if (isrcVerificationTimeoutRef.current) {
+          clearTimeout(isrcVerificationTimeoutRef.current);
+        }
+
         setFormData(prev => ({
           ...prev,
           audioFile: audioFileData,
           title: prev.title || fileName // Only set if title is empty
         }));
+
+        // Extract duration in background — doesn't block fingerprinting
+        extractAudioDuration(audioFileData.uri).then(setAudioDuration);
 
         // Automatically trigger ACRCloud fingerprinting for music tracks
         if (formData.contentType === 'music') {
@@ -972,10 +1201,13 @@ export default function UploadScreen() {
     }
 
     // Copyright attestation validation
-    if (!agreedToCopyright) {
+    const termsAgreed = formData.contentType === 'mixtape' ? agreedToMixtapeTerms : agreedToCopyright;
+    if (!termsAgreed) {
       Alert.alert(
-        'Copyright Confirmation Required',
-        'You must agree to the copyright terms to upload content.'
+        'Terms Confirmation Required',
+        formData.contentType === 'mixtape'
+          ? 'You must agree to the mixtape terms to upload your mix.'
+          : 'You must agree to the copyright terms to upload content.'
       );
       return;
     }
@@ -989,7 +1221,7 @@ export default function UploadScreen() {
       const tier = uploadQuota.tier?.toLowerCase() || 'free';
       let message = '';
       if (tier === 'free') {
-        message = 'You\'ve uploaded your 3 free tracks. Upgrade to Premium for 7 tracks/month or Unlimited for unlimited uploads.';
+        message = 'You\'ve reached your 250MB storage limit. Upgrade to Premium for 2GB or Unlimited for 10GB of storage.';
       } else if (tier === 'premium') {
         message = 'You\'ve uploaded 7 tracks this month. Your limit resets on your renewal date. Upgrade to Unlimited for unlimited uploads anytime.';
       } else {
@@ -1007,34 +1239,35 @@ export default function UploadScreen() {
       return;
     }
 
-    // Check storage limits before upload
-    if (session && formData.audioFile?.size) {
-      try {
-        console.log('📊 Checking storage limits...');
-        const limits = await subscriptionService.getUsageLimits(session);
-        const fileSize = formData.audioFile.size;
+    // Check storage limits before upload using the quota state (source of truth from RevenueCat)
+    // This ensures consistency between what's displayed and what's checked
+    if (formData.audioFile?.size && uploadQuota?.storage) {
+      const fileSize = formData.audioFile.size;
+      const storageAvailable = uploadQuota.storage.storage_available;
+      const isUnlimited = uploadQuota.storage.is_unlimited_tier;
 
-        // Check if upload would exceed storage limit
-        if (!limits.storage.is_unlimited && fileSize > limits.storage.remaining) {
-          const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
-          const remainingMB = (limits.storage.remaining / (1024 * 1024)).toFixed(2);
+      console.log('📊 Checking storage limits...');
+      console.log(`📊 File size: ${(fileSize / (1024 * 1024)).toFixed(2)} MB`);
+      console.log(`📊 Storage available: ${uploadQuota.storage.storage_available_formatted}`);
+      console.log(`📊 Tier: ${uploadQuota.tier}`);
 
-          Alert.alert(
-            'Storage Limit Exceeded',
-            `This file (${fileSizeMB} MB) exceeds your remaining storage (${remainingMB} MB). Upgrade to Premium or Unlimited for more storage.`,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'View Plans', onPress: handleUpgradePress },
-            ],
-          );
-          return;
-        }
+      // Check if upload would exceed storage limit
+      if (!isUnlimited && fileSize > storageAvailable) {
+        const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+        const remainingMB = uploadQuota.storage.storage_available_formatted;
 
-        console.log('✅ Storage check passed');
-      } catch (error) {
-        console.error('Error checking storage limits:', error);
-        // On error, allow upload (fail open)
+        Alert.alert(
+          'Storage Limit Exceeded',
+          `This file (${fileSizeMB} MB) exceeds your remaining storage (${remainingMB}). Upgrade to Premium or Unlimited for more storage.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'View Plans', onPress: handleUpgradePress },
+          ],
+        );
+        return;
       }
+
+      console.log('✅ Storage check passed');
     }
 
     try {
@@ -1045,7 +1278,7 @@ export default function UploadScreen() {
 
       // Step 1: Upload audio file (70% of progress)
       setUploadProgress(10);
-      const audioUploadResult = await uploadAudioFile(user.id, formData.audioFile!);
+      const audioUploadResult = await uploadAudioFile(user.id, formData.audioFile!, { isMixtape: formData.contentType === 'mixtape' });
       
       if (!audioUploadResult.success) {
         throw new Error('Failed to upload audio file: ' + audioUploadResult.error?.message);
@@ -1084,6 +1317,12 @@ export default function UploadScreen() {
         enhancedDescription = enhancedDescription
           ? `Episode ${formData.episodeNumber.trim()}\n\n${enhancedDescription}`
           : `Episode ${formData.episodeNumber.trim()}`;
+      } else if (formData.contentType === 'mixtape') {
+        const parts: string[] = [];
+        if (formData.djName.trim()) parts.push(`Mixed by: ${formData.djName.trim()}`);
+        if (enhancedDescription) parts.push(enhancedDescription);
+        if (formData.tracklist.trim()) parts.push(`TRACKLIST:\n${formData.tracklist.trim()}`);
+        enhancedDescription = parts.join('\n\n');
       }
 
       const trackData = {
@@ -1091,16 +1330,29 @@ export default function UploadScreen() {
         description: enhancedDescription || null,
         file_url: audioUploadResult.data!.url,
         cover_art_url: artworkUrl, // Web app field name
-        duration: 0, // TODO: Extract duration from audio file
+        duration: audioDuration,
+        file_size: formData.audioFile?.size || 0, // Store file size for storage tracking
         tags: tagsArray.length > 0 ? tagsArray.join(',') : null,
         is_public: formData.privacy === 'public',
-        genre: formData.contentType === 'music' ? formData.genre : formData.podcastCategory,
+        visibility: formData.privacy === 'public' ? 'public' : formData.privacy === 'followers' ? 'followers_only' : 'private',
+        genre: formData.contentType === 'music' ? formData.genre : formData.contentType === 'mixtape' ? formData.genre : formData.podcastCategory,
         lyrics: formData.lyrics.trim() || null,
         lyrics_language: formData.lyricsLanguage,
         has_lyrics: formData.lyrics.trim().length > 0,
-        // Cover song ISRC fields
+        // Cover song fields
         is_cover: formData.contentType === 'music' ? (isCover || acrcloudStatus === 'match') : false,
-        isrc_code: (formData.contentType === 'music' && (isCover || acrcloudStatus === 'match')) ? isrcCode.trim() : null,
+        original_artist_name: formData.contentType === 'music' && (isCover || acrcloudStatus === 'match') ? originalArtistName.trim() || null : null,
+        original_song_title: formData.contentType === 'music' && (isCover || acrcloudStatus === 'match') ? originalSongTitle.trim() || null : null,
+        // ISRC — user-provided takes priority; null tells backend to auto-assign via PPL
+        isrc_code: (formData.contentType === 'music' && isrcCode.trim().length > 0) ? isrcCode.trim() : null,
+        // ISRC source hint for backend
+        isrc_source: formData.contentType === 'music' ? (
+          (acrcloudData as any)?.detectedISRC ? 'acrcloud_detected' :
+          isrcCode.trim() ? 'user_provided' :
+          'soundbridge_generated'
+        ) : null,
+        // Flag for manual review: ACRCloud matched an existing recording but user claims original
+        suspected_duplicate: formData.contentType === 'music' && acrcloudStatus === 'match' && !isCover,
         // ACRCloud fingerprinting data
         acrcloudData: formData.contentType === 'music' ? acrcloudData : null,
         // Copyright attestation data
@@ -1114,6 +1366,13 @@ export default function UploadScreen() {
           model: deviceInfo.deviceModel,
         },
         terms_version: deviceInfo.termsVersion,
+        // Mixtape flag — used by Discover screen to list under Mixtapes tab
+        content_type: formData.contentType,
+        is_mixtape: formData.contentType === 'mixtape',
+        // Paid content fields
+        is_paid: formData.isPaid,
+        price: formData.isPaid && formData.price ? parseFloat(formData.price) : null,
+        currency: formData.isPaid ? formData.currency : null,
       };
 
       const trackResult = await createAudioTrack(user.id, trackData);
@@ -1125,6 +1384,14 @@ export default function UploadScreen() {
       setUploadProgress(100);
       console.log('✅ Track created successfully');
 
+      // Queue push notifications to genre-matched listeners (fire-and-forget)
+      if (trackResult.data?.id && session) {
+        fetch(`${config.apiUrl}/api/tracks/${trackResult.data.id}/queue-notifications`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }).catch((err) => console.warn('⚠️ Failed to queue track notifications:', err));
+      }
+
       // Reset form
       setFormData({
         contentType: 'music',
@@ -1132,6 +1399,8 @@ export default function UploadScreen() {
         description: '',
         artistName: '',
         genre: '',
+        djName: '',
+        tracklist: '',
         episodeNumber: '',
         podcastCategory: '',
         tags: '',
@@ -1142,11 +1411,18 @@ export default function UploadScreen() {
         scheduleDate: '',
         coverImage: null,
         audioFile: null,
+        isPaid: false,
+        price: '',
+        currency: 'USD',
       });
       setAgreedToCopyright(false);
+      setAgreedToMixtapeTerms(false);
+      setAudioDuration(0);
 
-      // Reset cover song ISRC state
+      // Reset cover song / ISRC state
       setIsCover(false);
+      setOriginalArtistName('');
+      setOriginalSongTitle('');
       setIsrcCode('');
       setIsrcVerificationStatus('idle');
       setIsrcVerificationError(null);
@@ -1173,22 +1449,7 @@ export default function UploadScreen() {
         }, 2000);
       }
 
-      setUploadQuota((prev) => {
-        if (!prev) {
-          return prev;
-        }
-        const remaining = prev.remaining != null ? Math.max(prev.remaining - 1, 0) : prev.remaining;
-        const uploadsThisMonth = (prev.uploads_this_month ?? 0) + 1;
-        const canUpload =
-          prev.is_unlimited ||
-          (prev.upload_limit == null ? prev.can_upload : uploadsThisMonth < prev.upload_limit);
-        return {
-          ...prev,
-          uploads_this_month: uploadsThisMonth,
-          remaining,
-          can_upload: canUpload,
-        };
-      });
+      await loadUploadQuota(true);
 
     } catch (error) {
       console.error('Upload failed:', error);
@@ -1301,20 +1562,20 @@ export default function UploadScreen() {
         
         // Create track record
         const trackData = {
-          creator_id: user.id,
           title: track.title,
           description: '',
           genre: albumFormData.albumGenre,
-          audio_file_url: audioUploadResult.data?.url || '',
+          file_url: audioUploadResult.data?.url || '',
           duration: track.duration || 0,
+          file_size: track.audioFile?.size || 0,
           lyrics: track.lyrics || null,
           lyrics_language: track.lyricsLanguage || 'en',
           is_public: albumFormData.status === 'published',
           content_type: 'music' as const,
-          tags: [],
+          tags: '',
         };
         
-        const trackResult = await createAudioTrack(trackData);
+        const trackResult = await createAudioTrack(user.id, trackData);
         if (!trackResult.success || !trackResult.data) {
           throw new Error(`Failed to create track ${i + 1}: ${trackResult.error?.message}`);
         }
@@ -1372,51 +1633,104 @@ export default function UploadScreen() {
     }
   };
 
-  const ContentTypeSelector = () => (
-    <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Content Type</Text>
-      <View style={styles.contentTypeContainer}>
-        <TouchableOpacity
-          style={[
-            styles.contentTypeOption,
-            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-            formData.contentType === 'music' && { borderColor: theme.colors.primary, borderWidth: 2 }
-          ]}
-          onPress={() => handleInputChange('contentType', 'music')}
-        >
-          <View style={[styles.contentTypeIcon, { backgroundColor: theme.colors.primary }]}>
-            <Ionicons name="musical-notes" size={24} color="white" />
-          </View>
-          <View style={styles.contentTypeText}>
-            <Text style={[styles.contentTypeLabel, { color: theme.colors.text }]}>Music Track</Text>
-            <Text style={[styles.contentTypeDescription, { color: theme.colors.textSecondary }]}>Upload your music, beats, or audio tracks</Text>
-          </View>
-          {formData.contentType === 'music' && (
-            <Ionicons name="checkmark-circle" size={24} color={theme.colors.success} />
-          )}
-        </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[
-            styles.contentTypeOption,
-            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-            formData.contentType === 'podcast' && { borderColor: theme.colors.primary, borderWidth: 2 }
-          ]}
-          onPress={() => handleInputChange('contentType', 'podcast')}
-        >
-          <View style={[styles.contentTypeIcon, { backgroundColor: '#8B5CF6' }]}>
-            <Ionicons name="mic" size={24} color="white" />
-          </View>
-          <View style={styles.contentTypeText}>
-            <Text style={[styles.contentTypeLabel, { color: theme.colors.text }]}>Podcast Episode</Text>
-            <Text style={[styles.contentTypeDescription, { color: theme.colors.textSecondary }]}>Share your podcast episodes and audio content</Text>
-          </View>
-          {formData.contentType === 'podcast' && (
-            <Ionicons name="checkmark-circle" size={24} color={theme.colors.success} />
-          )}
-        </TouchableOpacity>
+  const GradientOption: React.FC<{
+    selected: boolean;
+    radius: number;
+    backgroundColor: string;
+    children: React.ReactNode;
+  }> = ({ selected, radius, backgroundColor, children }) => (
+    <View style={[styles.optionBorderWrap, { borderRadius: radius }]}>
+      {selected && (
+        <LinearGradient
+          colors={['#DC2626', '#EC4899']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[styles.optionBorderGradient, { borderRadius: radius }]}
+        />
+      )}
+      <View
+        style={[
+          styles.optionBorderInner,
+          {
+            borderRadius: radius - 2,
+            backgroundColor,
+            margin: selected ? 2 : 0,
+          },
+        ]}
+      >
+        {children}
       </View>
     </View>
+  );
+
+  const optionSurface = theme.isDark ? '#2A1745' : theme.colors.surface;
+
+  const ContentTypeSelector = () => (
+    <GlassSection>
+      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Content Type</Text>
+      <View style={styles.contentTypeContainer}>
+        <GradientOption
+          selected={formData.contentType === 'music'}
+          radius={18}
+          backgroundColor={optionSurface}
+        >
+          <TouchableOpacity
+            style={styles.contentTypeOption}
+            onPress={() => handleInputChange('contentType', 'music')}
+            activeOpacity={0.9}
+          >
+            <View style={[styles.contentTypeIcon, { backgroundColor: theme.colors.primary }]}>
+              <Ionicons name="musical-notes" size={24} color="white" />
+            </View>
+            <View style={styles.contentTypeText}>
+              <Text style={[styles.contentTypeLabel, { color: theme.colors.text }]}>Music Track</Text>
+              <Text style={[styles.contentTypeDescription, { color: theme.colors.textSecondary }]}>Upload your music, beats, or audio tracks</Text>
+            </View>
+          </TouchableOpacity>
+        </GradientOption>
+
+        <GradientOption
+          selected={formData.contentType === 'podcast'}
+          radius={18}
+          backgroundColor={optionSurface}
+        >
+          <TouchableOpacity
+            style={styles.contentTypeOption}
+            onPress={() => handleInputChange('contentType', 'podcast')}
+            activeOpacity={0.9}
+          >
+            <View style={[styles.contentTypeIcon, { backgroundColor: '#8B5CF6' }]}>
+              <Ionicons name="mic" size={24} color="white" />
+            </View>
+            <View style={styles.contentTypeText}>
+              <Text style={[styles.contentTypeLabel, { color: theme.colors.text }]}>Podcast Episode</Text>
+              <Text style={[styles.contentTypeDescription, { color: theme.colors.textSecondary }]}>Share your podcast episodes and audio content</Text>
+            </View>
+          </TouchableOpacity>
+        </GradientOption>
+
+        <GradientOption
+          selected={formData.contentType === 'mixtape'}
+          radius={18}
+          backgroundColor={optionSurface}
+        >
+          <TouchableOpacity
+            style={styles.contentTypeOption}
+            onPress={() => handleInputChange('contentType', 'mixtape')}
+            activeOpacity={0.9}
+          >
+            <View style={[styles.contentTypeIcon, { backgroundColor: '#F59E0B' }]}>
+              <Ionicons name="disc" size={24} color="white" />
+            </View>
+            <View style={styles.contentTypeText}>
+              <Text style={[styles.contentTypeLabel, { color: theme.colors.text }]}>DJ Mixtape</Text>
+              <Text style={[styles.contentTypeDescription, { color: theme.colors.textSecondary }]}>Upload DJ mixes and continuous sets</Text>
+            </View>
+          </TouchableOpacity>
+        </GradientOption>
+      </View>
+    </GlassSection>
   );
 
   const renderFileUpload = (type: 'coverImage' | 'audioFile', title: string, fileUri?: { uri: string; name: string } | null) => {
@@ -1429,7 +1743,7 @@ export default function UploadScreen() {
     } : {};
 
     return (
-      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+      <GlassSection>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>{title}</Text>
         {fileUri ? (
           <View style={[styles.filePreview, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
@@ -1463,134 +1777,110 @@ export default function UploadScreen() {
               {type === 'coverImage' ? 'Select Cover Image' : 'Select Audio File'}
             </Text>
             <Text style={[styles.uploadButtonSubtext, { color: theme.colors.textSecondary }]}>
-              {type === 'coverImage' ? 'JPG, PNG (Max 10MB)' : 'MP3, WAV, M4A, AAC, OGG, FLAC (Max 100MB)'}
+              {type === 'coverImage' ? 'JPG, PNG (Max 5MB)' : `MP3, WAV, M4A, AAC, OGG, FLAC (Max ${formData.contentType === 'mixtape' ? '200MB' : '100MB'})`}
             </Text>
           </UploadButton>
         )}
-      </View>
+      </GlassSection>
     );
   };
 
   // Upload Mode Selector Component
   const UploadModeSelector = () => (
-    <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+    <GlassSection>
       <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Upload Mode</Text>
       <View style={styles.modeSelector}>
-        <TouchableOpacity
-          style={[
-            styles.modeOption,
-            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-            uploadMode === 'single' && { 
-              borderColor: theme.colors.primary, 
-              borderWidth: 2,
-              backgroundColor: theme.colors.primary + '10',
-            }
-          ]}
-          onPress={() => {
-            setUploadMode('single');
-            setAlbumStep(1);
-          }}
-        >
-          <Ionicons 
-            name="musical-note" 
-            size={32} 
-            color={uploadMode === 'single' ? theme.colors.primary : theme.colors.textSecondary} 
-          />
-          <Text style={[
-            styles.modeLabel, 
-            { color: uploadMode === 'single' ? theme.colors.primary : theme.colors.text }
-          ]}>
-            Single Track
-          </Text>
-          <Text style={[styles.modeDescription, { color: theme.colors.textSecondary }]}>
-            Upload one track
-          </Text>
-          {uploadMode === 'single' && (
-            <Ionicons 
-              name="checkmark-circle" 
-              size={24} 
-              color={theme.colors.primary} 
-              style={styles.modeCheckmark} 
+        <GradientOption selected={uploadMode === 'single'} radius={18} backgroundColor={optionSurface}>
+          <TouchableOpacity
+            style={styles.modeOption}
+            onPress={() => {
+              setUploadMode('single');
+              setAlbumStep(1);
+            }}
+            activeOpacity={0.9}
+          >
+            <Ionicons
+              name="musical-note"
+              size={32}
+              color={uploadMode === 'single' ? theme.colors.primary : theme.colors.textSecondary}
             />
-          )}
-        </TouchableOpacity>
+            <Text style={[
+              styles.modeLabel,
+              { color: uploadMode === 'single' ? theme.colors.primary : theme.colors.text }
+            ]}>
+              Single Track
+            </Text>
+            <Text style={[styles.modeDescription, { color: theme.colors.textSecondary }]}>
+              Upload one track
+            </Text>
+          </TouchableOpacity>
+        </GradientOption>
         
-        <TouchableOpacity
-          style={[
-            styles.modeOption,
-            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-            uploadMode === 'album' && { 
-              borderColor: theme.colors.primary, 
-              borderWidth: 2,
-              backgroundColor: theme.colors.primary + '10',
-            }
-          ]}
-          onPress={() => {
-            const tier = uploadQuota?.tier?.toLowerCase() || 'free';
-            if (tier === 'free') {
-              Alert.alert(
-                'Upgrade Required',
-                'Albums are only available for Premium and Unlimited users. Upgrade now to create albums!',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'View Plans', onPress: handleUpgradePress },
-                ]
-              );
-              return;
-            }
-            setUploadMode('album');
-            setAlbumStep(1);
-          }}
-        >
-          <Ionicons 
-            name="albums" 
-            size={32} 
-            color={uploadMode === 'album' ? theme.colors.primary : theme.colors.textSecondary} 
-          />
-          <Text style={[
-            styles.modeLabel, 
-            { color: uploadMode === 'album' ? theme.colors.primary : theme.colors.text }
-          ]}>
-            Album
-          </Text>
-          <Text style={[styles.modeDescription, { color: theme.colors.textSecondary }]}>
-            Multiple tracks
-          </Text>
-          {uploadMode === 'album' && (
-            <Ionicons 
-              name="checkmark-circle" 
-              size={24} 
-              color={theme.colors.primary} 
-              style={styles.modeCheckmark} 
+        <GradientOption selected={uploadMode === 'album'} radius={18} backgroundColor={optionSurface}>
+          <TouchableOpacity
+            style={styles.modeOption}
+            onPress={() => {
+              const tier = uploadQuota?.tier?.toLowerCase() || 'free';
+              if (tier === 'free') {
+                Alert.alert(
+                  'Upgrade Required',
+                  'Albums are only available for Premium and Unlimited users. Upgrade now to create albums!',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'View Plans', onPress: handleUpgradePress },
+                  ]
+                );
+                return;
+              }
+              setUploadMode('album');
+              setAlbumStep(1);
+            }}
+            activeOpacity={0.9}
+          >
+            <Ionicons
+              name="albums"
+              size={32}
+              color={uploadMode === 'album' ? theme.colors.primary : theme.colors.textSecondary}
             />
-          )}
-          {(uploadQuota?.tier === 'free' || !uploadQuota?.tier) && (
-            <View style={[styles.upgradeBadge, { backgroundColor: theme.colors.warning }]}>
-              <Text style={styles.upgradeBadgeText}>PRO</Text>
-            </View>
-          )}
-        </TouchableOpacity>
+            <Text style={[
+              styles.modeLabel,
+              { color: uploadMode === 'album' ? theme.colors.primary : theme.colors.text }
+            ]}>
+              Album
+            </Text>
+            <Text style={[styles.modeDescription, { color: theme.colors.textSecondary }]}>
+              Multiple tracks
+            </Text>
+            {(uploadQuota?.tier === 'free' || !uploadQuota?.tier) && (
+              <View style={[styles.upgradeBadge, { backgroundColor: theme.colors.warning }]}>
+                <Text style={styles.upgradeBadgeText}>PRO</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </GradientOption>
       </View>
-    </View>
+    </GlassSection>
   );
 
   // Album Form - Step 1: Metadata
   const AlbumMetadataForm = () => (
     <View>
       {/* Album Title */}
-      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+      <GlassSection>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Album Title *</Text>
         <TextInput
-          style={[styles.input, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
+          style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
           placeholder="Enter album title"
           placeholderTextColor={theme.colors.textSecondary}
           value={albumFormData.albumTitle}
           onChangeText={(text) => setAlbumFormData(prev => ({ ...prev, albumTitle: text }))}
+          textContentType="none"
+          autoComplete="off"
         />
-      </View>
+      </GlassSection>
 
       {/* Album Description */}
-      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+      <GlassSection>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Description</Text>
         <TextInput
           style={[styles.textArea, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
@@ -1600,11 +1890,13 @@ export default function UploadScreen() {
           onChangeText={(text) => setAlbumFormData(prev => ({ ...prev, albumDescription: text }))}
           multiline
           numberOfLines={4}
+          textContentType="none"
+          autoComplete="off"
         />
-      </View>
+      </GlassSection>
 
       {/* Album Genre */}
-      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+      <GlassSection>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Genre *</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.genreScroll}>
           {genres.map((genre) => (
@@ -1629,10 +1921,10 @@ export default function UploadScreen() {
             </TouchableOpacity>
           ))}
         </ScrollView>
-      </View>
+      </GlassSection>
 
       {/* Album Cover */}
-      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+      <GlassSection>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Album Cover *</Text>
         {albumFormData.albumCover ? (
           <View style={[styles.filePreview, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
@@ -1656,10 +1948,10 @@ export default function UploadScreen() {
             </Text>
           </TouchableOpacity>
         )}
-      </View>
+      </GlassSection>
 
       {/* Release Status */}
-      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+      <GlassSection>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Release Status</Text>
         <View style={styles.statusContainer}>
           {(['draft', 'published'] as const).map((status) => (
@@ -1685,7 +1977,7 @@ export default function UploadScreen() {
             </TouchableOpacity>
           ))}
         </View>
-      </View>
+      </GlassSection>
 
       {/* Next Button */}
       <TouchableOpacity
@@ -1717,7 +2009,7 @@ export default function UploadScreen() {
     <View style={{ flex: 1 }}>
       <View>
         {/* Track List */}
-        <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <GlassSection>
           <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
             Tracks ({albumFormData.tracks.length})
           </Text>
@@ -1789,6 +2081,8 @@ export default function UploadScreen() {
                       onChangeText={(text) => updateTrackTitle(item.id, text)}
                       placeholder="Track title"
                       placeholderTextColor={theme.colors.textSecondary}
+                      textContentType="none"
+                      autoComplete="off"
                     />
                     <Text style={[styles.trackFileName, { color: theme.colors.textSecondary }]}>
                       {item.audioFile?.name}
@@ -1822,7 +2116,7 @@ export default function UploadScreen() {
               Premium: {albumFormData.tracks.length}/7 tracks
             </Text>
           )}
-        </View>
+        </GlassSection>
 
         {/* Navigation Buttons */}
         <View style={styles.navigationButtons}>
@@ -1856,7 +2150,7 @@ export default function UploadScreen() {
   const AlbumReviewForm = () => (
     <View>
       {/* Album Summary */}
-      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+      <GlassSection>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Album Summary</Text>
         
         <View style={styles.reviewRow}>
@@ -1881,10 +2175,10 @@ export default function UploadScreen() {
             {albumFormData.albumDescription}
           </Text>
         )}
-      </View>
+      </GlassSection>
 
       {/* Track List Summary */}
-      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+      <GlassSection>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Track List</Text>
         {albumFormData.tracks.map((track) => (
           <View key={track.id} style={styles.reviewTrack}>
@@ -1896,7 +2190,7 @@ export default function UploadScreen() {
             </Text>
           </View>
         ))}
-      </View>
+      </GlassSection>
 
       {/* Navigation Buttons */}
       <View style={styles.navigationButtons}>
@@ -1935,72 +2229,106 @@ export default function UploadScreen() {
     </View>
   );
 
+  const handleDismissStorageModal = () => {
+    storageAlertActiveRef.current = false;
+    setShowStorageModal(false);
+  };
+
+  const handleManageStorage = () => {
+    storageAlertActiveRef.current = false;
+    setShowStorageModal(false);
+    handleOpenStorage();
+  };
+
+  const handleUpgradeStorage = () => {
+    storageAlertActiveRef.current = false;
+    setShowStorageModal(false);
+    handleUpgradePress();
+  };
+
   return (
     <View style={styles.container}>
-      {/* Main Background Gradient - Uses theme colors */}
-      <LinearGradient
-        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        locations={[0, 0.5, 1]}
-        style={styles.mainGradient}
-      />
+      {/* Main Background - dark uses spline, light uses gradient */}
+      {theme.isDark ? (
+        <View style={styles.mainGradient}>
+          <WebView
+            source={{ uri: 'https://my.spline.design/glowingplanetparticles-nhVHji30IRoa5HBGe8yeDiTs' }}
+            style={styles.splineWebView}
+            scrollEnabled={false}
+            originWhitelist={['*']}
+            javaScriptEnabled
+            domStorageEnabled
+            pointerEvents="none"
+          />
+          <LinearGradient
+            colors={['rgba(19, 7, 34, 0.65)', 'rgba(36, 12, 62, 0.5)', 'rgba(46, 16, 101, 0.6)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.splineOverlay}
+          />
+        </View>
+      ) : (
+        <LinearGradient
+          colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          locations={[0, 0.5, 1]}
+          style={styles.mainGradient}
+        />
+      )}
       
       <SafeAreaView style={styles.safeArea} edges={[]}>
+
         <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
         
         <View style={styles.gradient}>
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
-          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Upload Content</Text>
-          {/* Step 15: You're Ready to EARN (Final Step) */}
-          <WalkthroughableTouchable
-            order={15}
-            name="ready_to_earn"
-            text="Tap Publish when ready! Your music goes LIVE instantly. Followers see it FIRST in their feed. You earn from: Tips (95% yours), Event tickets (95%), Paid collaborations, Services marketplace. You're ready to EARN. Welcome to SoundBridge! 🎉"
-            style={[styles.publishButton, isUploading && styles.publishButtonDisabled]}
-            onPress={handleUpload}
-            disabled={isUploading}
+          <Text
+            style={[styles.headerTitle, { color: theme.colors.text }]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
           >
-            <LinearGradient
-              colors={isUploading ? ['#666', '#666'] : ['#DC2626', '#EC4899']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.publishButtonGradient}
+            Create Track
+          </Text>
+          <Text style={[styles.headerSubtitle, { color: theme.colors.textSecondary }]}>
+            Upload your track or episode
+          </Text>
+          {uploadQuota?.storage && (
+            <TouchableOpacity
+              style={[styles.headerStatusPill, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+              onPress={handleOpenStorage}
+              activeOpacity={0.8}
             >
-              <Text style={styles.publishButtonText}>
-                {isUploading ? 'Uploading...' : `Publish ${formData.contentType === 'music' ? 'Track' : 'Episode'}`}
+              <Ionicons name="cloud-outline" size={16} color={theme.colors.primary} style={{ marginRight: 6 }} />
+              <Text style={[styles.headerStatusText, { color: theme.colors.textSecondary }]}>
+                {Math.round(uploadQuota.storage.storage_percent_used || 0)}% used
               </Text>
-            </LinearGradient>
-          </WalkthroughableTouchable>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Upload Progress */}
         {isUploading && (
           <View style={styles.progressContainer}>
             <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${uploadProgress}%` }]} />
+              <LinearGradient
+                colors={['#DC2626', '#EC4899', 'rgba(255,255,255,0.9)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={[styles.progressFill, { width: `${uploadProgress}%` }]}
+              />
             </View>
             <Text style={[styles.progressText, { color: theme.colors.text }]}>{uploadProgress}%</Text>
           </View>
         )}
 
-      <ScrollView 
+      <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
-          <UploadLimitCard
-            quota={uploadQuota}
-            loading={quotaLoading}
-            onUpgrade={handleUpgradePress}
-          />
-
-          {/* Storage Indicator - NEW */}
-          {uploadQuota?.storage && (
-            <StorageIndicator storageQuota={uploadQuota.storage} />
-          )}
-
           {/* Upload Mode Selector */}
           <UploadModeSelector />
 
@@ -2014,7 +2342,7 @@ export default function UploadScreen() {
           {renderFileUpload('audioFile', 'Audio File *', formData.audioFile)}
           
           {/* Basic Information */}
-          <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <GlassSection>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Basic Information</Text>
             
             <View style={styles.inputGroup}>
@@ -2025,6 +2353,8 @@ export default function UploadScreen() {
                 placeholderTextColor={theme.colors.textSecondary}
                 value={formData.title}
                 onChangeText={(value) => handleInputChange('title', value)}
+                textContentType="none"
+                autoComplete="off"
               />
             </View>
 
@@ -2038,6 +2368,8 @@ export default function UploadScreen() {
                 onChangeText={(value) => handleInputChange('description', value)}
                 multiline
                 numberOfLines={3}
+                textContentType="none"
+                autoComplete="off"
               />
             </View>
 
@@ -2052,6 +2384,8 @@ export default function UploadScreen() {
                     placeholderTextColor={theme.colors.textSecondary}
                     value={formData.artistName}
                     onChangeText={(value) => handleInputChange('artistName', value)}
+                    textContentType="none"
+                    autoComplete="off"
                   />
                 </View>
 
@@ -2082,20 +2416,22 @@ export default function UploadScreen() {
     </View>
             </View>
               </>
-            ) : (
+            ) : formData.contentType === 'podcast' ? (
               <>
-          <View style={styles.inputGroup}>
+                <View style={styles.inputGroup}>
                   <Text style={[styles.label, { color: theme.colors.text }]}>Episode Number *</Text>
-            <TextInput
+                  <TextInput
                     style={[styles.textInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
-                    placeholder="e.g., Episode 1"
+                    placeholder="e.g., 1"
                     placeholderTextColor={theme.colors.textSecondary}
                     value={formData.episodeNumber}
                     onChangeText={(value) => handleInputChange('episodeNumber', value)}
-            />
-          </View>
+                    keyboardType="number-pad"
+                    autoComplete="off"
+                  />
+                </View>
 
-          <View style={styles.inputGroup}>
+                <View style={styles.inputGroup}>
                   <Text style={[styles.label, { color: theme.colors.text }]}>Category</Text>
                   <View style={styles.genreContainer}>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -2120,7 +2456,78 @@ export default function UploadScreen() {
                       ))}
                     </ScrollView>
                   </View>
-          </View>
+                </View>
+              </>
+            ) : (
+              <>
+                {/* Mixtape info banner */}
+                <View style={[styles.inputGroup, { backgroundColor: 'rgba(245,158,11,0.1)', borderRadius: 12, padding: 12, marginBottom: 8 }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+                    <Ionicons name="information-circle-outline" size={18} color="#F59E0B" style={{ marginTop: 1 }} />
+                    <Text style={{ color: theme.colors.textSecondary, fontSize: 13, flex: 1, lineHeight: 18 }}>
+                      DJ Mixes are shared for promotional use. You are responsible for the content you upload. SoundBridge complies with all valid DMCA takedown requests.
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>DJ / Artist Name *</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
+                    placeholder="e.g., DJ Justice"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={formData.djName}
+                    onChangeText={(value) => handleInputChange('djName', value)}
+                    textContentType="none"
+                    autoComplete="off"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>Genre *</Text>
+                  <View style={styles.genreContainer}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      {genres.map((genre) => (
+                        <TouchableOpacity
+                          key={genre}
+                          style={[
+                            styles.genreChip,
+                            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                            formData.genre === genre && { backgroundColor: '#F59E0B', borderColor: '#F59E0B' }
+                          ]}
+                          onPress={() => handleInputChange('genre', genre)}
+                        >
+                          <Text style={[
+                            styles.genreChipText,
+                            { color: theme.colors.text },
+                            formData.genre === genre && { color: '#FFFFFF' }
+                          ]}>
+                            {genre}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>Tracklist *</Text>
+                  <Text style={[styles.hintText, { color: theme.colors.textSecondary, marginBottom: 6 }]}>
+                    List each track on a new line, e.g. "Artist - Song Title"
+                  </Text>
+                  <TextInput
+                    style={[styles.textInput, styles.textArea, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text, minHeight: 120 }]}
+                    placeholder={"1. Artist - Track Title\n2. Artist - Track Title\n3. Artist - Track Title"}
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={formData.tracklist}
+                    onChangeText={(value) => handleInputChange('tracklist', value)}
+                    multiline
+                    numberOfLines={6}
+                    textAlignVertical="top"
+                    textContentType="none"
+                    autoComplete="off"
+                  />
+                </View>
               </>
             )}
 
@@ -2132,10 +2539,12 @@ export default function UploadScreen() {
                 placeholderTextColor={theme.colors.textSecondary}
               value={formData.tags}
                 onChangeText={(value) => handleInputChange('tags', value)}
+                textContentType="none"
+                autoComplete="off"
             />
           </View>
 
-          {/* Lyrics Section (for music only) */}
+          {/* Lyrics Section (for music only, not podcast or mixtape) */}
           {formData.contentType === 'music' && (
             <>
               <View style={styles.inputGroup}>
@@ -2149,6 +2558,8 @@ export default function UploadScreen() {
                   multiline
                   numberOfLines={8}
                   textAlignVertical="top"
+                  textContentType="none"
+                  autoComplete="off"
                 />
               </View>
 
@@ -2185,11 +2596,11 @@ export default function UploadScreen() {
               </View>
             </>
           )}
-        </View>
+        </GlassSection>
 
         {/* ACRCloud Audio Fingerprinting (for music only) */}
         {formData.contentType === 'music' && formData.audioFile && (
-          <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <GlassSection>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Audio Verification</Text>
 
             {/* Loading State */}
@@ -2223,15 +2634,22 @@ export default function UploadScreen() {
                     </Text>
                   )}
                   <Text style={[styles.acrcloudMessage, { color: '#666666', marginTop: 8 }]}>
-                    To upload this track, please provide a valid ISRC code for verification.
+                    This recording matches a known release. Fill in the original artist and title below, then upload as a cover. If you own this recording, your upload will be queued for manual review.
                   </Text>
+
+                  {/* Suspected duplicate notice */}
+                  <View style={{ backgroundColor: '#FFF8E1', borderColor: '#F59E0B', borderWidth: 1, borderRadius: 6, padding: 10, marginTop: 8 }}>
+                    <Text style={{ color: '#92400E', fontSize: 12, lineHeight: 17 }}>
+                      ⚠️ Uploads that match existing recordings are flagged for manual review before going public. Confirm the original artist/title details below.
+                    </Text>
+                  </View>
 
                   {/* Artist Mismatch Warning */}
                   {acrcloudData.artistMatch && !acrcloudData.artistMatch.match && (
                     <View style={[styles.artistMismatchWarning, { backgroundColor: '#FFEBEE', borderColor: '#DC2626' }]}>
                       <Ionicons name="warning" size={18} color="#DC2626" />
                       <Text style={[styles.artistMismatchText, { color: '#DC2626' }]}>
-                        Artist name mismatch. This track belongs to "{acrcloudData.detectedArtist}". Please verify ownership with ISRC.
+                        Artist name mismatch: detected as "{acrcloudData.detectedArtist}". Correct the original artist name below if needed.
                       </Text>
                     </View>
                   )}
@@ -2283,19 +2701,30 @@ export default function UploadScreen() {
                 </View>
               </View>
             )}
-          </View>
+          </GlassSection>
         )}
 
         {/* ISRC Verification Section */}
         {formData.contentType === 'music' && (
-          <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <GlassSection>
             {/* Show different titles based on ACRCloud status */}
             {acrcloudStatus === 'match' ? (
               <View>
-                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>ISRC Verification Required *</Text>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>ISRC Verification (optional)</Text>
                 <Text style={[styles.hintText, { color: theme.colors.textSecondary, marginBottom: 16 }]}>
-                  This track was detected as a released song. Please provide the ISRC code to verify ownership.
+                  This track was detected as a released song. If you have an ISRC, enter it to verify ownership. If you don't have one, leave it blank.
                 </Text>
+              </View>
+            ) : acrcloudStatus === 'no_match' ? (
+              <View>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+                  {isCover ? 'Cover Song Details' : 'ISRC Verification (optional)'}
+                </Text>
+                {!isCover && (
+                  <Text style={[styles.hintText, { color: theme.colors.textSecondary, marginBottom: 16 }]}>
+                    No ISRC? SoundBridge will automatically assign one to your recording once PPL registration is complete. If you already have a distributor ISRC, enter it below.
+                  </Text>
+                )}
               </View>
             ) : (
               <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Cover Song Verification</Text>
@@ -2320,20 +2749,82 @@ export default function UploadScreen() {
               </TouchableOpacity>
             )}
 
-            {/* ISRC Input - Show if ACRCloud match OR user checked "cover song" */}
+            {/* Original Artist / Song Title — required for covers and ACRCloud matches */}
             {(acrcloudStatus === 'match' || isCover) && (
+              <View style={{ marginTop: 12 }}>
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>
+                    Original Artist Name <Text style={{ color: '#EF4444', fontWeight: '700' }}>*</Text>
+                  </Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: theme.colors.surface, borderColor: !originalArtistName.trim() && (acrcloudStatus === 'match' || isCover) ? theme.colors.border : theme.colors.border, color: theme.colors.text }]}
+                    placeholder="e.g., The Beatles"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={originalArtistName}
+                    onChangeText={setOriginalArtistName}
+                    textContentType="none"
+                    autoComplete="off"
+                  />
+                  {acrcloudStatus === 'match' && (
+                    <Text style={[styles.hintText, { color: theme.colors.textSecondary }]}>
+                      Auto-filled from audio fingerprint — edit if incorrect.
+                    </Text>
+                  )}
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>
+                    Original Song Title <Text style={{ color: '#EF4444', fontWeight: '700' }}>*</Text>
+                  </Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
+                    placeholder="e.g., Let It Be"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={originalSongTitle}
+                    onChangeText={setOriginalSongTitle}
+                    textContentType="none"
+                    autoComplete="off"
+                  />
+                  {acrcloudStatus === 'match' && (
+                    <Text style={[styles.hintText, { color: theme.colors.textSecondary }]}>
+                      Auto-filled from audio fingerprint — edit if incorrect.
+                    </Text>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* ISRC Input - Show if ACRCloud match, original (no_match), or user checked "cover song" */}
+            {(acrcloudStatus === 'match' || acrcloudStatus === 'no_match' || isCover) && (
               <View style={styles.isrcContainer}>
-                {/* Warning for detected matches - DO NOT show the ISRC */}
+                {/* Context banner for match (optional) */}
                 {acrcloudStatus === 'match' && (
-                  <View style={[styles.detectedIsrcHint, { backgroundColor: '#FFF3E0', borderColor: '#FF9800', marginBottom: 12, padding: 12, borderRadius: 8, borderWidth: 1 }]}>
+                  <View style={{ backgroundColor: '#FFF3E0', borderColor: '#FF9800', marginBottom: 12, padding: 12, borderRadius: 8, borderWidth: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                       <Ionicons name="shield-checkmark" size={20} color="#FF9800" style={{ marginRight: 8 }} />
                       <View style={{ flex: 1 }}>
-                        <Text style={{ color: '#E65100', fontWeight: '600', fontSize: 14, marginBottom: 4 }}>
-                          Ownership Verification Required
+                        <Text style={[Typography.label, { color: '#E65100', fontWeight: '600', fontSize: 14, marginBottom: 4 }]}>
+                          Ownership Verification (optional)
                         </Text>
-                        <Text style={{ color: '#EF6C00', fontSize: 13, lineHeight: 18 }}>
-                          To upload this track, please enter the ISRC code from your music distributor (DistroKid, TuneCore, CD Baby, etc.). The ISRC must match the detected track.
+                        <Text style={[Typography.label, { color: '#EF6C00', fontSize: 13, lineHeight: 18 }]}>
+                          If you have an ISRC from your distributor (DistroKid, TuneCore, CD Baby, etc.), enter it to verify ownership. No ISRC? Leave blank — SoundBridge will assign your recording one.
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                {/* Auto-assign info for originals */}
+                {acrcloudStatus === 'no_match' && !isCover && (
+                  <View style={{ backgroundColor: '#F0FDF4', borderColor: '#10B981', marginBottom: 12, padding: 12, borderRadius: 8, borderWidth: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Ionicons name="checkmark-circle" size={20} color="#10B981" style={{ marginRight: 8 }} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[Typography.label, { color: '#065F46', fontWeight: '600', fontSize: 14, marginBottom: 4 }]}>
+                          ISRC Auto-Assignment
+                        </Text>
+                        <Text style={[Typography.label, { color: '#047857', fontSize: 13, lineHeight: 18 }]}>
+                          SoundBridge will assign an ISRC (GB-SBR-26-XXXXX) to this recording automatically. If you already have a distributor ISRC, enter it below to use yours instead.
                         </Text>
                       </View>
                     </View>
@@ -2342,24 +2833,27 @@ export default function UploadScreen() {
 
                 <View style={styles.inputGroup}>
                   <Text style={[styles.label, { color: theme.colors.text }]}>
-                    ISRC Code *
+                    ISRC Code{' '}
+                    <Text style={{ color: theme.colors.textSecondary, fontWeight: '400' }}>(optional)</Text>
                   </Text>
                   <TextInput
                     style={[
                       styles.textInput,
                       { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text },
-                      isrcVerificationStatus === 'error' && { borderColor: theme.colors.error },
+                      isrcVerificationStatus === 'error' && { borderColor: '#F59E0B' },
                       isrcVerificationStatus === 'success' && { borderColor: theme.colors.success },
                     ]}
-                    placeholder="Type the ISRC code (e.g., GBUM71502800)"
+                    placeholder={"e.g., GBUM71502800 — leave blank to auto-assign"}
                     placeholderTextColor={theme.colors.textSecondary}
                     value={isrcCode}
                     onChangeText={handleISRCChange}
                     maxLength={14}
                     autoCapitalize="characters"
+                    textContentType="none"
+                    autoComplete="off"
                   />
                   <Text style={[styles.hintText, { color: theme.colors.textSecondary }]}>
-                    Format: XX-XXX-YY-NNNNN (12 characters, hyphens optional)
+                    Format: XX-XXX-YY-NNNNN (12 characters, hyphens optional).{isCover ? " No ISRC? That's fine — leave it blank. SoundBridge will assign your recording an ISRC once we complete our PPL registration." : ''}
                   </Text>
                 </View>
 
@@ -2389,23 +2883,26 @@ export default function UploadScreen() {
                 )}
 
                 {isrcVerificationStatus === 'error' && isrcVerificationError && (
-                  <View style={[styles.verificationError, { borderColor: theme.colors.error, backgroundColor: '#FFEBEE' }]}>
-                    <Ionicons name="alert-circle" size={20} color={theme.colors.error} />
+                  <View style={[styles.verificationError, { borderColor: '#F59E0B', backgroundColor: '#FFFBEB' }]}>
+                    <Ionicons name="information-circle" size={20} color="#F59E0B" />
                     <View style={styles.verificationContent}>
-                      <Text style={[styles.verificationTitle, { color: '#DC2626' }]}>Verification Failed</Text>
-                      <Text style={[styles.verificationDetails, { color: '#991B1B' }]}>
+                      <Text style={[styles.verificationTitle, { color: '#92400E' }]}>ISRC not verified</Text>
+                      <Text style={[styles.verificationDetails, { color: '#78350F' }]}>
                         {isrcVerificationError}
+                      </Text>
+                      <Text style={[styles.verificationDetails, { color: '#92400E', marginTop: 4 }]}>
+                        You can still proceed — leave ISRC blank and SoundBridge will assign one.
                       </Text>
                     </View>
                   </View>
                 )}
               </View>
             )}
-          </View>
+          </GlassSection>
         )}
 
         {/* Privacy Settings */}
-        <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <GlassSection>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Privacy Settings</Text>
             <View style={styles.privacyContainer}>
               {[
@@ -2432,45 +2929,100 @@ export default function UploadScreen() {
           </TouchableOpacity>
               ))}
             </View>
-          </View>
+          </GlassSection>
 
-          {/* Copyright Verification */}
-          <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Copyright Confirmation *</Text>
-            <View style={[styles.copyrightContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-              <Ionicons name="shield-checkmark-outline" size={24} color={theme.colors.primary} style={styles.copyrightIcon} />
-              <View style={styles.copyrightTextContainer}>
-                <Text style={[styles.copyrightText, { color: theme.colors.text }]}>
-                  I confirm that I own all rights to this music and it does not infringe any third-party copyrights. I understand that uploading copyrighted content without permission may result in account suspension or termination.
-                </Text>
-                <TouchableOpacity onPress={() => {
-                  navigation.navigate('CopyrightPolicy' as never);
-                }}>
-                  <Text style={[styles.copyrightLearnMore, { color: theme.colors.primary }]}>
-                    Learn more about our copyright policy
+          {/* Pricing Controls */}
+          <PricingControls
+            isPaid={formData.isPaid}
+            price={formData.price}
+            currency={formData.currency}
+            onIsPaidChange={(value) => {
+              handleInputChange('isPaid', value);
+              // Reset mixtape terms acceptance when toggling paid — terms text changes
+              if (formData.contentType === 'mixtape') setAgreedToMixtapeTerms(false);
+            }}
+            onPriceChange={(value) => handleInputChange('price', value)}
+            onCurrencyChange={(value) => handleInputChange('currency', value)}
+            userSubscription={uploadQuota?.tier?.toLowerCase()}
+          />
+
+          {/* Copyright / Terms Verification */}
+          <GlassSection>
+            {formData.contentType === 'mixtape' ? (
+              <>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Mixtape Terms *</Text>
+                <View style={[styles.copyrightContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                  <Ionicons name="shield-checkmark-outline" size={24} color="#F59E0B" style={styles.copyrightIcon} />
+                  <View style={styles.copyrightTextContainer}>
+                    <Text style={[styles.copyrightText, { color: theme.colors.text }]}>
+                      {formData.isPaid
+                        ? 'I confirm that I have obtained the necessary licenses or permissions to sell this mix commercially. I understand that rights holders may request removal and that SoundBridge complies with all valid DMCA takedown requests. Selling content that infringes copyright may result in removal or account suspension.'
+                        : 'I confirm this mix is shared for promotional, non-commercial purposes. I understand I do not own the underlying recordings and that rights holders may request removal. SoundBridge complies with all valid DMCA takedown requests. Uploading content that infringes copyright may result in removal or account suspension.'}
+                    </Text>
+                    <TouchableOpacity onPress={() => {
+                      navigation.navigate('CopyrightPolicy' as never);
+                    }}>
+                      <Text style={[styles.copyrightLearnMore, { color: '#F59E0B' }]}>
+                        Learn more about our copyright policy
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[styles.copyrightCheckbox, { borderColor: theme.colors.border }]}
+                  onPress={() => setAgreedToMixtapeTerms(!agreedToMixtapeTerms)}
+                >
+                  <View style={[
+                    styles.checkbox,
+                    { borderColor: theme.colors.border },
+                    agreedToMixtapeTerms && { backgroundColor: '#F59E0B', borderColor: '#F59E0B' }
+                  ]}>
+                    {agreedToMixtapeTerms && <Ionicons name="checkmark" size={18} color="#fff" />}
+                  </View>
+                  <Text style={[styles.checkboxLabel, { color: theme.colors.text }]}>
+                    {formData.isPaid ? 'I confirm I have the rights to sell this mix commercially' : 'I agree to the mixtape terms above'}
                   </Text>
                 </TouchableOpacity>
-              </View>
-            </View>
-            <TouchableOpacity
-              style={[styles.copyrightCheckbox, { borderColor: theme.colors.border }]}
-              onPress={() => setAgreedToCopyright(!agreedToCopyright)}
-            >
-              <View style={[
-                styles.checkbox,
-                { borderColor: theme.colors.border },
-                agreedToCopyright && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }
-              ]}>
-                {agreedToCopyright && <Ionicons name="checkmark" size={18} color="#fff" />}
-              </View>
-              <Text style={[styles.checkboxLabel, { color: theme.colors.text }]}>
-                I agree to the copyright terms above
-              </Text>
-            </TouchableOpacity>
-          </View>
+              </>
+            ) : (
+              <>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Copyright Confirmation *</Text>
+                <View style={[styles.copyrightContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                  <Ionicons name="shield-checkmark-outline" size={24} color={theme.colors.primary} style={styles.copyrightIcon} />
+                  <View style={styles.copyrightTextContainer}>
+                    <Text style={[styles.copyrightText, { color: theme.colors.text }]}>
+                      I confirm that I own all rights to this music and it does not infringe any third-party copyrights. I understand that uploading copyrighted content without permission may result in account suspension or termination.
+                    </Text>
+                    <TouchableOpacity onPress={() => {
+                      navigation.navigate('CopyrightPolicy' as never);
+                    }}>
+                      <Text style={[styles.copyrightLearnMore, { color: theme.colors.primary }]}>
+                        Learn more about our copyright policy
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[styles.copyrightCheckbox, { borderColor: theme.colors.border }]}
+                  onPress={() => setAgreedToCopyright(!agreedToCopyright)}
+                >
+                  <View style={[
+                    styles.checkbox,
+                    { borderColor: theme.colors.border },
+                    agreedToCopyright && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }
+                  ]}>
+                    {agreedToCopyright && <Ionicons name="checkmark" size={18} color="#fff" />}
+                  </View>
+                  <Text style={[styles.checkboxLabel, { color: theme.colors.text }]}>
+                    I agree to the copyright terms above
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </GlassSection>
 
           {/* Cover Art */}
-          {renderFileUpload('coverImage', 'Cover Art (Optional)', formData.coverImage)}
+          {renderFileUpload('coverImage', 'Cover Art *', formData.coverImage)}
             </>
           )}
 
@@ -2478,7 +3030,7 @@ export default function UploadScreen() {
           {uploadMode === 'album' && (
             <>
               {/* Album Step Indicator */}
-              <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+              <GlassSection>
                 <View style={styles.stepIndicator}>
                   <View style={[styles.step, albumStep >= 1 && { backgroundColor: theme.colors.primary }]}>
                     <Text style={[styles.stepNumber, { color: albumStep >= 1 ? '#fff' : theme.colors.text }]}>1</Text>
@@ -2495,17 +3047,90 @@ export default function UploadScreen() {
                 <Text style={[styles.stepLabel, { color: theme.colors.textSecondary }]}>
                   Step {albumStep}: {albumStep === 1 ? 'Album Info' : albumStep === 2 ? 'Add Tracks' : 'Review'}
                 </Text>
-              </View>
+              </GlassSection>
 
-              {/* Album Forms */}
-              {albumStep === 1 && <AlbumMetadataForm />}
-              {albumStep === 2 && <AlbumTracksForm />}
-              {albumStep === 3 && <AlbumReviewForm />}
+              {/* Album Forms — inlined to prevent inner-component remount on each keystroke */}
+              {albumStep === 1 && AlbumMetadataForm()}
+              {albumStep === 2 && AlbumTracksForm()}
+              {albumStep === 3 && AlbumReviewForm()}
             </>
+          )}
+
+          {uploadMode !== 'album' && (
+            <WalkthroughableTouchable
+              order={15}
+              name="ready_to_earn"
+              text="Tap Publish when ready! Your music goes LIVE instantly. Followers see it FIRST in their feed. You earn from: Tips (95% yours), Event tickets (95%), Paid collaborations, Services marketplace. You're ready to EARN. Welcome to SoundBridge! 🎉"
+              style={[styles.publishButton, isUploading && styles.publishButtonDisabled, { alignSelf: 'stretch' }]}
+              onPress={handleUpload}
+              disabled={isUploading}
+            >
+              <LinearGradient
+                colors={isUploading ? ['#666', '#666'] : ['#DC2626', '#EC4899']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.publishButtonGradient}
+              >
+                <Text style={styles.publishButtonText} numberOfLines={1}>
+                  {isUploading ? 'Uploading...' : 'Publish'}
+                </Text>
+              </LinearGradient>
+            </WalkthroughableTouchable>
           )}
       </ScrollView>
         </View>
       </SafeAreaView>
+
+      <Modal transparent visible={showStorageModal} animationType="fade">
+        <View style={styles.storageModalOverlay}>
+          <View style={styles.storageModalBackdrop} />
+          <BlurView intensity={40} tint="dark" style={styles.storageModalCard}>
+            <LinearGradient
+              colors={['rgba(255,255,255,0.18)', 'rgba(255,255,255,0.02)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={styles.storageModalGlow}
+            />
+            <Text style={[styles.storageModalTitle, { color: theme.colors.text }]}>
+              {storagePromptKind === 'full' ? 'Storage Full' : 'Storage Almost Full'}
+            </Text>
+            <Text style={[styles.storageModalBody, { color: theme.colors.textSecondary }]}>
+              {storagePromptKind === 'full'
+                ? 'You have run out of storage. Upgrade to continue uploading or free up space.'
+                : `You are close to your storage limit (${storagePromptPercent}% used). Upgrade now or manage your files to avoid upload issues.`}
+            </Text>
+
+            <TouchableOpacity
+              style={styles.storageModalButton}
+              onPress={handleManageStorage}
+              activeOpacity={0.9}
+            >
+              <LinearGradient
+                colors={['#DC2626', '#EC4899']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.storagePrimaryButton}
+              >
+                <Text style={styles.storagePrimaryText}>Manage Storage</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.storageModalButton, styles.storageSecondaryButton]}
+              onPress={handleUpgradeStorage}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.storageSecondaryText}>Upgrade</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.storageModalButton, styles.storageTertiaryButton]}
+              onPress={handleDismissStorageModal}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.storageTertiaryText}>Not now</Text>
+            </TouchableOpacity>
+          </BlurView>
+        </View>
+      </Modal>
 
       {/* Service Provider Prompt Modal */}
       <ServiceProviderPromptModal
@@ -2529,6 +3154,13 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
   },
+  splineWebView: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
+  },
+  splineOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: 'transparent',
@@ -2538,24 +3170,43 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: 'column',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-start',
     paddingHorizontal: 20,
     paddingVertical: 16,
     paddingTop: 8,
     borderBottomWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    ...Typography.headerLarge,
+    fontSize: 34,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    lineHeight: 40,
+    marginBottom: 6,
+  },
+  headerSubtitle: {
+    ...Typography.label,
+    fontSize: 15,
+    lineHeight: 20,
+    letterSpacing: 0.2,
+  },
+  headerStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  headerStatusText: {
+    ...Typography.label,
   },
   publishButton: {
+    width: '100%',
+    maxWidth: '100%',
     borderRadius: 25,
     overflow: 'hidden',
   },
@@ -2563,13 +3214,95 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   publishButtonGradient: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   publishButtonText: {
     color: 'white',
-    fontWeight: '600',
-    fontSize: 14,
+    ...Typography.button,
+    textAlign: 'center',
+  },
+  storageModalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  storageModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
+  },
+  storageModalCard: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 28,
+    padding: 20,
+    backgroundColor: 'rgba(24, 8, 52, 0.04)',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.28,
+    shadowRadius: 24,
+    elevation: 6,
+  },
+  storageModalGlow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 120,
+  },
+  storageModalTitle: {
+    ...Typography.headerMedium,
+    marginBottom: 8,
+  },
+  storageModalBody: {
+    ...Typography.body,
+    marginBottom: 18,
+  },
+  storageModalButton: {
+    borderRadius: 999,
+    overflow: 'hidden',
+    marginTop: 12,
+  },
+  storagePrimaryButton: {
+    borderRadius: 999,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  storagePrimaryText: {
+    color: '#FFFFFF',
+    ...Typography.button,
+  },
+  storageSecondaryButton: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 999,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  storageSecondaryText: {
+    color: '#FFFFFF',
+    ...Typography.button,
+  },
+  storageTertiaryButton: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 999,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  storageTertiaryText: {
+    color: 'rgba(255,255,255,0.8)',
+    ...Typography.button,
   },
   progressContainer: {
     paddingHorizontal: 20,
@@ -2586,34 +3319,59 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#10B981',
     borderRadius: 2,
   },
   progressText: {
-    fontSize: 14,
-    fontWeight: '600',
+    ...Typography.label,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     padding: 20,
+    paddingBottom: 140,
   },
   section: {
-    marginBottom: 24,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
+    marginBottom: 22,
+  },
+  glassCard: {
+    borderRadius: 22,
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 18,
+    elevation: 3,
+  },
+  glassInner: {
+    padding: 18,
+    borderRadius: 22,
+  },
+  optionBorderWrap: {
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  optionBorderGradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  optionBorderInner: {
+    borderRadius: 16,
+  },
+  glassHighlight: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 60,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
   },
   sectionTitle: {
+    ...Typography.body,
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 16,
+    letterSpacing: 0.2,
+    marginBottom: 14,
   },
   contentTypeContainer: {
     gap: 12,
@@ -2621,9 +3379,9 @@ const styles = StyleSheet.create({
   contentTypeOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 0,
   },
   contentTypeIcon: {
     width: 48,
@@ -2637,26 +3395,24 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentTypeLabel: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.body,
     marginBottom: 4,
   },
   contentTypeDescription: {
-    fontSize: 14,
+    ...Typography.label,
   },
   inputGroup: {
-    marginBottom: 16,
+    marginBottom: 18,
   },
   label: {
-    fontSize: 16,
-    fontWeight: '500',
+    ...Typography.label,
     marginBottom: 8,
   },
   textInput: {
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    borderWidth: 1,
+    borderRadius: 14,
+    padding: 16,
+    ...Typography.body,
+    borderWidth: 0,
   },
   textArea: {
     height: 80,
@@ -2676,8 +3432,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   genreChipText: {
-    fontSize: 14,
-    fontWeight: '500',
+    ...Typography.label,
   },
   privacyContainer: {
     gap: 8,
@@ -2686,35 +3441,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 0,
   },
   privacyOptionContent: {
     flex: 1,
   },
   privacyOptionLabel: {
-    fontSize: 16,
-    fontWeight: '500',
+    ...Typography.body,
     marginBottom: 2,
   },
   privacyOptionDescription: {
-    fontSize: 14,
+    ...Typography.label,
   },
   uploadButton: {
-    borderRadius: 8,
-    padding: 24,
+    borderRadius: 16,
+    padding: 26,
     alignItems: 'center',
     borderWidth: 2,
     borderStyle: 'dashed',
   },
   uploadButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
+    ...Typography.button,
     marginTop: 8,
   },
   uploadButtonSubtext: {
-    fontSize: 12,
+    ...Typography.label,
     marginTop: 4,
   },
   filePreview: {
@@ -2731,8 +3484,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   fileName: {
-    fontSize: 14,
-    fontWeight: '500',
+    ...Typography.body,
     marginLeft: 8,
     flex: 1,
   },
@@ -2746,19 +3498,18 @@ const styles = StyleSheet.create({
   },
   modeOption: {
     flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 16,
+    borderRadius: 18,
+    borderWidth: 0,
+    padding: 18,
     alignItems: 'center',
     position: 'relative',
   },
   modeLabel: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.body,
     marginTop: 8,
   },
   modeDescription: {
-    fontSize: 12,
+    ...Typography.label,
     marginTop: 4,
   },
   modeCheckmark: {
@@ -2775,6 +3526,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   upgradeBadgeText: {
+    ...Typography.label,
     fontSize: 10,
     fontWeight: '700',
     color: '#fff',
@@ -2795,8 +3547,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   stepNumber: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.body,
   },
   stepLine: {
     width: 60,
@@ -2805,7 +3556,7 @@ const styles = StyleSheet.create({
   },
   stepLabel: {
     textAlign: 'center',
-    fontSize: 14,
+    ...Typography.label,
     marginTop: 8,
   },
   // Album Form Styles
@@ -2830,8 +3581,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statusLabel: {
-    fontSize: 14,
-    fontWeight: '500',
+    ...Typography.label,
   },
   // Track List Styles
   emptyTracksContainer: {
@@ -2839,12 +3589,11 @@ const styles = StyleSheet.create({
     padding: 40,
   },
   emptyTracksText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.body,
     marginTop: 16,
   },
   emptyTracksSubtext: {
-    fontSize: 14,
+    ...Typography.label,
     marginTop: 8,
     textAlign: 'center',
   },
@@ -2871,19 +3620,17 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   trackNumberText: {
-    fontSize: 14,
-    fontWeight: '600',
+    ...Typography.label,
   },
   trackInfo: {
     flex: 1,
   },
   trackTitleInput: {
-    fontSize: 15,
-    fontWeight: '500',
+    ...Typography.body,
     marginBottom: 4,
   },
   trackFileName: {
-    fontSize: 12,
+    ...Typography.label,
   },
   trackRemoveButton: {
     padding: 8,
@@ -2899,12 +3646,11 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   addTrackButtonText: {
-    fontSize: 15,
-    fontWeight: '500',
+    ...Typography.body,
     marginLeft: 8,
   },
   limitInfo: {
-    fontSize: 12,
+    ...Typography.label,
     textAlign: 'center',
     marginTop: 8,
   },
@@ -2923,8 +3669,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   primaryButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.button,
     color: '#fff',
   },
   secondaryButton: {
@@ -2937,8 +3682,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   secondaryButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
+    ...Typography.button,
   },
   // Review Styles
   reviewRow: {
@@ -2956,17 +3700,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   reviewTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    ...Typography.headerMedium,
     marginBottom: 4,
   },
   reviewDetail: {
-    fontSize: 14,
+    ...Typography.label,
     marginBottom: 2,
   },
   reviewDescription: {
-    fontSize: 14,
-    lineHeight: 20,
+    ...Typography.body,
   },
   reviewTrack: {
     flexDirection: 'row',
@@ -2976,11 +3718,11 @@ const styles = StyleSheet.create({
   },
   reviewTrackNumber: {
     width: 30,
-    fontSize: 14,
+    ...Typography.label,
   },
   reviewTrackTitle: {
     flex: 1,
-    fontSize: 14,
+    ...Typography.label,
   },
   // Copyright Verification Styles
   copyrightContainer: {
@@ -2998,13 +3740,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   copyrightText: {
-    fontSize: 14,
-    lineHeight: 20,
+    ...Typography.body,
     marginBottom: 8,
   },
   copyrightLearnMore: {
-    fontSize: 14,
-    fontWeight: '500',
+    ...Typography.label,
     textDecorationLine: 'underline',
   },
   copyrightCheckbox: {
@@ -3024,9 +3764,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   checkboxLabel: {
-    fontSize: 15,
+    ...Typography.body,
     flex: 1,
-    fontWeight: '500',
   },
   // ACRCloud Audio Fingerprinting Styles
   acrcloudStatus: {
@@ -3054,17 +3793,14 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   acrcloudTitle: {
-    fontSize: 15,
-    fontWeight: '600',
+    ...Typography.body,
     marginBottom: 4,
   },
   acrcloudDetails: {
-    fontSize: 13,
-    lineHeight: 18,
+    ...Typography.label,
   },
   acrcloudMessage: {
-    fontSize: 14,
-    fontWeight: '500',
+    ...Typography.body,
   },
   artistMismatchWarning: {
     flexDirection: 'row',
@@ -3075,10 +3811,9 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   artistMismatchText: {
-    fontSize: 13,
+    ...Typography.label,
     marginLeft: 8,
     flex: 1,
-    fontWeight: '500',
   },
   originalMusicCheckbox: {
     flexDirection: 'row',
@@ -3100,7 +3835,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   hintText: {
-    fontSize: 12,
+    ...Typography.label,
     marginTop: 4,
   },
   verificationStatus: {
@@ -3113,7 +3848,7 @@ const styles = StyleSheet.create({
   },
   verificationText: {
     marginLeft: 8,
-    fontSize: 14,
+    ...Typography.label,
   },
   verificationSuccess: {
     flexDirection: 'row',
@@ -3138,11 +3873,69 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   verificationTitle: {
-    fontSize: 14,
-    fontWeight: '600',
+    ...Typography.label,
     marginBottom: 4,
   },
   verificationDetails: {
-    fontSize: 12,
+    ...Typography.label,
   },
 });
+
+// Extracted outside UploadScreen to prevent re-mounting on every render
+// (inline component definitions cause React to treat them as new types each render,
+//  which drops TextInput focus and dismisses the keyboard on every keystroke)
+const GlassSection: React.FC<{ children: React.ReactNode; style?: any }> = ({ children, style }) => {
+  const { theme } = useTheme();
+
+  // BlurView renders as a yellowish solid rectangle on Android — use a plain View instead
+  if (Platform.OS === 'android') {
+    return (
+      <View
+        style={[
+          styles.section,
+          styles.glassCard,
+          style,
+          {
+            backgroundColor: theme.isDark ? 'rgba(24, 8, 52, 0.95)' : '#FFFFFF',
+            borderWidth: 1,
+            borderColor: theme.isDark ? 'rgba(255,255,255,0.12)' : 'rgba(88,36,145,0.15)',
+          },
+        ]}
+      >
+        <View style={[styles.glassInner]}>
+          {children}
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <BlurView
+      intensity={theme.isDark ? 40 : 30}
+      tint={theme.isDark ? 'dark' : 'light'}
+      style={[styles.section, styles.glassCard, style]}
+    >
+      <View
+        style={[
+          styles.glassInner,
+          {
+            backgroundColor: theme.isDark ? 'rgba(24, 8, 52, 0.04)' : 'rgba(88, 36, 145, 0.08)',
+            borderColor: theme.isDark ? 'rgba(255,255,255,0.22)' : 'rgba(88, 36, 145, 0.2)',
+          },
+        ]}
+      >
+        <LinearGradient
+          pointerEvents="none"
+          colors={[
+            theme.isDark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.2)',
+            'rgba(255,255,255,0.0)',
+          ]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={styles.glassHighlight}
+        />
+        {children}
+      </View>
+    </BlurView>
+  );
+};

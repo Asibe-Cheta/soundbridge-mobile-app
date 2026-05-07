@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
 interface ModerationBadgeProps {
-  status: 'pending_check' | 'checking' | 'clean' | 'flagged' | 'approved' | 'rejected' | 'appealed';
+  status: 'pending_check' | 'checking' | 'clean' | 'flagged' | 'approved' | 'rejected' | 'appealed' | 'taken_down';
   confidence?: number | null;
   isOwner: boolean;
 }
@@ -15,6 +15,7 @@ const MODERATION_COLORS = {
   approved: '#10B981',
   rejected: '#EF4444',
   appealed: '#F59E0B',
+  taken_down: '#7C3AED',
 };
 
 const MODERATION_LABELS = {
@@ -25,6 +26,7 @@ const MODERATION_LABELS = {
   approved: '✓ Approved',
   rejected: '✗ Not Approved',
   appealed: '📬 Appeal Pending',
+  taken_down: '⚖️ Copyright Removed',
 };
 
 export const ModerationBadge: React.FC<ModerationBadgeProps> = ({ 
@@ -34,6 +36,9 @@ export const ModerationBadge: React.FC<ModerationBadgeProps> = ({
 }) => {
   // Don't show badge to non-owners
   if (!isOwner) return null;
+
+  // Internal processing states — only relevant to admins, not the uploader
+  if (status === 'pending_check' || status === 'checking') return null;
 
   // Don't show badge for clean tracks with low confidence (they're fine)
   if (status === 'clean' && (!confidence || confidence < 50)) return null;

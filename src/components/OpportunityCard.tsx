@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import VerifiedAvatar from './VerifiedAvatar';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getRelativeTime } from '../utils/collaborationUtils';
 import * as Haptics from 'expo-haptics';
 import ExpressInterestModal from './ExpressInterestModal';
+import { opportunityService } from '../services/OpportunityService';
 
 interface Opportunity {
   id: string;
@@ -18,9 +20,16 @@ interface Opportunity {
     username: string;
     display_name: string;
     avatar_url?: string;
+    is_verified?: boolean;
   };
   posted_at: string;
+  created_at?: string;
   is_featured: boolean;
+  has_expressed_interest?: boolean;
+  // Urgent gig fields
+  gig_type?: 'urgent' | 'planned';
+  expires_at?: string;
+  distance_km?: number;
 }
 
 interface OpportunityCardProps {
@@ -37,46 +46,47 @@ export default function OpportunityCard({
   const { theme } = useTheme();
   const { user } = useAuth();
   const [modalVisible, setModalVisible] = useState(false);
+  const [interestSent, setInterestSent] = useState(opportunity.has_expressed_interest || false);
 
-  // Check if user is a service provider
-  const [isServiceProvider, setIsServiceProvider] = useState(false);
+  const isOwnPost = !!user && user.id === opportunity.posted_by?.id;
+  const isUrgent = opportunity.gig_type === 'urgent';
 
-  // TODO: Fetch service provider status from database
-  // For now, assume all authenticated users are service providers
-  React.useEffect(() => {
-    // This will be replaced with actual check:
-    // const checkServiceProvider = async () => {
-    //   const { data } = await supabase
-    //     .from('service_provider_profiles')
-    //     .select('user_id')
-    //     .eq('user_id', user?.id)
-    //     .single();
-    //   setIsServiceProvider(!!data);
-    // };
-    // checkServiceProvider();
-    setIsServiceProvider(!!user);
-  }, [user]);
+  // Countdown for urgent gigs (updates every minute)
+  const [urgentCountdown, setUrgentCountdown] = useState('');
+  useEffect(() => {
+    if (!isUrgent || !opportunity.expires_at) return;
+    function update() {
+      const diff = new Date(opportunity.expires_at!).getTime() - Date.now();
+      if (diff <= 0) { setUrgentCountdown('Expired'); return; }
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      setUrgentCountdown(h > 0 ? `${h}h ${m}m` : `${m}m`);
+    }
+    update();
+    const t = setInterval(update, 60000);
+    return () => clearInterval(t);
+  }, [isUrgent, opportunity.expires_at]);
 
   const handleApplyPress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (isServiceProvider) {
-      setModalVisible(true);
-    } else {
-      // Show message that only service providers can express interest
-      alert('Only service providers can express interest in opportunities. Become a service provider to apply!');
+    if (isOwnPost || interestSent) return;
+    if (!user) {
+      Alert.alert('Sign In Required', 'Please sign in to express interest.');
+      return;
     }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setModalVisible(true);
   };
 
   const handleSubmitInterest = async (data: {
     opportunityId: string;
     reason: string;
     message: string;
-    enableAlerts: boolean;
   }) => {
-    // Call the parent's onApply with the data
-    console.log('Submitting interest:', data);
-    // TODO: Implement database insert
-    // await supabase.from('opportunity_interests').insert({...})
+    await opportunityService.expressInterest(data.opportunityId, {
+      reason: data.reason,
+      message: data.message || undefined,
+    });
+    setInterestSent(true);
     onApply?.(data.opportunityId);
   };
 
@@ -98,31 +108,53 @@ export default function OpportunityCard({
         style={styles.gradient}
       >
         {/* Badge */}
-        {opportunity.is_featured && (
+        {isUrgent ? (
+          <View style={[styles.badge, { backgroundColor: '#DC2626', flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+            <Text style={{ fontSize: 11 }}>🔥</Text>
+            <Text style={styles.badgeText}>URGENT</Text>
+          </View>
+        ) : opportunity.is_featured ? (
           <View style={[styles.badge, { backgroundColor: '#7C3AED' }]}>
             <Text style={styles.badgeText}>FEATURED</Text>
+          </View>
+        ) : null}
+
+        {/* Urgent gig meta row: countdown + distance */}
+        {isUrgent && (urgentCountdown || opportunity.distance_km != null) && (
+          <View style={styles.urgentMeta}>
+            {urgentCountdown ? (
+              <View style={styles.urgentMetaItem}>
+                <Text style={{ fontSize: 11 }}>⏰</Text>
+                <Text style={[styles.urgentMetaText, { color: urgentCountdown === 'Expired' ? '#EF4444' : '#F59E0B' }]}>
+                  {urgentCountdown === 'Expired' ? 'Expired' : `Expires in ${urgentCountdown}`}
+                </Text>
+              </View>
+            ) : null}
+            {opportunity.distance_km != null && (
+              <View style={styles.urgentMetaItem}>
+                <Text style={{ fontSize: 11 }}>📍</Text>
+                <Text style={styles.urgentMetaText}>{opportunity.distance_km.toFixed(1)} km away</Text>
+              </View>
+            )}
           </View>
         )}
 
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.authorInfo}>
-            {opportunity.posted_by.avatar_url ? (
-              <Image
-                source={{ uri: opportunity.posted_by.avatar_url }}
-                style={styles.avatar}
-              />
-            ) : (
-              <View style={[styles.avatar, { backgroundColor: theme.colors.surface }]}>
-                <Ionicons name="person" size={20} color={theme.colors.textSecondary} />
-              </View>
-            )}
+            <VerifiedAvatar
+              avatarUrl={opportunity.posted_by?.avatar_url}
+              isVerified={opportunity.posted_by?.is_verified}
+              size={32}
+              fallbackIconSize={16}
+              marginRight={8}
+            />
             <View style={styles.authorText}>
               <Text style={[styles.authorName, { color: theme.colors.text }]}>
-                {opportunity.posted_by.display_name}
+                {opportunity.posted_by?.display_name ?? 'Unknown'}
               </Text>
               <Text style={[styles.postedAt, { color: theme.colors.textSecondary }]}>
-                {getRelativeTime(opportunity.posted_at)}
+                {getRelativeTime(opportunity.posted_at || opportunity.created_at || '')}
               </Text>
             </View>
           </View>
@@ -142,20 +174,37 @@ export default function OpportunityCard({
         </Text>
 
         {/* Apply Button */}
-        <TouchableOpacity
-          style={styles.applyButton}
-          onPress={handleApplyPress}
-        >
-          <LinearGradient
-            colors={['#7C3AED', '#8B5CF6']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.applyGradient}
+        {isOwnPost ? (
+          <View style={styles.ownPostRow}>
+            <Ionicons name="person-circle-outline" size={15} color={theme.colors.textSecondary} />
+            <Text style={[styles.ownPostText, { color: theme.colors.textSecondary }]}>Your post</Text>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.applyButton}
+            onPress={handleApplyPress}
+            disabled={interestSent}
           >
-            <Text style={styles.applyText}>Express Interest</Text>
-            <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
-          </LinearGradient>
-        </TouchableOpacity>
+            <LinearGradient
+              colors={interestSent ? ['#059669', '#047857'] : ['#7C3AED', '#8B5CF6']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.applyGradient}
+            >
+              {interestSent ? (
+                <>
+                  <Ionicons name="checkmark-circle" size={16} color="#FFFFFF" />
+                  <Text style={styles.applyText}>Interest Sent</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.applyText}>Express Interest</Text>
+                  <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
       </LinearGradient>
 
       {/* Express Interest Modal */}
@@ -192,6 +241,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  urgentMeta: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  urgentMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  urgentMetaText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#F59E0B',
   },
   header: {
     marginBottom: 12,
@@ -249,6 +314,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  ownPostRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+  },
+  ownPostText: {
+    fontSize: 13,
+    fontWeight: '500',
   },
 });
 

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
   Text,
@@ -13,8 +14,12 @@ import {
   Modal,
   Linking,
   StatusBar,
+  AppState,
+  type AppStateStatus,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as WebBrowser from 'expo-web-browser';
+import * as Notifications from 'expo-notifications';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
@@ -22,7 +27,12 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { currencyService } from '../services/CurrencyService';
 import BackButton from '../components/BackButton';
-import { revenueService } from '../services/revenueService';
+import { payoutService } from '../services/PayoutService';
+import { creatorRevenueService } from '../services/CreatorRevenueService';
+import subscriptionService from '../services/SubscriptionService';
+import { walletService } from '../services/WalletService';
+import { supabase } from '../lib/supabase';
+import GettingStartedChecklist from '../components/GettingStartedChecklist';
 import {
   fetchServiceProviderProfile,
   fetchProviderBookings,
@@ -34,18 +44,18 @@ import {
   updateBookingStatus,
   fetchBadgeInsights,
   fetchVerificationStatus,
-  submitVerificationRequest,
+  startPersonaVerification,
   addAvailabilitySlot,
   deleteAvailabilitySlot,
   fetchProviderReviews,
   type ServiceProviderProfileResponse,
   type ServiceOfferingInput,
   type PortfolioItemInput,
-  type VerificationRequestInput,
   type AvailabilitySlotInput,
 } from '../services/creatorExpansionService';
 import type {
   ServiceBooking,
+  BookingSummary,
   ServiceCategory,
   ServiceOffering,
   ServicePortfolioItem,
@@ -75,7 +85,7 @@ const SERVICE_CATEGORIES: ServiceCategory[] = [
 const SUPPORTED_CURRENCIES = currencyService.getSupportedCurrencies().sort();
 
 export default function ServiceProviderDashboardScreen() {
-  const { user, session } = useAuth();
+  const { user, session, refreshUser } = useAuth();
   const { theme } = useTheme();
   const navigation = useNavigation();
   const route = useRoute();
@@ -86,7 +96,7 @@ export default function ServiceProviderDashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [profile, setProfile] = useState<ServiceProviderProfileResponse | null>(null);
-  const [bookings, setBookings] = useState<ServiceBooking[]>([]);
+  const [bookings, setBookings] = useState<BookingSummary[]>([]);
   const [badgeInsights, setBadgeInsights] = useState<BadgeInsights | null>(null);
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatusResponse | null>(null);
   const [availability, setAvailability] = useState<ServiceProviderAvailability[]>([]);
@@ -100,6 +110,17 @@ export default function ServiceProviderDashboardScreen() {
     currency: string;
   } | null>(null);
   const [loadingEarnings, setLoadingEarnings] = useState(false);
+  const [subscriptionTier, setSubscriptionTier] = useState<'free' | 'premium' | 'unlimited'>('free');
+
+  // Getting Started checklist state
+  const [checklistBasicProfile, setChecklistBasicProfile] = useState<{
+    display_name?: string | null;
+    avatar_url?: string | null;
+    bio?: string | null;
+    genres?: string[] | null;
+  } | null>(null);
+  const [checklistHasPayoutMethod, setChecklistHasPayoutMethod] = useState(false);
+  const [checklistHasFirstTrack, setChecklistHasFirstTrack] = useState(false);
 
   // Offerings state
   const [showOfferingForm, setShowOfferingForm] = useState(false);
@@ -119,7 +140,7 @@ export default function ServiceProviderDashboardScreen() {
     media_url: '',
     thumbnail_url: '',
     caption: '',
-    display_order: 0,
+    sort_order: 0,
   });
 
   // Portfolio video modal
@@ -127,11 +148,148 @@ export default function ServiceProviderDashboardScreen() {
   
   // Currency picker modal
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  const [showRateUnitPicker, setShowRateUnitPicker] = useState(false);
+
+  // Persona verification
+  const [startingVerification, setStartingVerification] = useState(false);
+  const [confirmedVerified, setConfirmedVerified] = useState(false);
+  const personaInProgressRef = useRef(false);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+
+  const VERIFIED_KEY = userId ? `persona_verified_${userId}` : null;
+
+  useEffect(() => {
+    if (!VERIFIED_KEY) return;
+    AsyncStorage.getItem(VERIFIED_KEY).then((val) => {
+      if (val === 'true') setConfirmedVerified(true);
+    });
+  }, [VERIFIED_KEY]);
+
+  const refreshVerificationStatus = useCallback(async () => {
+    if (!userId || !session) return;
+    try {
+      // Refresh both — badgeInsights is the primary source of truth for isVerified
+      const [updated, updatedBadges] = await Promise.all([
+        fetchVerificationStatus(userId, { session }),
+        fetchBadgeInsights(userId, { session }),
+      ]);
+      if (updated) setVerificationStatus(updated);
+      if (updatedBadges) setBadgeInsights(updatedBadges);
+
+      // If now verified, also refresh AuthContext so the verified badge propagates
+      // immediately across PostCard, ProfileScreen, SearchScreen etc.
+      const nowVerified =
+        updatedBadges?.verified_professional_state === 'verified_premium' ||
+        updatedBadges?.verified_professional_state === 'verified_downgraded' ||
+        updated?.status === 'approved';
+      if (nowVerified) {
+        refreshUser().catch(() => {}); // non-blocking, best-effort
+      }
+    } catch {
+      // non-critical
+    }
+  }, [userId, session, refreshUser]);
+
+  const handleStartVerification = async () => {
+    console.log('🔎 handleStartVerification called, userId:', userId, 'hasSession:', !!session);
+    if (!userId || !session) {
+      console.warn('⚠️ handleStartVerification: missing userId or session — early return');
+      return;
+    }
+    setStartingVerification(true);
+    console.log('🔎 calling startPersonaVerification...');
+    try {
+      const result = await startPersonaVerification(userId, { session });
+      console.log('🔎 startPersonaVerification result:', JSON.stringify(result));
+
+      if (result.already_verified) {
+        setConfirmedVerified(true);
+        if (VERIFIED_KEY) AsyncStorage.setItem(VERIFIED_KEY, 'true');
+        await refreshVerificationStatus();
+        return;
+      }
+
+      if (result.needs_review || result.inquiry_url === null) {
+        // Persona flagged for manual review — show pending state
+        setVerificationStatus((prev) =>
+          prev ? { ...prev, status: 'pending' } : null
+        );
+        Alert.alert(
+          'Under Review',
+          "Your verification is being reviewed by our team. You'll be notified once it's complete."
+        );
+        return;
+      }
+
+      // Normal flow — open Persona hosted URL in in-app browser sheet
+      // (SFSafariViewController on iOS, Chrome Custom Tabs on Android)
+      // This keeps the user in the app while giving full camera/mic access for the KYC flow
+      personaInProgressRef.current = true;
+      await WebBrowser.openBrowserAsync(result.inquiry_url!, {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
+      });
+      // Browser closed (user finished or dismissed) — refresh status
+      personaInProgressRef.current = false;
+      await refreshVerificationStatus();
+    } catch (error: any) {
+      console.error('❌ handleStartVerification caught error:', {
+        name: error?.name,
+        message: error?.message,
+        status: error?.status,
+        stack: error?.stack,
+      });
+      const message =
+        error?.status === 403
+          ? 'A Premium subscription is required to start verification.'
+          : `Could not start verification: ${error?.message || 'Unknown error'}. Please try again.`;
+      Alert.alert('Verification Error', message);
+    } finally {
+      setStartingVerification(false);
+    }
+  };
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      const prev = appStateRef.current;
+      appStateRef.current = nextState;
+      // When user returns to app after being in Persona browser flow
+      if (personaInProgressRef.current && prev !== 'active' && nextState === 'active') {
+        personaInProgressRef.current = false;
+        refreshVerificationStatus();
+      }
+    });
+    return () => subscription.remove();
+  }, [refreshVerificationStatus]);
+
+  // Refresh verification status when Persona's webhook fires and the backend
+  // sends an 'identity_verified' push notification to the device.
+  useEffect(() => {
+    const sub = Notifications.addNotificationReceivedListener((notification) => {
+      const type = (notification.request.content.data as any)?.type;
+      if (type === 'identity_verified') {
+        refreshVerificationStatus();
+      }
+    });
+    return () => sub.remove();
+  }, [refreshVerificationStatus]);
 
   useEffect(() => {
     loadDashboardData();
     loadEarnings();
+    loadSubscriptionTier();
+    if (userId === user?.id) loadChecklistData();
   }, [userId]);
+
+  const loadSubscriptionTier = async () => {
+    if (!session) return;
+    try {
+      const status = await subscriptionService.getSubscriptionStatusSafe(session);
+      if (status?.tier) setSubscriptionTier(status.tier);
+    } catch {
+      // non-critical — default remains 'free'
+    }
+  };
 
   const loadDashboardData = async () => {
     if (!userId || !session) {
@@ -315,18 +473,76 @@ export default function ServiceProviderDashboardScreen() {
   };
 
   const loadEarnings = async () => {
-    if (!userId) return;
+    if (!userId || !session) return;
 
     setLoadingEarnings(true);
     try {
-      const earningsData = await revenueService.getEarnings(userId);
-      setEarnings(earningsData);
+      // Use creatorRevenueService (queries wallet_transactions directly via Supabase)
+      // This is the same source used by the Earnings Dashboard and is always accurate.
+      // /api/revenue/balance (payoutService) returns zeros when creator_revenue table isn't synced.
+      const [revenueBySource, walletBalance] = await Promise.all([
+        creatorRevenueService.getRevenueBySource(session, undefined, undefined, 'USD').catch(() => null),
+        payoutService.getCreatorRevenue(session).catch(() => null),
+      ]);
+
+      if (revenueBySource) {
+        setEarnings({
+          totalEarnings: revenueBySource.total.amount ?? 0,
+          pendingBalance: walletBalance?.pending_balance ?? 0,
+          availableBalance: walletBalance?.available_balance ?? revenueBySource.total.amount ?? 0,
+          currency: revenueBySource.total.currency ?? 'USD',
+        });
+      } else {
+        setEarnings(null);
+      }
     } catch (error) {
       console.error('Error loading earnings:', error);
-      // Don't show alert, just fail silently for earnings
       setEarnings(null);
     } finally {
       setLoadingEarnings(false);
+    }
+  };
+
+  const loadChecklistData = async () => {
+    if (!userId) return;
+    try {
+      // Use Supabase directly — faster and more reliable than REST endpoints
+      // that may be broken or read from different data sources than the web app
+      const [profileResult, tracksResult] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('display_name, avatar_url, bio, genres')
+          .eq('id', userId)
+          .maybeSingle(),
+        supabase
+          .from('audio_tracks')
+          .select('id', { count: 'exact', head: true })
+          .eq('creator_id', userId),
+      ]);
+
+      if (!profileResult.error && profileResult.data) {
+        setChecklistBasicProfile(profileResult.data);
+      }
+      if (!tracksResult.error) {
+        setChecklistHasFirstTrack((tracksResult.count ?? 0) > 0);
+      }
+
+      // Payout check: fire and forget with a 4-second cap so it never blocks the UI
+      if (session) {
+        Promise.race([
+          walletService.getWithdrawalMethods(session),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('timeout')), 4000)
+          ),
+        ])
+          .then((result: any) => {
+            const count = result?.count ?? result?.methods?.length ?? 0;
+            if (count > 0) setChecklistHasPayoutMethod(true);
+          })
+          .catch(() => {}); // Silently ignore — step stays incomplete
+      }
+    } catch {
+      // Non-critical — checklist shows incomplete state until data loads
     }
   };
 
@@ -334,6 +550,7 @@ export default function ServiceProviderDashboardScreen() {
     setRefreshing(true);
     loadDashboardData();
     loadEarnings();
+    if (userId === user?.id) loadChecklistData();
   };
 
   // ============================================================================
@@ -363,7 +580,7 @@ export default function ServiceProviderDashboardScreen() {
                 <Ionicons name="trophy" size={24} color={theme.colors.accentPurple} />
                 <Text style={[styles.earningsLabel, { color: theme.colors.textSecondary }]}>Total Earnings</Text>
                 <Text style={[styles.earningsValue, { color: theme.colors.text }]}>
-                  {earnings.currency} {earnings.totalEarnings.toFixed(2)}
+                  {earnings.currency} {(earnings.totalEarnings ?? 0).toFixed(2)}
                 </Text>
               </View>
 
@@ -372,7 +589,7 @@ export default function ServiceProviderDashboardScreen() {
                 <Ionicons name="wallet" size={24} color="#34d399" />
                 <Text style={[styles.earningsLabel, { color: theme.colors.textSecondary }]}>Available</Text>
                 <Text style={[styles.earningsValue, { color: theme.colors.text }]}>
-                  {earnings.currency} {earnings.availableBalance.toFixed(2)}
+                  {earnings.currency} {(earnings.availableBalance ?? 0).toFixed(2)}
                 </Text>
               </View>
 
@@ -381,7 +598,7 @@ export default function ServiceProviderDashboardScreen() {
                 <Ionicons name="time" size={24} color="#facc15" />
                 <Text style={[styles.earningsLabel, { color: theme.colors.textSecondary }]}>Pending</Text>
                 <Text style={[styles.earningsValue, { color: theme.colors.text }]}>
-                  {earnings.currency} {earnings.pendingBalance.toFixed(2)}
+                  {earnings.currency} {(earnings.pendingBalance ?? 0).toFixed(2)}
                 </Text>
               </View>
             </View>
@@ -451,7 +668,7 @@ export default function ServiceProviderDashboardScreen() {
                 <Text style={[styles.badgeStatValue, { color: theme.colors.text }]}>{badgeInsights.completed_booking_count || 0}</Text>
                 <Text style={[styles.badgeStatLabel, { color: theme.colors.textSecondary }]}>Completed Bookings</Text>
               </View>
-              {badgeInsights.average_rating && (
+              {badgeInsights.average_rating != null && (
                 <View style={styles.badgeStat}>
                   <Text style={[styles.badgeStatValue, { color: theme.colors.text }]}>
                     {badgeInsights.average_rating.toFixed(1)}
@@ -470,231 +687,178 @@ export default function ServiceProviderDashboardScreen() {
   // VERIFICATION SECTION (Section 2)
   // ============================================================================
 
-  const [showVerificationForm, setShowVerificationForm] = useState(false);
-  const [verificationForm, setVerificationForm] = useState<VerificationRequestInput>({
-    governmentIdUrl: '',
-    selfieUrl: '',
-    businessDocUrl: '',
-    notes: '',
-  });
-
-  const handleSubmitVerification = async () => {
-    if (!verificationForm.governmentIdUrl.trim() || !verificationForm.selfieUrl.trim()) {
-      Alert.alert('Error', 'Please provide Government ID URL and Selfie URL');
-      return;
-    }
-
-    if (!session) return;
-
-    try {
-      await submitVerificationRequest(userId, verificationForm, { session });
-      Alert.alert('Success', 'Verification request submitted');
-      setShowVerificationForm(false);
-      setVerificationForm({
-        governmentIdUrl: '',
-        selfieUrl: '',
-        businessDocUrl: '',
-        notes: '',
-      });
-      await loadDashboardData();
-    } catch (error) {
-      console.error('Error submitting verification:', error);
-      Alert.alert('Error', 'Failed to submit verification request');
-    }
-  };
-
   const renderVerificationSection = () => {
-    if (!verificationStatus) return null;
+    const serverState = badgeInsights?.verified_professional_state;
+    const isVerified =
+      confirmedVerified ||
+      serverState === 'verified_premium' ||
+      serverState === 'verified_downgraded' ||
+      verificationStatus?.status === 'approved' ||
+      !!profile?.is_verified;
 
-    // Handle prerequisites as object (from API) or array (from type definition)
-    // API returns: { [key: string]: { met: boolean; required: boolean; value: any } }
-    const prerequisites = verificationStatus.prerequisites;
-    
-    // Convert object to array if needed
-    let prerequisitesArray: Array<{ key: string; label: string; satisfied: boolean; details?: string }> = [];
-    
-    if (Array.isArray(prerequisites)) {
-      // Already an array (legacy format)
-      prerequisitesArray = prerequisites;
-    } else if (prerequisites && typeof prerequisites === 'object') {
-      // Object format from API - convert to array
-      const prerequisiteLabels: Record<string, string> = {
-        completeProfile: 'Complete Profile',
-        activeOffering: 'Active Offering',
-        portfolioItems: 'Portfolio Items',
-        completedBookings: 'Completed Bookings',
-        averageRating: 'Average Rating',
-        connectAccount: 'Connect Account',
-      };
-      
-      prerequisitesArray = Object.entries(prerequisites).map(([key, value]: [string, any]) => ({
-        key,
-        label: prerequisiteLabels[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, (str) => str.toUpperCase()),
-        satisfied: value.met === true,
-        details: value.required ? (value.met ? 'Completed' : 'Required') : 'Optional',
-      }));
+    const isPremium =
+      !!badgeInsights?.active_premium ||
+      subscriptionTier === 'premium' ||
+      subscriptionTier === 'unlimited';
+
+    const isPending = !isVerified && verificationStatus?.status === 'pending';
+
+    // State 0: Pending review → submitted to Persona, awaiting decision
+    if (isPending) {
+      return (
+        <View style={[styles.sectionCard, { backgroundColor: theme.colors.cardBackground, borderColor: theme.colors.borderCard }]}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Identity Verification</Text>
+          <View style={[styles.verificationComingSoon, { backgroundColor: '#F59E0B' + '10', borderColor: '#F59E0B' + '30' }]}>
+            <Ionicons name="time-outline" size={40} color="#F59E0B" />
+            <Text style={[styles.verificationComingSoonTitle, { color: theme.colors.text }]}>
+              Verification Under Review
+            </Text>
+            <Text style={[styles.verificationComingSoonBody, { color: theme.colors.textSecondary }]}>
+              Your identity check has been submitted and is being reviewed. This usually takes a few minutes. You'll be notified once it's complete.
+            </Text>
+          </View>
+        </View>
+      );
     }
 
-    const allPrerequisitesMet = prerequisitesArray.length > 0 && prerequisitesArray.every((p) => p.satisfied);
-
-    return (
-      <View style={[styles.sectionCard, { backgroundColor: theme.colors.cardBackground, borderColor: theme.colors.borderCard }]}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Verification</Text>
-
-        {/* Prerequisites Checklist */}
-        <View style={styles.prerequisitesList}>
-          {prerequisitesArray.map((prereq) => {
-            // Check if this prerequisite requires navigation
-            const requiresNavigation = prereq.key === 'connectAccount' && !prereq.satisfied;
-            const PrereqContainer = requiresNavigation ? TouchableOpacity : View;
-
-            return (
-              <PrereqContainer
-                key={prereq.key}
-                style={[
-                  styles.prerequisiteCard,
-                  { backgroundColor: prereq.satisfied ? '#bbf7d0' + '20' : '#fca5a5' + '20', borderColor: prereq.satisfied ? '#bbf7d0' : '#fca5a5' },
-                ]}
-                onPress={requiresNavigation ? () => navigation.navigate('PaymentMethods' as never) : undefined}
-              >
-                <Ionicons
-                  name={prereq.satisfied ? 'checkmark-circle' : 'alert-circle'}
-                  size={24}
-                  color={prereq.satisfied ? '#34d399' : '#f87171'}
-                />
-                <View style={styles.prerequisiteContent}>
-                  <Text style={[styles.prerequisiteLabel, { color: prereq.satisfied ? '#bbf7d0' : '#fca5a5' }]}>
-                    {prereq.label}
-                  </Text>
-                  {prereq.details && (
-                    <Text style={[styles.prerequisiteDetails, { color: theme.colors.textSecondary }]}>
-                      {prereq.details}
-                      {requiresNavigation && ' - Tap to set up'}
-                    </Text>
-                  )}
-                </View>
-                {requiresNavigation && (
-                  <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
-                )}
-              </PrereqContainer>
-            );
-          })}
-        </View>
-
-        {/* Last Submission Info */}
-        {verificationStatus.last_submission && (
-          <View style={[styles.submissionInfo, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-            <Text style={[styles.submissionTitle, { color: theme.colors.text }]}>Last Submission</Text>
-            <Text style={[styles.submissionDate, { color: theme.colors.textSecondary }]}>
-              {new Date(verificationStatus.last_submission.submitted_at).toLocaleString()}
-            </Text>
-            {verificationStatus.last_submission.notes && (
-              <Text style={[styles.submissionNotes, { color: theme.colors.textSecondary }]}>
-                {verificationStatus.last_submission.notes}
+    // State 1: Verified + Active Premium → show active badge
+    if (isVerified && isPremium) {
+      return (
+        <View style={[styles.sectionCard, { backgroundColor: theme.colors.cardBackground, borderColor: theme.colors.borderCard }]}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Identity Verification</Text>
+          <View style={[styles.verifiedBanner, { backgroundColor: '#34d399' + '15', borderColor: '#34d399' + '40' }]}>
+            <Ionicons name="shield-checkmark" size={32} color="#34d399" />
+            <View style={styles.verifiedBannerText}>
+              <Text style={[styles.verifiedTitle, { color: '#34d399' }]}>Verified Professional</Text>
+              <Text style={[styles.verifiedSubtitle, { color: theme.colors.textSecondary }]}>
+                Your identity has been verified. The Verified Professional badge is visible to clients on your profile.
               </Text>
-            )}
-          </View>
-        )}
-
-        {/* Verification Form */}
-        {showVerificationForm && (
-          <View style={[styles.formCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-            <Text style={[styles.formTitle, { color: theme.colors.text }]}>Submit Verification Request</Text>
-
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, color: theme.colors.text }]}
-              placeholder="Government ID URL (required)"
-              placeholderTextColor={theme.colors.textMuted}
-              value={verificationForm.governmentIdUrl}
-              onChangeText={(text) => setVerificationForm((prev) => ({ ...prev, governmentIdUrl: text }))}
-            />
-
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, color: theme.colors.text }]}
-              placeholder="Selfie with ID URL (required)"
-              placeholderTextColor={theme.colors.textMuted}
-              value={verificationForm.selfieUrl}
-              onChangeText={(text) => setVerificationForm((prev) => ({ ...prev, selfieUrl: text }))}
-            />
-
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, color: theme.colors.text }]}
-              placeholder="Business Document URL (optional)"
-              placeholderTextColor={theme.colors.textMuted}
-              value={verificationForm.businessDocUrl}
-              onChangeText={(text) => setVerificationForm((prev) => ({ ...prev, businessDocUrl: text }))}
-            />
-
-            <TextInput
-              style={[styles.textArea, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, color: theme.colors.text }]}
-              placeholder="Notes for review (optional)"
-              placeholderTextColor={theme.colors.textMuted}
-              value={verificationForm.notes}
-              onChangeText={(text) => setVerificationForm((prev) => ({ ...prev, notes: text }))}
-              multiline
-              numberOfLines={3}
-            />
-
-            <View style={styles.formActions}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setShowVerificationForm(false)}>
-                <Text style={[styles.cancelButtonText, { color: theme.colors.textSecondary }]}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.saveButton}
-                onPress={handleSubmitVerification}
-                disabled={!allPrerequisitesMet}
-              >
-                <LinearGradient
-                  colors={['#DC2626', '#EC4899']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={[styles.saveButtonGradient, !allPrerequisitesMet && { opacity: 0.5 }]}
-                >
-                  <Text style={styles.saveButtonText}>Submit Verification Request</Text>
-                </LinearGradient>
-              </TouchableOpacity>
             </View>
           </View>
-        )}
+        </View>
+      );
+    }
 
-        {/* Submit Button */}
-        {!showVerificationForm && verificationStatus.status !== 'approved' && (
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => setShowVerificationForm(true)}
-            disabled={!allPrerequisitesMet}
-          >
-            <LinearGradient
-              colors={['#DC2626', '#EC4899']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={[styles.addButtonGradient, !allPrerequisitesMet && { opacity: 0.5 }]}
+    // State 2: Verified + Downgraded → badge hidden, show re-subscribe nudge
+    if (isVerified && !isPremium) {
+      return (
+        <View style={[styles.sectionCard, { backgroundColor: theme.colors.cardBackground, borderColor: theme.colors.borderCard }]}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Identity Verification</Text>
+          <View style={[styles.verificationComingSoon, { backgroundColor: '#F59E0B' + '10', borderColor: '#F59E0B' + '30' }]}>
+            <Ionicons name="shield-outline" size={40} color="#F59E0B" />
+            <Text style={[styles.verificationComingSoonTitle, { color: theme.colors.text }]}>
+              Badge Hidden
+            </Text>
+            <Text style={[styles.verificationComingSoonBody, { color: theme.colors.textSecondary }]}>
+              You're identity-verified but your Premium subscription is inactive. Your{' '}
+              <Text style={{ color: '#F59E0B', fontWeight: '600' }}>Verified Professional</Text>
+              {' '}badge is hidden until you reactivate Premium. Your verification record is saved — no re-verification needed.
+            </Text>
+            <TouchableOpacity
+              style={[styles.comingSoonBadge, { backgroundColor: theme.colors.primary + '20', marginTop: 12 }]}
+              onPress={() => navigation.navigate('Upgrade' as never)}
             >
-              <Ionicons name="shield-checkmark" size={16} color="#FFFFFF" />
-              <Text style={styles.addButtonText}>Submit Verification Request</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        )}
+              <Ionicons name="arrow-up-circle-outline" size={14} color={theme.colors.primary} />
+              <Text style={[styles.comingSoonText, { color: theme.colors.primary, fontWeight: '600' }]}>
+                Reactivate Premium to restore your badge
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
 
-        {/* Status Display */}
-        {verificationStatus.status === 'approved' && (
-          <View style={[styles.statusBadge, { backgroundColor: '#34d399' + '20' }]}>
-            <Ionicons name="checkmark-circle" size={20} color="#34d399" />
-            <Text style={[styles.statusBadgeText, { color: '#34d399' }]}>Verified</Text>
+    // State 3: Not verified + Active Premium → show verify CTA
+    if (!isVerified && isPremium) {
+      return (
+        <View style={[styles.sectionCard, { backgroundColor: theme.colors.cardBackground, borderColor: theme.colors.borderCard }]}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Identity Verification</Text>
+          <View style={[styles.verificationComingSoon, { backgroundColor: theme.colors.accentPurple + '10', borderColor: theme.colors.accentPurple + '30' }]}>
+            <Ionicons name="shield-outline" size={40} color={theme.colors.accentPurple} />
+            <Text style={[styles.verificationComingSoonTitle, { color: theme.colors.text }]}>
+              Get Verified Professional
+            </Text>
+            <Text style={[styles.verificationComingSoonBody, { color: theme.colors.textSecondary }]}>
+              As a Premium member, you can complete identity verification and earn your{' '}
+              <Text style={{ color: theme.colors.primary, fontWeight: '600' }}>Verified Professional</Text>
+              {' '}badge. Verified creators are significantly more likely to receive bookings.
+            </Text>
+            <View style={styles.verificationBenefits}>
+              {[
+                'Verified Professional badge on your profile',
+                'Higher visibility in search results',
+                'Increased client trust and bookings',
+                'Signals accountability to every client',
+              ].map((benefit) => (
+                <View key={benefit} style={styles.verificationBenefitRow}>
+                  <Ionicons name="checkmark-circle" size={16} color={theme.colors.accentPurple} />
+                  <Text style={[styles.verificationBenefitText, { color: theme.colors.textSecondary }]}>{benefit}</Text>
+                </View>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.verifyButton,
+                { backgroundColor: theme.colors.accentPurple },
+                startingVerification && { opacity: 0.6 },
+              ]}
+              onPress={handleStartVerification}
+              disabled={startingVerification}
+            >
+              {startingVerification ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="shield-checkmark-outline" size={16} color="#fff" />
+                  <Text style={styles.verifyButtonText}>Start Verification</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <Text style={[styles.verificationDisclaimer, { color: theme.colors.textSecondary }]}>
+              You'll be taken to a secure identity check. It takes about 2 minutes.
+            </Text>
           </View>
-        )}
-        {verificationStatus.status === 'pending' && (
-          <View style={[styles.statusBadge, { backgroundColor: '#facc15' + '20' }]}>
-            <Ionicons name="time" size={20} color="#facc15" />
-            <Text style={[styles.statusBadgeText, { color: '#facc15' }]}>Pending Review</Text>
+        </View>
+      );
+    }
+
+    // State 4: Not verified + Free → upgrade prompt only, no verification mention
+    return (
+      <View style={[styles.sectionCard, { backgroundColor: theme.colors.cardBackground, borderColor: theme.colors.borderCard }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Identity Verification</Text>
+        <View style={[styles.verificationComingSoon, { backgroundColor: theme.colors.accentPurple + '10', borderColor: theme.colors.accentPurple + '30' }]}>
+          <Ionicons name="shield-outline" size={40} color={theme.colors.accentPurple} />
+          <Text style={[styles.verificationComingSoonTitle, { color: theme.colors.text }]}>
+            Verified Professional Badge
+          </Text>
+          <Text style={[styles.verificationComingSoonBody, { color: theme.colors.textSecondary }]}>
+            Upgrade to Premium to unlock identity verification and earn your{' '}
+            <Text style={{ color: theme.colors.primary, fontWeight: '600' }}>Verified Professional</Text>
+            {' '}badge. Verified creators are significantly more likely to get booked.
+          </Text>
+          <View style={styles.verificationBenefits}>
+            {[
+              'Verified Professional badge on your profile',
+              'Higher visibility in search results',
+              'Increased client trust and bookings',
+              'Included with Premium at £6.99/month',
+            ].map((benefit) => (
+              <View key={benefit} style={styles.verificationBenefitRow}>
+                <Ionicons name="checkmark-circle" size={16} color={theme.colors.accentPurple} />
+                <Text style={[styles.verificationBenefitText, { color: theme.colors.textSecondary }]}>{benefit}</Text>
+              </View>
+            ))}
           </View>
-        )}
-        {verificationStatus.status === 'rejected' && (
-          <View style={[styles.statusBadge, { backgroundColor: '#f87171' + '20' }]}>
-            <Ionicons name="close-circle" size={20} color="#f87171" />
-            <Text style={[styles.statusBadgeText, { color: '#f87171' }]}>Rejected</Text>
-          </View>
-        )}
+          <TouchableOpacity
+            style={[styles.comingSoonBadge, { backgroundColor: theme.colors.primary + '20', marginTop: 4 }]}
+            onPress={() => navigation.navigate('Upgrade' as never)}
+          >
+            <Ionicons name="arrow-up-circle-outline" size={14} color={theme.colors.primary} />
+            <Text style={[styles.comingSoonText, { color: theme.colors.primary, fontWeight: '600' }]}>
+              Become a Premium Member
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -932,10 +1096,11 @@ export default function ServiceProviderDashboardScreen() {
     setOfferingForm({
       title: offering.title,
       category: offering.category as ServiceCategory,
-      rate_amount: offering.rate_amount,
+      rate_amount: offering.rate_amount ?? 0,
       rate_currency: offering.rate_currency,
-      rate_unit: offering.rate_unit,
+      rate_unit: (offering.rate_unit ?? 'per_hour') as ServiceOfferingInput['rate_unit'],
       is_active: offering.is_active ?? true,
+      description: offering.description ?? '',
     });
     setShowOfferingForm(true);
   };
@@ -997,11 +1162,15 @@ export default function ServiceProviderDashboardScreen() {
             <View style={styles.formRow}>
               <View style={styles.formRowItem}>
                 <Text style={[styles.label, { color: theme.colors.text }]}>Category</Text>
-                <View style={[styles.pickerContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                <TouchableOpacity
+                  style={[styles.pickerContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                  onPress={() => setShowCategoryPicker(true)}
+                >
                   <Text style={[styles.pickerText, { color: theme.colors.text }]}>
                     {getServiceCategoryLabel(offeringForm.category)}
                   </Text>
-                </View>
+                  <Ionicons name="chevron-down" size={16} color={theme.colors.textSecondary} />
+                </TouchableOpacity>
               </View>
 
               <View style={styles.formRowItem}>
@@ -1033,11 +1202,15 @@ export default function ServiceProviderDashboardScreen() {
 
               <View style={styles.formRowItem}>
                 <Text style={[styles.label, { color: theme.colors.text }]}>Rate Unit</Text>
-                <View style={[styles.pickerContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                <TouchableOpacity
+                  style={[styles.pickerContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                  onPress={() => setShowRateUnitPicker(true)}
+                >
                   <Text style={[styles.pickerText, { color: theme.colors.text }]}>
                     {offeringForm.rate_unit.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
                   </Text>
-                </View>
+                  <Ionicons name="chevron-down" size={16} color={theme.colors.textSecondary} />
+                </TouchableOpacity>
               </View>
             </View>
 
@@ -1104,7 +1277,7 @@ export default function ServiceProviderDashboardScreen() {
               </Text>
 
               <Text style={[styles.offeringRate, { color: theme.colors.text }]}>
-                {offering.rate_amount} {offering.rate_currency} / {offering.rate_unit.replace(/_/g, ' ')}
+                {offering.rate_amount} {offering.rate_currency} / {(offering.rate_unit ?? '').replace(/_/g, ' ')}
               </Text>
 
               {offering.description && (
@@ -1171,7 +1344,7 @@ export default function ServiceProviderDashboardScreen() {
         media_url: '',
         thumbnail_url: '',
         caption: '',
-        display_order: 0,
+        sort_order: 0,
       });
       await loadDashboardData();
     } catch (error) {
@@ -1457,7 +1630,7 @@ export default function ServiceProviderDashboardScreen() {
               <View style={styles.availabilityHeader}>
                 <View style={styles.availabilityTimeRange}>
                   <Text style={[styles.availabilityTime, { color: theme.colors.text }]}>
-                    {new Date(slot.start_time).toLocaleString()} → {new Date(slot.end_time).toLocaleString()}
+                    {new Date((slot as any).start_at ?? (slot as any).start_time).toLocaleString()} → {new Date((slot as any).end_at ?? (slot as any).end_time).toLocaleString()}
                   </Text>
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: (slot.is_bookable ? '#34d399' : '#f87171') + '20' }]}>
@@ -1466,7 +1639,7 @@ export default function ServiceProviderDashboardScreen() {
                   </Text>
                 </View>
               </View>
-              {slot.is_recurring && (
+              {(slot as any).recurrence_rule && (slot as any).recurrence_rule !== 'none' && (
                 <View style={styles.recurringIndicator}>
                   <Ionicons name="repeat" size={16} color={theme.colors.accentPurple} />
                   <Text style={[styles.recurringText, { color: theme.colors.textSecondary }]}>Recurring</Text>
@@ -1590,6 +1763,25 @@ export default function ServiceProviderDashboardScreen() {
     );
   }
 
+  const isOwnDashboard = userId === user?.id;
+
+  const checklistHasCompletedProfile = !!(
+    checklistBasicProfile?.display_name &&
+    checklistBasicProfile?.avatar_url &&
+    checklistBasicProfile?.bio &&
+    (checklistBasicProfile?.genres?.length ?? 0) > 0
+  );
+
+  const checklistHasSpProfile = !!(
+    (profile?.categories?.length ?? 0) > 0 &&
+    profile?.headline
+  );
+
+  const checklistHasVerification =
+    profile?.is_verified === true ||
+    verificationStatus?.status === 'approved' ||
+    verificationStatus?.status === 'pending';
+
   return (
     <View style={styles.container}>
       {/* Main Background Gradient - Uses theme colors */}
@@ -1622,6 +1814,23 @@ export default function ServiceProviderDashboardScreen() {
         contentContainerStyle={styles.contentContainer}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
       >
+        {/* Getting Started checklist — own dashboard only, hidden once all steps complete */}
+        {isOwnDashboard && (
+          <GettingStartedChecklist
+            userId={userId}
+            hasCompletedProfile={checklistHasCompletedProfile}
+            hasSpProfile={checklistHasSpProfile}
+            hasPayoutMethod={checklistHasPayoutMethod}
+            hasVerification={checklistHasVerification}
+            hasFirstTrack={checklistHasFirstTrack}
+            onGoToProfile={() => navigation.navigate('Profile' as never)}
+            onGoToSpOnboarding={() => navigation.navigate('ServiceProviderOnboarding' as never)}
+            onGoToPaymentMethods={() => navigation.navigate('PaymentMethods' as never)}
+            onStartVerification={handleStartVerification}
+            onGoToUpload={() => navigation.navigate('Upload' as never)}
+          />
+        )}
+
         {/* Section 0: Earnings & Payouts */}
         {renderEarningsSection()}
 
@@ -1652,8 +1861,8 @@ export default function ServiceProviderDashboardScreen() {
 
       {/* Currency Picker Modal */}
       <Modal visible={showCurrencyPicker} transparent animationType="slide" onRequestClose={() => setShowCurrencyPicker(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.currencyModalContent, { backgroundColor: theme.colors.surface, maxHeight: '70%' }]}>
+        <View style={styles.pickerOverlay}>
+          <View style={[styles.pickerSheet, { backgroundColor: theme.colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}>
               <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Select Currency</Text>
               <TouchableOpacity onPress={() => setShowCurrencyPicker(false)}>
@@ -1689,6 +1898,90 @@ export default function ServiceProviderDashboardScreen() {
                   </TouchableOpacity>
                 );
               })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Category Picker Modal */}
+      <Modal visible={showCategoryPicker} transparent animationType="slide" onRequestClose={() => setShowCategoryPicker(false)}>
+        <View style={styles.pickerOverlay}>
+          <View style={[styles.pickerSheet, { backgroundColor: theme.colors.surface }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}>
+              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Select Category</Text>
+              <TouchableOpacity onPress={() => setShowCategoryPicker(false)}>
+                <Ionicons name="close" size={24} color={theme.colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalScrollView} contentContainerStyle={styles.modalScrollContent}>
+              {SERVICE_CATEGORIES.map((category) => {
+                const isSelected = offeringForm.category === category;
+                return (
+                  <TouchableOpacity
+                    key={category}
+                    style={[
+                      styles.currencyOption,
+                      {
+                        backgroundColor: isSelected ? theme.colors.primary + '20' : theme.colors.card,
+                        borderColor: isSelected ? theme.colors.primary : theme.colors.border,
+                      },
+                    ]}
+                    onPress={() => {
+                      setOfferingForm((prev) => ({ ...prev, category }));
+                      setShowCategoryPicker(false);
+                    }}
+                  >
+                    <View style={styles.currencyOptionContent}>
+                      <Text style={[styles.currencyCode, { color: theme.colors.text }]}>
+                        {getServiceCategoryLabel(category)}
+                      </Text>
+                    </View>
+                    {isSelected && <Ionicons name="checkmark-circle" size={24} color={theme.colors.primary} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Rate Unit Picker Modal */}
+      <Modal visible={showRateUnitPicker} transparent animationType="slide" onRequestClose={() => setShowRateUnitPicker(false)}>
+        <View style={styles.pickerOverlay}>
+          <View style={[styles.pickerSheet, { backgroundColor: theme.colors.surface }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}>
+              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Select Rate Unit</Text>
+              <TouchableOpacity onPress={() => setShowRateUnitPicker(false)}>
+                <Ionicons name="close" size={24} color={theme.colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalScrollView} contentContainerStyle={styles.modalScrollContent}>
+            {(['per_hour', 'per_track', 'per_project', 'fixed'] as const).map((unit) => {
+              const isSelected = offeringForm.rate_unit === unit;
+              return (
+                <TouchableOpacity
+                  key={unit}
+                  style={[
+                    styles.currencyOption,
+                    {
+                      backgroundColor: isSelected ? theme.colors.primary + '20' : theme.colors.card,
+                      borderColor: isSelected ? theme.colors.primary : theme.colors.border,
+                    },
+                  ]}
+                  onPress={() => {
+                    setOfferingForm((prev) => ({ ...prev, rate_unit: unit }));
+                    setShowRateUnitPicker(false);
+                  }}
+                >
+                  <View style={styles.currencyOptionContent}>
+                    <Text style={[styles.currencyCode, { color: theme.colors.text }]}>
+                      {unit.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                    </Text>
+                  </View>
+                  {isSelected && <Ionicons name="checkmark-circle" size={24} color={theme.colors.primary} />}
+                </TouchableOpacity>
+              );
+            })}
             </ScrollView>
           </View>
         </View>
@@ -2200,7 +2493,18 @@ const styles = StyleSheet.create({
     color: '#999999',
     fontSize: 12,
   },
-  // Currency Picker Modal
+  // Picker bottom sheet (Category, Currency, Rate Unit)
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  pickerSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    height: '60%',
+  },
+  // Legacy Currency Picker Modal (kept for reference, replaced by pickerSheet)
   currencyModalContent: {
     width: '90%',
     maxHeight: '70%',
@@ -2279,47 +2583,88 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   // Verification Section
-  prerequisitesList: {
-    gap: 12,
-    marginBottom: 16,
-  },
-  prerequisiteCard: {
+  verifiedBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
+    gap: 16,
+    padding: 16,
     borderRadius: 12,
+    borderWidth: 1,
+  },
+  verifiedBannerText: {
+    flex: 1,
+  },
+  verifiedTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  verifiedSubtitle: {
+    fontSize: 13,
+  },
+  verificationComingSoon: {
+    alignItems: 'center',
+    padding: 24,
+    borderRadius: 16,
     borderWidth: 1,
     gap: 12,
   },
-  prerequisiteContent: {
+  verificationComingSoonTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  verificationComingSoonBody: {
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  verificationBenefits: {
+    alignSelf: 'stretch',
+    gap: 8,
+    marginTop: 4,
+  },
+  verificationBenefitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  verificationBenefitText: {
+    fontSize: 13,
+  },
+  comingSoonBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginTop: 4,
+  },
+  comingSoonText: {
+    fontSize: 12,
+    fontWeight: '500',
     flex: 1,
   },
-  prerequisiteLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  prerequisiteDetails: {
-    fontSize: 12,
-  },
-  submissionInfo: {
+  verifyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
     borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    marginBottom: 16,
+    marginTop: 16,
   },
-  submissionTitle: {
-    fontSize: 16,
+  verifyButtonText: {
+    color: '#fff',
+    fontSize: 15,
     fontWeight: '600',
-    marginBottom: 8,
   },
-  submissionDate: {
+  verificationDisclaimer: {
     fontSize: 12,
-    marginBottom: 8,
-  },
-  submissionNotes: {
-    fontSize: 14,
-    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 10,
+    lineHeight: 17,
   },
   // Availability Section
   availabilityCard: {

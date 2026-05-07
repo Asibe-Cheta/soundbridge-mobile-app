@@ -6,6 +6,7 @@ import { createClient, processLock } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Platform } from 'react-native';
 import { withQueryTimeout } from '../utils/dataLoading';
+import { config } from '../config/environment';
 import type {
   CreatorAvailability,
   CollaborationRequest,
@@ -20,9 +21,8 @@ import type {
   TimeSlotValidation
 } from '../types/collaboration';
 
-// CORRECT CREDENTIALS
-const supabaseUrl = 'https://aunxdbqukbxyyiusaeqi.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1bnhkYnF1a2J4eXlpdXNhZXFpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI2OTA2MTUsImV4cCI6MjA2ODI2NjYxNX0.IP-c4_S7Fkbq6F2UkgzL-TibkoBN49yQ1Cqz4CkMzB0';
+const supabaseUrl = config.supabaseUrl;
+const supabaseAnonKey = config.supabaseAnonKey;
 
 // Create Supabase client with React Native-specific configuration
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -277,9 +277,50 @@ export const dbHelpers = {
     }
   },
 
-  // Search profiles/artists - EXACT WORKING CODE from web app team
+  // Search profiles/artists - Creators only (for backward compatibility)
   async searchProfiles(query: string, limit = 10) {
     try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select(`
+          id,
+          username,
+          display_name,
+          bio,
+          avatar_url,
+          location,
+          genre,
+          role,
+          is_verified,
+          created_at,
+          followers:follows!follows_following_id_fkey(count),
+          tracks:audio_tracks!audio_tracks_creator_id_fkey(count)
+        `)
+        .or(`username.ilike.%${query}%,display_name.ilike.%${query}%,bio.ilike.%${query}%`)
+        .eq('role', 'creator')
+        .order('username', { ascending: true })
+        .limit(limit);
+
+      if (error) throw error;
+
+      // Transform data to match expected format
+      const transformedData = data?.map(profile => ({
+        ...profile,
+        followers_count: profile.followers?.[0]?.count || 0,
+        tracks_count: profile.tracks?.[0]?.count || 0,
+      }));
+
+      return { success: true, data: transformedData, error: null };
+    } catch (error) {
+      console.error('Error searching profiles:', error);
+      return { success: false, data: null, error };
+    }
+  },
+
+  // Search ALL users (creators AND listeners)
+  async searchAllUsers(query: string, limit = 20) {
+    try {
+      console.log('🔍 Searching all users for:', query);
       const { data, error } = await supabase
         .from('profiles')
         .select(`
@@ -296,12 +337,11 @@ export const dbHelpers = {
           tracks:audio_tracks!audio_tracks_creator_id_fkey(count)
         `)
         .or(`username.ilike.%${query}%,display_name.ilike.%${query}%,bio.ilike.%${query}%`)
-        .eq('role', 'creator')
         .order('username', { ascending: true })
         .limit(limit);
 
       if (error) throw error;
-      
+
       // Transform data to match expected format
       const transformedData = data?.map(profile => ({
         ...profile,
@@ -309,9 +349,10 @@ export const dbHelpers = {
         tracks_count: profile.tracks?.[0]?.count || 0,
       }));
 
+      console.log('✅ Found users:', transformedData?.length || 0, '(creators + listeners)');
       return { success: true, data: transformedData, error: null };
     } catch (error) {
-      console.error('Error searching profiles:', error);
+      console.error('Error searching all users:', error);
       return { success: false, data: null, error };
     }
   },
@@ -409,6 +450,7 @@ export const dbHelpers = {
             username,
             display_name,
             avatar_url,
+            is_verified,
             role
           ),
           recipient:profiles!messages_recipient_id_fkey(
@@ -416,6 +458,7 @@ export const dbHelpers = {
             username,
             display_name,
             avatar_url,
+            is_verified,
             role
           )
         `)
@@ -439,6 +482,11 @@ export const dbHelpers = {
           ? message.recipient 
           : message.sender;
 
+        if (!otherUserId || !otherUser) {
+          console.warn('⚠️ Skipping message with missing other user:', message.id);
+          return;
+        }
+
         // Create conversation ID (always alphabetically sorted - per web team spec)
         const conversationId = [userId, otherUserId].sort().join('_');
 
@@ -450,12 +498,14 @@ export const dbHelpers = {
               username: otherUser.username,
               display_name: otherUser.display_name,
               avatar_url: otherUser.avatar_url,
+              is_verified: (otherUser as any).is_verified ?? false,
               role: otherUser.role
             },
             lastMessage: {
               content: message.content,
               created_at: message.created_at,
-              sender_id: message.sender_id
+              sender_id: message.sender_id,
+              is_read: message.is_read
             },
             unreadCount: 0,
             updatedAt: message.created_at
@@ -463,6 +513,9 @@ export const dbHelpers = {
         }
 
         const conversation = conversationsMap.get(conversationId);
+        if (!conversation) {
+          return;
+        }
         
         // Count unread messages (where current user is recipient)
         if (!message.is_read && message.recipient_id === userId) {
@@ -474,7 +527,8 @@ export const dbHelpers = {
           conversation.lastMessage = {
             content: message.content,
             created_at: message.created_at,
-            sender_id: message.sender_id
+            sender_id: message.sender_id,
+            is_read: message.is_read
           };
           conversation.updatedAt = message.created_at;
         }
@@ -544,12 +598,52 @@ export const dbHelpers = {
         })
         .select()
         .single();
-      
+
       if (error) throw error;
+
+      // 🔔 Trigger instant push notification for the message
+      // This ensures the recipient gets notified immediately even if app is backgrounded
+      if (data?.id) {
+        this.triggerInstantMessagePush(data.id).catch(err => {
+          console.warn('⚠️ Failed to trigger instant push (non-blocking):', err);
+        });
+      }
+
       return { data, error: null };
     } catch (error) {
       console.error('Error sending message:', error);
       return { data: null, error };
+    }
+  },
+
+  // 🔔 Trigger instant push notification for a message
+  // This calls the backend API to send push notification immediately
+  async triggerInstantMessagePush(messageId: string) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        console.log('⚠️ No session for instant push - skipping');
+        return;
+      }
+
+      const response = await fetch(`${config.apiUrl}/notifications/message`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ messageId }),
+      });
+
+      if (response.ok) {
+        console.log('✅ Instant message push triggered for:', messageId);
+      } else {
+        const errorText = await response.text();
+        console.warn('⚠️ Instant push API error:', response.status, errorText);
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to trigger instant message push:', error);
+      // Non-blocking - don't throw, cron fallback will handle it
     }
   },
 
@@ -935,6 +1029,7 @@ export const dbHelpers = {
             )
           `)
           .eq('is_public', true)
+          .not('content_type', 'in', '(podcast,mixtape)')
           .in('genre', genreNames)
           .order('play_count', { ascending: false })
           .limit(limit),
@@ -954,12 +1049,15 @@ export const dbHelpers = {
     }
   },
 
-  // ✅ NEW: Get personalized events based on user location and genres (Updated to use PostgreSQL function)
+  // ✅ STRICT: Get personalized events - NO fallback to unfiltered events
+  // Per business plan: Events tab must show ONLY personalized events matching user's location/preferences
+  // This is a core business differentiator (MOAT #1: Precision Event Discovery)
+  // NO FALLBACK - strict personalization enforced
   async getPersonalizedEvents(userId: string, limit = 20) {
     try {
       console.log('🎯 Getting personalized events for user:', userId);
-      
-      // First try the new PostgreSQL function
+
+      // Call the PostgreSQL RPC function for personalized events
       const { data, error } = await supabase
         .rpc('get_personalized_events', {
           p_user_id: userId,
@@ -967,63 +1065,22 @@ export const dbHelpers = {
           p_offset: 0
         });
 
-      if (!error && data && data.length > 0) {
-        console.log('✅ Found personalized events via RPC:', data.length);
-        return { data, error: null };
+      if (error) {
+        // Log error but return empty array - DO NOT fallback to unfiltered events
+        console.warn('⚠️ get_personalized_events RPC error:', error.message);
+        console.log('📋 Returning empty array - strict personalization enforced');
+        return { data: [], error: null };
       }
 
-      // Fallback to manual query if RPC function doesn't exist yet
-      console.log('⚠️ RPC function not available, using manual query. Error:', error?.message);
-      
-      // Get user's profile for location
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('country')
-        .eq('id', userId)
-        .single();
-
-      let query = supabase
-        .from('events')
-        .select(`
-          id,
-          title,
-          description,
-          image_url,
-          event_date,
-          location,
-          country,
-          ticket_price,
-          tickets_available,
-          created_at,
-          creator:profiles!events_creator_id_fkey(
-            id,
-            username,
-            display_name,
-            avatar_url
-          )
-        `)
-        .gte('event_date', new Date().toISOString());
-
-      // Filter by country if available
-      if (profile?.country) {
-        query = query.eq('country', profile.country);
-        console.log('🌍 Filtering events by country:', profile.country);
-      }
-
-      const { data: manualData, error: manualError } = await query
-        .order('event_date', { ascending: true })
-        .limit(limit);
-
-      if (manualError) {
-        console.log('⚠️ Error with manual personalized events, falling back to general:', manualError.message);
-        return this.getEvents(limit);
-      }
-
-      console.log('✅ Found personalized events via manual query:', manualData?.length || 0);
-      return { data: manualData, error: null };
+      // Return whatever the RPC returns, even if empty
+      // Empty results mean no events match user's preferences/location - this is correct behavior
+      console.log('✅ Found personalized events via RPC:', data?.length || 0);
+      return { data: data || [], error: null };
     } catch (error) {
+      // On any error, return empty array - DO NOT fallback to unfiltered events
       console.error('❌ Error getting personalized events:', error);
-      return this.getEvents(limit);
+      console.log('📋 Returning empty array - strict personalization enforced');
+      return { data: [], error: null };
     }
   },
 
@@ -1055,6 +1112,7 @@ export const dbHelpers = {
             )
           `)
           .eq('is_public', true)
+          .not('content_type', 'in', '(podcast,mixtape)')
           .order('play_count', { ascending: false })
           .limit(limit),
         { timeout: 5000, fallback: [] }
@@ -1076,7 +1134,8 @@ export const dbHelpers = {
   async getEvents(limit = 20) {
     try {
       console.log('🎪 Getting events...');
-      
+
+      // Use same schema as getUpcomingEvents (which works)
       const { data, error } = await withQueryTimeout(
         supabase
           .from('events')
@@ -1084,30 +1143,28 @@ export const dbHelpers = {
             id,
             title,
             description,
-            image_url,
             event_date,
             location,
-            country,
-            ticket_price,
-            tickets_available,
-            created_at,
-            creator:profiles!events_creator_id_fkey(
-              id,
-              username,
-              display_name,
-              avatar_url
-            )
+            venue,
+            city,
+            category,
+            price_gbp,
+            price_ngn,
+            max_attendees,
+            current_attendees,
+            image_url,
+            created_at
           `)
           .gte('event_date', new Date().toISOString())
           .order('event_date', { ascending: true })
           .limit(limit),
         { timeout: 6000, fallback: [] }
       );
-      
+
       if (error) {
         console.error('❌ Error getting events:', error);
       }
-      
+
       console.log('✅ Found events:', data?.length || 0);
       return { data: data || [], error: error || null };
     } catch (error) {
@@ -2015,6 +2072,43 @@ export const dbHelpers = {
    * End a live session (host only)
    * Updates session status to 'ended' and sets end time
    */
+  /**
+   * End any live session as an admin (bypasses creator_id ownership check).
+   * Requires the calling user to have is_admin = true on their profile (enforced by RLS).
+   */
+  async adminEndLiveSession(sessionId: string) {
+    try {
+      console.log('🛑 [Admin] Ending live session:', sessionId);
+
+      const { error: updateError } = await supabase
+        .from('live_sessions')
+        .update({
+          status: 'ended',
+          end_time: new Date().toISOString(),
+        })
+        .eq('id', sessionId);
+
+      if (updateError) throw updateError;
+
+      // Mark all active participants as left
+      const { error: participantsError } = await supabase
+        .from('live_session_participants')
+        .update({ left_at: new Date().toISOString() })
+        .eq('session_id', sessionId)
+        .is('left_at', null);
+
+      if (participantsError) {
+        console.warn('⚠️ [Admin] Error updating participants on session end:', participantsError);
+      }
+
+      console.log('✅ [Admin] Live session ended successfully');
+      return { success: true, error: null };
+    } catch (error) {
+      console.error('❌ [Admin] Error ending live session:', error);
+      return { success: false, error };
+    }
+  },
+
   async endLiveSession(sessionId: string, creatorId: string) {
     try {
       console.log('🔴 Ending live session:', sessionId);
@@ -2518,6 +2612,10 @@ export const dbHelpers = {
           created_at,
           updated_at,
           published_at,
+          is_paid,
+          price,
+          currency,
+          total_sales_count,
           creator:profiles!albums_creator_id_fkey(
             id,
             username,
@@ -2541,12 +2639,12 @@ export const dbHelpers = {
             id,
             title,
             duration,
-            cover_image_url,
+            file_url,
             cover_art_url,
             artwork_url,
             genre,
             is_public,
-            plays_count,
+            play_count,
             likes_count,
             created_at,
             creator:profiles!audio_tracks_creator_id_fkey(
@@ -2790,7 +2888,7 @@ export const dbHelpers = {
   async getAlbumTracks(albumId: string) {
     try {
       console.log('🎵 Fetching album tracks:', albumId);
-      
+
       const { data, error } = await supabase
         .from('album_tracks')
         .select(`
@@ -2800,12 +2898,12 @@ export const dbHelpers = {
             id,
             title,
             duration,
-            cover_image_url,
+            file_url,
             cover_art_url,
             artwork_url,
             genre,
             is_public,
-            plays_count,
+            play_count,
             likes_count,
             created_at,
             creator:profiles!audio_tracks_creator_id_fkey(
@@ -2833,22 +2931,33 @@ export const dbHelpers = {
   async checkAlbumLimit(userId: string) {
     try {
       console.log('🎵 Checking album limit for user:', userId);
-      
-      // Get user's subscription tier
+
+      // Get user's subscription tier and early adopter status
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('subscription_tier')
+        .select('subscription_tier, early_adopter, subscription_period_end')
         .eq('id', userId)
         .single();
 
       if (profileError) throw profileError;
-      
-      const tier = profile.subscription_tier || 'free';
-      
+
+      let tier: string = profile.subscription_tier || 'free';
+
+      // Early adopters receive 3 months free Premium with unlimited albums.
+      // Upgrade tier to 'unlimited' for album limit purposes if their grant is still active.
+      if (profile.early_adopter === true) {
+        const periodEnd = profile.subscription_period_end;
+        const isStillActive = !periodEnd || new Date(periodEnd) > new Date();
+        if (isStillActive) {
+          tier = 'unlimited';
+          console.log('✅ Early adopter — treating as unlimited for album limit check');
+        }
+      }
+
       // Define tier limits
       const limits = {
         free: 0,
-        premium: 2,
+        premium: 10, // 10 albums for premium
         unlimited: -1, // unlimited
       };
       
@@ -2881,17 +2990,26 @@ export const dbHelpers = {
   async checkTrackLimitForAlbum(albumId: string, userId: string) {
     try {
       console.log('🎵 Checking track limit for album:', albumId);
-      
-      // Get user's subscription tier
+
+      // Get user's subscription tier and early adopter status
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('subscription_tier')
+        .select('subscription_tier, early_adopter, subscription_period_end')
         .eq('id', userId)
         .single();
 
       if (profileError) throw profileError;
-      
-      const tier = profile.subscription_tier || 'free';
+
+      let tier: string = profile.subscription_tier || 'free';
+
+      // Early adopters receive 3 months free Premium — apply same logic as checkAlbumLimit
+      if (tier === 'free' && profile.early_adopter === true) {
+        const periodEnd = profile.subscription_period_end;
+        const isStillActive = !periodEnd || new Date(periodEnd) > new Date();
+        if (isStillActive) {
+          tier = 'premium';
+        }
+      }
       
       // Define tier limits for tracks per album
       const limits = {
@@ -2932,13 +3050,13 @@ export const dbHelpers = {
       });
 
       if (error) {
-        // Fallback to manual increment if RPC doesn't exist
-        const { error: updateError } = await supabase
-          .from('albums')
-          .update({ total_plays: supabase.sql`total_plays + 1` })
-          .eq('id', albumId);
-        
-        if (updateError) throw updateError;
+        // Fallback: increment via raw RPC expression
+        const { error: updateError } = await supabase.rpc('increment_album_plays', {
+          p_album_id: albumId,
+        });
+        if (updateError) {
+          console.warn('⚠️ increment_album_plays RPC not available, skipping play count update');
+        }
       }
       
       return { data: null, error: null };

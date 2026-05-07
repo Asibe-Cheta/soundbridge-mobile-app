@@ -5,8 +5,9 @@
 
 import { supabase } from '../lib/supabase';
 import { dbHelpers } from '../lib/supabase';
+import { config } from '../config/environment';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
+const API_URL = config.apiUrl;
 
 export interface LiveTipPaymentIntent {
   clientSecret: string;
@@ -19,6 +20,7 @@ export interface LiveTipParams {
   creatorId: string;
   amount: number;
   message?: string;
+  stripePaymentIntentId?: string;
 }
 
 export const LiveTippingService = {
@@ -130,7 +132,7 @@ export const LiveTippingService = {
         params.creatorId,
         params.amount,
         params.message,
-        undefined // No payment intent ID for MVP
+        params.stripePaymentIntentId
       );
 
       if (!result.success) {

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import VerifiedAvatar from '../components/VerifiedAvatar';
 import {
   View,
   Text,
@@ -16,10 +17,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { dbHelpers } from '../lib/supabase';
-import { subscriptionService, UsageLimits } from '../services/SubscriptionService';
+import { dbHelpers, supabase } from '../lib/supabase';
+import { useOnlinePresence } from '../hooks/useOnlinePresence';
 import BackButton from '../components/BackButton';
 
 const { width } = Dimensions.get('window');
@@ -52,12 +54,14 @@ interface Conversation {
     username: string;
     display_name: string;
     avatar_url?: string;
+    is_verified?: boolean;
     role: string;
   };
   lastMessage: {
     content: string;
     created_at: string;
     sender_id: string;
+    is_read: boolean;
   };
   unreadCount: number;
   updatedAt: string;
@@ -66,33 +70,15 @@ interface Conversation {
 export default function MessagesScreen({ navigation }: any) {
   const { user, session } = useAuth();
   const { theme } = useTheme();
+  const { isUserOnline } = useOnlinePresence();
   const [activeTab, setActiveTab] = useState<'conversations' | 'search'>('conversations');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [usageLimits, setUsageLimits] = useState<UsageLimits | null>(null);
 
-  useEffect(() => {
-    loadConversations();
-    loadUsageLimits();
-  }, []);
-
-  const loadUsageLimits = async () => {
-    if (!session) return;
-
-    try {
-      console.log('📊 Loading message usage limits...');
-      const limits = await subscriptionService.getUsageLimits(session);
-      setUsageLimits(limits);
-      console.log('✅ Message limits loaded:', limits.messages);
-    } catch (error) {
-      console.error('Error loading usage limits:', error);
-    }
-  };
-
-  const loadConversations = async () => {
+  const loadConversations = useCallback(async () => {
     setLoading(true);
     try {
       if (!user) {
@@ -118,7 +104,61 @@ export default function MessagesScreen({ navigation }: any) {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [user]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadConversations();
+    }, [loadConversations])
+  );
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const subscription = supabase
+      .channel(`messages-inbox:${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `recipient_id=eq.${user.id}`,
+        },
+        () => {
+          loadConversations();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `sender_id=eq.${user.id}`,
+        },
+        () => {
+          loadConversations();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `recipient_id=eq.${user.id}`,
+        },
+        () => {
+          loadConversations();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
+  }, [user?.id, loadConversations]);
 
   const handleSearch = async (query: string) => {
     setSearchQuery(query);
@@ -138,7 +178,6 @@ export default function MessagesScreen({ navigation }: any) {
           username: profile.username,
           display_name: profile.display_name,
           avatar_url: profile.avatar_url,
-          is_online: false, // TODO: Implement online status
         }));
         
         console.log('✅ User search results:', searchResults.length, 'users found');
@@ -205,16 +244,7 @@ export default function MessagesScreen({ navigation }: any) {
       onPress={() => handleConversationPress(item)}
     >
       <View style={styles.conversationAvatar}>
-        {item.otherUser.avatar_url ? (
-          <Image
-            source={{ uri: item.otherUser.avatar_url }}
-            style={styles.avatarImage}
-          />
-        ) : (
-          <View style={[styles.defaultAvatar, { backgroundColor: theme.colors.surface }]}>
-            <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
-          </View>
-        )}
+        <VerifiedAvatar avatarUrl={item.otherUser.avatar_url} isVerified={item.otherUser.is_verified} size={48} />
         {item.unreadCount > 0 && (
           <View style={styles.unreadBadge}>
             <Text style={styles.unreadCount}>
@@ -235,19 +265,27 @@ export default function MessagesScreen({ navigation }: any) {
         </View>
         
         <View style={styles.conversationFooter}>
-          <Text 
+          <Text
             style={[
               styles.lastMessage,
               { color: theme.colors.textSecondary },
               item.unreadCount > 0 && { color: theme.colors.text, fontWeight: '500' }
-            ]} 
+            ]}
             numberOfLines={1}
           >
-            {item.lastMessage ? item.lastMessage.content : 'No messages yet'}
+            {item.lastMessage ? (() => {
+                try {
+                  const p = JSON.parse(item.lastMessage.content);
+                  if (p?.replyTo && p?.text) return p.text;
+                } catch {}
+                return item.lastMessage.content;
+              })() : 'No messages yet'}
           </Text>
-          {item.unreadCount > 0 && (
+          {item.unreadCount > 0 ? (
             <View style={styles.unreadIndicator} />
-          )}
+          ) : item.lastMessage?.sender_id === user?.id && item.lastMessage?.is_read ? (
+            <Text style={styles.readReceipt}>Read</Text>
+          ) : null}
         </View>
       </View>
     </TouchableOpacity>
@@ -269,7 +307,7 @@ export default function MessagesScreen({ navigation }: any) {
             <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
           </View>
         )}
-        <View style={[styles.onlineIndicator, { backgroundColor: item.is_online ? '#4CAF50' : '#666' }]} />
+        <View style={[styles.onlineIndicator, { backgroundColor: isUserOnline(item.id) ? '#4CAF50' : '#666' }]} />
       </View>
 
       <View style={styles.searchResultContent}>
@@ -312,14 +350,6 @@ export default function MessagesScreen({ navigation }: any) {
           <BackButton style={{ marginRight: 12 }} />
           <View style={styles.headerTitleContainer}>
             <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Messages</Text>
-            {usageLimits && !usageLimits.messages.is_unlimited && (
-              <View style={[styles.usageLimitBadge, { backgroundColor: theme.colors.surface }]}>
-                <Ionicons name="mail-outline" size={12} color={theme.colors.textSecondary} />
-                <Text style={[styles.usageLimitText, { color: theme.colors.textSecondary }]}>
-                  {usageLimits.messages.remaining}/{usageLimits.messages.limit}
-                </Text>
-              </View>
-            )}
           </View>
           <TouchableOpacity style={styles.headerButton}>
             <Ionicons name="add" size={24} color={theme.colors.text} />
@@ -393,7 +423,12 @@ export default function MessagesScreen({ navigation }: any) {
                 autoCorrect={false}
               />
               {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setSearchQuery('');
+                    setSearchResults([]);
+                  }}
+                >
                   <Ionicons name="close-circle" size={20} color={theme.colors.textSecondary} />
                 </TouchableOpacity>
               )}
@@ -468,20 +503,6 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-  },
-  usageLimitBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-    marginTop: 4,
-    alignSelf: 'flex-start',
-    gap: 4,
-  },
-  usageLimitText: {
-    fontSize: 11,
-    fontWeight: '500',
   },
   headerButton: {
     padding: 8,
@@ -589,6 +610,13 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: '#DC2626',
     marginLeft: 8,
+  },
+  readReceipt: {
+    fontSize: 11,
+    color: '#7c3aed',
+    fontWeight: '600',
+    marginLeft: 6,
+    flexShrink: 0,
   },
   searchContainer: {
     flex: 1,

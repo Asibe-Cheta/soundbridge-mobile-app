@@ -16,13 +16,14 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { config } from '../config/environment';
 
 interface RouteParams {
   trackId: string;
   trackTitle: string;
 }
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://www.soundbridge.live';
+const API_BASE_URL = config.apiUrl.replace(/\/api\/?$/, '');
 
 export default function AppealFormScreen() {
   const navigation = useNavigation();

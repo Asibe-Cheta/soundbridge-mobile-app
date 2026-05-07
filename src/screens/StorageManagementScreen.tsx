@@ -18,7 +18,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { formatBytes, getStorageQuotaCached, invalidateStorageCache, StorageQuota, getStorageWarningLevel } from '../services/StorageQuotaService';
-import { invalidateQuotaCache } from '../services/UploadQuotaService';
+import { invalidateQuotaCache, getUploadQuota } from '../services/UploadQuotaService';
 import BackButton from '../components/BackButton';
 import * as Haptics from 'expo-haptics';
 
@@ -50,15 +50,24 @@ export default function StorageManagementScreen() {
   }, []);
 
   const loadStorageData = async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
 
     try {
       setLoading(true);
 
-      // Load storage quota
-      const tier = 'premium'; // TODO: Get actual tier from user profile
-      const quota = await getStorageQuotaCached(user.id, tier, true);
-      setStorageQuota(quota);
+      // Get session for quota check
+      const { data: { session } } = await supabase.auth.getSession();
+
+      // Load storage quota using UploadQuotaService (uses RevenueCat as source of truth)
+      // This ensures Storage Management shows the same tier as Upload screen
+      const uploadQuota = await getUploadQuota(session, true);
+      if (uploadQuota?.storage) {
+        setStorageQuota(uploadQuota.storage);
+      }
 
       // Load files
       const { data, error } = await supabase

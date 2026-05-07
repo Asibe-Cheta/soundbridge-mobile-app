@@ -19,8 +19,10 @@ import { useTheme } from '../contexts/ThemeContext';
 import { walletService, WalletBalance } from '../services/WalletService';
 import { currencyService } from '../services/CurrencyService';
 import { subscriptionService, SubscriptionStatus, UsageStatistics, BillingHistoryItem, RevenueData, TrackSelection } from '../services/SubscriptionService';
+import { payoutService } from '../services/PayoutService';
 import RevenueCatService from '../services/RevenueCatService';
 import TrackSelectionModal from '../components/TrackSelectionModal';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 // Interfaces moved to SubscriptionService
 
@@ -407,16 +409,19 @@ export default function BillingScreen() {
       `Request payout of ${currencyService.formatAmount(revenue.pending_earnings, revenue.currency)}?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Request', 
+        {
+          text: 'Request',
           onPress: async () => {
             try {
-              const result = await subscriptionService.requestPayout(session);
+              const result = await payoutService.requestPayout(session, {
+                amount: revenue.pending_earnings,
+                currency: revenue.currency,
+              });
               if (result.success) {
-                Alert.alert('Success', result.message || 'Payout requested successfully.');
+                Alert.alert('Success', 'Payout requested successfully.');
                 loadBillingData(); // Refresh data
               } else {
-                Alert.alert('Error', result.message || 'Failed to request payout.');
+                Alert.alert('Error', result.error || 'Failed to request payout.');
               }
             } catch (error) {
               console.error('Error requesting payout:', error);
@@ -703,21 +708,21 @@ export default function BillingScreen() {
               <View style={styles.revenueItem}>
                 <Text style={[styles.revenueLabel, { color: theme.colors.textSecondary }]}>Total Earnings</Text>
                 <Text style={[styles.revenueValue, { color: theme.colors.text }]}>
-                  ${revenue.total_earnings.toFixed(2)}
+                  {currencyService.formatAmount(revenue.total_earnings, revenue.currency)}
                 </Text>
               </View>
               
               <View style={styles.revenueItem}>
                 <Text style={[styles.revenueLabel, { color: theme.colors.textSecondary }]}>Pending</Text>
                 <Text style={[styles.revenueValue, { color: theme.colors.text }]}>
-                  ${revenue.pending_earnings.toFixed(2)}
+                  {currencyService.formatAmount(revenue.pending_earnings, revenue.currency)}
                 </Text>
               </View>
               
               <View style={styles.revenueItem}>
                 <Text style={[styles.revenueLabel, { color: theme.colors.textSecondary }]}>Last Payout</Text>
                 <Text style={[styles.revenueValue, { color: theme.colors.text }]}>
-                  ${revenue.last_payout.toFixed(2)}
+                  {currencyService.formatAmount(revenue.last_payout, revenue.currency)}
                 </Text>
                 <Text style={[styles.revenueDate, { color: theme.colors.textSecondary }]}>
                   {formatDate(revenue.last_payout_date)}
@@ -758,7 +763,7 @@ export default function BillingScreen() {
             
             {revenue.pending_earnings < 25 && (
               <Text style={[styles.payoutMinimum, { color: theme.colors.textSecondary }]}>
-                Minimum payout amount is $25.00
+                Minimum payout amount is {currencyService.formatAmount(25, revenue.currency)}
               </Text>
             )}
           </View>
@@ -893,8 +898,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 34,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    lineHeight: 40,
+    fontFamily: Typography.body.fontFamily,
   },
   scrollView: {
     flex: 1,
@@ -913,7 +921,9 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 16,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   card: {
     borderRadius: 12,
@@ -927,8 +937,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   cardTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
   },
   statusBadge: {
     flexDirection: 'row',
@@ -938,8 +948,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   statusText: {
+    ...Typography.label,
     fontSize: 12,
-    fontWeight: '600',
     marginLeft: 4,
   },
   planInfo: {
@@ -952,23 +962,25 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   planName: {
+    ...Typography.headerMedium,
     fontSize: 20,
-    fontWeight: 'bold',
   },
   planPrice: {
+    ...Typography.body,
     fontSize: 18,
-    fontWeight: '600',
   },
   billingDates: {
     marginBottom: 12,
   },
   dateLabel: {
+    ...Typography.label,
     fontSize: 12,
-    fontWeight: '500',
     marginBottom: 4,
   },
   dateValue: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
   },
   cancellationNotice: {
     flexDirection: 'row',
@@ -978,7 +990,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   cancellationText: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     marginLeft: 8,
   },
   guaranteeBadge: {
@@ -989,12 +1003,14 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   guaranteeText: {
+    ...Typography.label,
     fontSize: 12,
     marginLeft: 8,
-    fontWeight: '500',
   },
   usageHint: {
+    ...Typography.label,
     fontSize: 11,
+    lineHeight: 14,
     marginTop: 4,
     fontStyle: 'italic',
   },
@@ -1012,8 +1028,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   upgradeButtonText: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
   },
   cancelButton: {
     paddingHorizontal: 16,
@@ -1023,8 +1039,8 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     color: '#EF4444',
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
   },
   usageItem: {
     marginBottom: 20,
@@ -1036,11 +1052,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   usageLabel: {
+    ...Typography.body,
     fontSize: 16,
-    fontWeight: '600',
   },
   usageValue: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
   },
   progressBar: {
     height: 8,
@@ -1061,16 +1079,18 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   revenueLabel: {
+    ...Typography.label,
     fontSize: 12,
-    fontWeight: '500',
     marginBottom: 4,
   },
   revenueValue: {
+    ...Typography.headerMedium,
     fontSize: 20,
-    fontWeight: 'bold',
   },
   revenueDate: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     marginTop: 2,
   },
   payoutButton: {
@@ -1083,11 +1103,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   payoutButtonText: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
   },
   payoutMinimum: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     textAlign: 'center',
   },
   historyList: {
@@ -1104,19 +1126,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   historyDescription: {
+    ...Typography.body,
     fontSize: 16,
-    fontWeight: '500',
     marginBottom: 4,
   },
   historyDate: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
   },
   historyAmount: {
     alignItems: 'flex-end',
   },
   historyPrice: {
+    ...Typography.body,
     fontSize: 16,
-    fontWeight: 'bold',
     marginBottom: 4,
   },
   historyStatus: {
@@ -1127,8 +1151,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   historyStatusText: {
+    ...Typography.label,
     fontSize: 10,
-    fontWeight: '600',
     marginLeft: 4,
   },
   emptyHistory: {
@@ -1136,7 +1160,9 @@ const styles = StyleSheet.create({
     paddingVertical: 32,
   },
   emptyHistoryText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     marginTop: 16,
   },
   walletInfo: {
@@ -1151,13 +1177,13 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   walletLabel: {
+    ...Typography.label,
     fontSize: 12,
-    fontWeight: '500',
     marginBottom: 4,
   },
   walletAmount: {
+    ...Typography.headerMedium,
     fontSize: 20,
-    fontWeight: 'bold',
   },
   walletStatusBadge: {
     flexDirection: 'row',
@@ -1170,8 +1196,8 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   walletStatusText: {
+    ...Typography.label,
     fontSize: 14,
-    fontWeight: '600',
   },
   walletActions: {
     flexDirection: 'row',
@@ -1188,7 +1214,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   walletButtonText: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
   },
 });

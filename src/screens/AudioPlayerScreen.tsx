@@ -25,8 +25,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { offlineDownloadService } from '../services/OfflineDownloadService';
 import TipModal from '../components/TipModal';
+import TipIconAnimated from '../components/TipIconAnimated';
+import AudioPlayerErrorBoundary from '../components/AudioPlayerErrorBoundary';
 import { BlurView as ExpoBlurView } from 'expo-blur';
-import Svg, { Circle } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 // import type { AudioTrack } from '@soundbridge/types'; // Commented out - using local type
 
 const { width, height } = Dimensions.get('window');
@@ -71,6 +73,16 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   const [isVolumePressed, setIsVolumePressed] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
   const isSeekingRef = useRef(false);
+
+  // Refs that keep PanResponder callbacks from going stale.
+  // PanResponder.create() runs once, so its closures freeze over the initial
+  // values of `duration` and `seekTo`. We update these refs on every render
+  // so the callbacks always see fresh values.
+  const durationRef = useRef(duration);
+  const seekToRef = useRef(seekTo);
+  const handleCircularSeekRef = useRef<(x: number, y: number) => void>(() => {});
+  durationRef.current = duration;
+  seekToRef.current = seekTo;
   const [showLyrics, setShowLyrics] = useState(false);
   const [lyricsData, setLyricsData] = useState<string | null>(null);
   const [isLoadingLyrics, setIsLoadingLyrics] = useState(false);
@@ -78,6 +90,8 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   const [isOffline, setIsOffline] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [showTipModal, setShowTipModal] = useState(false);
+  const [showTipAnimation, setShowTipAnimation] = useState(false);
+  const animatedTracks = useRef(new Set<string>()).current;
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
   const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
@@ -123,8 +137,22 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     lyricsRecoveryAttempted.current = false;
   }, [currentTrack, user]);
   
-  // Track peeks are static - no animation resets needed
-  
+  // Start tip animation after 30s of listening on a track the user doesn't own
+  useEffect(() => {
+    const trackId = currentTrack?.id;
+    if (!trackId || !isPlaying) return;
+    const isOwn = !user?.id || !currentTrack?.creator?.id || currentTrack.creator.id === user.id;
+    if (isOwn || animatedTracks.has(trackId)) return;
+    if (position >= 30) {
+      animatedTracks.add(trackId);
+      setShowTipAnimation(true);
+    }
+  }, [position, currentTrack?.id, isPlaying]);
+
+  useEffect(() => {
+    setShowTipAnimation(false);
+  }, [currentTrack?.id]);
+
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(height)).current;
@@ -167,69 +195,88 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     return distance >= INNER_RADIUS - 10 && distance <= CIRCLE_RADIUS + TOUCH_BUFFER;
   };
 
-  // Calculate seek position from circular progress bar touch
-  const handleCircularSeek = (x: number, y: number) => {
-    if (!duration || duration <= 0) return;
-    
+  // Calculate seek position from circular progress bar touch.
+  // Written to handleCircularSeekRef.current on every render so that the
+  // stale PanResponder closure always invokes the latest implementation.
+  //
+  // requireRingHit=true  → initial touch: only seek if finger is on the ring
+  // requireRingHit=false → drag move: seek from any position so the finger
+  //                        can drift inward/outward without seeking stopping
+  handleCircularSeekRef.current = (x: number, y: number, requireRingHit = true) => {
+    const currentDuration = durationRef.current;
+    if (!currentDuration || currentDuration <= 0) return;
+
     const CIRCLE_CENTER_X = 160;
     const CIRCLE_CENTER_Y = 160;
     const CIRCLE_RADIUS = 121.6;
     const INNER_RADIUS = 96;
-    
-    // Calculate distance from center
+
     const dx = x - CIRCLE_CENTER_X;
     const dy = y - CIRCLE_CENTER_Y;
     const distance = Math.sqrt(dx * dx + dy * dy);
-    
-    // Only seek if touch is within the progress ring (between inner and outer radius)
-    if (distance < INNER_RADIUS - 10 || distance > CIRCLE_RADIUS + 25) {
+
+    if (requireRingHit && (distance < INNER_RADIUS - 10 || distance > CIRCLE_RADIUS + 25)) {
       return;
     }
-    
-    // Calculate angle (in radians)
+    // Avoid degenerate angle when finger is at or very near the centre
+    if (distance < 5) return;
+
     // atan2 returns angle from positive x-axis (-π to π)
-    // We need to convert to 0-2π range starting from top (-90 degrees)
     let angle = Math.atan2(dy, dx);
-    
     // Normalize to 0-2π range
-    if (angle < 0) {
-      angle = angle + 2 * Math.PI;
-    }
-    
-    // Adjust for -90deg start (progress starts at top, which is -90deg or 270deg)
-    // Top is at angle 3π/2 (270deg), we want it to be at 0
+    if (angle < 0) angle += 2 * Math.PI;
+    // Shift so that 12 o'clock (top, -90°) maps to angle 0
     angle = (angle + Math.PI / 2) % (2 * Math.PI);
-    
-    // Convert angle to progress (0 to 1)
+
     const progress = Math.max(0, Math.min(1, angle / (2 * Math.PI)));
-    
-    // Seek to calculated position
-    const newPosition = progress * duration;
-    seekTo(Math.max(0, Math.min(newPosition, duration)));
+    const newPosition = progress * currentDuration;
+    seekToRef.current(Math.max(0, Math.min(newPosition, currentDuration)));
   };
 
-  // Pan responder for circular progress bar seeking
+  // Pan responder for circular progress bar seeking.
+  // All seek logic is delegated to handleCircularSeekRef.current so the
+  // frozen closure always calls the latest implementation with fresh duration.
   const circularProgressPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: (evt) => {
         const { locationX, locationY } = evt.nativeEvent;
-        if (isTouchOnProgressRing(locationX, locationY)) {
-          setIsSeeking(true);
-          isSeekingRef.current = true;
+        // Claim ANY touch inside the disc so the ScrollView / outer swipe
+        // responder never receives it and slides the screen.
+        if (isTouchInCircularArea(locationX, locationY)) {
+          // Only activate seeking state when the touch is specifically on the ring.
+          if (isTouchOnProgressRing(locationX, locationY)) {
+            setIsSeeking(true);
+            isSeekingRef.current = true;
+          }
           return true;
         }
         return false;
       },
-      onStartShouldSetPanResponderCapture: (evt) => {
-        const { locationX, locationY } = evt.nativeEvent;
-        return isTouchOnProgressRing(locationX, locationY);
+      onStartShouldSetPanResponderCapture: () => {
+        // This handler lives on centralPlayerContainer (the 320×320 disc view).
+        // Any touch that reaches it is on the disc — return true unconditionally
+        // so the ScrollView and outer swipe-to-close responder never receive
+        // disc touches regardless of coordinate math.
+        return true;
       },
-      onMoveShouldSetPanResponder: () => true,
+      // Claim move events in BOTH the capture phase (before ScrollView's native
+      // scroll gesture can claim them) and the bubble phase, whenever a ring-touch
+      // has started seeking.  The capture phase handler is what actually prevents
+      // the ScrollView from scrolling the screen while the ring is being dragged.
+      onMoveShouldSetPanResponderCapture: () => isSeekingRef.current,
+      onMoveShouldSetPanResponder: () => isSeekingRef.current,
+      // Tell the native layer (UIScrollView on iOS, equivalent on Android) to yield
+      // control to this JS responder once it has been granted.  Without this the
+      // native scroll gesture keeps running in parallel and drags the screen.
+      onShouldBlockNativeResponder: () => true,
       onPanResponderGrant: (evt) => {
-        handleCircularSeek(evt.nativeEvent.locationX, evt.nativeEvent.locationY);
+        // Initial touch — require finger to be on the ring
+        handleCircularSeekRef.current(evt.nativeEvent.locationX, evt.nativeEvent.locationY, true);
       },
       onPanResponderMove: (evt) => {
-        handleCircularSeek(evt.nativeEvent.locationX, evt.nativeEvent.locationY);
+        // During drag — track angle from anywhere so a drifting finger
+        // doesn't freeze the scrubber mid-seek
+        handleCircularSeekRef.current(evt.nativeEvent.locationX, evt.nativeEvent.locationY, false);
       },
       onPanResponderRelease: () => {
         setIsSeeking(false);
@@ -1076,13 +1123,18 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
           onPress={handlePlayPause}
           activeOpacity={0.9}
         >
-          <View style={[styles.playButtonCircle, { backgroundColor: theme.colors.primary }]}>
-            <Ionicons 
-              name={isPlaying ? 'pause' : 'play'} 
-              size={32} 
-              color="#FFFFFF" 
+          <LinearGradient
+            colors={['#ef4444', '#ec4899', '#a855f7', '#60a5fa', '#fbbf24']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.playButtonCircle}
+          >
+            <Ionicons
+              name={isPlaying ? 'pause' : 'play'}
+              size={32}
+              color="#FFFFFF"
             />
-          </View>
+          </LinearGradient>
         </TouchableOpacity>
 
         {/* Next */}
@@ -1116,17 +1168,13 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
 
         {/* Tip Icon Button */}
         {currentTrack?.creator?.id && (
-          <TouchableOpacity 
-            style={styles.controlButton}
-            onPress={handleTipCreator}
-            activeOpacity={0.7}
-          >
-            <Ionicons 
-              name="gift" 
-              size={22} 
-              color="#FACC15" 
+          <View style={styles.controlButton}>
+            <TipIconAnimated
+              size={22}
+              onPress={handleTipCreator}
+              showAnimation={showTipAnimation}
             />
-          </TouchableOpacity>
+          </View>
         )}
       </View>
     </View>
@@ -1237,10 +1285,11 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   }
 
   return (
+    <AudioPlayerErrorBoundary navigation={navigation}>
     <View style={styles.fullScreenContainer}>
       <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} translucent />
       <SafeAreaView style={styles.safeArea} edges={[]}>
-        <Animated.View 
+        <Animated.View
           style={[
             styles.container,
             {
@@ -1271,7 +1320,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
         style={styles.scrollContainer}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        scrollEnabled={!showLyrics}
+        scrollEnabled={showLyrics}
       >
       {/* Header - Matching HTML design */}
       <View style={[styles.header, { paddingTop: Platform.OS === 'ios' ? 50 : 20 }]}>
@@ -1372,17 +1421,21 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
           {...circularProgressPanResponder.panHandlers}
         >
           {/* Glass Ring */}
-          <ExpoBlurView intensity={20} tint={theme.isDark ? 'dark' : 'light'} style={styles.glassRingBlur}>
-            <LinearGradient
-              colors={theme.isDark 
-                ? ['rgba(255, 255, 255, 0.1)', 'transparent']
-                : ['rgba(0, 0, 0, 0.1)', 'transparent']
-              }
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-              style={styles.glassRingGradient}
-            />
-          </ExpoBlurView>
+          {Platform.OS === 'ios' ? (
+            <ExpoBlurView intensity={20} tint={theme.isDark ? 'dark' : 'light'} style={styles.glassRingBlur}>
+              <LinearGradient
+                colors={theme.isDark
+                  ? ['rgba(255, 255, 255, 0.1)', 'transparent']
+                  : ['rgba(0, 0, 0, 0.1)', 'transparent']
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={styles.glassRingGradient}
+              />
+            </ExpoBlurView>
+          ) : (
+            <View style={[styles.glassRingBlur, { backgroundColor: theme.isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }]} />
+          )}
           <View style={[styles.glassRing, { 
             borderColor: theme.isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
             shadowColor: theme.isDark ? '#a855f7' : '#9333ea',
@@ -1393,34 +1446,75 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
             style={styles.progressArcContainer}
           >
             <Svg width={320} height={320} style={styles.svgProgress}>
+              <Defs>
+                {/* Arc gradient: red → pink → white → blue → yellow, diagonal top-left→bottom-right */}
+                <SvgLinearGradient
+                  id="arcGradient"
+                  x1="38"
+                  y1="38"
+                  x2="282"
+                  y2="282"
+                  gradientUnits="userSpaceOnUse"
+                >
+                  <Stop offset="0%"   stopColor="#ef4444" stopOpacity="1" />
+                  <Stop offset="28%"  stopColor="#ec4899" stopOpacity="1" />
+                  <Stop offset="52%"  stopColor="#f8fafc" stopOpacity="1" />
+                  <Stop offset="76%"  stopColor="#60a5fa" stopOpacity="1" />
+                  <Stop offset="100%" stopColor="#fbbf24" stopOpacity="1" />
+                </SvgLinearGradient>
+              </Defs>
+
               {/* Background track */}
               <Circle
                 cx={160}
                 cy={160}
-                r={121.6} // 38% of 320
+                r={121.6}
                 fill="none"
-                stroke={theme.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}
-                strokeWidth={1.5}
+                stroke={theme.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.08)'}
+                strokeWidth={isSeeking ? 5 : 1.5}
               />
-              {/* Active Progress - grows in length using stroke-dashoffset */}
+
+              {/* Active progress arc — grows clockwise from 12 o'clock */}
               {duration > 0 && (() => {
-                const circumference = 2 * Math.PI * 121.6; // ~764
+                const RADIUS = 121.6;
+                const circumference = 2 * Math.PI * RADIUS;
                 const progress = Math.min(position / duration, 1);
                 const strokeDashoffset = circumference * (1 - progress);
-                
+
+                // Thumb dot position — angle 0 = 12 o'clock, clockwise
+                const thumbAngle = progress * 2 * Math.PI - Math.PI / 2;
+                const thumbX = 160 + RADIUS * Math.cos(thumbAngle);
+                const thumbY = 160 + RADIUS * Math.sin(thumbAngle);
+                const commonArcProps = {
+                  cx: 160, cy: 160, r: RADIUS,
+                  fill: "none",
+                  stroke: "url(#arcGradient)",
+                  strokeDasharray: circumference,
+                  strokeDashoffset,
+                  strokeLinecap: "round" as const,
+                  transform: "rotate(-90 160 160)",
+                };
+
                 return (
-                  <Circle
-                    cx={160}
-                    cy={160}
-                    r={121.6}
-                    fill="none"
-                    stroke="#60a5fa"
-                    strokeWidth={2.5}
-                    strokeDasharray={circumference}
-                    strokeDashoffset={strokeDashoffset}
-                    strokeLinecap="round"
-                    transform="rotate(-90 160 160)"
-                  />
+                  <>
+                    {/* Neon glow — outermost halo (always visible, intensifies on press) */}
+                    <Circle {...commonArcProps} strokeWidth={isSeeking ? 24 : 12} opacity={0.06} />
+                    {/* Neon glow — mid halo */}
+                    <Circle {...commonArcProps} strokeWidth={isSeeking ? 14 : 7} opacity={0.13} />
+                    {/* Neon glow — inner halo */}
+                    <Circle {...commonArcProps} strokeWidth={isSeeking ? 8 : 4}  opacity={0.28} />
+                    {/* Main gradient arc — thickens on press */}
+                    <Circle {...commonArcProps} strokeWidth={isSeeking ? 8 : 3}  opacity={1} />
+
+                    {/* Neon tip glow — subtle halo at the arc head when seeking */}
+                    {progress > 0 && isSeeking && (
+                      <>
+                        <Circle cx={thumbX} cy={thumbY} r={14} fill="rgba(239,68,68,0.12)" />
+                        <Circle cx={thumbX} cy={thumbY} r={9}  fill="rgba(236,72,153,0.22)" />
+                        <Circle cx={thumbX} cy={thumbY} r={5}  fill="rgba(248,250,252,0.30)" />
+                      </>
+                    )}
+                  </>
                 );
               })()}
             </Svg>
@@ -1432,15 +1526,21 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
           }]} />
           
           {/* Album Art */}
-          <TouchableOpacity 
-            style={styles.albumArtContainer} 
+          <TouchableOpacity
+            style={styles.albumArtContainer}
             onPress={handleAlbumArtTap}
             activeOpacity={0.9}
           >
-            <Image 
-              source={{ uri: currentTrack.cover_image_url || currentTrack.cover_art_url || currentTrack.artwork_url || 'https://via.placeholder.com/300' }}
-              style={styles.albumArt}
-            />
+            {(currentTrack.cover_image_url || (currentTrack as any).cover_art_url || (currentTrack as any).artwork_url) ? (
+              <Image
+                source={{ uri: currentTrack.cover_image_url || (currentTrack as any).cover_art_url || (currentTrack as any).artwork_url }}
+                style={styles.albumArt}
+              />
+            ) : (
+              <View style={[styles.albumArt, { justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)' }]}>
+                <Ionicons name="musical-notes" size={80} color="rgba(255,255,255,0.12)" />
+              </View>
+            )}
             {/* Shine overlay */}
             <LinearGradient
               colors={theme.isDark 
@@ -1525,7 +1625,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
             style={StyleSheet.absoluteFill}
           />
           
-          <View style={styles.container}>
+          <View style={styles.lyricsPaddedContainer}>
 
             {/* Swipe indicator */}
             <View style={styles.swipeIndicator} />
@@ -1575,70 +1675,39 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
 
             {/* Mini Player - Liquid Glass iOS 26 Style */}
             <View style={styles.miniPlayerWrapper}>
-              {/* iOS System Material Blur */}
-              <ExpoBlurView 
-                intensity={Platform.OS === 'ios' ? 50 : 80} 
-                tint="dark" 
-                style={styles.miniPlayer}
-              >
-                {/* Adaptive Tint Layer - creates depth */}
-                <View style={[
-                  StyleSheet.absoluteFill,
-                  { 
-                    backgroundColor: theme.isDark 
-                      ? 'rgba(0, 0, 0, 0.3)' 
-                      : 'rgba(255, 255, 255, 0.2)' 
-                  }
-                ]} />
-
-                {/* Glass Highlight - top sheen for "liquid glass" feel */}
-                <LinearGradient
-                  colors={[
-                    'rgba(255, 255, 255, 0.35)',
-                    'rgba(255, 255, 255, 0.12)',
-                    'transparent',
-                  ]}
-                  style={styles.glassHighlight}
-                />
-
-                {/* Content Layer */}
-                <View style={styles.miniPlayerContent}>
-                  <View style={styles.albumArtContainer}>
-                    <Image
-                      source={{ 
-                        uri: currentTrack?.cover_image_url || 
-                             currentTrack?.cover_art_url || 
-                             currentTrack?.artwork_url || 
-                             'https://via.placeholder.com/56' 
-                      }}
-                      style={styles.albumArt}
-                    />
+              {Platform.OS === 'ios' ? (
+                <ExpoBlurView intensity={50} tint="dark" style={styles.miniPlayer}>
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.isDark ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.2)' }]} />
+                  <LinearGradient colors={['rgba(255,255,255,0.35)', 'rgba(255,255,255,0.12)', 'transparent']} style={styles.glassHighlight} />
+                  <View style={styles.miniPlayerContent}>
+                    <View style={styles.albumArtContainer}>
+                      <Image source={{ uri: currentTrack?.cover_image_url || currentTrack?.cover_art_url || currentTrack?.artwork_url || 'https://via.placeholder.com/56' }} style={styles.albumArt} />
+                    </View>
+                    <View style={styles.songInfo}>
+                      <Text style={styles.songTitle} numberOfLines={1}>{currentTrack?.title || 'Unknown Track'}</Text>
+                      <Text style={styles.songArtist} numberOfLines={1}>{currentTrack?.creator?.display_name || currentTrack?.creator?.username || 'Unknown Artist'}</Text>
+                    </View>
+                    <TouchableOpacity onPress={isPlaying ? pause : resume} style={styles.playButton} activeOpacity={0.8}>
+                      <Ionicons name={isPlaying ? 'pause' : 'play'} color="#000000" size={20} />
+                    </TouchableOpacity>
                   </View>
-
-                  <View style={styles.songInfo}>
-                    <Text style={styles.songTitle} numberOfLines={1}>
-                      {currentTrack?.title || 'Unknown Track'}
-                    </Text>
-                    <Text style={styles.songArtist} numberOfLines={1}>
-                      {currentTrack?.creator?.display_name || 
-                       currentTrack?.creator?.username || 
-                       'Unknown Artist'}
-                    </Text>
+                </ExpoBlurView>
+              ) : (
+                <View style={[styles.miniPlayer, styles.miniPlayerAndroid]}>
+                  <View style={styles.miniPlayerContent}>
+                    <View style={styles.albumArtContainer}>
+                      <Image source={{ uri: currentTrack?.cover_image_url || currentTrack?.cover_art_url || currentTrack?.artwork_url || 'https://via.placeholder.com/56' }} style={styles.albumArt} />
+                    </View>
+                    <View style={styles.songInfo}>
+                      <Text style={[styles.songTitle, { color: '#FFFFFF' }]} numberOfLines={1}>{currentTrack?.title || 'Unknown Track'}</Text>
+                      <Text style={[styles.songArtist, { color: 'rgba(255,255,255,0.7)' }]} numberOfLines={1}>{currentTrack?.creator?.display_name || currentTrack?.creator?.username || 'Unknown Artist'}</Text>
+                    </View>
+                    <TouchableOpacity onPress={isPlaying ? pause : resume} style={styles.playButton} activeOpacity={0.8}>
+                      <Ionicons name={isPlaying ? 'pause' : 'play'} color="#FFFFFF" size={20} />
+                    </TouchableOpacity>
                   </View>
-
-                  <TouchableOpacity
-                    onPress={isPlaying ? pause : resume}
-                    style={styles.playButton}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons
-                      name={isPlaying ? 'pause' : 'play'}
-                      color="#000000"
-                      size={20}
-                    />
-                  </TouchableOpacity>
                 </View>
-              </ExpoBlurView>
+              )}
             </View>
 
             {/* Progress Bar */}
@@ -1693,9 +1762,9 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
             ]}
           >
             <ExpoBlurView
-              intensity={80}
+              intensity={Platform.OS === 'ios' ? 80 : 0}
               tint={theme.isDark ? 'dark' : 'light'}
-              style={styles.menuBlur}
+              style={[styles.menuBlur, Platform.OS === 'android' && { backgroundColor: theme.isDark ? 'rgba(20,20,30,0.97)' : 'rgba(245,245,250,0.97)' }]}
             >
               <ScrollView 
                 style={styles.menuContent}
@@ -1862,6 +1931,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
         </Animated.View>
       </SafeAreaView>
     </View>
+    </AudioPlayerErrorBoundary>
   );
 }
 
@@ -2028,7 +2098,12 @@ const styles = StyleSheet.create({
     pointerEvents: 'box-none',
   },
   svgProgress: {
-    transform: [{ rotate: '-90deg' }],
+    // No RN-level rotation here. The progress Circle already has
+    // transform="rotate(-90 160 160)" in SVG space which correctly places
+    // the arc start at 12 o'clock (top). Adding a second -90° rotation on
+    // the Svg view element was shifting the visual zero point to 9 o'clock
+    // (left), creating a quarter-circle offset between where the user taps
+    // and where the seek actually lands.
   },
   glassRingBlur: {
     position: 'absolute',
@@ -2444,7 +2519,7 @@ const styles = StyleSheet.create({
   lyricsModalFullScreen: {
     flex: 1,
   },
-  container: {
+  lyricsPaddedContainer: {
     flex: 1,
     padding: 24,
   },
@@ -2500,12 +2575,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   miniPlayer: {
-    borderRadius: 999,          // Capsule shape (pill-shaped)
+    borderRadius: 999,
     overflow: 'hidden',
     borderWidth: 0.5,
-    borderColor: 'rgba(255, 255, 255, 0.12)',  // Subtle edge definition
+    borderColor: 'rgba(255, 255, 255, 0.12)',
     backgroundColor: 'transparent',
-    height: 84,                 // Apple Music mini-player height
+    height: 84,
+  },
+  miniPlayerAndroid: {
+    backgroundColor: 'rgba(15,10,30,0.92)',
   },
   glassHighlight: {
     position: 'absolute',

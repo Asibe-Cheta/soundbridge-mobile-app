@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { Connection } from '../types/network.types';
 import { getRelativeTime } from '../utils/collaborationUtils';
 import * as Haptics from 'expo-haptics';
+import VerifiedAvatar from './VerifiedAvatar';
 
 interface ConnectionCardProps {
   connection: Connection;
@@ -38,13 +39,13 @@ export default function ConnectionCard({ connection, onPress, onMessage }: Conne
       activeOpacity={0.7}
     >
       {/* Avatar */}
-      <View style={[styles.avatar, { borderColor: theme.colors.border }]}>
-        {connection.user.avatar_url ? (
-          <Image source={{ uri: connection.user.avatar_url }} style={styles.avatarImage} />
-        ) : (
-          <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
-        )}
-      </View>
+      <VerifiedAvatar
+        avatarUrl={connection.user.avatar_url}
+        isVerified={connection.user.is_verified}
+        size={48}
+        fallbackIconSize={24}
+        marginRight={12}
+      />
 
       {/* Info */}
       <View style={styles.info}>

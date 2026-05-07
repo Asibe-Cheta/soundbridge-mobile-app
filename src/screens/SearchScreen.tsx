@@ -7,7 +7,6 @@ import {
   Text,
   StyleSheet,
   ActivityIndicator,
-  FlatList,
   Image,
   Platform,
 } from 'react-native';
@@ -18,9 +17,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSearch } from '../hooks/useSearch';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import PostCard from '../components/PostCard';
-import { Post } from '../types/feed.types';
 import BackButton from '../components/BackButton';
+import VerifiedBadge from '../components/VerifiedBadge';
 import { formatServiceCategories } from '../utils/serviceCategoryLabels';
 
 type SearchTab = 'all' | 'posts' | 'people' | 'opportunities';
@@ -31,7 +29,7 @@ export default function SearchScreen() {
   const { theme } = useTheme();
   const navigation = useNavigation();
   const route = useRoute();
-  const { searchQuery, setSearchQuery, searchResults, isSearching } = useSearch();
+  const { searchQuery, setSearchQuery, searchResults, isSearching, searchError } = useSearch();
   const [activeTab, setActiveTab] = useState<SearchTab>('all');
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   
@@ -93,69 +91,6 @@ export default function SearchScreen() {
     } else if (type === 'opportunity') {
       navigation.navigate('Network' as never, { tab: 'opportunities' } as never);
     }
-  };
-
-  const renderResult = ({ item }: { item: SearchResult }) => {
-    if (item.type === 'post') {
-      // Convert SearchResult to Post format for PostCard
-      const post: Post = {
-        id: item.id,
-        content: item.content || '',
-        post_type: 'update',
-        visibility: 'public',
-        author: {
-          id: item.id,
-          username: item.username || 'user',
-          display_name: item.display_name || 'User',
-          avatar_url: item.avatar_url,
-        },
-        reactions_count: {
-          support: 0,
-          love: 0,
-          fire: 0,
-          congrats: 0,
-        },
-        comments_count: 0,
-        user_reaction: null,
-        created_at: item.created_at || new Date().toISOString(),
-      };
-
-      return (
-        <PostCard
-          post={post}
-          onPress={() => handleResultPress(item)}
-          onReactionPress={() => {}}
-          onCommentPress={() => {}}
-        />
-      );
-    }
-
-    // Render other result types
-    return (
-      <TouchableOpacity
-        style={[styles.resultItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-        onPress={() => handleResultPress(item)}
-      >
-        <View style={styles.resultContent}>
-          {item.avatar_url && (
-            <View style={styles.avatarContainer}>
-              <Ionicons name="person-circle" size={40} color={theme.colors.primary} />
-            </View>
-          )}
-          <View style={styles.resultText}>
-            <Text style={[styles.resultTitle, { color: theme.colors.text }]}>
-              {item.display_name || item.title || item.username}
-            </Text>
-            {item.content && (
-              <Text style={[styles.resultSubtitle, { color: theme.colors.textSecondary }]} numberOfLines={2}>
-                {item.content}
-              </Text>
-            )}
-          </View>
-        </View>
-        <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
-      </TouchableOpacity>
-    );
   };
 
   return (
@@ -288,6 +223,16 @@ export default function SearchScreen() {
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={theme.colors.primary} />
           </View>
+        ) : searchError?.isLimitExceeded ? (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="alert-circle-outline" size={64} color={theme.colors.textSecondary} />
+            <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
+              Search limit reached
+            </Text>
+            <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+              {searchError.message || 'You have reached your monthly search limit. Upgrade to Pro for unlimited searches.'}
+            </Text>
+          </View>
         ) : (() => {
           // Filter results by active tab
           let filteredResults = { ...searchResults };
@@ -354,11 +299,11 @@ export default function SearchScreen() {
 
           return (
             <ScrollView style={styles.resultsContainer} showsVerticalScrollIndicator={false}>
-              {/* Artists */}
+              {/* People (creators and listeners) */}
               {filteredResults.artists.length > 0 && (
               <View style={styles.resultsSection}>
-                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Artists</Text>
-                {searchResults.artists.map((artist) => (
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>People</Text>
+                {filteredResults.artists.map((artist) => (
                   <TouchableOpacity
                     key={artist.id}
                     style={[styles.resultItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
@@ -374,11 +319,14 @@ export default function SearchScreen() {
                       )}
                     </View>
                     <View style={styles.resultInfo}>
-                      <Text style={[styles.resultTitle, { color: theme.colors.text }]} numberOfLines={1}>
-                        {artist.display_name || artist.username}
-                      </Text>
+                      <View style={styles.resultTitleRow}>
+                        <Text style={[styles.resultTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                          {artist.display_name || artist.username}
+                        </Text>
+                        {artist.is_verified && <VerifiedBadge size={12} />}
+                      </View>
                       <Text style={[styles.resultSubtitle, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                        @{artist.username}
+                        @{artist.username} · {artist.role === 'creator' ? 'Creator' : 'Listener'}
                       </Text>
                     </View>
                     <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
@@ -662,6 +610,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     marginBottom: 4,
+  },
+  resultTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   resultSubtitle: {
     fontSize: 13,

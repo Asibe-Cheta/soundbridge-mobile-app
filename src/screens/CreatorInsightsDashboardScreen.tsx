@@ -29,7 +29,7 @@ import { SystemTypography as Typography } from '../constants/Typography';
 const { width } = Dimensions.get('window');
 
 type DateRangeTab = 'week' | 'month' | 'year';
-type TabType = 'overview' | 'fans' | 'tracks' | 'growth';
+type TabType = 'overview' | 'fans' | 'tracks' | 'growth' | 'ai-advisor';
 
 const CreatorInsightsDashboardScreen = ({ navigation }: any) => {
   const { theme } = useTheme();
@@ -421,27 +421,33 @@ const CreatorInsightsDashboardScreen = ({ navigation }: any) => {
 
         {/* Tab Selector */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabSelector}>
-          {(['overview', 'fans', 'tracks', 'growth'] as TabType[]).map(tab => (
-            <TouchableOpacity
-              key={tab}
-              onPress={() => setSelectedTab(tab)}
-              style={[
-                styles.tab,
-                { backgroundColor: theme.colors.card, borderColor: theme.colors.border },
-                selectedTab === tab && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
-              ]}
-            >
-              <Text
+          {(['overview', 'fans', 'tracks', 'growth', 'ai-advisor'] as TabType[]).map(tab => {
+            const label = tab === 'ai-advisor' ? '✦ AI Advisor' : tab.charAt(0).toUpperCase() + tab.slice(1);
+            const isAI = tab === 'ai-advisor';
+            return (
+              <TouchableOpacity
+                key={tab}
+                onPress={() => setSelectedTab(tab)}
                 style={[
-                  styles.tabText,
-                  { color: theme.colors.text },
-                  selectedTab === tab && { color: '#FFFFFF' },
+                  styles.tab,
+                  { backgroundColor: theme.colors.card, borderColor: theme.colors.border },
+                  selectedTab === tab && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
+                  isAI && { borderColor: '#7c3aed', borderWidth: 1 },
+                  isAI && selectedTab === tab && { backgroundColor: '#7c3aed', borderColor: '#7c3aed' },
                 ]}
               >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                <Text
+                  style={[
+                    styles.tabText,
+                    { color: isAI ? '#a78bfa' : theme.colors.text },
+                    selectedTab === tab && { color: '#FFFFFF' },
+                  ]}
+                >
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
 
         {/* Tab Content */}
@@ -449,6 +455,24 @@ const CreatorInsightsDashboardScreen = ({ navigation }: any) => {
         {selectedTab === 'fans' && renderFansTab()}
         {selectedTab === 'tracks' && renderTracksTab()}
         {selectedTab === 'growth' && renderGrowthTab()}
+        {selectedTab === 'ai-advisor' && (
+          <View style={styles.aiComingSoon}>
+            <LinearGradient
+              colors={['#3b0764', '#1e1b4b']}
+              style={styles.aiComingSoonCard}
+            >
+              <Ionicons name="sparkles" size={48} color="#a78bfa" style={{ marginBottom: 16 }} />
+              <Text style={styles.aiComingSoonTitle}>AI Career Advisor</Text>
+              <Text style={styles.aiComingSoonSubtitle}>Coming Soon</Text>
+              <Text style={styles.aiComingSoonBody}>
+                Your personal AI music career coach — analysing your growth, suggesting your next moves, and helping you build your audience strategically.
+              </Text>
+              <View style={styles.aiComingSoonBadge}>
+                <Text style={styles.aiComingSoonBadgeText}>Notify me when it's live</Text>
+              </View>
+            </LinearGradient>
+          </View>
+        )}
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -561,6 +585,53 @@ const styles = StyleSheet.create({
     ...Typography.label,
     fontSize: 14,
     lineHeight: 20,
+    fontWeight: '600',
+  },
+  aiComingSoon: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 32,
+  },
+  aiComingSoonCard: {
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.4)',
+  },
+  aiComingSoonTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#e9d5ff',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  aiComingSoonSubtitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#7c3aed',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginBottom: 20,
+  },
+  aiComingSoonBody: {
+    fontSize: 14,
+    color: '#c4b5fd',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 28,
+  },
+  aiComingSoonBadge: {
+    backgroundColor: 'rgba(124,58,237,0.25)',
+    borderRadius: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.4)',
+  },
+  aiComingSoonBadgeText: {
+    color: '#a78bfa',
+    fontSize: 13,
     fontWeight: '600',
   },
   section: {

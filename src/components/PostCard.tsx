@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable, Dimensions, Clipboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import VerifiedAvatar from './VerifiedAvatar';
 import VerifiedBadge from './VerifiedBadge';
 import { ActivityIndicator } from 'react-native';
 import { walkthroughable } from 'react-native-copilot';
@@ -17,6 +18,7 @@ import PostAudioPlayer from './PostAudioPlayer';
 import PostSaveButton from './PostSaveButton';
 import { ReactionPicker } from './ReactionPicker';
 import CommentsModal from '../modals/CommentsModal';
+import ReactionsListModal from '../modals/ReactionsListModal';
 import { RepostModal } from './RepostModal';
 import { RepostedPostCard } from './RepostedPostCard';
 import { networkService } from '../services/api/networkService';
@@ -100,11 +102,15 @@ const PostCard = memo(function PostCard({
   const [showReportModal, setShowReportModal] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [showCommentsModal, setShowCommentsModal] = useState(false);
+  const [showReactionsModal, setShowReactionsModal] = useState(false);
   const [showRepostModal, setShowRepostModal] = useState(false);
   const [isReposting, setIsReposting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionPending, setConnectionPending] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [galleryIndex, setGalleryIndex] = useState(0);
+  const [showCopyMenu, setShowCopyMenu] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const handleReactionPress = (reactionType: 'support' | 'love' | 'fire' | 'congrats') => {
@@ -125,6 +131,18 @@ const PostCard = memo(function PostCard({
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
     }
+  };
+
+  // Long-press copy on post text
+  const handleTextLongPress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setShowCopyMenu(true);
+  };
+
+  const handleCopyText = () => {
+    Clipboard.setString(post.content);
+    showToast('Copied to clipboard', 'success');
+    setShowCopyMenu(false);
   };
 
   // Quick Support reaction (single tap)
@@ -148,21 +166,24 @@ const PostCard = memo(function PostCard({
     return { emoji: '👍', label: 'Like', color: theme.colors.textSecondary };
   };
 
+  // Get reaction icon name and color for the action bar button
+  const getReactionIcon = (): { name: React.ComponentProps<typeof Ionicons>['name']; color: string } => {
+    if (!post.user_reaction) return { name: 'thumbs-up-outline', color: theme.colors.textSecondary };
+    const map: Record<string, { name: React.ComponentProps<typeof Ionicons>['name']; color: string }> = {
+      support: { name: 'thumbs-up', color: '#DC2626' },
+      love: { name: 'heart', color: '#EC4899' },
+      fire: { name: 'flame', color: '#F5A623' },
+      congrats: { name: 'ribbon', color: '#7B68EE' },
+    };
+    return map[post.user_reaction] ?? { name: 'thumbs-up', color: '#DC2626' };
+  };
+
   // Calculate total reactions
   const totalReactions = 
     post.reactions_count.support +
     post.reactions_count.love +
     post.reactions_count.fire +
     post.reactions_count.congrats;
-
-  // Debug logging for repost detection
-  console.log('🔍 PostCard Debug:', {
-    postId: post.id,
-    hasRepostedFromId: !!post.reposted_from_id,
-    hasRepostedFrom: !!post.reposted_from,
-    repostedFromId: post.reposted_from_id,
-    content: post.content?.substring(0, 30) + '...',
-  });
 
   const isRepost = post.reposted_from_id && post.reposted_from;
   const isOwnPost = user?.id === post.author.id;
@@ -330,7 +351,7 @@ const PostCard = memo(function PostCard({
   };
 
   return (
-    <View style={styles.outerContainer}>
+    <View style={[styles.outerContainer, { borderBottomColor: theme.colors.border }]}>
       {/* LinkedIn-style Header - Outside Card */}
       <View style={styles.profileHeader}>
         {/* Avatar */}
@@ -340,21 +361,12 @@ const PostCard = memo(function PostCard({
             onAuthorPress?.(post.author.id);
           }}
         >
-          <View
-            style={[
-              styles.avatar,
-              { borderColor: theme.colors.border },
-            ]}
-          >
-            {post.author.avatar_url ? (
-              <Image
-                source={{ uri: post.author.avatar_url }}
-                style={styles.avatarImage}
-              />
-            ) : (
-              <Ionicons name="person" size={24} color={theme.colors.textSecondary} />
-            )}
-          </View>
+          <VerifiedAvatar
+            avatarUrl={post.author.avatar_url}
+            isVerified={post.author.is_verified}
+            size={48}
+            marginRight={12}
+          />
         </TouchableOpacity>
 
         {/* Author Info */}
@@ -369,6 +381,12 @@ const PostCard = memo(function PostCard({
             <Text style={[styles.authorName, { color: theme.colors.text }]} numberOfLines={1}>
               {post.author.display_name}
             </Text>
+
+            {isOwnPost && (
+              <Text style={[styles.youIndicator, { color: theme.colors.textSecondary }]}>
+                {' · You'}
+              </Text>
+            )}
 
             {post.author.is_verified && <VerifiedBadge size={14} />}
 
@@ -461,10 +479,12 @@ const PostCard = memo(function PostCard({
           styles.container,
           {
             backgroundColor: theme.colors.card,
-            borderColor: theme.colors.border,
           },
         ]}
-        onPress={onPress}
+        onPress={() => {
+          if (showCopyMenu) { setShowCopyMenu(false); return; }
+          onPress?.();
+        }}
         activeOpacity={0.95}
       >
         {/* Card Header - Redrop Indicator + Save and More buttons */}
@@ -502,17 +522,40 @@ const PostCard = memo(function PostCard({
 
       {/* Content Section - Only show for non-reposts OR reposts with comment */}
       {(!isRepost || (isRepost && post.content && post.content.trim().length > 0)) && (
-        <View style={styles.contentSection}>
+        <View style={[styles.contentSection, styles.contentSectionPositioned]}>
+
+          {/* Long-press copy popup — floats above the text */}
+          {showCopyMenu && (
+            <View style={styles.copyMenuWrapper} pointerEvents="box-none">
+              <View style={[styles.copyMenu, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                <TouchableOpacity
+                  style={styles.copyMenuItem}
+                  onPress={handleCopyText}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="copy-outline" size={14} color={theme.colors.text} />
+                  <Text style={[styles.copyMenuLabel, { color: theme.colors.text }]}>Copy</Text>
+                </TouchableOpacity>
+              </View>
+              {/* Downward-pointing arrow: outer (border colour) + inner (fill colour) */}
+              <View style={[styles.copyMenuArrowOuter, { borderTopColor: theme.colors.border }]} />
+              <View style={[styles.copyMenuArrowInner, { borderTopColor: theme.colors.surface }]} />
+            </View>
+          )}
+
           <Text
             style={[styles.postContent, { color: theme.colors.text }]}
-            numberOfLines={8}
+            numberOfLines={isExpanded ? undefined : 8}
+            onLongPress={handleTextLongPress}
+            delayLongPress={500}
+            suppressHighlighting
           >
             {post.content}
           </Text>
           {post.content.length > 200 && (
-            <TouchableOpacity>
+            <TouchableOpacity onPress={() => setIsExpanded(prev => !prev)}>
               <Text style={[styles.seeMore, { color: theme.colors.primary }]}>
-                See more
+                {isExpanded ? 'See less' : 'See more'}
               </Text>
             </TouchableOpacity>
           )}
@@ -521,7 +564,7 @@ const PostCard = memo(function PostCard({
 
       {/* Reposted Original Post (Quote Repost - Twitter style) */}
       {isRepost && (
-        <>
+        <View style={{ paddingHorizontal: 16, marginBottom: 14 }}>
           <RepostedPostCard
             post={post.reposted_from!}
             onPress={() => {
@@ -538,27 +581,140 @@ const PostCard = memo(function PostCard({
               onAuthorPress?.(authorId);
             }}
           />
-        </>
+        </View>
       )}
 
       {/* Media Section (only if NOT a repost with original post data) */}
-      {post.image_url && !isRepost && (
-        <View style={styles.mediaSection}>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setShowFullScreenImage(true);
-            }}
-          >
-            <Image
-              source={{ uri: post.image_url }}
-              style={styles.imagePreview}
-              resizeMode="cover"
-            />
-          </TouchableOpacity>
-        </View>
-      )}
+      {!isRepost && (() => {
+        const allImages: string[] = post.image_urls && post.image_urls.length > 0
+          ? post.image_urls
+          : post.image_url ? [post.image_url] : [];
+
+        if (allImages.length === 0) return null;
+
+        const openGallery = (index: number) => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          setGalleryIndex(index);
+          setShowFullScreenImage(true);
+        };
+
+        const cardWidth = Dimensions.get('window').width;
+        // LinkedIn-style grid dimensions
+        const GRID_H = Math.round(cardWidth * 0.68);
+        const leftW = Math.round(cardWidth * 0.58);
+        const rightW = cardWidth - leftW - 2;
+
+        return (
+          <View style={styles.mediaSection}>
+            {/* 1 image — wide 16:9 */}
+            {allImages.length === 1 && (
+              <TouchableOpacity activeOpacity={0.9} onPress={() => openGallery(0)}>
+                <Image
+                  source={{ uri: allImages[0] }}
+                  style={{ width: cardWidth, height: Math.round(cardWidth * 0.56) }}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+            )}
+
+            {/* 2 images — side by side equal */}
+            {allImages.length === 2 && (
+              <View style={{ flexDirection: 'row', gap: 2, height: Math.round(cardWidth * 0.52) }}>
+                {allImages.map((uri, i) => (
+                  <TouchableOpacity
+                    key={i}
+                    activeOpacity={0.9}
+                    onPress={() => openGallery(i)}
+                    style={{ flex: 1 }}
+                  >
+                    <Image
+                      source={{ uri }}
+                      style={{ flex: 1 }}
+                      resizeMode="cover"
+                    />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* 3 images — LinkedIn: left big, right 2 stacked */}
+            {allImages.length === 3 && (
+              <View style={{ flexDirection: 'row', gap: 2, height: GRID_H }}>
+                <TouchableOpacity activeOpacity={0.9} onPress={() => openGallery(0)}>
+                  <Image
+                    source={{ uri: allImages[0] }}
+                    style={{ width: leftW, height: GRID_H }}
+                    resizeMode="cover"
+                  />
+                </TouchableOpacity>
+                <View style={{ flex: 1, gap: 2 }}>
+                  {allImages.slice(1).map((uri, i) => {
+                    const h = Math.round((GRID_H - 2) / 2);
+                    return (
+                      <TouchableOpacity key={i} activeOpacity={0.9} onPress={() => openGallery(i + 1)}>
+                        <Image
+                          source={{ uri }}
+                          style={{ width: rightW, height: h }}
+                          resizeMode="cover"
+                        />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
+            {/* 4+ images — LinkedIn: left big, right 3 stacked, last with +N */}
+            {allImages.length >= 4 && (
+              <View style={{ flexDirection: 'row', gap: 2, height: GRID_H }}>
+                <TouchableOpacity activeOpacity={0.9} onPress={() => openGallery(0)}>
+                  <Image
+                    source={{ uri: allImages[0] }}
+                    style={{ width: leftW, height: GRID_H }}
+                    resizeMode="cover"
+                  />
+                </TouchableOpacity>
+                <View style={{ flex: 1, gap: 2 }}>
+                  {[allImages[1], allImages[2], allImages[3]].map((uri, i) => {
+                    const h = Math.round((GRID_H - 4) / 3);
+                    const isLast = i === 2;
+                    const remaining = allImages.length - 4; // images beyond the 4 shown
+                    return (
+                      <TouchableOpacity
+                        key={i}
+                        activeOpacity={0.9}
+                        onPress={() => openGallery(i + 1)}
+                        style={{ position: 'relative' }}
+                      >
+                        <Image
+                          source={{ uri }}
+                          style={{ width: rightW, height: h }}
+                          resizeMode="cover"
+                        />
+                        {isLast && remaining > 0 && (
+                          <View
+                            style={{
+                              position: 'absolute',
+                              top: 0, left: 0, right: 0, bottom: 0,
+                              backgroundColor: 'rgba(0,0,0,0.55)',
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600' }}>
+                              +{remaining}
+                            </Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+          </View>
+        );
+      })()}
 
       {post.audio_url && (
         <PostAudioPlayer
@@ -590,9 +746,11 @@ const PostCard = memo(function PostCard({
             onPressOut={handleSupportPressOut}
             onPress={handleQuickSupport}
           >
-            <Text style={[styles.interactionIcon, { fontSize: 20 }]}>
-              {getCurrentReaction().emoji}
-            </Text>
+            <Ionicons
+              name={getReactionIcon().name}
+              size={20}
+              color={getReactionIcon().color}
+            />
           </Pressable>
 
           {/* Comment Button */}
@@ -671,47 +829,81 @@ const PostCard = memo(function PostCard({
           </WalkthroughableTouchable>
         </View>
 
-        {/* Summary Line */}
-        {(totalReactions > 0 || post.comments_count > 0 || (post.shares_count && post.shares_count > 0)) && (
-          <TouchableOpacity 
-            style={styles.summaryLine}
-            onPress={() => {
-              if (post.comments_count > 0) {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setShowCommentsModal(true);
-              }
-            }}
-            activeOpacity={post.comments_count > 0 ? 0.7 : 1}
-          >
+        {/* Summary Line - LinkedIn style */}
+        {(totalReactions > 0 || post.comments_count > 0 || (post.shares_count ?? 0) > 0) && (
+          <View style={styles.summaryLine}>
+            {/* Left: emoji bubbles + reaction count */}
             {totalReactions > 0 && (
-              <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
-                {post.user_reaction 
-                  ? `You and ${totalReactions - 1} other${totalReactions - 1 !== 1 ? 's' : ''} reacted`
-                  : `${totalReactions} reaction${totalReactions !== 1 ? 's' : ''}`
-                }
-              </Text>
-            )}
-            {totalReactions > 0 && (post.comments_count > 0 || (post.shares_count && post.shares_count > 0)) && (
-              <Text style={[styles.summaryDot, { color: theme.colors.textSecondary }]}> • </Text>
-            )}
-            {post.comments_count > 0 && (
-              <>
+              <TouchableOpacity
+                style={styles.reactorsRow}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setShowReactionsModal(true);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.reactionBubblesCluster}>
+                  {Object.entries(post.reactions_count)
+                    .filter(([_, count]) => (count as number) > 0)
+                    .slice(0, 3)
+                    .map(([type], i) => (
+                      <View
+                        key={type}
+                        style={[
+                          styles.reactionBubbleSmall,
+                          {
+                            marginLeft: i > 0 ? -6 : 0,
+                            zIndex: 10 - i,
+                            borderColor: theme.colors.card,
+                          },
+                        ]}
+                      >
+                        <Text style={styles.reactionEmojiSmall}>
+                          {REACTION_TYPES[type as keyof typeof REACTION_TYPES].emoji}
+                        </Text>
+                      </View>
+                    ))}
+                </View>
                 <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
-                  {post.comments_count} comment{post.comments_count !== 1 ? 's' : ''}
+                  {totalReactions}
                 </Text>
-                {post.shares_count && post.shares_count > 0 && (
-                  <Text style={[styles.summaryDot, { color: theme.colors.textSecondary }]}> • </Text>
-                )}
-              </>
+              </TouchableOpacity>
             )}
-            {post.shares_count && post.shares_count > 0 && (
-              <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
-                {post.shares_count} redrop{post.shares_count !== 1 ? 's' : ''}
-              </Text>
-            )}
-          </TouchableOpacity>
+
+            {/* Right: comments + redrops */}
+            <View style={styles.summaryRight}>
+              {post.comments_count > 0 && (
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setShowCommentsModal(true);
+                  }}
+                >
+                  <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
+                    {post.comments_count} comment{post.comments_count !== 1 ? 's' : ''}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {post.comments_count > 0 && (post.shares_count ?? 0) > 0 && (
+                <Text style={[styles.summaryDot, { color: theme.colors.textSecondary }]}> · </Text>
+              )}
+              {(post.shares_count ?? 0) > 0 && (
+                <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
+                  {post.shares_count} redrop{post.shares_count !== 1 ? 's' : ''}
+                </Text>
+              )}
+            </View>
+          </View>
         )}
       </View>
+
+      {/* Reactions List Modal */}
+      <ReactionsListModal
+        visible={showReactionsModal}
+        onClose={() => setShowReactionsModal(false)}
+        postId={post.id}
+        reactionsCount={post.reactions_count}
+      />
 
       {/* Reaction Picker Modal */}
       <ReactionPicker
@@ -764,12 +956,22 @@ const PostCard = memo(function PostCard({
         }}
       />
 
-      {/* Full Screen Image Modal */}
-      {post.image_url && (
+      {/* Full Screen Image Gallery */}
+      {(post.image_urls?.length || post.image_url) && (
         <FullScreenImageModal
           visible={showFullScreenImage}
-          imageUrl={post.image_url}
+          imageUrls={
+            post.image_urls && post.image_urls.length > 0
+              ? post.image_urls
+              : post.image_url ? [post.image_url] : []
+          }
+          initialIndex={galleryIndex}
           onClose={() => setShowFullScreenImage(false)}
+          userReaction={post.user_reaction}
+          reactionsCount={post.reactions_count}
+          commentsCount={post.comments_count}
+          onReactionPress={handleReactionPress}
+          onCommentPress={() => setShowCommentsModal(true)}
         />
       )}
 
@@ -819,7 +1021,8 @@ export default PostCard;
 
 const styles = StyleSheet.create({
   outerContainer: {
-    marginBottom: 16,
+    marginBottom: 0,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   profileHeader: {
     flexDirection: 'row',
@@ -829,15 +1032,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   container: {
-    marginHorizontal: 16,
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    // edge-to-edge: no horizontal margin, no border radius
   },
   repostIndicator: {
     flexDirection: 'row',
@@ -855,7 +1050,9 @@ const styles = StyleSheet.create({
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 10,
+    paddingHorizontal: 16,
+    paddingTop: 4,
   },
   avatar: {
     width: 48,
@@ -872,6 +1069,23 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 24,
   },
+  verifiedRing: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    padding: 2.5,
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verifiedRingInner: {
+    width: 49,
+    height: 49,
+    borderRadius: 24.5,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   authorInfo: {
     flex: 1,
   },
@@ -886,6 +1100,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 20,
     fontWeight: '600',
+  },
+  youIndicator: {
+    ...Typography.body,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '400',
   },
   proBadge: {
     backgroundColor: '#DC2626',
@@ -979,6 +1199,7 @@ const styles = StyleSheet.create({
   },
   contentSection: {
     marginBottom: 14,
+    paddingHorizontal: 16,
   },
   postContent: {
     ...Typography.body,
@@ -995,17 +1216,13 @@ const styles = StyleSheet.create({
   },
   mediaSection: {
     marginBottom: 14,
-    borderRadius: 12,
     overflow: 'hidden',
-    maxHeight: 300,
-  },
-  imagePreview: {
-    width: '100%',
-    aspectRatio: 16 / 9,
   },
   engagementSection: {
     borderTopWidth: 1,
     paddingTop: 12,
+    paddingHorizontal: 8,
+    paddingBottom: 8,
   },
   interactionButtonsRow: {
     flexDirection: 'row',
@@ -1036,10 +1253,37 @@ const styles = StyleSheet.create({
   summaryLine: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.05)',
     marginTop: 8,
+  },
+  reactorsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  reactionBubblesCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  reactionBubbleSmall: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  reactionEmojiSmall: {
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  summaryRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   summaryText: {
     ...Typography.label,
@@ -1052,6 +1296,66 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '400',
+  },
+
+  // ── Long-press copy menu ─────────────────────────────────
+  contentSectionPositioned: {
+    // Establishes a positioning context so the popup is anchored to this View.
+    // RN default is already 'relative', but explicit avoids surprises.
+    position: 'relative',
+    overflow: 'visible',
+  },
+  copyMenuWrapper: {
+    position: 'absolute',
+    // Sits 48px above the top of contentSection (menu ~36px + arrow 8px + 4px gap)
+    top: -48,
+    left: 0,
+    zIndex: 200,
+  },
+  copyMenu: {
+    borderRadius: 10,
+    borderWidth: 1,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 12,
+  },
+  copyMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  copyMenuLabel: {
+    ...Typography.button,
+    fontSize: 14,
+  },
+  // Outer triangle — rendered in border colour to create the outline
+  copyMenuArrowOuter: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 7,
+    borderRightWidth: 7,
+    borderTopWidth: 8,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    marginLeft: 16,
+  },
+  // Inner triangle — rendered in fill colour, 1px above outer, masks the interior
+  copyMenuArrowInner: {
+    position: 'absolute',
+    bottom: 1,
+    left: 17,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderTopWidth: 7,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
   },
 });
 

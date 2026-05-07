@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
@@ -35,14 +36,14 @@ export default function UploadLimitCard({ quota, loading, onUpgrade }: UploadLim
 
   const glassPalette = theme.isDark
     ? {
-        bg: 'rgba(15, 23, 42, 0.55)',
-        inner: 'rgba(15, 23, 42, 0.28)',
-        border: 'rgba(148, 163, 184, 0.32)',
+        bg: 'rgba(24, 8, 52, 0.55)',
+        inner: 'rgba(24, 8, 52, 0.38)',
+        border: 'rgba(255, 255, 255, 0.12)',
       }
     : {
-        bg: 'rgba(255, 255, 255, 0.72)',
-        inner: 'rgba(255, 255, 255, 0.38)',
-        border: 'rgba(148, 163, 184, 0.2)',
+        bg: 'rgba(88, 36, 145, 0.18)',
+        inner: 'rgba(88, 36, 145, 0.12)',
+        border: 'rgba(88, 36, 145, 0.2)',
       };
 
   const GlassContainer: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -51,7 +52,7 @@ export default function UploadLimitCard({ quota, loading, onUpgrade }: UploadLim
       tint={theme.isDark ? 'dark' : 'light'}
       style={[styles.container, { backgroundColor: glassPalette.bg, borderColor: glassPalette.border }]}
     >
-      <View style={[styles.inner, { backgroundColor: glassPalette.inner }]}>{children}</View>
+      <View style={[styles.inner, { backgroundColor: glassPalette.inner, borderColor: glassPalette.border }]}>{children}</View>
     </BlurView>
   );
 
@@ -88,7 +89,7 @@ export default function UploadLimitCard({ quota, loading, onUpgrade }: UploadLim
             {storage.storage_limit_formatted} storage · {storage.approximate_tracks}
           </Text>
           <Text style={[styles.description, { color: theme.colors.textSecondary, marginTop: 4 }]}>
-            {storage.is_unlimited_tier ? 'Unlimited uploads*' : tier === 'free' ? '3 uploads total' : 'Unlimited uploads*'}
+            {storage.is_unlimited_tier ? 'Unlimited uploads*' : 'Uploads limited by storage capacity*'}
           </Text>
           {!storage.is_unlimited_tier && tier === 'premium' && (
             <Text style={[styles.resetText, { color: theme.colors.textSecondary, fontSize: 11 }]}>
@@ -97,13 +98,13 @@ export default function UploadLimitCard({ quota, loading, onUpgrade }: UploadLim
           )}
         </>
       ) : (
-        // Fallback to old upload count display if storage not available
+          // Fallback to storage-based display if storage not available
         <>
           {quota.is_unlimited ? (
-            <Text style={[styles.description, { color: theme.colors.textSecondary }]}>Unlimited uploads available.</Text>
+            <Text style={[styles.description, { color: theme.colors.textSecondary }]}>Unlimited storage available.</Text>
           ) : (
             <Text style={[styles.description, { color: theme.colors.textSecondary }]}>
-              {quota.upload_limit ?? 'N/A'} {tier === 'free' ? 'uploads total' : 'uploads/month'} · {quota.remaining ?? 0} remaining
+              {tier === 'free' ? '250MB storage (~30-40 tracks)' : '2GB storage (~250 tracks)'}
             </Text>
           )}
         </>
@@ -111,14 +112,21 @@ export default function UploadLimitCard({ quota, loading, onUpgrade }: UploadLim
 
       {showUpgrade && (
         <TouchableOpacity
-          style={[styles.upgradeButton, { backgroundColor: theme.colors.primary }]}
+          style={styles.upgradeButton}
           onPress={onUpgrade}
           accessibilityRole="button"
+          activeOpacity={0.9}
         >
-          <Ionicons name="arrow-up-circle" size={18} color="#FFFFFF" style={styles.upgradeIcon} />
-          <Text style={styles.upgradeText}>
-            {tier === 'free' ? 'Upgrade for 2GB (66× more!)' : 'Upgrade for 10GB storage'}
-          </Text>
+          <LinearGradient
+            colors={['#DC2626', '#EC4899']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.upgradeGradient}
+          >
+            <Text style={styles.upgradeText}>
+              {tier === 'free' ? 'Upgrade for 2GB (66× more!)' : 'Upgrade for 10GB storage'}
+            </Text>
+          </LinearGradient>
         </TouchableOpacity>
       )}
 
@@ -149,9 +157,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 20,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 4,
   },
   inner: {
     padding: 18,
+    borderWidth: 1,
+    borderRadius: 20,
   },
   headerRow: {
     flexDirection: 'row',
@@ -173,21 +188,22 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   upgradeButton: {
-    flexDirection: 'row',
+    borderRadius: 25,
+    overflow: 'hidden',
+    marginTop: 12,
+  },
+  upgradeGradient: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
-    paddingVertical: 10,
-    marginTop: 12,
-    gap: 8,
-  },
-  upgradeIcon: {
-    marginRight: 4,
   },
   upgradeText: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 17,
+    fontWeight: '600',
+    lineHeight: 22,
+    textAlign: 'center',
   },
   warning: {
     marginTop: 14,

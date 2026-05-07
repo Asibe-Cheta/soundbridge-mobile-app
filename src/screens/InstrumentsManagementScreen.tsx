@@ -17,6 +17,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { profileService } from '../services/ProfileService';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 const COMMON_INSTRUMENTS = [
   'Piano', 'Guitar', 'Bass', 'Drums', 'Violin', 'Cello', 'Viola', 'Double Bass',
@@ -304,8 +305,9 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   headerTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
   },
   addButton: {
     width: 40,
@@ -319,7 +321,9 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   infoText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     marginBottom: 16,
   },
   centerContainer: {
@@ -329,13 +333,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   emptyText: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtext: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     textAlign: 'center',
   },
   listContent: {
@@ -354,7 +361,9 @@ const styles = StyleSheet.create({
     minWidth: '45%',
   },
   instrumentText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     fontWeight: '500',
     flex: 1,
   },
@@ -378,8 +387,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   modalTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
   },
   modalBody: {
     padding: 16,
@@ -388,7 +398,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   label: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
     fontWeight: '500',
     marginBottom: 8,
   },
@@ -396,7 +408,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 8,
     padding: 12,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   suggestionsContainer: {
     flexDirection: 'row',
@@ -413,7 +427,9 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   suggestionText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
   },
   modalFooter: {
     flexDirection: 'row',
@@ -429,7 +445,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cancelButtonText: {
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
   },
   addButtonModal: {
@@ -440,7 +458,9 @@ const styles = StyleSheet.create({
   },
   addButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
   },
 });

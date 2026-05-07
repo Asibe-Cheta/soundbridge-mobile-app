@@ -20,10 +20,10 @@ export type SubmitRatingPayload = {
 };
 
 class RatingsService {
-  private baseUrl = `${config.apiUrl}/ratings`;
+  private basePath = '/api/ratings';
 
   async getSummary(userId: string): Promise<RatingSummary> {
-    const response = await apiFetch<RatingSummary>(`${this.baseUrl}/${userId}/summary`);
+    const response = await apiFetch<RatingSummary>(`${this.basePath}/${userId}/summary`);
     return {
       average: response.average || 0,
       count: response.count || 0,
@@ -31,10 +31,23 @@ class RatingsService {
   }
 
   async submitRating(session: Session, payload: SubmitRatingPayload) {
-    return apiFetch<{ success: boolean; message?: string }>(`${this.baseUrl}`, {
+    const body: Record<string, unknown> = {
+      rated_user_id: payload.ratedUserId,
+      rating: payload.rating,
+      comment: payload.comment,
+    };
+
+    if (payload.context?.type) {
+      body.context_type = payload.context.type;
+    }
+    if (payload.context?.id) {
+      body.context_id = payload.context.id;
+    }
+
+    return apiFetch<{ success: boolean; message?: string }>(`${this.basePath}`, {
       method: 'POST',
       session,
-      body: payload,
+      body: JSON.stringify(body),
     });
   }
 }

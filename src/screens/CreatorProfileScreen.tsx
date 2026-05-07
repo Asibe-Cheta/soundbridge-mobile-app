@@ -5,6 +5,9 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  TouchableWithoutFeedback,
+  Keyboard,
+  TextInput,
   Image,
   ActivityIndicator,
   Alert,
@@ -42,6 +45,13 @@ import { externalLinksService } from '../services/ExternalLinksService';
 import type { ExternalLink } from '../types/external-links';
 import { SystemTypography as Typography } from '../constants/Typography';
 import { ratingsService, type RatingSummary } from '../services/RatingsService';
+import { profileService } from '../services/ProfileService';
+import BlockUserModal from '../modals/BlockUserModal';
+import ReportContentModal from '../modals/ReportContentModal';
+import { blockService } from '../services/api/blockService';
+import { deepLinkingService } from '../services/DeepLinkingService';
+import QRCodeModal from '../components/QRCodeModal';
+import { useBranding } from '../hooks/useBranding';
 
 interface Creator {
   id: string;
@@ -64,6 +74,7 @@ interface Creator {
   tips_this_month_amount?: number;
   tips_this_month_count?: number;
   is_verified?: boolean;
+  early_adopter?: boolean;
   created_at: string;
   isFollowing?: boolean;
 }
@@ -160,7 +171,9 @@ export default function CreatorProfileScreen() {
   const [externalLinks, setExternalLinks] = useState<ExternalLink[]>([]);
 
   // Tab and posts state
-  const [activeTab, setActiveTab] = useState<'drops' | 'tracks' | 'about'>('drops');
+  const [activeTab, setActiveTab] = useState<'drops' | 'tracks' | 'albums' | 'about'>('drops');
+  const [albums, setAlbums] = useState<{ id: string; title: string; cover_image_url?: string; tracks_count?: number; total_plays?: number; created_at: string }[]>([]);
+  const [loadingAlbums, setLoadingAlbums] = useState(false);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [postsPage, setPostsPage] = useState(1);
@@ -173,6 +186,26 @@ export default function CreatorProfileScreen() {
   const [ratingComment, setRatingComment] = useState('');
   const [submittingRating, setSubmittingRating] = useState(false);
 
+  // Professional profile state
+  const [creatorSkills, setCreatorSkills] = useState<string[]>([]);
+  const [creatorInstruments, setCreatorInstruments] = useState<string[]>([]);
+  const [creatorExperience, setCreatorExperience] = useState<Array<{
+    id: string; user_id: string; title: string; company?: string;
+    description?: string; start_date?: string; end_date?: string; is_current: boolean;
+  }>>([]);
+
+  // Block/Report state
+  const [showBlockModal, setShowBlockModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
+
+  // QR code modal
+  const [showQRModal, setShowQRModal] = useState(false);
+
+  const isOwnProfile = user?.id === creatorId;
+  const { branding } = useBranding(creatorId);
+
   const canRequestCollaboration = useMemo(() => {
     if (bookingStatus) {
       return collaborationUtils.isCreatorAvailable(bookingStatus);
@@ -183,11 +216,13 @@ export default function CreatorProfileScreen() {
   useEffect(() => {
     loadCreatorProfile();
     loadCreatorTracks();
+    loadAlbums();
     checkFollowStatus();
     loadBookingStatus();
     loadCreatorAvailability();
     loadUserPosts(1);
     loadExternalLinks();
+    loadCreatorProfessionalProfile();
   }, [creatorId]);
 
   useEffect(() => {
@@ -242,6 +277,13 @@ export default function CreatorProfileScreen() {
     }
   }, [loading, availability, bookingStatus, creatorId, user]);
 
+  useEffect(() => {
+    if (!user || user.id === creatorId) return;
+    blockService.checkBlockStatus(creatorId).then(status => {
+      setIsBlocked(status.isBlocking);
+    }).catch(() => {});
+  }, [creatorId, user?.id]);
+
   const markTooltipSeen = async (key: string) => {
     try {
       await AsyncStorage.setItem(key, 'true');
@@ -267,7 +309,7 @@ export default function CreatorProfileScreen() {
   };
 
   const loadCreatorProfile = async () => {
-    if (initialCreator) return; // Skip if we already have creator data
+    if (!creatorId) return;
 
     try {
       console.log('🔧 Loading creator profile:', creatorId);
@@ -286,6 +328,7 @@ export default function CreatorProfileScreen() {
           professional_headline,
           subscription_tier,
           is_verified,
+          early_adopter,
           rating_avg,
           rating_count,
           role,
@@ -313,11 +356,12 @@ export default function CreatorProfileScreen() {
           .select('*', { count: 'exact', head: true })
           .eq('follower_id', creatorId),
 
-        // Get tracks count
+        // Get tracks count (public only — matches what's displayed in the Tracks tab)
         supabase
           .from('audio_tracks')
           .select('*', { count: 'exact', head: true })
-          .eq('creator_id', creatorId),
+          .eq('creator_id', creatorId)
+          .eq('is_public', true),
 
         // Get events count
         supabase
@@ -435,7 +479,10 @@ export default function CreatorProfileScreen() {
           file_url,
           cover_art_url,
           genre,
-          created_at
+          created_at,
+          is_paid,
+          price,
+          currency
         `)
         .eq('creator_id', creatorId)
         .eq('is_public', true)
@@ -452,6 +499,24 @@ export default function CreatorProfileScreen() {
     }
   };
 
+  const loadAlbums = async () => {
+    try {
+      setLoadingAlbums(true);
+      const { data, error } = await supabase
+        .from('albums')
+        .select('id, title, cover_image_url, tracks_count, total_plays, created_at')
+        .eq('creator_id', creatorId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      setAlbums(data || []);
+    } catch (error) {
+      console.error('❌ Error loading albums:', error);
+    } finally {
+      setLoadingAlbums(false);
+    }
+  };
+
   const loadExternalLinks = async () => {
     try {
       console.log('🔗 Loading external links for creator:', creatorId);
@@ -460,6 +525,22 @@ export default function CreatorProfileScreen() {
       console.log('✅ External links loaded:', links.length);
     } catch (error) {
       console.error('❌ Error loading external links:', error);
+    }
+  };
+
+  const loadCreatorProfessionalProfile = async () => {
+    if (!session) return;
+    try {
+      const [skillsRes, instrumentsRes, experienceRes] = await Promise.allSettled([
+        profileService.getSkills(session, creatorId),
+        profileService.getInstruments(session, creatorId),
+        profileService.getExperience(session, creatorId),
+      ]);
+      if (skillsRes.status === 'fulfilled') setCreatorSkills(skillsRes.value.skills);
+      if (instrumentsRes.status === 'fulfilled') setCreatorInstruments(instrumentsRes.value.instruments);
+      if (experienceRes.status === 'fulfilled') setCreatorExperience(experienceRes.value.experience);
+    } catch (error) {
+      console.warn('⚠️ Could not load professional profile fields:', error);
     }
   };
 
@@ -661,11 +742,12 @@ export default function CreatorProfileScreen() {
       setRatingComment('');
       Alert.alert('Thanks!', 'Your rating has been submitted.');
     } catch (error: any) {
-      console.error('❌ Failed to submit rating:', error);
       const errorCode = error?.body?.code || error?.body?.error?.code;
       if (error?.status === 403 && errorCode === 'NOT_ELIGIBLE') {
+        console.warn('ℹ️ Rating blocked: NOT_ELIGIBLE');
         Alert.alert('Not Eligible Yet', 'Ratings unlock after a completed paid interaction.');
       } else {
+        console.error('❌ Failed to submit rating:', error);
         Alert.alert('Rating Failed', error?.message || 'Please try again.');
       }
     } finally {
@@ -699,7 +781,11 @@ export default function CreatorProfileScreen() {
       if (page === 1) {
         setPosts(newPosts);
       } else {
-        setPosts(prev => [...prev, ...newPosts]);
+        setPosts(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          const unique = newPosts.filter(p => !existingIds.has(p.id));
+          return [...prev, ...unique];
+        });
       }
 
       setHasMorePosts(hasMore);
@@ -727,6 +813,7 @@ export default function CreatorProfileScreen() {
     await Promise.all([
       loadCreatorProfile(),
       loadCreatorTracks(),
+      loadAlbums(),
       checkFollowStatus(),
       loadBookingStatus(),
       loadCreatorAvailability(),
@@ -875,10 +962,33 @@ export default function CreatorProfileScreen() {
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
         <BackButton style={styles.headerButton} onPress={() => navigation.goBack()} />
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>{creator.display_name}</Text>
-        <TouchableOpacity style={styles.headerButton}>
-          <Ionicons name="share-outline" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
+        <View style={styles.headerTitleRow}>
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>{creator.display_name}</Text>
+          {creator.is_verified && <VerifiedBadge size={14} />}
+        </View>
+        {isOwnProfile ? (
+          <View style={styles.headerActionsRow}>
+            <TouchableOpacity style={styles.headerButton} onPress={() => setShowQRModal(true)}>
+              <Ionicons name="qr-code-outline" size={22} color={theme.colors.text} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerButton} onPress={() => {
+              if (creator.username) deepLinkingService.shareProfile(creatorId, creator.display_name || creator.username);
+            }}>
+              <Ionicons name="share-outline" size={22} color={theme.colors.text} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.headerActionsRow}>
+            <TouchableOpacity style={styles.headerButton} onPress={() => {
+              if (creator.username) deepLinkingService.shareProfile(creatorId, creator.display_name || creator.username);
+            }}>
+              <Ionicons name="share-outline" size={24} color={theme.colors.text} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerButton} onPress={() => setShowProfileMenu(true)}>
+              <Ionicons name="ellipsis-vertical" size={24} color={theme.colors.text} />
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
       
       <ScrollView 
@@ -888,71 +998,214 @@ export default function CreatorProfileScreen() {
       >
         {/* Profile Header */}
         <View style={styles.profileSection}>
-          {creator.banner_url && (
-            <Image source={{ uri: creator.banner_url }} style={styles.bannerImage} />
-          )}
-          
-        <View style={styles.profileInfo}>
-            <TouchableOpacity 
+          {/* Banner — edge to edge, tinted with creator's branding primary color */}
+          <View style={styles.bannerContainer}>
+            {creator.banner_url ? (
+              <>
+                <Image source={{ uri: creator.banner_url }} style={styles.bannerImage} />
+                {/* Subtle branding tint — only when creator has explicitly set colors */}
+                {branding.primary_color ? (
+                  <LinearGradient
+                    colors={[
+                      branding.primary_color + '44',
+                      'transparent',
+                      (branding.accent_color || branding.primary_color) + '22',
+                    ]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                ) : null}
+              </>
+            ) : branding.primary_color ? (
+              <LinearGradient
+                colors={[
+                  branding.primary_color,
+                  (branding.accent_color || branding.primary_color) + 'CC',
+                  (branding.secondary_color || '#1F2937') + '99',
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.bannerPlaceholder}
+              />
+            ) : (
+              <LinearGradient
+                colors={['#1e0a4e', '#7C3AED', '#2d1b69']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.bannerPlaceholder}
+              />
+            )}
+            {/* Custom logo — glassmorphic pill container */}
+            {branding.custom_logo_url ? (
+              <View
+                style={[
+                  styles.brandingLogoContainer,
+                  branding.custom_logo_position === 'top-right' && { right: 12, left: undefined },
+                  branding.custom_logo_position === 'bottom-left' && { bottom: 12, top: undefined },
+                  branding.custom_logo_position === 'bottom-right' && { bottom: 12, right: 12, top: undefined, left: undefined },
+                ]}
+              >
+                <Image
+                  source={{ uri: branding.custom_logo_url }}
+                  style={styles.brandingLogoImage}
+                  resizeMode="contain"
+                />
+              </View>
+            ) : null}
+            {/* "Powered by SoundBridge" watermark badge */}
+            {branding.show_powered_by === true && (
+              <View style={styles.poweredByBadge}>
+                <Text style={styles.poweredByBadgeText}>♪ SoundBridge</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Avatar — centered, overlaps banner */}
+          <View style={styles.avatarWrapper}>
+            <TouchableOpacity
               onPress={() => creator.avatar_url && setShowFullScreenAvatar(true)}
               activeOpacity={creator.avatar_url ? 0.8 : 1}
             >
-              {creator.avatar_url ? (
-                <Image source={{ uri: creator.avatar_url }} style={styles.avatar} />
+              {creator.is_verified ? (
+                <LinearGradient
+                  colors={['#9333EA', '#F59E0B']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.avatarGradientRing}
+                >
+                  {creator.avatar_url ? (
+                    <Image source={{ uri: creator.avatar_url }} style={styles.avatarInner} />
+                  ) : (
+                    <View style={[styles.defaultAvatarInner, { backgroundColor: theme.colors.surface }]}>
+                      <Ionicons name="person" size={44} color={theme.colors.textSecondary} />
+                    </View>
+                  )}
+                </LinearGradient>
+              ) : (branding.avatar_border_type ?? 'single') === 'gradient' ? (
+                <LinearGradient
+                  colors={[
+                    branding.avatar_border_gradient_start || '#7C3AED',
+                    branding.avatar_border_gradient_end || '#EC4899',
+                  ]}
+                  style={styles.avatarGradientRing}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  {creator.avatar_url ? (
+                    <Image source={{ uri: creator.avatar_url }} style={styles.avatarInner} />
+                  ) : (
+                    <View style={[styles.defaultAvatarInner, { backgroundColor: theme.colors.surface }]}>
+                      <Ionicons name="person" size={44} color={theme.colors.textSecondary} />
+                    </View>
+                  )}
+                </LinearGradient>
+              ) : creator.avatar_url ? (
+                <Image source={{ uri: creator.avatar_url }} style={[styles.avatar, {
+                  borderColor: (branding.avatar_border_type ?? 'single') === 'none'
+                    ? 'transparent'
+                    : (branding.avatar_border_color || theme.colors.background),
+                }]} />
               ) : (
-                <View style={[styles.defaultAvatar, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-                  <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
+                <View style={[styles.defaultAvatar, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: (branding.avatar_border_type ?? 'single') === 'none'
+                    ? 'transparent'
+                    : (branding.avatar_border_color || theme.colors.background),
+                }]}>
+                  <Ionicons name="person" size={44} color={theme.colors.textSecondary} />
                 </View>
               )}
             </TouchableOpacity>
+          </View>
 
-            <View style={styles.nameSection}>
-              <View style={styles.nameRow}>
-                <Text style={[styles.displayName, { color: theme.colors.text }]}>{creator.display_name}</Text>
+          {/* Name, headline, username — centered */}
+          <View style={styles.nameSection}>
+            <View style={styles.nameRow}>
+              <Text style={[styles.displayName, { color: theme.colors.text }]}>{creator.display_name}</Text>
+              {creator.is_verified && <VerifiedBadge size={16} />}
+              {creator.early_adopter && (
+                <View style={[styles.earlyAdopterBadge]}>
+                  <Ionicons name="rocket" size={10} color="#FFFFFF" />
+                  <Text style={styles.earlyAdopterText}>Early</Text>
+                </View>
+              )}
+              {creator.subscription_tier === 'premium' && (
+                <View style={styles.proBadge}>
+                  <Ionicons name="diamond" size={12} color="#FFFFFF" />
+                </View>
+              )}
+              {creator.subscription_tier === 'unlimited' && (
+                <View style={styles.proPlusBadge}>
+                  <Ionicons name="diamond" size={12} color="#FFFFFF" />
+                  <Text style={styles.proPlusText}>+</Text>
+                </View>
+              )}
+            </View>
+            {creator.professional_headline && (
+              <Text style={[styles.professionalHeadline, { color: theme.colors.textSecondary }]}>
+                {creator.professional_headline}
+              </Text>
+            )}
+            <Text style={[styles.username, { color: theme.colors.textSecondary }]}>@{creator.username}</Text>
 
-                {creator.is_verified && <VerifiedBadge size={16} />}
-
-                {/* Pro Badge (Premium tier) */}
-                {creator.subscription_tier === 'premium' && (
-                  <View style={styles.proBadge}>
-                    <Ionicons name="diamond" size={12} color="#FFFFFF" />
+            {/* Location + Genre inline */}
+            {(creator.location || creator.genre) && (
+              <View style={styles.metaRow}>
+                {creator.location && (
+                  <View style={styles.metaItem}>
+                    <Ionicons name="location-outline" size={13} color={theme.colors.textSecondary} />
+                    <Text style={[styles.metaText, { color: theme.colors.textSecondary }]}>{creator.location}</Text>
                   </View>
                 )}
-
-                {/* Pro+ Badge (Unlimited tier) */}
-                {creator.subscription_tier === 'unlimited' && (
-                  <View style={styles.proPlusBadge}>
-                    <Ionicons name="diamond" size={12} color="#FFFFFF" />
-                    <Text style={styles.proPlusText}>+</Text>
+                {creator.genre && (
+                  <View style={[styles.genreTag, { backgroundColor: theme.colors.primary + '20' }]}>
+                    <Text style={[styles.genreText, { color: theme.colors.primary }]}>{creator.genre}</Text>
                   </View>
                 )}
               </View>
-
-              {creator.professional_headline && (
-                <Text style={[styles.professionalHeadline, { color: theme.colors.textSecondary }]}>
-                  {creator.professional_headline}
-                </Text>
-              )}
-
-              <Text style={[styles.username, { color: theme.colors.textSecondary }]}>@{creator.username}</Text>
+            )}
           </View>
-        </View>
 
+
+          {/* Stats row with dividers */}
+          <View style={[styles.statsRow, { borderTopColor: theme.colors.border, borderBottomColor: theme.colors.border }]}>
+            <TouchableOpacity style={styles.statItem} onPress={() => navigation.navigate('FollowersList' as never, { userId: creatorId } as never)}>
+              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(creator.followers_count || 0)}</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Followers</Text>
+            </TouchableOpacity>
+            <View style={[styles.statDivider, { backgroundColor: theme.colors.border }]} />
+            <TouchableOpacity style={styles.statItem} onPress={() => navigation.navigate('FollowingList' as never, { userId: creatorId } as never)}>
+              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber((creator as any).following_count || 0)}</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Following</Text>
+            </TouchableOpacity>
+            <View style={[styles.statDivider, { backgroundColor: theme.colors.border }]} />
+            <View style={styles.statItem}>
+              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(creator.tracks_count || 0)}</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Tracks</Text>
+            </View>
+            <View style={[styles.statDivider, { backgroundColor: theme.colors.border }]} />
+            <View style={styles.statItem}>
+              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(creator.events_count || 0)}</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Events</Text>
+            </View>
+            {ratingSummary?.count ? (
+              <>
+                <View style={[styles.statDivider, { backgroundColor: theme.colors.border }]} />
+                <View style={styles.statItem}>
+                  <View style={styles.ratingStatInner}>
+                    <Ionicons name="star" size={13} color={theme.colors.primary} />
+                    <Text style={[styles.statNumber, { color: theme.colors.text }]}>{ratingSummary.average.toFixed(1)}</Text>
+                  </View>
+                  <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>{ratingSummary.count} reviews</Text>
+                </View>
+              </>
+            ) : null}
+          </View>
+
+          {/* Bio */}
           {creator.bio && (
             <Text style={[styles.bio, { color: theme.colors.text }]}>{creator.bio}</Text>
-          )}
-
-          {creator.location && (
-            <View style={styles.locationRow}>
-              <Ionicons name="location-outline" size={16} color={theme.colors.textSecondary} />
-              <Text style={[styles.location, { color: theme.colors.textSecondary }]}>{creator.location}</Text>
-          </View>
-          )}
-
-          {creator.genre && (
-            <View style={[styles.genreTag, { backgroundColor: theme.colors.primary + '20' }]}>
-              <Text style={[styles.genreText, { color: theme.colors.primary }]}>{creator.genre}</Text>
-          </View>
           )}
 
           {/* External Links */}
@@ -965,49 +1218,67 @@ export default function CreatorProfileScreen() {
             </View>
           )}
 
-          {/* Collaboration Status */}
-          {bookingStatus && (
-            <TouchableOpacity
-              style={[
-                styles.collaborationStatus,
-                {
-                  backgroundColor: theme.colors.surface,
-                  borderColor: theme.colors.border,
-                  opacity: canRequestCollaboration ? 1 : 0.75,
-                },
-              ]}
-              onPress={() => canRequestCollaboration && handleCollaborationRequest()}
-              activeOpacity={canRequestCollaboration ? 0.8 : 1}
-            >
-              <View style={styles.statusHeader}>
-                <Ionicons
-                  name="calendar"
-                  size={16}
-                  color={collaborationUtils.getBookingStatusColor(bookingStatus)}
-                />
-                <Text
-                  style={[
-                    styles.statusText,
-                    { color: collaborationUtils.getBookingStatusColor(bookingStatus) },
-                  ]}
+          {/* Action Buttons */}
+          {user?.id !== creatorId && (
+            <View style={styles.actionButtons}>
+              {/* Row 1: Follow + Message */}
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={[styles.followButton, { backgroundColor: isFollowing ? theme.colors.surface : theme.colors.primary, borderColor: theme.colors.primary }]}
+                  onPress={handleFollow}
                 >
-                  {collaborationUtils.getBookingStatusText(bookingStatus)}
-                </Text>
+                  <Text style={[styles.followButtonText, { color: isFollowing ? theme.colors.primary : '#FFFFFF' }]}>
+                    {isFollowing ? 'Following' : 'Follow'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.iconActionBtn, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                  onPress={() => {
+                    if (!user?.id) { Alert.alert('Login Required', 'Please log in to send messages'); return; }
+                    const sortedIds = [user.id, creatorId].sort();
+                    navigation.navigate('Chat' as never, {
+                      conversationId: `${sortedIds[0]}_${sortedIds[1]}`,
+                      otherUser: { id: creatorId, username: creator?.username || 'user', display_name: creator?.display_name || 'User', avatar_url: creator?.avatar_url || null, role: creator?.role || 'creator' },
+                    } as never);
+                  }}
+                >
+                  <Ionicons name="chatbubble-outline" size={18} color={theme.colors.text} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.iconActionBtn, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                  onPress={() => setShowRatingModal(true)}
+                >
+                  <Ionicons name="star-outline" size={18} color={theme.colors.text} />
+                </TouchableOpacity>
+                {creator?.role === 'creator' && (
+                  <TouchableOpacity
+                    style={[styles.iconActionBtn, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                    onPress={() => setShowTipModal(true)}
+                  >
+                    <Ionicons name="heart-outline" size={18} color={theme.colors.text} />
+                  </TouchableOpacity>
+                )}
               </View>
-              {bookingStatus.next_available_slot && (
-                <Text style={[styles.nextSlotText, { color: theme.colors.textSecondary }]}>
-                  Next available: {collaborationUtils.formatDate(bookingStatus.next_available_slot)}
-                </Text>
-              )}
-              <Text
+
+              {/* Collaborate button — full width, only if available */}
+              <TouchableOpacity
                 style={[
-                  styles.statusActionText,
-                  { color: canRequestCollaboration ? theme.colors.primary : theme.colors.textSecondary },
+                  styles.collabFullBtn,
+                  {
+                    backgroundColor: canRequestCollaboration ? theme.colors.primary + '18' : theme.colors.surface,
+                    borderColor: canRequestCollaboration ? theme.colors.primary : theme.colors.border,
+                    opacity: canRequestCollaboration ? 1 : 0.5,
+                  }
                 ]}
+                onPress={() => handleCollaborationRequest()}
+                disabled={!canRequestCollaboration}
               >
-                {canRequestCollaboration ? 'Tap to request collaboration' : 'Not accepting collaboration requests'}
-              </Text>
-            </TouchableOpacity>
+                <Ionicons name="people-outline" size={16} color={canRequestCollaboration ? theme.colors.primary : theme.colors.textSecondary} />
+                <Text style={[styles.collabFullBtnText, { color: canRequestCollaboration ? theme.colors.primary : theme.colors.textSecondary }]}>
+                  {canRequestCollaboration ? 'Request Collaboration' : 'Not accepting collaborations'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           )}
 
           {/* Available Time Slots */}
@@ -1035,175 +1306,8 @@ export default function CreatorProfileScreen() {
                   </TouchableOpacity>
                 ))}
               </ScrollView>
-        </View>
+            </View>
           )}
-
-        {/* Action Buttons */}
-        <View style={styles.actionButtons}>
-          {/* Follow Button - Only show if NOT viewing own profile */}
-          {user?.id !== creatorId && (
-            <TouchableOpacity
-                style={[
-                  styles.followButton,
-                  {
-                    backgroundColor: isFollowing ? theme.colors.surface : theme.colors.primary,
-                    borderColor: theme.colors.primary,
-                  }
-                ]}
-              onPress={handleFollow}
-              >
-                <Text
-                  style={[
-                    styles.followButtonText,
-                    { color: isFollowing ? theme.colors.primary : '#FFFFFF' }
-                  ]}
-                >
-                  {isFollowing ? 'Following' : 'Follow'}
-                </Text>
-              </TouchableOpacity>
-          )}
-
-            {/* Message Button - Show for all users except own profile */}
-            {user?.id !== creatorId && (
-              <TouchableOpacity
-                style={[
-                  styles.messageButton,
-                  {
-                    backgroundColor: theme.colors.surface,
-                    borderColor: theme.colors.primary,
-                  }
-                ]}
-                onPress={() => {
-                  if (!user?.id) {
-                    Alert.alert('Login Required', 'Please log in to send messages');
-                    return;
-                  }
-                  // ChatScreen expects conversationId in format "userId1_userId2" (sorted alphabetically)
-                  // and otherUser object with user details
-                  const sortedIds = [user.id, creatorId].sort();
-                  const conversationId = `${sortedIds[0]}_${sortedIds[1]}`;
-
-                  navigation.navigate('Chat' as never, {
-                    conversationId,
-                    otherUser: {
-                      id: creatorId,
-                      username: creator?.username || 'user',
-                      display_name: creator?.display_name || creator?.username || 'User',
-                      avatar_url: creator?.avatar_url || null,
-                      role: creator?.role || 'creator',
-                    },
-                  } as never);
-                }}
-              >
-                <Ionicons name="chatbubble-outline" size={16} color={theme.colors.primary} />
-                <Text
-                  style={[
-                    styles.messageButtonText,
-                    { color: theme.colors.primary }
-                  ]}
-                >
-                  Message
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Rate Button */}
-            {user?.id !== creatorId && (
-              <TouchableOpacity
-                style={[
-                  styles.rateButton,
-                  {
-                    backgroundColor: theme.colors.surface,
-                    borderColor: theme.colors.primary,
-                  }
-                ]}
-                onPress={() => setShowRatingModal(true)}
-              >
-                <Ionicons name="star-outline" size={16} color={theme.colors.primary} />
-                <Text style={[styles.rateButtonText, { color: theme.colors.primary }]}>Rate</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Collaboration Button */}
-            {user?.id !== creatorId && (
-              <TouchableOpacity
-                style={[
-                  styles.collabButton,
-                  {
-                    backgroundColor: canRequestCollaboration ? theme.colors.primary : theme.colors.surface,
-                    borderColor: theme.colors.primary,
-                    opacity: canRequestCollaboration ? 1 : 0.6,
-                  }
-                ]}
-                onPress={() => handleCollaborationRequest()}
-                disabled={!canRequestCollaboration}
-          >
-            <Ionicons
-                  name="people"
-                  size={16}
-                  color={canRequestCollaboration ? '#FFFFFF' : theme.colors.primary}
-                />
-                <Text
-                  style={[
-                    styles.collabButtonText,
-                    { color: canRequestCollaboration ? '#FFFFFF' : theme.colors.primary }
-                  ]}
-                >
-                  Collaborate
-            </Text>
-          </TouchableOpacity>
-            )}
-
-            {/* Tip Button - Only show on creator profiles (role === 'creator'), not your own profile */}
-            {user?.id !== creatorId && creator?.role === 'creator' && (
-              <TouchableOpacity
-                style={[
-                  styles.tipButton,
-                  {
-                    backgroundColor: theme.colors.surface,
-                    borderColor: theme.colors.primary,
-                  }
-                ]}
-                onPress={() => setShowTipModal(true)}
-              >
-                <Ionicons name="heart" size={16} color={theme.colors.primary} />
-                <Text
-                  style={[
-                    styles.tipButtonText,
-                    { color: theme.colors.primary }
-                  ]}
-                >
-                  Tip
-                </Text>
-              </TouchableOpacity>
-            )}
-        </View>
-
-          {/* Stats */}
-          <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(creator.followers_count || 0)}</Text>
-              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Followers</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(creator.tracks_count || 0)}</Text>
-              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Tracks</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(creator.events_count || 0)}</Text>
-              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Events</Text>
-            </View>
-          </View>
-
-        <View style={styles.ratingRow}>
-          <Ionicons name="star" size={16} color={theme.colors.primary} />
-          <Text style={[styles.ratingText, { color: theme.colors.text }]}>
-            {ratingSummary?.average ? ratingSummary.average.toFixed(1) : 'No ratings yet'}
-          </Text>
-          <Text style={[styles.ratingCount, { color: theme.colors.textSecondary }]}>
-            {ratingSummary?.count || 0}
-          </Text>
-        </View>
         </View>
 
         {/* Tabs */}
@@ -1243,6 +1347,22 @@ export default function CreatorProfileScreen() {
           <TouchableOpacity
             style={[
               styles.tab,
+              activeTab === 'albums' && styles.activeTab,
+              activeTab === 'albums' && { borderBottomColor: theme.colors.primary }
+            ]}
+            onPress={() => setActiveTab('albums')}
+          >
+            <Text style={[
+              styles.tabText,
+              { color: activeTab === 'albums' ? theme.colors.primary : theme.colors.textSecondary }
+            ]}>
+              Albums
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.tab,
               activeTab === 'about' && styles.activeTab,
               activeTab === 'about' && { borderBottomColor: theme.colors.primary }
             ]}
@@ -1275,7 +1395,7 @@ export default function CreatorProfileScreen() {
                     onPress={() => {}}
                     onReactionPress={() => {}}
                     onCommentPress={() => {}}
-                    onShare={() => {}}
+                    onShare={(post) => deepLinkingService.sharePost(post.id, post.content?.substring(0, 100))}
                     onTip={handleTipFromPost}
                   />
                 )}
@@ -1337,10 +1457,18 @@ export default function CreatorProfileScreen() {
               </View>
 
               <View style={styles.trackActions}>
+                {track.is_paid && track.price ? (
+                  <View style={[styles.priceBadge, { backgroundColor: theme.colors.primary + '20', borderColor: theme.colors.primary + '40' }]}>
+                    <Text style={[styles.priceBadgeText, { color: theme.colors.primary }]}>
+                      {track.currency === 'GBP' ? '£' : track.currency === 'EUR' ? '€' : '$'}{Number(track.price).toFixed(2)}
+                    </Text>
+                  </View>
+                ) : (
                   <Text style={[styles.trackDuration, { color: theme.colors.textSecondary }]}>
                     {formatDuration(track.duration)}
                   </Text>
-                <TouchableOpacity 
+                )}
+                <TouchableOpacity
                     style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]}
                     onPress={() => handleTrackPress(track)}
                   >
@@ -1356,6 +1484,53 @@ export default function CreatorProfileScreen() {
             </View>
           )}
         </View>
+        )}
+
+        {/* Albums Tab */}
+        {activeTab === 'albums' && (
+          <View style={styles.tabContent}>
+            {loadingAlbums ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={theme.colors.primary} />
+                <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading albums...</Text>
+              </View>
+            ) : albums.length > 0 ? (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', padding: 12, gap: 12 }}>
+                {albums.map((album) => (
+                  <TouchableOpacity
+                    key={album.id}
+                    style={{ width: '46%', borderRadius: 12, overflow: 'hidden', backgroundColor: theme.colors.surface }}
+                    onPress={() => (navigation as any).navigate('AlbumDetails', { albumId: album.id })}
+                  >
+                    <View style={{ width: '100%', aspectRatio: 1, backgroundColor: theme.colors.card }}>
+                      {album.cover_image_url ? (
+                        <Image source={{ uri: album.cover_image_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                      ) : (
+                        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                          <Ionicons name="disc-outline" size={40} color={theme.colors.textSecondary} />
+                        </View>
+                      )}
+                    </View>
+                    <View style={{ padding: 8 }}>
+                      <Text style={[{ fontWeight: '600', fontSize: 13 }, { color: theme.colors.text }]} numberOfLines={1}>
+                        {album.title}
+                      </Text>
+                      <Text style={[{ fontSize: 11, marginTop: 2 }, { color: theme.colors.textSecondary }]}>
+                        {album.tracks_count ?? 0} tracks
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <Ionicons name="disc-outline" size={64} color={theme.colors.textSecondary} />
+                <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
+                  No albums yet
+                </Text>
+              </View>
+            )}
+          </View>
         )}
 
         {/* About Tab */}
@@ -1389,14 +1564,73 @@ export default function CreatorProfileScreen() {
                 </Text>
               </View>
             </View>
+
+            {creatorInstruments.length > 0 && (
+              <View style={[styles.aboutCard, { backgroundColor: theme.colors.surface }]}>
+                <View style={styles.aboutRow}>
+                  <Ionicons name="musical-notes-outline" size={18} color={theme.colors.primary} />
+                  <Text style={[styles.aboutTitle, { color: theme.colors.text, marginBottom: 0, marginLeft: 6 }]}>Instruments</Text>
+                </View>
+                <View style={styles.chipRow}>
+                  {creatorInstruments.map((inst) => (
+                    <View key={inst} style={[styles.chip, { backgroundColor: theme.colors.primary + '20', borderColor: theme.colors.primary + '50' }]}>
+                      <Text style={[styles.chipText, { color: theme.colors.primary }]}>{inst}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {creatorSkills.length > 0 && (
+              <View style={[styles.aboutCard, { backgroundColor: theme.colors.surface }]}>
+                <View style={styles.aboutRow}>
+                  <Ionicons name="star-outline" size={18} color={theme.colors.primary} />
+                  <Text style={[styles.aboutTitle, { color: theme.colors.text, marginBottom: 0, marginLeft: 6 }]}>Skills</Text>
+                </View>
+                <View style={styles.chipRow}>
+                  {creatorSkills.map((skill) => (
+                    <View key={skill} style={[styles.chip, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                      <Text style={[styles.chipText, { color: theme.colors.text }]}>{skill}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {creatorExperience.length > 0 && (
+              <View style={[styles.aboutCard, { backgroundColor: theme.colors.surface }]}>
+                <View style={[styles.aboutRow, { marginBottom: 12 }]}>
+                  <Ionicons name="briefcase-outline" size={18} color={theme.colors.primary} />
+                  <Text style={[styles.aboutTitle, { color: theme.colors.text, marginBottom: 0, marginLeft: 6 }]}>Experience</Text>
+                </View>
+                {creatorExperience.map((exp, index) => (
+                  <View key={exp.id} style={[styles.experienceItem, index < creatorExperience.length - 1 && styles.experienceItemBorder, { borderColor: theme.colors.border }]}>
+                    <Text style={[styles.experienceTitle, { color: theme.colors.text }]}>{exp.title}</Text>
+                    {exp.company && (
+                      <Text style={[styles.experienceCompany, { color: theme.colors.primary }]}>{exp.company}</Text>
+                    )}
+                    {(exp.start_date || exp.is_current) && (
+                      <Text style={[styles.experienceDates, { color: theme.colors.textSecondary }]}>
+                        {exp.start_date ? new Date(exp.start_date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : ''}
+                        {exp.is_current ? ' · Present' : exp.end_date ? ` · ${new Date(exp.end_date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}` : ''}
+                      </Text>
+                    )}
+                    {exp.description && (
+                      <Text style={[styles.experienceDesc, { color: theme.colors.textSecondary }]}>{exp.description}</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         )}
       </ScrollView>
 
       {/* Rating Modal */}
       <Modal visible={showRatingModal} animationType="fade" transparent>
-        <View style={styles.ratingOverlay}>
-          <View style={[styles.ratingModal, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.ratingOverlay}>
+            <View style={[styles.ratingModal, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
             <Text style={[styles.ratingTitle, { color: theme.colors.text }]}>Rate this creator</Text>
             <Text style={[styles.ratingSubtitle, { color: theme.colors.textSecondary }]}>
               Share your experience to help others
@@ -1446,8 +1680,9 @@ export default function CreatorProfileScreen() {
                 )}
               </TouchableOpacity>
             </View>
+            </View>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
       {/* Tip Modal */}
@@ -1658,12 +1893,100 @@ export default function CreatorProfileScreen() {
             </View>
             
             <View style={styles.fullScreenAvatarFooter}>
-              <Text style={styles.fullScreenAvatarName}>{creator?.display_name}</Text>
+              <View style={styles.fullScreenNameRow}>
+                <Text style={styles.fullScreenAvatarName}>{creator?.display_name}</Text>
+                {creator?.is_verified && <VerifiedBadge size={16} />}
+                {creator?.early_adopter && (
+                  <View style={styles.earlyAdopterBadge}>
+                    <Ionicons name="rocket" size={10} color="#FFFFFF" />
+                    <Text style={styles.earlyAdopterText}>Early</Text>
+                  </View>
+                )}
+              </View>
               <Text style={styles.fullScreenAvatarUsername}>@{creator?.username}</Text>
             </View>
           </TouchableOpacity>
         </View>
       </Modal>
+
+      {/* Profile Actions Sheet */}
+      <Modal
+        visible={showProfileMenu}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowProfileMenu(false)}
+      >
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={() => setShowProfileMenu(false)}
+        />
+        <View style={[styles.menuSheet, { backgroundColor: theme.colors.surface }]}>
+          <View style={[styles.menuHandle, { backgroundColor: theme.colors.border }]} />
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => { setShowProfileMenu(false); setShowBlockModal(true); }}
+          >
+            <Ionicons name="ban-outline" size={22} color="#EF4444" />
+            <Text style={[styles.menuItemText, { color: '#EF4444' }]}>
+              {isBlocked ? `Unblock ${creator?.display_name}` : `Block ${creator?.display_name}`}
+            </Text>
+          </TouchableOpacity>
+          <View style={[styles.menuDivider, { backgroundColor: theme.colors.border }]} />
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => { setShowProfileMenu(false); setShowReportModal(true); }}
+          >
+            <Ionicons name="flag-outline" size={22} color={theme.colors.text} />
+            <Text style={[styles.menuItemText, { color: theme.colors.text }]}>
+              Report {creator?.display_name}
+            </Text>
+          </TouchableOpacity>
+          <View style={[styles.menuDivider, { backgroundColor: theme.colors.border }]} />
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => setShowProfileMenu(false)}
+          >
+            <Text style={[styles.menuItemText, { color: theme.colors.textSecondary }]}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* Block User Modal */}
+      {creator && (
+        <BlockUserModal
+          visible={showBlockModal}
+          onClose={() => setShowBlockModal(false)}
+          userId={creatorId}
+          userName={creator.display_name}
+          userAvatar={creator.avatar_url}
+          isCurrentlyBlocked={isBlocked}
+          onBlocked={() => { setIsBlocked(true); setShowBlockModal(false); }}
+          onUnblocked={() => { setIsBlocked(false); setShowBlockModal(false); }}
+        />
+      )}
+
+      {/* Report Profile Modal */}
+      {creator && (
+        <ReportContentModal
+          visible={showReportModal}
+          contentType="profile"
+          contentId={creatorId}
+          contentTitle={creator.display_name}
+          onReported={() => setShowReportModal(false)}
+        />
+      )}
+
+      {/* QR Code Modal — own profile only */}
+      {creator && isOwnProfile && (
+        <QRCodeModal
+          visible={showQRModal}
+          onClose={() => setShowQRModal(false)}
+          creatorUsername={creator.username}
+          creatorName={creator.display_name}
+          avatarUrl={creator.avatar_url}
+        />
+      )}
 
       {/* Service Provider Prompt Modal */}
       <ServiceProviderPromptModal
@@ -1727,49 +2050,159 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
   },
+  headerTitleRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
   headerButton: {
     padding: 8,
   },
+  headerActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  menuSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 32,
+    paddingTop: 12,
+  },
+  menuHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 8,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    gap: 14,
+  },
+  menuItemText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  menuDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 24,
+  },
   headerTitle: {
-    ...Typography.headerMedium,
+    fontFamily: Typography.headerMedium.fontFamily,
     fontSize: 18,
     lineHeight: 24,
+    fontWeight: '600',
+    letterSpacing: -0.4,
   },
   scrollView: {
     flex: 1,
     backgroundColor: 'transparent',
   },
   profileSection: {
-    padding: 16,
+    paddingBottom: 8,
+  },
+  bannerContainer: {
+    width: '100%',
+    height: 150,
+    overflow: 'hidden',
   },
   bannerImage: {
     width: '100%',
-    height: 120,
-    borderRadius: 12,
-    marginBottom: 16,
+    height: 150,
   },
-  profileInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
+  bannerPlaceholder: {
+    width: '100%',
+    height: 150,
+  },
+  brandingLogoContainer: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  brandingLogoImage: {
+    width: 88,
+    height: 32,
+  },
+  poweredByBadge: {
+    position: 'absolute',
+    bottom: 8,
+    right: 10,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderRadius: 6,
+    paddingVertical: 3,
+    paddingHorizontal: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  poweredByBadgeText: {
+    color: 'rgba(255,255,255,0.65)',
+    fontSize: 9.5,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  avatarWrapper: {
+    alignSelf: 'center',
+    marginTop: -50,
+    marginBottom: 12,
   },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    marginRight: 16,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
   },
-  defaultAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    marginRight: 16,
+  avatarGradientRing: {
+    width: 106,
+    height: 106,
+    borderRadius: 53,
+    padding: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInner: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+  },
+  defaultAvatarInner: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
+  },
+  defaultAvatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
   },
   nameSection: {
-    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 16,
   },
   nameRow: {
     flexDirection: 'row',
@@ -1778,9 +2211,47 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   displayName: {
-    ...Typography.headerMedium,
-    fontSize: 20,
-    lineHeight: 26,
+    fontFamily: Typography.headerMedium.fontFamily,
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: '600',
+    letterSpacing: -0.4,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  metaText: {
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+  },
+  earlyAdopterBadge: {
+    backgroundColor: '#7C3AED',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 3,
+    marginLeft: 4,
+  },
+  earlyAdopterText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '700' as const,
+    letterSpacing: 0.3,
   },
   proBadge: {
     backgroundColor: '#DC2626',
@@ -1809,35 +2280,70 @@ const styles = StyleSheet.create({
     marginTop: -1,
   },
   professionalHeadline: {
-    ...Typography.body,
-    fontSize: 15,
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 14,
     lineHeight: 20,
-    marginBottom: 4,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    marginBottom: 2,
+    textAlign: 'center',
   },
   username: {
-    ...Typography.label,
-    fontSize: 14,
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 13,
     lineHeight: 18,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    textAlign: 'center',
   },
   actionButtons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+    paddingHorizontal: 16,
     marginVertical: 16,
+    gap: 10,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
   },
   followButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 24,
     borderWidth: 1,
     alignItems: 'center',
-    minWidth: 80,
+    justifyContent: 'center',
   },
   followButtonText: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '600',
+    letterSpacing: -0.4,
+  },
+  iconActionBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  collabFullBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 24,
+    borderWidth: 1,
+    gap: 8,
+  },
+  collabFullBtnText: {
+    fontFamily: Typography.body.fontFamily,
     fontSize: 14,
     lineHeight: 18,
-    fontWeight: '600',
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   tipButton: {
     flexDirection: 'row',
@@ -1891,10 +2397,11 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   availabilityTitle: {
-    ...Typography.body,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 16,
     lineHeight: 22,
-    fontWeight: '600',
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginBottom: 12,
   },
   availabilityScroll: {
@@ -1909,22 +2416,27 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   slotDate: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 14,
     lineHeight: 18,
-    fontWeight: '600',
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginBottom: 4,
   },
   slotTime: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 12,
     lineHeight: 16,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginBottom: 6,
   },
   slotNotes: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 11,
     lineHeight: 14,
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   messageButton: {
     flexDirection: 'row',
@@ -1978,10 +2490,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   bio: {
-    ...Typography.body,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 14,
     lineHeight: 20,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginBottom: 12,
+    paddingHorizontal: 16,
+    textAlign: 'center',
   },
   locationRow: {
     flexDirection: 'row',
@@ -2002,58 +2518,60 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   genreText: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 12,
     lineHeight: 16,
-    fontWeight: '600',
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   portfolioSection: {
     marginBottom: 16,
   },
   portfolioLabel: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 13,
     lineHeight: 18,
-    fontWeight: '700',
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginBottom: 8,
   },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
+    alignItems: 'center',
     paddingVertical: 16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    marginHorizontal: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    marginBottom: 16,
   },
-  ratingRow: {
+  statDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 32,
+  },
+  ratingStatInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingBottom: 12,
-    gap: 8,
-  },
-  ratingText: {
-    ...Typography.label,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '600',
-  },
-  ratingCount: {
-    ...Typography.label,
-    fontSize: 12,
-    lineHeight: 16,
+    gap: 3,
+    marginBottom: 2,
   },
   statItem: {
     alignItems: 'center',
+    flex: 1,
   },
   statNumber: {
-    ...Typography.headerMedium,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 18,
     lineHeight: 24,
-    marginBottom: 4,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    marginBottom: 2,
   },
   statLabel: {
-    ...Typography.label,
-    fontSize: 12,
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 11,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     lineHeight: 16,
   },
   tipsSummaryCard: {
@@ -2093,9 +2611,11 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   sectionTitle: {
-    ...Typography.headerMedium,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 18,
     lineHeight: 24,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginBottom: 16,
   },
   trackItem: {
@@ -2124,10 +2644,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   trackTitle: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 14,
     lineHeight: 18,
-    fontWeight: '600',
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginBottom: 4,
   },
   trackStats: {
@@ -2135,9 +2656,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   trackStatText: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 12,
     lineHeight: 16,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginLeft: 4,
   },
   trackActions: {
@@ -2146,9 +2669,23 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   trackDuration: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 12,
     lineHeight: 16,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+  },
+  priceBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  priceBadgeText: {
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: -0.2,
   },
   playButton: {
     width: 32,
@@ -2162,9 +2699,11 @@ const styles = StyleSheet.create({
     paddingVertical: 48,
   },
   emptyText: {
-    ...Typography.body,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 16,
     lineHeight: 22,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginTop: 16,
   },
   // Notification preferences modal styles
@@ -2192,15 +2731,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   ratingTitle: {
-    ...Typography.headerMedium,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 18,
     lineHeight: 24,
+    fontWeight: '600',
+    letterSpacing: -0.4,
     marginBottom: 4,
   },
   ratingSubtitle: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 13,
     lineHeight: 18,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginBottom: 12,
   },
   starsRow: {
@@ -2229,7 +2772,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   ratingCancelText: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 14,
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   ratingSubmit: {
     paddingVertical: 10,
@@ -2248,9 +2794,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   modalTitle: {
-    ...Typography.headerMedium,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 20,
     lineHeight: 26,
+    fontWeight: '600',
+    letterSpacing: -0.4,
   },
   modalCloseButton: {
     padding: 4,
@@ -2259,9 +2807,11 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalDescription: {
-    ...Typography.body,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 15,
     lineHeight: 22,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginBottom: 24,
   },
   notifPrefItem: {
@@ -2282,16 +2832,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   notifPrefTitle: {
-    ...Typography.body,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 16,
     lineHeight: 22,
-    fontWeight: '600',
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginBottom: 4,
   },
   notifPrefSubtitle: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 13,
     lineHeight: 18,
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   notifNote: {
     flexDirection: 'row',
@@ -2302,9 +2855,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   notifNoteText: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 13,
     lineHeight: 18,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     flex: 1,
   },
   modalFooter: {
@@ -2318,10 +2873,11 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     color: '#fff',
-    ...Typography.button,
+    fontFamily: Typography.body.fontFamily,
     fontSize: 16,
     lineHeight: 20,
     fontWeight: '600',
+    letterSpacing: -0.4,
   },
   // Full-Screen Avatar Modal Styles
   fullScreenAvatarContainer: {
@@ -2371,6 +2927,11 @@ const styles = StyleSheet.create({
     lineHeight: 30,
     marginBottom: 4,
   },
+  fullScreenNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   fullScreenAvatarUsername: {
     color: 'rgba(255, 255, 255, 0.7)',
     ...Typography.body,
@@ -2393,10 +2954,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
   },
   tabText: {
-    ...Typography.body,
-    fontSize: 16,
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 15,
     lineHeight: 22,
-    fontWeight: '600',
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   tabContent: {
     flex: 1,
@@ -2407,10 +2969,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   loadingText: {
-    ...Typography.label,
+    fontFamily: Typography.body.fontFamily,
     marginTop: 12,
     fontSize: 14,
     lineHeight: 18,
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   emptyState: {
     padding: 60,
@@ -2418,10 +2982,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emptyStateText: {
-    ...Typography.body,
+    fontFamily: Typography.body.fontFamily,
     marginTop: 16,
     fontSize: 16,
     lineHeight: 22,
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   aboutSection: {
     padding: 16,
@@ -2432,21 +2998,70 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   aboutTitle: {
-    ...Typography.headerMedium,
-    fontSize: 18,
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 16,
     lineHeight: 24,
-    fontWeight: '700',
+    fontWeight: '300',
+    letterSpacing: -0.4,
     marginBottom: 12,
   },
   aboutText: {
-    ...Typography.body,
-    fontSize: 15,
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 14,
     lineHeight: 22,
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   aboutRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
     gap: 12,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  chipText: {
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  experienceItem: {
+    paddingBottom: 14,
+    marginBottom: 14,
+  },
+  experienceItemBorder: {
+    borderBottomWidth: 1,
+  },
+  experienceTitle: {
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  experienceCompany: {
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 13,
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  experienceDates: {
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  experienceDesc: {
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 13,
+    lineHeight: 20,
   },
 });

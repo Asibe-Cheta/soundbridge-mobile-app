@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,15 @@ import {
   RefreshControl,
   StatusBar,
   TouchableOpacity,
+  Modal,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
+import { BlurView } from 'expo-blur';
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation, useFocusEffect, useScrollToTop } from '@react-navigation/native';
+import * as Notifications from 'expo-notifications';
 import { walkthroughable, useCopilot } from 'react-native-copilot';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -29,6 +34,8 @@ import { imageSaveService } from '../services/ImageSaveService';
 import { Alert } from 'react-native';
 import { useToast } from '../contexts/ToastContext';
 import { checkShouldShowTour } from '../services/tourService';
+import { SystemTypography as Typography } from '../constants/Typography';
+import { SkeletonFeed } from '../components/SkeletonLoader';
 
 // Create walkthroughable components
 const WalkthroughableView = walkthroughable(View);
@@ -58,6 +65,43 @@ export default function FeedScreen() {
   const [showTipModal, setShowTipModal] = useState(false);
   const [tipAuthorId, setTipAuthorId] = useState<string>('');
   const [tipAuthorName, setTipAuthorName] = useState<string>('');
+
+  // Notification permission modal
+  const [showNotifModal, setShowNotifModal] = useState(false);
+  const [notifAlreadyDenied, setNotifAlreadyDenied] = useState(false);
+  const notifCheckedThisSession = useRef(false);
+  const flatListRef = useRef<any>(null);
+  useScrollToTop(flatListRef);
+
+  // Refresh + scroll to top when user taps the Feed tab while already on it
+  useFocusEffect(
+    useCallback(() => {
+      const unsubscribe = (navigation as any).addListener?.('tabPress', () => {
+        flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+        refresh();
+      });
+      return unsubscribe;
+    }, [navigation, refresh])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id || notifCheckedThisSession.current) return;
+      notifCheckedThisSession.current = true;
+      (async () => {
+        try {
+          const { status } = await Notifications.getPermissionsAsync();
+          console.log('🔔 Notification permission status:', status);
+          if (status !== 'granted') {
+            setNotifAlreadyDenied(status === 'denied');
+            setTimeout(() => setShowNotifModal(true), 1500);
+          }
+        } catch (e) {
+          console.warn('🔔 Could not check notification permission:', e);
+        }
+      })();
+    }, [user?.id])
+  );
 
   // Initialize app tour for new users
   useEffect(() => {
@@ -286,10 +330,10 @@ export default function FeedScreen() {
         />
 
             <FlatList
+              ref={flatListRef}
               data={posts}
-              renderItem={({ item }) => (
+              renderItem={({ item, index }) => (
                 <PostCard
-                  key={item.id}
                   post={item}
                   onPress={() => handlePostPress(item.id)}
                   onReactionPress={(reactionType) => handleReactionPress(item.id, reactionType)}
@@ -314,7 +358,7 @@ export default function FeedScreen() {
                   isSaved={savedPosts.has(item.id)}
                 />
               )}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item, index) => `${item.id}-${index}`}
               style={styles.scrollView}
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
@@ -365,11 +409,7 @@ export default function FeedScreen() {
                 // Only show loading if we truly have no posts and are loading
                 // With cache, we should have posts immediately, so this should rarely show
                 loading && posts.length === 0 ? (
-                  <View style={styles.loadingContainer}>
-                    <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>
-                      Loading feed...
-                    </Text>
-                  </View>
+                  <SkeletonFeed />
                 ) : error && posts.length === 0 ? (
                   <View style={styles.errorContainer}>
                     <Text style={[styles.errorText, { color: theme.colors.error }]}>
@@ -431,6 +471,85 @@ export default function FeedScreen() {
           console.log('Tip sent successfully:', amount, message);
         }}
       />
+
+      {/* Notification permission bottom sheet */}
+      <Modal
+        visible={showNotifModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowNotifModal(false)}
+      >
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' }}>
+          <BlurView intensity={22} tint="dark" style={{ borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden', borderTopWidth: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+            <View style={{ padding: 28, paddingBottom: 44 }}>
+              {/* Handle */}
+              <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 24 }} />
+
+              {/* Bell icon */}
+              <View style={{ alignItems: 'center', marginBottom: 20 }}>
+                <LinearGradient colors={['#EC4899', '#9333EA']} style={{ width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="notifications" size={30} color="#FFFFFF" />
+                </LinearGradient>
+              </View>
+
+              {/* Headline */}
+              <Text style={{ color: '#FFFFFF', fontSize: 21, fontWeight: '800', textAlign: 'center', marginBottom: 10, letterSpacing: -0.2 }}>
+                SoundBridge works best with notifications on
+              </Text>
+
+              {/* Sub-head */}
+              <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, textAlign: 'center', marginBottom: 22, lineHeight: 20 }}>
+                This app is built for timely alerts. Off = you miss matched events, paid gigs, sales moments, and personalised growth nudges.
+              </Text>
+
+              {/* Bullets */}
+              {[
+                { icon: 'flash-outline',      text: 'Urgent gigs — Paid, time-critical. No alert = you\'re not in the running.' },
+                { icon: 'calendar-outline',   text: 'Events matched to you — Local + your interests. Off = your crowd fills the room without you.' },
+                { icon: 'cash-outline',       text: 'Audio sales & drops — Off = others see it first.' },
+                { icon: 'trending-up-outline', text: 'Personalised career tips — Right-time nudges to grow. Off = you\'re on your own.' },
+              ].map((item, i) => (
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 13, gap: 12 }}>
+                  <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(236,72,153,0.18)', alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>
+                    <Ionicons name={item.icon as any} size={15} color="#EC4899" />
+                  </View>
+                  <Text style={{ flex: 1, color: 'rgba(255,255,255,0.78)', fontSize: 13, lineHeight: 20 }}>{item.text}</Text>
+                </View>
+              ))}
+
+              {/* Trust line */}
+              <Text style={{ color: 'rgba(255,255,255,0.28)', fontSize: 12, textAlign: 'center', marginTop: 4, marginBottom: 20, lineHeight: 17 }}>
+                You choose categories and quiet hours in the app — we don't blast you.
+              </Text>
+
+              {/* Primary CTA — context-aware label */}
+              <TouchableOpacity
+                style={{ borderRadius: 999, overflow: 'hidden', marginBottom: 12 }}
+                activeOpacity={0.85}
+                onPress={async () => {
+                  setShowNotifModal(false);
+                  if (notifAlreadyDenied) {
+                    Linking.openSettings();
+                  } else {
+                    await Notifications.requestPermissionsAsync();
+                  }
+                }}
+              >
+                <LinearGradient colors={['#EC4899', '#9333EA']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ paddingVertical: 16, alignItems: 'center', borderRadius: 999 }}>
+                  <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}>
+                    {notifAlreadyDenied ? 'Open Settings' : 'Allow notifications'}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* Secondary */}
+              <TouchableOpacity onPress={() => setShowNotifModal(false)} activeOpacity={0.6} style={{ alignItems: 'center', paddingVertical: 8 }}>
+                <Text style={{ color: 'rgba(255,255,255,0.32)', fontSize: 14 }}>Not now</Text>
+              </TouchableOpacity>
+            </View>
+          </BlurView>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -461,14 +580,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadMoreText: {
-    fontSize: 14,
+    ...Typography.label,
   },
   loadingContainer: {
     paddingVertical: 48,
     alignItems: 'center',
   },
   loadingText: {
-    fontSize: 14,
+    ...Typography.label,
   },
   errorContainer: {
     paddingVertical: 48,
@@ -476,7 +595,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   errorText: {
-    fontSize: 14,
+    ...Typography.label,
     textAlign: 'center',
   },
 });

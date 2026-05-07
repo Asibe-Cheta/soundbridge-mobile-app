@@ -45,9 +45,10 @@ export default function AllAlbumsScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
 
-  const params = route.params as { category?: string; title?: string } | undefined;
+  const params = route.params as { category?: string; title?: string; userId?: string } | undefined;
   const category = params?.category || 'all';
   const screenTitle = params?.title || 'All Albums';
+  const userId = params?.userId;
 
   const [albums, setAlbums] = useState<Album[]>([]);
   const [filteredAlbums, setFilteredAlbums] = useState<Album[]>([]);
@@ -90,7 +91,7 @@ export default function AllAlbumsScreen() {
           tracks_count,
           total_plays,
           created_at,
-          creator:profiles!albums_user_id_fkey (
+          creator:profiles!albums_creator_id_fkey (
             id,
             username,
             display_name,
@@ -99,6 +100,10 @@ export default function AllAlbumsScreen() {
         `)
         .order('created_at', { ascending: false })
         .limit(50);
+
+      if (userId) {
+        query = query.eq('creator_id', userId);
+      }
 
       if (category === 'featured' || category === 'popular') {
         query = query.order('total_plays', { ascending: false });

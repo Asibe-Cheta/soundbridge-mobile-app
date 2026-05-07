@@ -1,7 +1,8 @@
 import { Session } from '@supabase/supabase-js';
 import { apiFetch } from '../lib/apiClient';
+import { config } from '../config/environment';
 
-const API_BASE_URL = 'https://www.soundbridge.live';
+const API_BASE_URL = config.apiUrl.replace(/\/api\/?$/, '');
 
 /**
  * Profile Service - Handles all profile-related API calls
@@ -188,9 +189,9 @@ class ProfileService {
 
   /**
    * Get experience entries
-   * GET /api/profile/experience
+   * GET /api/profile/experience?user_id={userId}
    */
-  async getExperience(session: Session): Promise<{
+  async getExperience(session: Session, userId?: string): Promise<{
     success: boolean;
     experience: Array<{
       id: string;
@@ -203,7 +204,13 @@ class ProfileService {
       is_current: boolean;
     }>;
   }> {
-    return this.makeRequest('/api/profile/experience', session);
+    const endpoint = userId ? `/api/profile/experience?user_id=${userId}` : '/api/profile/experience';
+    const response = await this.makeRequest<any>(endpoint, session);
+    const unwrapped = response?.success && response?.data ? response.data : response;
+    return {
+      success: unwrapped?.success ?? true,
+      experience: unwrapped?.experience ?? [],
+    };
   }
 
   /**
@@ -213,6 +220,7 @@ class ProfileService {
   async addExperience(
     experience: {
       title: string;
+      role?: string;
       company?: string;
       description?: string;
       start_date?: string;
@@ -243,13 +251,29 @@ class ProfileService {
 
   /**
    * Get skills
-   * GET /api/profile/skills
+   * GET /api/profile/skills?user_id={userId}
    */
-  async getSkills(session: Session): Promise<{
+  async getSkills(session: Session, userId?: string): Promise<{
     success: boolean;
     skills: string[];
   }> {
-    return this.makeRequest('/api/profile/skills', session);
+    const endpoint = userId ? `/api/profile/skills?user_id=${userId}` : '/api/profile/skills';
+    const response = await this.makeRequest<any>(endpoint, session);
+    // Unwrap if API wraps response in { success, data: {...} }
+    const unwrapped = response?.success && response?.data ? response.data : response;
+    const raw: any[] = unwrapped?.skills ?? [];
+    // Normalise: API may return strings OR objects like { skill: "..." } or { name: "..." }
+    const skills = raw.map((item) => {
+      if (typeof item === 'string') return item;
+      if (typeof item === 'object' && item !== null) {
+        return item.skill ?? item.name ?? item.title ?? String(item);
+      }
+      return String(item);
+    }).filter(Boolean);
+    return {
+      success: unwrapped?.success ?? skills.length >= 0,
+      skills,
+    };
   }
 
   /**
@@ -260,10 +284,13 @@ class ProfileService {
     skill: string,
     session: Session
   ): Promise<{ success: boolean; message?: string; error?: string }> {
-    return this.makeRequest('/api/profile/skills', session, {
+    const response = await this.makeRequest<any>('/api/profile/skills', session, {
       method: 'POST',
       body: JSON.stringify({ skill }),
     });
+    const outerSuccess = response?.success === true;
+    const unwrapped = outerSuccess && response?.data ? response.data : response;
+    return { success: outerSuccess || unwrapped?.success === true, ...unwrapped };
   }
 
   /**
@@ -274,21 +301,38 @@ class ProfileService {
     skill: string,
     session: Session
   ): Promise<{ success: boolean; message?: string; error?: string }> {
-    return this.makeRequest('/api/profile/skills', session, {
+    const response = await this.makeRequest<any>('/api/profile/skills', session, {
       method: 'DELETE',
       body: JSON.stringify({ skill }),
     });
+    const outerSuccess = response?.success === true;
+    const unwrapped = outerSuccess && response?.data ? response.data : response;
+    return { success: outerSuccess || unwrapped?.success === true, ...unwrapped };
   }
 
   /**
    * Get instruments
-   * GET /api/profile/instruments
+   * GET /api/profile/instruments?user_id={userId}
    */
-  async getInstruments(session: Session): Promise<{
+  async getInstruments(session: Session, userId?: string): Promise<{
     success: boolean;
     instruments: string[];
   }> {
-    return this.makeRequest('/api/profile/instruments', session);
+    const endpoint = userId ? `/api/profile/instruments?user_id=${userId}` : '/api/profile/instruments';
+    const response = await this.makeRequest<any>(endpoint, session);
+    const unwrapped = response?.success && response?.data ? response.data : response;
+    const raw: any[] = unwrapped?.instruments ?? [];
+    const instruments = raw.map((item) => {
+      if (typeof item === 'string') return item;
+      if (typeof item === 'object' && item !== null) {
+        return item.instrument ?? item.name ?? item.title ?? String(item);
+      }
+      return String(item);
+    }).filter(Boolean);
+    return {
+      success: unwrapped?.success ?? instruments.length >= 0,
+      instruments,
+    };
   }
 
   /**
@@ -299,10 +343,13 @@ class ProfileService {
     instrument: string,
     session: Session
   ): Promise<{ success: boolean; message?: string; error?: string }> {
-    return this.makeRequest('/api/profile/instruments', session, {
+    const response = await this.makeRequest<any>('/api/profile/instruments', session, {
       method: 'POST',
       body: JSON.stringify({ instrument }),
     });
+    const outerSuccess = response?.success === true;
+    const unwrapped = outerSuccess && response?.data ? response.data : response;
+    return { success: outerSuccess || unwrapped?.success === true, ...unwrapped };
   }
 
   /**
@@ -313,10 +360,13 @@ class ProfileService {
     instrument: string,
     session: Session
   ): Promise<{ success: boolean; message?: string; error?: string }> {
-    return this.makeRequest('/api/profile/instruments', session, {
+    const response = await this.makeRequest<any>('/api/profile/instruments', session, {
       method: 'DELETE',
       body: JSON.stringify({ instrument }),
     });
+    const outerSuccess = response?.success === true;
+    const unwrapped = outerSuccess && response?.data ? response.data : response;
+    return { success: outerSuccess || unwrapped?.success === true, ...unwrapped };
   }
 
   /**

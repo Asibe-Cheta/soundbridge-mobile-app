@@ -10,6 +10,7 @@ import {
   Share,
   ActivityIndicator,
   Dimensions,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,6 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { supabase, dbHelpers } from '../lib/supabase';
+import PricingControls from '../components/PricingControls';
 
 const { width, height } = Dimensions.get('window');
 
@@ -36,6 +38,10 @@ interface Album {
   total_likes: number;
   created_at: string;
   published_at?: string;
+  is_paid?: boolean;
+  price?: number | null;
+  currency?: string | null;
+  total_sales_count?: number;
   creator: {
     id: string;
     username: string;
@@ -50,12 +56,17 @@ export default function AlbumDetailsScreen() {
   const route = useRoute<any>();
   const { user } = useAuth();
   const { theme } = useTheme();
-  const { playTrack, addToQueue, currentTrack, isPlaying } = useAudioPlayer();
+  const { play, addToQueue, currentTrack, isPlaying } = useAudioPlayer();
 
   const [album, setAlbum] = useState<Album | null>(null);
   const [loading, setLoading] = useState(true);
   const [isLiked, setIsLiked] = useState(false);
   const [likesCount, setLikesCount] = useState(0);
+  const [showPricingModal, setShowPricingModal] = useState(false);
+  const [pricingIsPaid, setPricingIsPaid] = useState(false);
+  const [pricingPrice, setPricingPrice] = useState('');
+  const [pricingCurrency, setPricingCurrency] = useState<'USD' | 'GBP' | 'EUR'>('USD');
+  const [savingPricing, setSavingPricing] = useState(false);
 
   const albumId = route.params?.albumId;
   const isCreator = user?.id === album?.creator?.id;
@@ -63,9 +74,14 @@ export default function AlbumDetailsScreen() {
   useEffect(() => {
     if (albumId) {
       loadAlbum();
-      checkLikeStatus();
     }
   }, [albumId]);
+
+  useEffect(() => {
+    if (albumId) {
+      checkLikeStatus();
+    }
+  }, [albumId, user?.id]);
 
   const loadAlbum = async () => {
     try {
@@ -85,7 +101,10 @@ export default function AlbumDetailsScreen() {
   };
 
   const checkLikeStatus = async () => {
-    if (!user) return;
+    if (!user) {
+      setIsLiked(false);
+      return;
+    }
 
     try {
       const { data, error } = await supabase
@@ -101,6 +120,48 @@ export default function AlbumDetailsScreen() {
       }
     } catch (error) {
       console.error('Error checking like status:', error);
+    }
+  };
+
+  const openPricingModal = () => {
+    if (!album) return;
+    setPricingIsPaid(album.is_paid || false);
+    setPricingPrice(album.price ? String(album.price) : '');
+    setPricingCurrency((album.currency as 'USD' | 'GBP' | 'EUR') || 'USD');
+    setShowPricingModal(true);
+  };
+
+  const handleSavePricing = async () => {
+    if (!album || !user) return;
+    if (pricingIsPaid && (!pricingPrice || parseFloat(pricingPrice) < 0.99)) {
+      Alert.alert('Invalid Price', 'Please set a price of at least $0.99.');
+      return;
+    }
+    setSavingPricing(true);
+    try {
+      const { error } = await supabase
+        .from('albums')
+        .update({
+          is_paid: pricingIsPaid,
+          price: pricingIsPaid ? parseFloat(pricingPrice) : null,
+          currency: pricingIsPaid ? pricingCurrency : null,
+        })
+        .eq('id', album.id)
+        .eq('creator_id', user.id);
+      if (error) throw error;
+      setShowPricingModal(false);
+      await loadAlbum();
+      Alert.alert(
+        'Pricing Updated',
+        pricingIsPaid
+          ? `Your album is now available for purchase at ${pricingCurrency} ${pricingPrice}.`
+          : 'Your album is now available for free.'
+      );
+    } catch (error) {
+      console.error('❌ Error saving album pricing:', error);
+      Alert.alert('Error', 'Failed to update pricing. Please try again.');
+    } finally {
+      setSavingPricing(false);
     }
   };
 
@@ -158,7 +219,7 @@ export default function AlbumDetailsScreen() {
 
     try {
       // Play first track
-      await playTrack(album.tracks[0]);
+      await play(album.tracks[0]);
 
       // Add remaining tracks to queue
       for (let i = 1; i < album.tracks.length; i++) {
@@ -175,7 +236,7 @@ export default function AlbumDetailsScreen() {
 
   const handlePlayTrack = async (track: any, index: number) => {
     try {
-      await playTrack(track);
+      await play(track);
 
       // Add remaining tracks to queue
       for (let i = index + 1; i < album!.tracks.length; i++) {
@@ -489,7 +550,93 @@ export default function AlbumDetailsScreen() {
               );
             })}
           </View>
+
+          {/* Pricing Section — Creator Only */}
+          {isCreator && (
+            <View style={[styles.pricingSection, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+              <View style={styles.pricingSectionHeader}>
+                <Ionicons name="pricetag-outline" size={20} color={theme.colors.primary} />
+                <Text style={[styles.pricingSectionTitle, { color: theme.colors.text }]}>Sell This Album</Text>
+              </View>
+              {album.is_paid ? (
+                <View>
+                  <View style={styles.pricingRow}>
+                    <Text style={[styles.pricingLabel, { color: theme.colors.textSecondary }]}>Status:</Text>
+                    <Text style={[styles.pricingValue, { color: '#10B981', fontWeight: '600' }]}>For Sale</Text>
+                  </View>
+                  <View style={styles.pricingRow}>
+                    <Text style={[styles.pricingLabel, { color: theme.colors.textSecondary }]}>Price:</Text>
+                    <Text style={[styles.pricingValue, { color: theme.colors.text }]}>
+                      {album.currency === 'GBP' ? '£' : album.currency === 'EUR' ? '€' : '$'}{album.price?.toFixed(2)}
+                    </Text>
+                  </View>
+                  {(album.total_sales_count ?? 0) > 0 && (
+                    <View style={styles.pricingRow}>
+                      <Text style={[styles.pricingLabel, { color: theme.colors.textSecondary }]}>Sales:</Text>
+                      <Text style={[styles.pricingValue, { color: theme.colors.text }]}>{album.total_sales_count}</Text>
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <Text style={[styles.pricingHint, { color: theme.colors.textSecondary }]}>
+                  This album is currently free. Set a price to earn from every purchase.
+                </Text>
+              )}
+              <TouchableOpacity
+                style={[styles.setPriceButton, { backgroundColor: theme.colors.primary }]}
+                onPress={openPricingModal}
+              >
+                <Ionicons name="pricetag" size={20} color="#FFFFFF" />
+                <Text style={styles.setPriceButtonText}>
+                  {album.is_paid ? 'Edit Pricing' : 'Set a Price'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </ScrollView>
+
+        {/* Pricing Modal */}
+        <Modal
+          visible={showPricingModal}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setShowPricingModal(false)}
+        >
+          <View style={styles.pricingModalOverlay}>
+            <View style={[styles.pricingModalSheet, { backgroundColor: theme.colors.background }]}>
+              <View style={styles.pricingModalHeader}>
+                <Text style={[styles.pricingModalTitle, { color: theme.colors.text }]}>
+                  {album?.is_paid ? 'Edit Pricing' : 'Set a Price'}
+                </Text>
+                <TouchableOpacity onPress={() => setShowPricingModal(false)}>
+                  <Ionicons name="close" size={24} color={theme.colors.text} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView>
+                <PricingControls
+                  isPaid={pricingIsPaid}
+                  price={pricingPrice}
+                  currency={pricingCurrency}
+                  onIsPaidChange={setPricingIsPaid}
+                  onPriceChange={setPricingPrice}
+                  onCurrencyChange={setPricingCurrency}
+                  disabled={savingPricing}
+                />
+                <TouchableOpacity
+                  style={[styles.savePricingButton, { backgroundColor: theme.colors.primary, opacity: savingPricing ? 0.6 : 1 }]}
+                  onPress={handleSavePricing}
+                  disabled={savingPricing}
+                >
+                  {savingPricing ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.savePricingButtonText}>Save</Text>
+                  )}
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     </View>
   );
@@ -679,6 +826,85 @@ const styles = StyleSheet.create({
   trackDuration: {
     fontSize: 13,
     marginLeft: 12,
+  },
+  pricingSection: {
+    margin: 16,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  pricingSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  pricingSectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  pricingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  pricingLabel: {
+    fontSize: 14,
+  },
+  pricingValue: {
+    fontSize: 14,
+  },
+  pricingHint: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  setPriceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 10,
+    paddingVertical: 14,
+    marginTop: 12,
+  },
+  setPriceButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  pricingModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  pricingModalSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  pricingModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  pricingModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  savePricingButton: {
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 24,
+  },
+  savePricingButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });
 

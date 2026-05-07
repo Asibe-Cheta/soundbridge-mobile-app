@@ -135,7 +135,7 @@ export const authenticateWithBiometrics = async (
 export const isBiometricLoginEnabled = async (): Promise<boolean> => {
   try {
     const enabled = await SecureStore.getItemAsync(BIOMETRIC_ENABLED_KEY);
-    return enabled === 'true';
+    return enabled === 'true' || enabled === 'oauth';
   } catch (error) {
     console.error('❌ Error checking biometric login status:', error);
     return false;
@@ -293,6 +293,42 @@ export const showBiometricSetupPrompt = async (): Promise<void> => {
         },
       ]
     );
+  }
+};
+
+/**
+ * Enable biometric login for OAuth users (no password stored — session-based)
+ */
+export const enableBiometricLoginOAuth = async (): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const capability = await checkBiometricAvailability();
+    if (!capability.available || !capability.enrolled) {
+      return { success: false, error: capability.error || 'Biometrics not available' };
+    }
+
+    const authResult = await authenticateWithBiometrics('Authenticate to enable biometric login');
+    if (!authResult.success) return authResult;
+
+    // Mark as OAuth biometric — no password stored, Supabase session handles auth
+    await SecureStore.setItemAsync(BIOMETRIC_ENABLED_KEY, 'oauth');
+    await SecureStore.deleteItemAsync(STORED_PASSWORD_KEY);
+
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error enabling OAuth biometric login:', error);
+    return { success: false, error: 'Failed to enable biometric login' };
+  }
+};
+
+/**
+ * Check if biometric is enabled in OAuth mode (no stored password)
+ */
+export const isBiometricOAuthMode = async (): Promise<boolean> => {
+  try {
+    const val = await SecureStore.getItemAsync(BIOMETRIC_ENABLED_KEY);
+    return val === 'oauth';
+  } catch {
+    return false;
   }
 };
 

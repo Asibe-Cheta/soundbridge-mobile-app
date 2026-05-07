@@ -17,8 +17,19 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import BackButton from '../components/BackButton';
-import payoutService from '../services/PayoutService';
-import type { PayoutEligibilityResult } from '../services/PayoutService';
+import { payoutService } from '../services/PayoutService';
+import type { PayoutEligibility } from '../services/PayoutService';
+import { revenueService } from '../services/revenueService';
+import { SystemTypography as Typography } from '../constants/Typography';
+
+// Currencies routed through Wise (international transfer fees apply)
+const WISE_CURRENCIES = new Set(['NGN', 'GHS', 'KES', 'ZAR', 'TZS', 'UGX']);
+
+// Wise-currency-to-country display helper
+const WISE_COUNTRY_NAMES: Record<string, string> = {
+  NGN: 'Nigeria', GHS: 'Ghana', KES: 'Kenya',
+  ZAR: 'South Africa', TZS: 'Tanzania', UGX: 'Uganda',
+};
 
 export default function RequestPayoutScreen() {
   const { session } = useAuth();
@@ -26,20 +37,28 @@ export default function RequestPayoutScreen() {
   const navigation = useNavigation();
   const [loading, setLoading] = useState(true);
   const [requesting, setRequesting] = useState(false);
-  const [eligibility, setEligibility] = useState<PayoutEligibilityResult | null>(null);
+  const [eligibility, setEligibility] = useState<PayoutEligibility | null>(null);
   const [amount, setAmount] = useState('');
+  const [bankCurrency, setBankCurrency] = useState<string | null>(null);
 
   useEffect(() => {
     checkEligibility();
   }, []);
 
   const checkEligibility = async () => {
-    if (!session) return;
+    if (!session) {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     try {
-      const result = await payoutService.checkPayoutEligibility(session);
+      const [result, bankAccount] = await Promise.all([
+        payoutService.checkEligibility(session),
+        revenueService.getBankAccount(session.user.id).catch(() => null),
+      ]);
       setEligibility(result);
+      if (bankAccount?.currency) setBankCurrency(bankAccount.currency.toUpperCase());
     } catch (error) {
       console.error('Error checking eligibility:', error);
       Alert.alert('Error', 'Failed to check payout eligibility');
@@ -48,47 +67,84 @@ export default function RequestPayoutScreen() {
     }
   };
 
-  const handleRequestPayout = async () => {
+  const isWisePayout = bankCurrency ? WISE_CURRENCIES.has(bankCurrency) : false;
+
+  const getWiseFeeEstimate = (usdAmount: number): string => {
+    // Wise charges a fixed fee + variable percentage for most African currencies.
+    // Based on observed transfer: $7.31 fee on $40.44 (via Wise Business API).
+    // We show a conservative estimate; exact fee is confirmed at transfer time.
+    if (usdAmount <= 0) return '';
+    const estimated = Math.max(5, usdAmount * 0.17).toFixed(2);
+    const net = Math.max(0, usdAmount - parseFloat(estimated)).toFixed(2);
+    return `~$${estimated} USD fee · You'll receive approx $${net} USD equivalent in ${bankCurrency}`;
+  };
+
+  const handleRequestPayout = () => {
     if (!session || !eligibility) return;
 
     const payoutAmount = parseFloat(amount);
 
-    // Validation
     if (isNaN(payoutAmount) || payoutAmount <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid amount');
       return;
     }
 
-    if (payoutAmount < eligibility.minimumAmount) {
+    if (payoutAmount < eligibility.minimum_amount) {
       Alert.alert(
         'Amount Too Low',
-        `Minimum payout amount is ${eligibility.currency} ${eligibility.minimumAmount}`
+        `Minimum payout amount is ${eligibility.currency} ${eligibility.minimum_amount}`
       );
       return;
     }
 
-    if (payoutAmount > eligibility.availableBalance) {
+    if (payoutAmount > eligibility.available_balance) {
       Alert.alert(
         'Insufficient Balance',
-        `Available balance is ${eligibility.currency} ${eligibility.availableBalance}`
+        `Available balance is ${eligibility.currency} ${eligibility.available_balance.toFixed(2)}`
       );
       return;
     }
 
+    // Build confirmation message — include fee warning for Wise currencies
+    let confirmMessage = `Request payout of ${eligibility.currency} ${payoutAmount.toFixed(2)}?`;
+    if (isWisePayout && bankCurrency) {
+      const country = WISE_COUNTRY_NAMES[bankCurrency] ?? bankCurrency;
+      const estimatedFee = Math.max(5, payoutAmount * 0.17).toFixed(2);
+      const estimatedNet = Math.max(0, payoutAmount - parseFloat(estimatedFee)).toFixed(2);
+      confirmMessage =
+        `You're requesting USD ${payoutAmount.toFixed(2)}.\n\n` +
+        `International transfer to ${country} (via Wise):\n` +
+        `• Transfer fee: approx $${estimatedFee} USD\n` +
+        `• You'll receive: approx $${estimatedNet} USD equivalent in ${bankCurrency}\n\n` +
+        `Exact fee confirmed at transfer time. Processing takes 2-3 business days.`;
+    } else {
+      confirmMessage += '\n\nProcessing takes 2-3 business days.';
+    }
+
+    Alert.alert(
+      'Confirm Payout',
+      confirmMessage,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Confirm', style: 'default', onPress: () => submitPayout(payoutAmount) },
+      ]
+    );
+  };
+
+  const submitPayout = async (payoutAmount: number) => {
+    if (!session || !eligibility) return;
     setRequesting(true);
     try {
-      const result = await payoutService.requestPayout(session, payoutAmount);
+      const result = await payoutService.requestPayout(session, {
+        amount: payoutAmount,
+        currency: eligibility.currency,
+      });
 
-      if (result.success) {
+      if (result.success && result.payout) {
         Alert.alert(
           'Payout Requested',
-          `Your payout of ${result.currency} ${result.amount} has been requested. It will be processed within 2-3 business days.`,
-          [
-            {
-              text: 'OK',
-              onPress: () => navigation.goBack()
-            }
-          ]
+          `Your payout request has been submitted. Funds will be transferred to your bank account within 2-3 business days.`,
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
         );
       } else {
         throw new Error(result.error || 'Failed to request payout');
@@ -189,10 +245,10 @@ export default function RequestPayoutScreen() {
               Available Balance
             </Text>
             <Text style={[styles.balanceAmount, { color: '#10B981' }]}>
-              {eligibility.currency} {eligibility.availableBalance.toFixed(2)}
+              {eligibility.currency} {eligibility.available_balance.toFixed(2)}
             </Text>
             <Text style={[styles.minimumText, { color: theme.colors.textSecondary }]}>
-              Minimum payout: {eligibility.currency} {eligibility.minimumAmount}
+              Minimum payout: {eligibility.currency} {eligibility.minimum_amount}
             </Text>
           </View>
 
@@ -211,13 +267,36 @@ export default function RequestPayoutScreen() {
                     style={[styles.input, { color: theme.colors.text }]}
                     value={amount}
                     onChangeText={setAmount}
-                    placeholder={`Min ${eligibility.minimumAmount}`}
+                    placeholder={`Min ${eligibility.minimum_amount}`}
                     placeholderTextColor={theme.colors.textMuted}
                     keyboardType="decimal-pad"
                     editable={!requesting}
                   />
                 </View>
               </View>
+
+              {/* Wise fee warning — shown for African/international currencies */}
+              {isWisePayout && bankCurrency && (
+                <View style={[styles.feeWarningBox, { backgroundColor: '#FEF3C7', borderColor: '#F59E0B40' }]}>
+                  <Ionicons name="information-circle" size={20} color="#D97706" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.feeWarningTitle, { color: '#92400E' }]}>
+                      International Transfer Fee
+                    </Text>
+                    <Text style={[styles.feeWarningText, { color: '#78350F' }]}>
+                      Payments to {WISE_COUNTRY_NAMES[bankCurrency] ?? bankCurrency} go through Wise and include a transfer fee (~$5–12 USD depending on amount). The exact fee will be shown before your transfer is processed.
+                    </Text>
+                    {parseFloat(amount) > 0 && (
+                      <Text style={[styles.feeEstimate, { color: '#D97706' }]}>
+                        {getWiseFeeEstimate(parseFloat(amount))}
+                      </Text>
+                    )}
+                    <Text style={[styles.feeWarningTip, { color: '#92400E' }]}>
+                      💡 Tip: If you have a UK, EU, or US bank account, add it in Payment Methods to receive funds with lower fees — then transfer locally via an app like Lemfi.
+                    </Text>
+                  </View>
+                </View>
+              )}
 
               {/* Request Button */}
               <TouchableOpacity
@@ -297,8 +376,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 34,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    lineHeight: 40,
+    fontFamily: Typography.body.fontFamily,
     flex: 1,
     textAlign: 'center',
   },
@@ -316,11 +398,11 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   loadingText: {
+    ...Typography.body,
     marginTop: 16,
-    fontSize: 16,
   },
   errorText: {
-    fontSize: 16,
+    ...Typography.body,
   },
   card: {
     padding: 24,
@@ -330,23 +412,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   label: {
-    fontSize: 14,
+    ...Typography.label,
     marginBottom: 8,
   },
   balanceAmount: {
+    ...Typography.headerLarge,
     fontSize: 36,
-    fontWeight: 'bold',
     marginBottom: 8,
   },
   minimumText: {
+    ...Typography.label,
     fontSize: 12,
   },
   inputSection: {
     marginBottom: 24,
   },
   inputLabel: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
     marginBottom: 8,
   },
   inputContainer: {
@@ -357,14 +440,14 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   currencySymbol: {
+    ...Typography.button,
     fontSize: 18,
-    fontWeight: '600',
     marginRight: 8,
   },
   input: {
+    ...Typography.button,
     flex: 1,
     fontSize: 18,
-    fontWeight: '600',
   },
   requestButton: {
     borderRadius: 12,
@@ -379,9 +462,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   requestButtonText: {
-    color: '#fff',
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '600',
+    color: '#fff',
   },
   infoBox: {
     flexDirection: 'row',
@@ -391,9 +474,39 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   infoText: {
+    ...Typography.label,
     flex: 1,
-    fontSize: 14,
-    lineHeight: 20,
+  },
+  feeWarningBox: {
+    flexDirection: 'row',
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 10,
+    marginBottom: 16,
+  },
+  feeWarningTitle: {
+    ...Typography.button,
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  feeWarningText: {
+    ...Typography.label,
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 6,
+  },
+  feeEstimate: {
+    ...Typography.label,
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  feeWarningTip: {
+    ...Typography.label,
+    fontSize: 11,
+    lineHeight: 17,
+    fontStyle: 'italic',
   },
   notEligibleCard: {
     padding: 24,
@@ -402,8 +515,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   notEligibleTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
     marginTop: 16,
     marginBottom: 16,
   },

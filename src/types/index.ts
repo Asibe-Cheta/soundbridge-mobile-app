@@ -169,6 +169,10 @@ export interface BadgeInsights {
   first_booking_discount_enabled?: boolean | null;
   first_booking_discount_percent?: number | null;
   history?: ProviderBadgeHistoryItem[];
+  // Verified Professional badge fields (from web team badges API)
+  verified_professional_badge_active?: boolean | null;
+  verified_professional_state?: 'verified_premium' | 'verified_downgraded' | 'premium_not_verified' | 'free_not_verified' | null;
+  active_premium?: boolean | null;
 }
 
 export interface BookingSummary extends ServiceBooking {

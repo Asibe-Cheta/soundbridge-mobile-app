@@ -15,17 +15,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { LiveSession } from '../../types/liveSession';
 import { useTheme } from '../../contexts/ThemeContext';
+import { SystemTypography as Typography } from '../../constants/Typography';
 
 interface SessionCardProps {
   session: LiveSession;
   onPress: () => void;
-  currentUserId?: string; // Add current user ID to determine ownership
+  currentUserId?: string;
+  isAdmin?: boolean;
+  onAdminEnd?: (session: LiveSession) => void;
 }
 
-export default function SessionCard({ session, onPress, currentUserId }: SessionCardProps) {
+export default function SessionCard({ session, onPress, currentUserId, isAdmin, onAdminEnd }: SessionCardProps) {
   const { theme } = useTheme();
-  
-  // Check if this is the current user's session
+
   const isOwnSession = currentUserId && session.creator_id === currentUserId;
 
   const formatListenerCount = (count: number): string => {
@@ -37,6 +39,8 @@ export default function SessionCard({ session, onPress, currentUserId }: Session
 
   const isLive = session.status === 'live';
   const isScheduled = session.status === 'scheduled';
+  // Admins see an "End Session" button on other people's live sessions
+  const showAdminEnd = isAdmin && isLive && !isOwnSession;
 
   const formatScheduledTime = (dateString?: string): string => {
     if (!dateString) return '';
@@ -140,7 +144,7 @@ export default function SessionCard({ session, onPress, currentUserId }: Session
           </Text>
         </View>
 
-        {/* Scheduled Time, Join Button, or Manage Button */}
+        {/* Scheduled Time, Join Button, Manage Button, or Admin End Button */}
         {isScheduled ? (
           <View style={styles.scheduledBadge}>
             <Ionicons name="time-outline" size={12} color={theme.colors.textSecondary} />
@@ -153,6 +157,15 @@ export default function SessionCard({ session, onPress, currentUserId }: Session
             <Text style={styles.manageButtonText}>Manage</Text>
             <Ionicons name="settings-outline" size={14} color="#FFFFFF" />
           </View>
+        ) : showAdminEnd ? (
+          <TouchableOpacity
+            style={[styles.endButton]}
+            onPress={() => onAdminEnd?.(session)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="stop-circle" size={14} color="#FFFFFF" />
+            <Text style={styles.endButtonText}>End Session</Text>
+          </TouchableOpacity>
         ) : (
           <View style={[styles.joinButton, { backgroundColor: theme.colors.primary }]}>
             <Text style={styles.joinButtonText}>Join</Text>
@@ -200,8 +213,8 @@ const styles = StyleSheet.create({
   },
   liveText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 11,
-    fontWeight: '700',
     letterSpacing: 0.5,
   },
   header: {
@@ -234,11 +247,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   creatorName: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
     marginBottom: 2,
   },
   creatorUsername: {
+    ...Typography.label,
     fontSize: 12,
   },
   listenerCount: {
@@ -247,16 +261,17 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   listenerCountText: {
+    ...Typography.label,
     fontSize: 13,
-    fontWeight: '500',
   },
   title: {
+    ...Typography.button,
     fontSize: 16,
-    fontWeight: '700',
     marginBottom: 8,
     lineHeight: 22,
   },
   description: {
+    ...Typography.label,
     fontSize: 13,
     lineHeight: 18,
     marginBottom: 12,
@@ -275,8 +290,8 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   typeText: {
+    ...Typography.label,
     fontSize: 11,
-    fontWeight: '500',
   },
   scheduledBadge: {
     flexDirection: 'row',
@@ -284,8 +299,8 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   scheduledText: {
+    ...Typography.label,
     fontSize: 12,
-    fontWeight: '500',
   },
   joinButton: {
     flexDirection: 'row',
@@ -297,8 +312,8 @@ const styles = StyleSheet.create({
   },
   joinButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 13,
-    fontWeight: '600',
   },
   manageButton: {
     flexDirection: 'row',
@@ -310,8 +325,22 @@ const styles = StyleSheet.create({
   },
   manageButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 13,
-    fontWeight: '600',
+  },
+  endButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+    backgroundColor: '#DC2626',
+  },
+  endButtonText: {
+    color: '#FFFFFF',
+    ...Typography.button,
+    fontSize: 13,
   },
 });
 

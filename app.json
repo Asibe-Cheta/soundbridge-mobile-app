@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "SoundBridge Mobile",
+    "name": "SoundBridge",
     "slug": "soundbridge-mobile",
-    "version": "1.0.0",
+    "version": "1.4.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/images/logos/sb-app-icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/splash.png",
@@ -14,10 +14,19 @@
     "assetBundlePatterns": [
       "**/*"
     ],
+    "updates": {
+      "url": "https://u.expo.dev/96a15afd-b1fd-4031-a790-2701fa0bffdf",
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.soundbridge.mobile",
-      "buildNumber": "81",
+      "buildNumber": "86",
       "infoPlist": {
         "UIBackgroundModes": [
           "audio"
@@ -36,17 +45,21 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "foregroundImage": "./assets/images/logos/logo-foreground.png",
+        "backgroundImage": "./assets/images/logos/logo-background.png"
       },
       "package": "com.soundbridge.mobile",
+      "versionCode": 42,
       "permissions": [
-        "android.permission.WAKE_LOCK",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.INTERNET"
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECORD_AUDIO",
+        "NOTIFICATIONS"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
       ],
       "intentFilters": [
         {
@@ -81,13 +94,6 @@
             "DEFAULT"
           ]
         }
-      ],
-      "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "RECORD_AUDIO",
-        "NOTIFICATIONS"
       ]
     },
     "web": {
@@ -106,6 +112,12 @@
         {
           "ios": {
             "useFrameworks": "static"
+          },
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "minSdkVersion": 24,
+            "kotlinVersion": "2.1.20"
           }
         }
       ],
@@ -128,7 +140,11 @@
           "icon": "./assets/notification-icon.png",
           "color": "#EC4899"
         }
-      ]
+      ],
+      "expo-font",
+      "expo-apple-authentication",
+      "expo-asset",
+      "expo-audio"
     ]
   }
 }

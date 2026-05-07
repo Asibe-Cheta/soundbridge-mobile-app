@@ -12,12 +12,14 @@ import {
   Animated,
   Linking,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import PasswordStrengthIndicator from '../components/PasswordStrengthIndicator';
 import * as BiometricAuth from '../services/biometricAuth';
 import { loginWithTwoFactorCheck } from '../services/twoFactorAuthConfig';
@@ -25,6 +27,7 @@ import { loginWithTwoFactorCheck } from '../services/twoFactorAuthConfig';
 const { width, height } = Dimensions.get('window');
 
 export default function AuthScreen() {
+  console.log('🔐 AuthScreen RENDERING');
   const navigation = useNavigation();
   const { setIsChecking2FA } = useAuth();
   const [email, setEmail] = useState('');
@@ -42,7 +45,8 @@ export default function AuthScreen() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricType, setBiometricType] = useState('');
-  const { signIn, signUp, signInWithGoogle, resetPassword, resendConfirmation, error, refreshUser, session } = useAuth();
+  const { signIn, signUp, signInWithGoogle, signInWithApple, resetPassword, resendConfirmation, error, refreshUser, session } = useAuth();
+  const [isAppleAvailable, setIsAppleAvailable] = useState(false);
 
   // Debug logging functions
   const debugLog = (...args: any[]) => {
@@ -83,6 +87,11 @@ export default function AuthScreen() {
     ]).start();
   }, [isSignUp, isForgotPassword]);
 
+  // Check Apple Sign In availability on mount
+  useEffect(() => {
+    AppleAuthentication.isAvailableAsync().then(setIsAppleAvailable).catch(() => {});
+  }, []);
+
   // Check biometric availability on mount and auto-trigger if enabled
   useEffect(() => {
     const checkAndAutoBiometric = async () => {
@@ -96,15 +105,16 @@ export default function AuthScreen() {
         const enabled = await BiometricAuth.isBiometricLoginEnabled();
         setBiometricEnabled(enabled);
         console.log(`✅ ${typeName} available and ${enabled ? 'enabled' : 'not enabled'}`);
-        
-        // Auto-trigger biometric login if enabled (only on login screen)
-        if (enabled && !isSignUp && !isForgotPassword) {
-          console.log('🔐 Auto-triggering biometric login...');
-          // Small delay to ensure UI is ready
-          setTimeout(() => {
-            handleBiometricLogin(true); // Pass true to indicate auto-trigger
-          }, 500);
-        }
+
+        // DISABLED: Auto-trigger biometric login (causes issues in dev mode)
+        // Users can still use the biometric button manually
+        // if (enabled && !isSignUp && !isForgotPassword) {
+        //   console.log('🔐 Auto-triggering biometric login...');
+        //   // Small delay to ensure UI is ready
+        //   setTimeout(() => {
+        //     handleBiometricLogin(true); // Pass true to indicate auto-trigger
+        //   }, 500);
+        // }
       }
     };
     
@@ -240,7 +250,10 @@ export default function AuthScreen() {
   };
 
   const handleLogin = async () => {
-    if (!email || !password) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedPassword = password;
+
+    if (!normalizedEmail || !normalizedPassword) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
@@ -252,12 +265,26 @@ export default function AuthScreen() {
 
           setIsLoading(true);
     
+    const mapLoginInitiateError = (errorCode?: string, fallbackMessage?: string) => {
+      switch (errorCode) {
+        case 'EMAIL_UNCONFIRMED':
+          return 'Please verify your email before signing in.';
+        case 'OAUTH_ONLY':
+        case 'PASSWORD_NOT_SET':
+          return 'This account uses Google sign-in. Please continue with Google or set a password.';
+        case 'INVALID_CREDENTIALS':
+          return 'Invalid email or password.';
+        default:
+          return fallbackMessage || 'An error occurred during login';
+      }
+    };
+
     try {
       // Use the new 2FA-aware login flow
       // Note: We DON'T set isChecking2FA here because loginWithTwoFactorCheck
       // will sign out if 2FA is required, preventing navigation
       debugLog('🔐 Starting login with 2FA check...');
-      const result = await loginWithTwoFactorCheck(email, password);
+      const result = await loginWithTwoFactorCheck(normalizedEmail, normalizedPassword);
       
       debugLog('📊 Login result:', JSON.stringify({
         requires2FA: result.requires2FA,
@@ -287,7 +314,7 @@ export default function AuthScreen() {
         
         debugLog('📤 Navigating to TwoFactorVerification with:', JSON.stringify({
           userId: result.userId,
-          email: result.email || email,
+          email: result.email || normalizedEmail,
           hasSessionToken: !!result.sessionToken,
         }, null, 2));
         
@@ -325,7 +352,7 @@ export default function AuthScreen() {
                   {
                     text: 'Enable',
                     onPress: async () => {
-                      const result = await BiometricAuth.enableBiometricLogin(email, password);
+                      const result = await BiometricAuth.enableBiometricLogin(normalizedEmail, normalizedPassword);
                       if (result.success) {
                         setBiometricEnabled(true);
                         Alert.alert('Success', `${biometricType} login enabled!`);
@@ -348,7 +375,7 @@ export default function AuthScreen() {
                   {
                     text: 'Update',
                     onPress: async () => {
-                      const result = await BiometricAuth.updateBiometricCredentials(email, password);
+                      const result = await BiometricAuth.updateBiometricCredentials(normalizedEmail, normalizedPassword);
                       if (result.success) {
                         Alert.alert('Success', `${biometricType} login credentials updated!`);
                       } else {
@@ -375,9 +402,12 @@ export default function AuthScreen() {
       debugLog('🚩 2FA check flag cleared (error occurred)');
       
       // Handle email verification errors
-      if (err.message?.includes('Email not confirmed')) {
+      const errorCode = err?.code;
+      const friendlyMessage = mapLoginInitiateError(errorCode, err.message);
+
+      if (errorCode === 'EMAIL_UNCONFIRMED' || err.message?.includes('Email not confirmed')) {
         setNeedsEmailVerification(true);
-        setVerificationEmail(email);
+        setVerificationEmail(normalizedEmail);
         Alert.alert(
           'Email Verification Required',
           'Please verify your email before signing in. Check your inbox for the verification link.',
@@ -387,7 +417,7 @@ export default function AuthScreen() {
           ]
         );
       } else {
-        Alert.alert('Login Failed', err.message || 'An error occurred during login');
+        Alert.alert('Login Failed', friendlyMessage);
       }
     } finally {
       setIsLoading(false);
@@ -447,6 +477,18 @@ export default function AuthScreen() {
       }
     } catch (err) {
       Alert.alert('Sign Up Error', 'An unexpected error occurred');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAppleLogin = async () => {
+    setIsLoading(true);
+    try {
+      const { success, error } = await signInWithApple();
+      if (!success && error?.message !== 'Sign in cancelled') {
+        Alert.alert('Apple Sign In Failed', error?.message || 'An error occurred during Apple sign in');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -697,6 +739,12 @@ export default function AuthScreen() {
           },
         ]}
       >
+        <ScrollView
+          style={{ flex: 1, width: '100%' }}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
         <View style={styles.formContainer}>
           {/* SoundBridge Logo */}
           <View style={styles.iconContainer}>
@@ -841,6 +889,16 @@ export default function AuthScreen() {
                     <Text style={styles.googleButtonText}>Continue with Google</Text>
                   </BlurView>
                 </TouchableOpacity>
+
+                {isAppleAvailable && (
+                  <AppleAuthentication.AppleAuthenticationButton
+                    buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                    buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                    cornerRadius={24}
+                    style={styles.appleButton}
+                    onPress={handleAppleLogin}
+                  />
+                )}
               </>
             )}
 
@@ -875,6 +933,7 @@ export default function AuthScreen() {
             </View>
           </View>
         </View>
+        </ScrollView>
       </Animated.View>
     </LinearGradient>
   );
@@ -883,6 +942,7 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#0A0E1A',
   },
   backgroundGradient1: {
     position: 'absolute',
@@ -916,9 +976,13 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 16,
+    paddingVertical: 24,
   },
   formContainer: {
     width: '100%',
@@ -1085,6 +1149,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(147, 197, 253, 0.3)',
+  },
+  appleButton: {
+    width: '100%',
+    height: 48,
+    marginTop: 12,
   },
   googleButtonBlur: {
     flex: 1,

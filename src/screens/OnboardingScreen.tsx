@@ -16,9 +16,13 @@ import {
   Image,
   ImageBackground,
   Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -26,6 +30,8 @@ import { useNavigation } from '@react-navigation/native';
 import { useNetwork } from '../hooks/useNetwork';
 import CountrySelector from '../components/CountrySelector';
 import { supabase } from '../lib/supabase';
+import { config } from '../config/environment';
+import * as ImagePicker from 'expo-image-picker';
 
 const { width, height } = Dimensions.get('window');
 
@@ -53,13 +59,13 @@ interface CreatorProfile {
   events_count?: number;
 }
 
-type UserType = 'music_creator' | 'podcast_creator' | 'industry_professional' | 'music_lover' | null;
+type UserType = 'music_creator' | 'podcast_creator' | 'industry_professional' | 'music_lover' | 'event_organiser' | null;
 
 // Path-specific step types
-type OnboardingStep = 
+type OnboardingStep =
   // Universal steps
-  | 'welcome' 
-  | 'userType' 
+  | 'welcome'
+  | 'userType'
   | 'welcomeConfirmation'
   // Music Creator Path steps
   | 'musicCreator_profileSetup'
@@ -84,9 +90,17 @@ type OnboardingStep =
   | 'musicLover_genres'
   | 'musicLover_events'
   | 'musicLover_valueDemo'
+  // Event Organiser Path steps
+  | 'eventOrganiser_profileSetup'
+  | 'eventOrganiser_eventTypes'
+  | 'eventOrganiser_location'
+  | 'eventOrganiser_valueDemo'
   // Shared steps (after path-specific steps)
+  | 'followSuggestions'
+  | 'notificationPermission'
   | 'tierSelection'
-  | 'payment';
+  | 'payment'
+  | 'firstPost';
 
 // Event Type interface
 interface EventType {
@@ -124,6 +138,8 @@ export default function OnboardingScreen() {
         return 'industryProfessional_profileSetup';
       case 'music_lover':
         return 'musicLover_profileSetup';
+      case 'event_organiser':
+        return 'eventOrganiser_profileSetup';
       default:
         return null;
     }
@@ -136,6 +152,8 @@ export default function OnboardingScreen() {
       case 'industry_professional':
         return 7; // User Type + 6 path steps
       case 'music_lover':
+        return 6; // User Type + 5 path steps
+      case 'event_organiser':
         return 6; // User Type + 5 path steps
       default:
         return 0;
@@ -173,16 +191,24 @@ export default function OnboardingScreen() {
       'musicLover_genres': 3,
       'musicLover_events': 4,
       'musicLover_valueDemo': 5,
-      // Shared
+      // Event Organiser
+      'eventOrganiser_profileSetup': 2,
+      'eventOrganiser_eventTypes': 3,
+      'eventOrganiser_location': 4,
+      'eventOrganiser_valueDemo': 5,
+      // Shared (followSuggestions uses same number as the step it follows)
+      'followSuggestions': 3,
+      'notificationPermission': getPathTotalSteps(type),
       'tierSelection': getPathTotalSteps(type),
       'payment': getPathTotalSteps(type),
+      'firstPost': getPathTotalSteps(type) + 1,
     };
     
     return pathSteps[step] || 0;
   };
 
   const getStepIndicatorText = (step: OnboardingStep, type: UserType): string => {
-    if (step === 'welcome' || step === 'welcomeConfirmation') return '';
+    if (step === 'welcome' || step === 'welcomeConfirmation' || step === 'firstPost') return '';
     
     const totalSteps = getPathTotalSteps(type);
     const currentStepNum = getCurrentStepNumber(step, type);
@@ -215,6 +241,7 @@ export default function OnboardingScreen() {
   const [location, setLocation] = useState(userProfile?.location || '');
   const [country, setCountry] = useState(userProfile?.country || 'United Kingdom');
   const [company, setCompany] = useState(''); // For Industry Professional path
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
 
   // Genres data
   const [availableGenres, setAvailableGenres] = useState<Genre[]>([]);
@@ -306,7 +333,40 @@ export default function OnboardingScreen() {
   // Value demo creators
   const [demoCreators, setDemoCreators] = useState<CreatorProfile[]>([]);
   const [loadingCreators, setLoadingCreators] = useState(false);
-  const [connectingIds, setConnectingIds] = useState<Set<string>>(new Set());
+  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
+
+  // Event Organiser path data
+  const eventOrganiserEventTypes = [
+    { id: 'concerts', name: 'Concerts & Live Music', emoji: '🎸' },
+    { id: 'club_nights', name: 'Club Nights & DJ Sets', emoji: '🎧' },
+    { id: 'workshops', name: 'Workshops & Masterclasses', emoji: '📚' },
+    { id: 'conferences', name: 'Conferences & Talks', emoji: '🎤' },
+    { id: 'comedy', name: 'Comedy Shows', emoji: '😂' },
+    { id: 'open_mic', name: 'Open Mic Nights', emoji: '🎙️' },
+    { id: 'film', name: 'Film Screenings', emoji: '🎬' },
+    { id: 'fitness', name: 'Fitness & Wellness', emoji: '🧘' },
+    { id: 'art_culture', name: 'Art & Culture', emoji: '🎨' },
+    { id: 'networking', name: 'Networking Events', emoji: '🤝' },
+  ];
+  const [selectedOrgEventTypes, setSelectedOrgEventTypes] = useState<string[]>([]);
+  const eventOrganiserReachOptions = [
+    { id: 'local', label: 'Mostly local (my city/area)' },
+    { id: 'regional', label: 'Regional (multiple cities)' },
+    { id: 'national', label: 'National' },
+    { id: 'international', label: 'International / Online' },
+  ];
+  const [selectedOrgReach, setSelectedOrgReach] = useState<string | null>(null);
+
+  // Follow suggestions step
+  const [suggestedCreators, setSuggestedCreators] = useState<CreatorProfile[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [suggestionFollowedIds, setSuggestionFollowedIds] = useState<Set<string>>(new Set());
+  const suggestionsChecked = useRef(false);
+
+  // First post step
+  const [firstPostText, setFirstPostText] = useState('');
+  const [firstPostImage, setFirstPostImage] = useState<string | null>(null);
+  const [publishingPost, setPublishingPost] = useState(false);
 
   // Payment data
   const [cardNumber, setCardNumber] = useState('');
@@ -399,10 +459,27 @@ export default function OnboardingScreen() {
       'musicCreator_valueDemo',
       'podcastCreator_valueDemo',
       'industryProfessional_valueDemo',
-      'musicLover_valueDemo'
+      'musicLover_valueDemo',
+      'eventOrganiser_valueDemo',
     ];
     if (valueDemoSteps.includes(currentStep) && demoCreators.length === 0) {
       loadDemoCreators();
+    }
+  }, [currentStep]);
+
+  // Load follow suggestions when that step is reached (only once)
+  useEffect(() => {
+    if (currentStep === 'followSuggestions' && !suggestionsChecked.current) {
+      suggestionsChecked.current = true;
+      loadFollowSuggestions();
+    }
+  }, [currentStep]);
+
+
+  // Pre-fill first post text when that step is reached
+  useEffect(() => {
+    if (currentStep === 'firstPost' && !firstPostText) {
+      setFirstPostText(getFirstPostTemplate());
     }
   }, [currentStep]);
 
@@ -456,15 +533,33 @@ export default function OnboardingScreen() {
   const loadGenres = async () => {
     setLoadingGenres(true);
     try {
-      console.log('🎵 Loading genres for onboarding...');
-      const response = await fetch('https://www.soundbridge.live/api/genres?category=music');
+      const url = `${config.apiUrl}/api/genres?category=music`;
+      console.log('🎵 Loading genres from:', url);
+      const response = await fetch(url);
+
+      console.log('📡 Genres API response:', {
+        status: response.status,
+        statusText: response.statusText,
+        contentType: response.headers.get('content-type'),
+        url: response.url,
+      });
+
+      // Check if response is OK and content-type is JSON
+      const contentType = response.headers.get('content-type');
+      if (!response.ok || !contentType || !contentType.includes('application/json')) {
+        console.error('❌ Genres API returned non-JSON or error:', response.status, contentType);
+        // Gracefully handle error - don't block user
+        return;
+      }
+
       const data = await response.json();
-      
-      if (data.success && data.genres) {
+      console.log('📦 Genres API data:', data);
+
+      if (data.success && data.genres && data.genres.length > 0) {
         console.log('✅ Loaded', data.genres.length, 'music genres');
         setAvailableGenres(data.genres);
       } else {
-        console.error('❌ Failed to load genres:', data);
+        console.error('❌ API returned success=false or empty genres:', data);
       }
     } catch (error) {
       console.error('❌ Error loading genres:', error);
@@ -483,7 +578,7 @@ export default function OnboardingScreen() {
     setCheckingUsername(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const response = await fetch('https://www.soundbridge.live/api/onboarding/check-username', {
+      const response = await fetch(`${config.apiUrl}/api/onboarding/check-username`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -491,6 +586,14 @@ export default function OnboardingScreen() {
         },
         body: JSON.stringify({ username: usernameToCheck }),
       });
+
+      // Check if response is OK and content-type is JSON
+      const contentType = response.headers.get('content-type');
+      if (!response.ok || !contentType || !contentType.includes('application/json')) {
+        console.warn('⚠️ Username check API returned non-JSON or error:', response.status);
+        setUsernameAvailable(null);
+        return;
+      }
 
       const data = await response.json();
       setUsernameAvailable(data.available ?? false);
@@ -502,13 +605,275 @@ export default function OnboardingScreen() {
     }
   };
 
+  // Load genre-matched creators for follow suggestions
+  const loadFollowSuggestions = async () => {
+    setLoadingSuggestions(true);
+    try {
+      // Use the selected genres/categories to find matching creators
+      const genreIds = selectedGenres.length > 0
+        ? selectedGenres
+        : selectedPodcastCategories;
+
+      let query = supabase
+        .from('profiles')
+        .select('id, display_name, username, avatar_url, location, bio, followers_count, tracks_count')
+        .neq('id', user?.id)
+        .order('followers_count', { ascending: false })
+        .limit(10);
+
+      if (genreIds.length > 0) {
+        // Filter to creators who have at least one matching genre
+        // Using RPC or a join — fall back to top creators if query fails
+        const { data } = await supabase
+          .from('profiles')
+          .select('id, display_name, username, avatar_url, location, bio, followers_count, tracks_count')
+          .neq('id', user?.id)
+          .in('id',
+            (await supabase
+              .from('user_genres')
+              .select('user_id')
+              .in('genre_id', genreIds)
+              .then(r => (r.data || []).map((x: any) => x.user_id))
+            )
+          )
+          .order('followers_count', { ascending: false })
+          .limit(10);
+        if (data && data.length >= 3) {
+          setSuggestedCreators(data as CreatorProfile[]);
+          return;
+        }
+      }
+
+      // If genre match returns < 3, skip the step
+      setSuggestedCreators([]);
+      const nextStep =
+        userType === 'music_creator' ? 'musicCreator_role' :
+        userType === 'podcast_creator' ? 'podcastCreator_role' :
+        userType === 'industry_professional' ? 'industryProfessional_goals' :
+        userType === 'music_lover' ? 'musicLover_events' :
+        'eventOrganiser_location';
+      setLoadingSuggestions(false);
+      animateStepTransition(nextStep);
+      return;
+    } catch (error) {
+      console.error('❌ Error loading follow suggestions:', error);
+      setSuggestedCreators([]);
+      const nextStep =
+        userType === 'music_creator' ? 'musicCreator_role' :
+        userType === 'podcast_creator' ? 'podcastCreator_role' :
+        userType === 'industry_professional' ? 'industryProfessional_goals' :
+        userType === 'music_lover' ? 'musicLover_events' :
+        'eventOrganiser_location';
+      setLoadingSuggestions(false);
+      animateStepTransition(nextStep);
+      return;
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  };
+
+  // Generate per-user-type first post template
+  const getFirstPostTemplate = (): string => {
+    const genreNames = selectedGenres
+      .map(id => availableGenres.find(g => g.id === id)?.name)
+      .filter(Boolean)
+      .slice(0, 2)
+      .join(' & ');
+
+    const categoryNames = selectedPodcastCategories
+      .map(id => availablePodcastCategories.find(c => c.id === id)?.name)
+      .filter(Boolean)
+      .slice(0, 2)
+      .join(' & ');
+
+    const orgEventNames = selectedOrgEventTypes
+      .map(id => eventOrganiserEventTypes.find(e => e.id === id)?.name)
+      .filter(Boolean)
+      .slice(0, 2)
+      .join(' & ');
+
+    const roleName = selectedProfessionalRole
+      ? professionalRoles.find(r => r.id === selectedProfessionalRole)?.name || 'music professional'
+      : 'music professional';
+
+    switch (userType) {
+      case 'music_creator':
+        return genreNames
+          ? `Just joined SoundBridge! I make ${genreNames} music and I'm here to share my sound with the world. Follow along 🎵`
+          : `Just joined SoundBridge! I'm a music creator here to share my sound with the world. Follow along 🎵`;
+      case 'podcast_creator':
+        return categoryNames
+          ? `Just joined SoundBridge! I create ${categoryNames} podcasts and I'm excited to build my audience here. Follow along 🎙`
+          : `Just joined SoundBridge! I'm a podcast creator excited to build my audience here. Follow along 🎙`;
+      case 'industry_professional':
+        return `Just joined SoundBridge! I'm a ${roleName} looking to connect with talented creators. Let's collaborate. 🤝`;
+      case 'music_lover':
+        return `Just joined SoundBridge! Here to discover great music and support the artists behind it. 🎧`;
+      case 'event_organiser':
+        return orgEventNames
+          ? `Just joined SoundBridge! I organise ${orgEventNames} and I'm here to reach new audiences. Follow me for upcoming events. 🎟`
+          : `Just joined SoundBridge! I organise events and I'm here to reach new audiences. Follow me for upcoming events. 🎟`;
+      default:
+        return `Just joined SoundBridge! Excited to be part of this community. 🎵`;
+    }
+  };
+
+  // Pick profile photo
+  const handleAvatarPick = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow access to your photo library to add a profile photo.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setAvatarUri(result.assets[0].uri);
+    }
+  };
+
+  // Pick photo for first post
+  const handleFirstPostImagePick = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow access to your photo library to add a photo.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setFirstPostImage(result.assets[0].uri);
+    }
+  };
+
+  // Publish first post + complete onboarding
+  const handlePublishFirstPost = async () => {
+    if (publishingPost) return;
+    if (!firstPostText.trim()) {
+      Alert.alert('Required', 'Please write something for your first post.');
+      return;
+    }
+    setPublishingPost(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        Alert.alert('Error', 'Session expired. Please sign in again.');
+        return;
+      }
+
+      // Upload avatar if selected (best effort — don't block onboarding on failure)
+      let uploadedAvatarUrl: string | undefined;
+      if (avatarUri) {
+        try {
+          const avatarFormData = new FormData();
+          avatarFormData.append('file', { uri: avatarUri, type: 'image/jpeg', name: 'avatar.jpg' } as any);
+          avatarFormData.append('userId', user?.id || '');
+          const avatarResponse = await fetch(`${config.apiUrl}/api/upload/avatar`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${session.access_token}` },
+            body: avatarFormData,
+          });
+          if (avatarResponse.ok) {
+            const avatarData = await avatarResponse.json();
+            uploadedAvatarUrl = avatarData.url;
+          }
+        } catch (avatarError) {
+          console.warn('⚠️ Avatar upload failed, continuing onboarding:', avatarError);
+        }
+      }
+
+      // Complete profile first
+      await fetch(`${config.apiUrl}/api/user/complete-profile`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          role: userType === 'music_lover' ? 'listener' : 'creator',
+          display_name: displayName,
+          username: username,
+          country: country,
+          location: location,
+          genres: selectedGenres.length > 0 ? selectedGenres : undefined,
+          onboarding_user_type: userType,
+          ...(uploadedAvatarUrl && { avatar_url: uploadedAvatarUrl }),
+        }),
+      });
+
+      // Publish the post (best effort — don't block onboarding on failure)
+      try {
+        const formData = new FormData();
+        formData.append('content', firstPostText.trim());
+        formData.append('post_type', 'text');
+        if (firstPostImage) {
+          const filename = firstPostImage.split('/').pop() || 'photo.jpg';
+          formData.append('image', { uri: firstPostImage, name: filename, type: 'image/jpeg' } as any);
+        }
+        const postResponse = await fetch(`${config.apiUrl}/api/posts`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${session.access_token}` },
+          body: formData,
+        });
+        // If API is down/returning HTML, fall back to direct Supabase insert
+        if (!postResponse.ok) {
+          throw new Error('API post failed');
+        }
+      } catch (postError) {
+        console.warn('⚠️ API post failed, falling back to direct Supabase insert:', postError);
+        try {
+          await supabase.from('posts').insert({
+            user_id: user?.id,
+            content: firstPostText.trim(),
+            post_type: 'text',
+            is_published: true,
+            created_at: new Date().toISOString(),
+          });
+          console.log('✅ First post published via Supabase fallback');
+        } catch (supabaseError) {
+          console.warn('⚠️ Supabase post fallback also failed:', supabaseError);
+        }
+      }
+
+      // Complete onboarding
+      await fetch(`${config.apiUrl}/api/user/complete-onboarding`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ userId: user?.id }),
+      });
+
+      await refreshUser();
+
+      (navigation as any).reset({
+        index: 0,
+        routes: [{ name: 'MainTabs' }],
+      });
+    } catch (error) {
+      console.error('❌ Error publishing first post:', error);
+      Alert.alert('Error', 'Something went wrong. Please try again.');
+    } finally {
+      setPublishingPost(false);
+    }
+  };
+
   // Load demo creators
   const loadDemoCreators = async () => {
     setLoadingCreators(true);
     try {
       // Try to fetch from API endpoint if available
       const { data: { session } } = await supabase.auth.getSession();
-      const response = await fetch('https://www.soundbridge.live/api/onboarding/value-demo', {
+      const response = await fetch(`${config.apiUrl}/api/onboarding/value-demo`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -520,6 +885,7 @@ export default function OnboardingScreen() {
         const data = await response.json();
         if (data.creators && data.creators.length > 0) {
           setDemoCreators(data.creators);
+          setLoadingCreators(false);
           return;
         }
       }
@@ -590,19 +956,62 @@ export default function OnboardingScreen() {
     }
   };
 
-  // Handle connect to creator
-  const handleConnectToCreator = async (creatorId: string) => {
-    if (connectingIds.has(creatorId)) return;
+  // Track which creators have been followed (persistent across the session)
+  const [followedCreators, setFollowedCreators] = useState<Set<string>>(new Set());
 
-    setConnectingIds(prev => new Set(prev).add(creatorId));
+  // Handle follow/unfollow creator using the follow endpoint
+  const handleFollowCreator = async (creatorId: string) => {
+    const isCurrentlyFollowing = followedCreators.has(creatorId);
+    console.log('👆 Tapped creator:', creatorId, 'Currently following:', isCurrentlyFollowing);
+
+    setFollowingIds(prev => new Set(prev).add(creatorId));
     try {
-      await sendRequest(creatorId);
-      // Optionally show success feedback
+      const { data: { session } } = await supabase.auth.getSession();
+      const url = `${config.apiUrl}/api/user/${creatorId}/follow`;
+      const method = isCurrentlyFollowing ? 'DELETE' : 'POST';
+      console.log('🌐 API Call:', method, url);
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session && { 'Authorization': `Bearer ${session.access_token}` }),
+        },
+      });
+
+      const data = await response.json();
+      console.log('📡 API Response:', {
+        status: response.status,
+        success: data.success,
+        data: JSON.stringify(data, null, 2)
+      });
+
+      if (data.success) {
+        if (isCurrentlyFollowing) {
+          console.log('✅ Successfully unfollowed creator:', creatorId);
+          setFollowedCreators(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(creatorId);
+            console.log('🔄 Updated followedCreators:', Array.from(newSet));
+            return newSet;
+          });
+        } else {
+          console.log('✅ Successfully followed creator:', creatorId);
+          setFollowedCreators(prev => {
+            const newSet = new Set(prev).add(creatorId);
+            console.log('🔄 Updated followedCreators:', Array.from(newSet));
+            return newSet;
+          });
+        }
+      } else {
+        console.error('❌ API failed:', data.error);
+        Alert.alert('Error', data.error || `Failed to ${isCurrentlyFollowing ? 'unfollow' : 'follow'} (${response.status})`);
+      }
     } catch (error) {
-      console.error('Failed to send connection request:', error);
-      Alert.alert('Error', 'Failed to send connection request. Please try again.');
+      console.error('❌ Exception:', error);
+      Alert.alert('Error', 'Failed to update follow status. Please try again.');
     } finally {
-      setConnectingIds(prev => {
+      setFollowingIds(prev => {
         const newSet = new Set(prev);
         newSet.delete(creatorId);
         return newSet;
@@ -612,22 +1021,44 @@ export default function OnboardingScreen() {
 
   // Save genre preferences
   const saveGenrePreferences = async () => {
-    if (!user?.id || selectedGenres.length < 3) return false;
+    if (!user?.id || selectedGenres.length < 3 || selectedGenres.length > 5) return false;
 
     try {
       console.log('💾 Saving genre preferences:', selectedGenres);
-      const response = await fetch(`https://www.soundbridge.live/api/users/${user.id}/genres`, {
+      
+      // Get session for auth token
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(`${config.apiUrl}/api/users/${user.id}/genres`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(session && { 'Authorization': `Bearer ${session.access_token}` }),
         },
         body: JSON.stringify({
           genre_ids: selectedGenres
         })
       });
 
-      const data = await response.json();
+      // Always try to parse JSON response even on error
+      const contentType = response.headers.get('content-type');
+      const responseText = await response.text();
+      let data;
       
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        data = { raw: responseText };
+      }
+
+      if (!response.ok) {
+        console.error('❌ Save genres API error:');
+        console.error('  Status:', response.status, response.statusText);
+        console.error('  Content-Type:', contentType);
+        console.error('  Response:', JSON.stringify(data, null, 2));
+        return false;
+      }
+
       if (data.success) {
         console.log('✅ Genre preferences saved successfully');
         return true;
@@ -644,15 +1075,25 @@ export default function OnboardingScreen() {
   // Load event types from API
   const loadEventTypes = async () => {
     if (!userType) return;
-    
+
     setLoadingEventTypes(true);
     try {
       console.log('🎪 Loading event types for user type:', userType);
-      const response = await fetch(
-        `https://www.soundbridge.live/api/event-types?user_type=${userType}`
-      );
-      const data = await response.json();
+      const url = `${config.apiUrl}/api/event-types?user_type=${userType}`;
+      console.log('🔗 Event types URL:', url);
       
+      const response = await fetch(url);
+      
+      // Check if response is OK and content-type is JSON
+      const contentType = response.headers.get('content-type');
+      if (!response.ok || !contentType || !contentType.includes('application/json')) {
+        console.error('❌ Event types API returned non-JSON or error:', response.status, contentType);
+        // Gracefully handle error - don't block user
+        return;
+      }
+      
+      const data = await response.json();
+
       if (data.success && data.event_types) {
         console.log('✅ Loaded', data.event_types.length, 'event types');
         setAvailableEventTypes(data.event_types);
@@ -679,7 +1120,7 @@ export default function OnboardingScreen() {
 
       console.log('💾 Saving event preferences:', selectedEventTypes);
       const response = await fetch(
-        `https://www.soundbridge.live/api/users/${user.id}/event-preferences`,
+        `${config.apiUrl}/api/users/${user.id}/event-preferences`,
         {
           method: 'POST',
           headers: {
@@ -717,7 +1158,7 @@ export default function OnboardingScreen() {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         const firstStep = getPathFirstStep(type);
-        await fetch('https://www.soundbridge.live/api/user/onboarding-progress', {
+        await fetch(`${config.apiUrl}/api/user/onboarding-progress`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -746,8 +1187,7 @@ export default function OnboardingScreen() {
     setSelectedTier(tier);
 
     if (tier === 'free') {
-      // Skip payment, go directly to welcome confirmation
-      animateStepTransition('welcomeConfirmation');
+      animateStepTransition('firstPost');
     } else {
       // Navigate to UpgradeScreen for premium and unlimited tiers
       navigation.navigate('Upgrade' as never);
@@ -766,7 +1206,7 @@ export default function OnboardingScreen() {
       }
 
       // Call API to create Stripe subscription (immediate payment, no trial)
-      const response = await fetch('https://www.soundbridge.live/api/onboarding/upgrade-pro', {
+      const response = await fetch(`${config.apiUrl}/api/onboarding/upgrade-pro`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -813,8 +1253,8 @@ export default function OnboardingScreen() {
         duration: 300,
         useNativeDriver: true,
       }),
-    ]).start(() => {
-      // After animation completes, navigate to next screen
+    ]).start((_result) => {
+      // Always navigate — even if animation was interrupted (prevents blank screen)
       setCurrentStep(nextStep);
     });
   };
@@ -871,12 +1311,21 @@ export default function OnboardingScreen() {
 
         case 'musicCreator_genres':
           if (selectedGenres.length < 3) {
-            Alert.alert('Select Genres', 'Please select at least 3 genres to continue');
+            Alert.alert('Select Genres', 'Please select at least 3 genres (maximum 5) to continue');
+            setLoading(false);
+            return;
+          }
+          if (selectedGenres.length > 5) {
+            Alert.alert('Too Many Genres', 'Please select no more than 5 genres');
             setLoading(false);
             return;
           }
           await saveGenrePreferences();
-          animateStepTransition('musicCreator_role');
+          if (suggestionsChecked.current && suggestedCreators.length < 3) {
+            animateStepTransition('musicCreator_role');
+          } else {
+            animateStepTransition('followSuggestions');
+          }
           break;
 
         case 'musicCreator_role':
@@ -906,7 +1355,7 @@ export default function OnboardingScreen() {
           break;
 
         case 'musicCreator_valueDemo':
-          animateStepTransition('tierSelection');
+          animateStepTransition('notificationPermission');
           break;
 
         // ============================================
@@ -939,7 +1388,11 @@ export default function OnboardingScreen() {
             return;
           }
           // TODO: Save podcast categories to API in future
-          animateStepTransition('podcastCreator_role');
+          if (suggestionsChecked.current && suggestedCreators.length < 3) {
+            animateStepTransition('podcastCreator_role');
+          } else {
+            animateStepTransition('followSuggestions');
+          }
           break;
 
         case 'podcastCreator_role':
@@ -969,7 +1422,7 @@ export default function OnboardingScreen() {
           break;
 
         case 'podcastCreator_valueDemo':
-          animateStepTransition('tierSelection');
+          animateStepTransition('notificationPermission');
           break;
 
         // ============================================
@@ -1008,12 +1461,21 @@ export default function OnboardingScreen() {
 
         case 'industryProfessional_genres':
           if (selectedGenres.length < 2) {
-            Alert.alert('Select Genres', 'Please select at least 2 genres to continue');
+            Alert.alert('Select Genres', 'Please select at least 2 genres (maximum 5) to continue');
+            setLoading(false);
+            return;
+          }
+          if (selectedGenres.length > 5) {
+            Alert.alert('Too Many Genres', 'Please select no more than 5 genres');
             setLoading(false);
             return;
           }
           await saveGenrePreferences();
-          animateStepTransition('industryProfessional_goals');
+          if (suggestionsChecked.current && suggestedCreators.length < 3) {
+            animateStepTransition('industryProfessional_goals');
+          } else {
+            animateStepTransition('followSuggestions');
+          }
           break;
 
         case 'industryProfessional_goals':
@@ -1028,7 +1490,7 @@ export default function OnboardingScreen() {
           break;
 
         case 'industryProfessional_valueDemo':
-          animateStepTransition('tierSelection');
+          animateStepTransition('notificationPermission');
           break;
 
         // ============================================
@@ -1055,12 +1517,21 @@ export default function OnboardingScreen() {
 
         case 'musicLover_genres':
           if (selectedGenres.length < 3) {
-            Alert.alert('Select Genres', 'Please select at least 3 genres to continue');
+            Alert.alert('Select Genres', 'Please select at least 3 genres (maximum 5) to continue');
+            setLoading(false);
+            return;
+          }
+          if (selectedGenres.length > 5) {
+            Alert.alert('Too Many Genres', 'Please select no more than 5 genres');
             setLoading(false);
             return;
           }
           await saveGenrePreferences();
-          animateStepTransition('musicLover_events');
+          if (suggestionsChecked.current && suggestedCreators.length < 3) {
+            animateStepTransition('musicLover_events');
+          } else {
+            animateStepTransition('followSuggestions');
+          }
           break;
 
         case 'musicLover_events':
@@ -1079,12 +1550,74 @@ export default function OnboardingScreen() {
           break;
 
         case 'musicLover_valueDemo':
-          animateStepTransition('tierSelection');
+          animateStepTransition('notificationPermission');
+          break;
+
+        // ============================================
+        // EVENT ORGANISER PATH
+        // ============================================
+        case 'eventOrganiser_profileSetup':
+          if (!displayName.trim()) {
+            Alert.alert('Required', 'Please enter your display name');
+            setLoading(false);
+            return;
+          }
+          if (!username.trim() || username.length < 3) {
+            Alert.alert('Required', 'Please enter a valid username (minimum 3 characters)');
+            setLoading(false);
+            return;
+          }
+          if (usernameAvailable === false) {
+            Alert.alert('Username Taken', 'This username is already taken. Please choose another.');
+            setLoading(false);
+            return;
+          }
+          animateStepTransition('eventOrganiser_eventTypes');
+          break;
+
+        case 'eventOrganiser_eventTypes':
+          if (selectedOrgEventTypes.length < 1) {
+            Alert.alert('Select Event Types', 'Please select at least 1 event type to continue');
+            setLoading(false);
+            return;
+          }
+          if (suggestionsChecked.current && suggestedCreators.length < 3) {
+            animateStepTransition('eventOrganiser_location');
+          } else {
+            animateStepTransition('followSuggestions');
+          }
+          break;
+
+        case 'eventOrganiser_location':
+          if (!selectedOrgReach) {
+            Alert.alert('Select Reach', 'Please select your event reach to continue');
+            setLoading(false);
+            return;
+          }
+          animateStepTransition('eventOrganiser_valueDemo');
+          break;
+
+        case 'eventOrganiser_valueDemo':
+          animateStepTransition('notificationPermission');
           break;
 
         // ============================================
         // SHARED STEPS
         // ============================================
+
+        case 'followSuggestions':
+          // Route back to the correct next step for each path
+          if (userType === 'music_creator') animateStepTransition('musicCreator_role');
+          else if (userType === 'podcast_creator') animateStepTransition('podcastCreator_role');
+          else if (userType === 'industry_professional') animateStepTransition('industryProfessional_goals');
+          else if (userType === 'music_lover') animateStepTransition('musicLover_events');
+          else if (userType === 'event_organiser') animateStepTransition('eventOrganiser_location');
+          break;
+
+        case 'notificationPermission':
+          // handleNext here just means "skip" — actual permission request is in the dedicated handler
+          animateStepTransition('tierSelection');
+          break;
 
         case 'welcomeConfirmation':
           // Complete onboarding
@@ -1100,7 +1633,7 @@ export default function OnboardingScreen() {
             }
 
             // Complete profile
-            const profileResponse = await fetch('https://www.soundbridge.live/api/user/complete-profile', {
+            const profileResponse = await fetch(`${config.apiUrl}/api/user/complete-profile`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -1125,7 +1658,7 @@ export default function OnboardingScreen() {
             }
 
             // Complete onboarding
-            const onboardingResponse = await fetch('https://www.soundbridge.live/api/user/complete-onboarding', {
+            const onboardingResponse = await fetch(`${config.apiUrl}/api/user/complete-onboarding`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -1181,7 +1714,9 @@ export default function OnboardingScreen() {
         animateStepTransitionBack('musicCreator_profileSetup');
         break;
       case 'musicCreator_role':
-        animateStepTransitionBack('musicCreator_genres');
+        suggestedCreators.length >= 3
+          ? animateStepTransitionBack('followSuggestions')
+          : animateStepTransitionBack('musicCreator_genres');
         break;
       case 'musicCreator_events':
         animateStepTransitionBack('musicCreator_role');
@@ -1189,7 +1724,7 @@ export default function OnboardingScreen() {
       case 'musicCreator_valueDemo':
         animateStepTransitionBack('musicCreator_events');
         break;
-      
+
       // Podcast Creator Path
       case 'podcastCreator_profileSetup':
         animateStepTransitionBack('userType');
@@ -1198,7 +1733,9 @@ export default function OnboardingScreen() {
         animateStepTransitionBack('podcastCreator_profileSetup');
         break;
       case 'podcastCreator_role':
-        animateStepTransitionBack('podcastCreator_categories');
+        suggestedCreators.length >= 3
+          ? animateStepTransitionBack('followSuggestions')
+          : animateStepTransitionBack('podcastCreator_categories');
         break;
       case 'podcastCreator_events':
         animateStepTransitionBack('podcastCreator_role');
@@ -1206,7 +1743,7 @@ export default function OnboardingScreen() {
       case 'podcastCreator_valueDemo':
         animateStepTransitionBack('podcastCreator_events');
         break;
-      
+
       // Industry Professional Path
       case 'industryProfessional_profileSetup':
         animateStepTransitionBack('userType');
@@ -1218,12 +1755,14 @@ export default function OnboardingScreen() {
         animateStepTransitionBack('industryProfessional_role');
         break;
       case 'industryProfessional_goals':
-        animateStepTransitionBack('industryProfessional_genres');
+        suggestedCreators.length >= 3
+          ? animateStepTransitionBack('followSuggestions')
+          : animateStepTransitionBack('industryProfessional_genres');
         break;
       case 'industryProfessional_valueDemo':
         animateStepTransitionBack('industryProfessional_goals');
         break;
-      
+
       // Music Lover Path
       case 'musicLover_profileSetup':
         animateStepTransitionBack('userType');
@@ -1232,19 +1771,54 @@ export default function OnboardingScreen() {
         animateStepTransitionBack('musicLover_profileSetup');
         break;
       case 'musicLover_events':
-        animateStepTransitionBack('musicLover_genres');
+        suggestedCreators.length >= 3
+          ? animateStepTransitionBack('followSuggestions')
+          : animateStepTransitionBack('musicLover_genres');
         break;
       case 'musicLover_valueDemo':
         animateStepTransitionBack('musicLover_events');
         break;
-      
+
+      // Event Organiser Path
+      case 'eventOrganiser_profileSetup':
+        animateStepTransitionBack('userType');
+        break;
+      case 'eventOrganiser_eventTypes':
+        animateStepTransitionBack('eventOrganiser_profileSetup');
+        break;
+      case 'eventOrganiser_location':
+        suggestedCreators.length >= 3
+          ? animateStepTransitionBack('followSuggestions')
+          : animateStepTransitionBack('eventOrganiser_eventTypes');
+        break;
+      case 'eventOrganiser_valueDemo':
+        animateStepTransitionBack('eventOrganiser_location');
+        break;
+
+      // Shared — followSuggestions goes back to the genre/category step
+      case 'followSuggestions':
+        if (userType === 'music_creator') animateStepTransitionBack('musicCreator_genres');
+        else if (userType === 'podcast_creator') animateStepTransitionBack('podcastCreator_categories');
+        else if (userType === 'industry_professional') animateStepTransitionBack('industryProfessional_genres');
+        else if (userType === 'music_lover') animateStepTransitionBack('musicLover_genres');
+        else if (userType === 'event_organiser') animateStepTransitionBack('eventOrganiser_eventTypes');
+        break;
+
       // Shared steps
-      case 'tierSelection':
+      case 'notificationPermission':
         // Go back to path-specific value demo
         if (userType === 'music_creator') animateStepTransitionBack('musicCreator_valueDemo');
         else if (userType === 'podcast_creator') animateStepTransitionBack('podcastCreator_valueDemo');
         else if (userType === 'industry_professional') animateStepTransitionBack('industryProfessional_valueDemo');
         else if (userType === 'music_lover') animateStepTransitionBack('musicLover_valueDemo');
+        else if (userType === 'event_organiser') animateStepTransitionBack('eventOrganiser_valueDemo');
+        break;
+      case 'tierSelection':
+        animateStepTransitionBack('notificationPermission');
+        break;
+
+      case 'firstPost':
+        animateStepTransitionBack('tierSelection');
         break;
       case 'payment':
         animateStepTransitionBack('tierSelection');
@@ -1267,6 +1841,11 @@ export default function OnboardingScreen() {
     if (selectedGenres.includes(genreId)) {
       setSelectedGenres(selectedGenres.filter(id => id !== genreId));
     } else {
+      // Prevent selecting more than 5 genres
+      if (selectedGenres.length >= 5) {
+        Alert.alert('Maximum 5 Genres', 'You can only select up to 5 genres. Please deselect one to add another.');
+        return;
+      }
       setSelectedGenres([...selectedGenres, genreId]);
     }
   };
@@ -1294,14 +1873,23 @@ export default function OnboardingScreen() {
     setLoadingPodcastCategories(true);
     try {
       console.log('🎙️ Loading podcast categories for onboarding...');
-      const response = await fetch('https://www.soundbridge.live/api/genres?category=podcast');
+      const response = await fetch(`${config.apiUrl}/api/genres?category=podcast`);
+
+      // Check if response is OK and content-type is JSON
+      const contentType = response.headers.get('content-type');
+      if (!response.ok || !contentType || !contentType.includes('application/json')) {
+        console.error('❌ Podcast categories API returned non-JSON or error:', response.status, contentType);
+        // Gracefully handle error - don't block user
+        return;
+      }
+
       const data = await response.json();
-      
-      if (data.success && data.genres) {
+
+      if (data.success && data.genres && data.genres.length > 0) {
         console.log('✅ Loaded', data.genres.length, 'podcast categories');
         setAvailablePodcastCategories(data.genres);
       } else {
-        console.error('❌ Failed to load podcast categories:', data);
+        console.error('❌ API returned success=false or empty categories:', data);
       }
     } catch (error) {
       console.error('❌ Error loading podcast categories:', error);
@@ -1630,6 +2218,33 @@ export default function OnboardingScreen() {
                 </Text>
               </View>
             </TouchableOpacity>
+
+            {/* Option 5: Event Organiser */}
+            <TouchableOpacity
+              style={[
+                styles.roleCard,
+                selectedRole === 'event_organiser' && styles.roleCardSelected
+              ]}
+              onPress={() => {
+                setSelectedRole('event_organiser');
+                handleUserTypeSelection('event_organiser');
+              }}
+            >
+              <View style={[styles.roleIconBox, selectedRole === 'event_organiser' && { backgroundColor: '#F59E0B' }]}>
+                <Ionicons name="ticket" size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.roleTextContent}>
+                <View style={styles.roleHeader}>
+                  <Text style={styles.roleTitle}>Event Organiser</Text>
+                  <View style={[styles.radioCircle, selectedRole === 'event_organiser' && styles.radioCircleChecked]}>
+                    {selectedRole === 'event_organiser' && <View style={styles.radioCircleInner} />}
+                  </View>
+                </View>
+                <Text style={styles.roleDescription}>
+                  Promote events, sell tickets, grow your audience.
+                </Text>
+              </View>
+            </TouchableOpacity>
           </Animated.View>
 
           {/* Footer / Skip Action */}
@@ -1662,174 +2277,180 @@ export default function OnboardingScreen() {
         <View style={styles.backButtonPlaceholder} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Animated.View 
-          style={[
-            styles.headerContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
-            }
-          ]}
-        >
-          <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
-            Let's set up your profile
-          </Text>
-        </Animated.View>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Animated.View
+            style={[
+              styles.headerContainer,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
+              }
+            ]}
+          >
+            <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
+              Let's set up your profile
+            </Text>
+          </Animated.View>
 
-        <Animated.View 
-          style={[
-            styles.formContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }]
-            }
-          ]}
-        >
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Display Name</Text>
-            <TextInput
-              style={[styles.textInput, { 
-                backgroundColor: theme.colors.surface, 
-                borderColor: theme.colors.border,
-                color: theme.colors.text 
-              }]}
-              value={displayName}
-              onChangeText={setDisplayName}
-              placeholder="How should people call you?"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Username</Text>
-            <View style={styles.usernameContainer}>
-              <Text style={[styles.usernamePrefix, { color: theme.colors.textSecondary }]}>@</Text>
+          <Animated.View
+            style={[
+              styles.formContainer,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }]
+              }
+            ]}
+          >
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Display Name</Text>
               <TextInput
-                style={[styles.textInput, styles.usernameInput, { 
-                  backgroundColor: theme.colors.surface, 
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
                   borderColor: theme.colors.border,
-                  color: theme.colors.text 
+                  color: theme.colors.text
                 }]}
-                value={username}
-                onChangeText={(text) => setUsername(text.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                placeholder="yourname"
+                value={displayName}
+                onChangeText={setDisplayName}
+                placeholder="How should people call you?"
                 placeholderTextColor={theme.colors.textSecondary}
-                autoCapitalize="none"
               />
             </View>
-            {checkingUsername ? (
-              <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
-                Checking...
-              </Text>
-            ) : usernameAvailable === true ? (
-              <Text style={[styles.usernameStatus, { color: '#10B981' }]}>
-                ✓ Available
-              </Text>
-            ) : usernameAvailable === false ? (
-              <Text style={[styles.usernameStatus, { color: '#EF4444' }]}>
-                ✗ Already taken
-              </Text>
-            ) : username.length > 0 && username.length < 3 ? (
-              <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
-                Minimum 3 characters
-              </Text>
-            ) : null}
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-              What genres do you work with?
-            </Text>
-            <Text style={[styles.inputHint, { color: theme.colors.textSecondary }]}>
-              (Select at least 3)
-            </Text>
-            {loadingGenres ? (
-              <ActivityIndicator size="small" color={theme.colors.primary} style={styles.genreLoading} />
-            ) : (
-              <View style={styles.genresList}>
-                {availableGenres.slice(0, 12).map((item) => {
-                  const isSelected = selectedGenres.includes(item.id);
-                  return (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={[
-                        styles.genreChip,
-                        { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-                        isSelected && styles.genreChipSelected,
-                      ]}
-                      onPress={() => toggleGenre(item.id)}
-                    >
-                      <Text style={[
-                        styles.genreText,
-                        { color: theme.colors.text },
-                        isSelected && styles.genreTextSelected,
-                      ]}>
-                        {item.name}
-                      </Text>
-                      {isSelected && (
-                        <Ionicons name="checkmark-circle" size={16} color="#FFFFFF" style={styles.genreCheckmark} />
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Username</Text>
+              <View style={styles.usernameContainer}>
+                <Text style={[styles.usernamePrefix, { color: theme.colors.textSecondary }]}>@</Text>
+                <TextInput
+                  style={[styles.textInput, styles.usernameInput, {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                    color: theme.colors.text
+                  }]}
+                  value={username}
+                  onChangeText={(text) => setUsername(text.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                  placeholder="yourname"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  autoCapitalize="none"
+                />
               </View>
-            )}
-            {selectedGenres.length > 0 && (
-              <Text style={[styles.selectedGenresText, { color: theme.colors.textSecondary }]}>
-                Selected: {selectedGenres.map(id => availableGenres.find(g => g.id === id)?.name).filter(Boolean).join(', ')}
+              {checkingUsername ? (
+                <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
+                  Checking...
+                </Text>
+              ) : usernameAvailable === true ? (
+                <Text style={[styles.usernameStatus, { color: '#10B981' }]}>
+                  ✓ Available
+                </Text>
+              ) : usernameAvailable === false ? (
+                <Text style={[styles.usernameStatus, { color: '#EF4444' }]}>
+                  ✗ Already taken
+                </Text>
+              ) : username.length > 0 && username.length < 3 ? (
+                <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
+                  Minimum 3 characters
+                </Text>
+              ) : null}
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
+                What genres do you work with?
               </Text>
-            )}
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-              Your Location (Optional)
-            </Text>
-            <CountrySelector
-              value={country}
-              onChange={setCountry}
-            />
-            <TextInput
-              style={[styles.textInput, { 
-                backgroundColor: theme.colors.surface, 
-                borderColor: theme.colors.border,
-                color: theme.colors.text,
-                marginTop: 12,
-              }]}
-              value={location}
-              onChangeText={setLocation}
-              placeholder="City (e.g., London, Manchester)"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
-          </View>
-
-          <TouchableOpacity
-            style={[
-              styles.modernButtonContainer,
-              (!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || selectedGenres.length < 3) && styles.buttonDisabled
-            ]}
-            onPress={handleNext}
-            disabled={!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || selectedGenres.length < 3 || loading}
-          >
-        <LinearGradient
-              colors={(!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || selectedGenres.length < 3)
-                ? ['#9CA3AF', '#9CA3AF']
-                : ['#7C3AED', '#6D28D9', '#5B21B6']
-          }
-          start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.modernButtonGradient}
-            >
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
+              <Text style={[styles.inputHint, { color: theme.colors.textSecondary }]}>
+                (Select 3-5 genres)
+              </Text>
+              {loadingGenres ? (
+                <ActivityIndicator size="small" color={theme.colors.primary} style={styles.genreLoading} />
               ) : (
-                <Text style={styles.modernButtonText}>Continue</Text>
+                <View style={styles.genresList}>
+                  {availableGenres.slice(0, 12).map((item) => {
+                    const isSelected = selectedGenres.includes(item.id);
+                    return (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={[
+                          styles.genreChip,
+                          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                          isSelected && styles.genreChipSelected,
+                        ]}
+                        onPress={() => toggleGenre(item.id)}
+                      >
+                        <Text style={[
+                          styles.genreText,
+                          { color: theme.colors.text },
+                          isSelected && styles.genreTextSelected,
+                        ]}>
+                          {item.name}
+                        </Text>
+                        {isSelected && (
+                          <Ionicons name="checkmark-circle" size={16} color="#FFFFFF" style={styles.genreCheckmark} />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               )}
-            </LinearGradient>
-          </TouchableOpacity>
-        </Animated.View>
-      </ScrollView>
+              {selectedGenres.length > 0 && (
+                <Text style={[styles.selectedGenresText, { color: theme.colors.textSecondary }]}>
+                  Selected: {selectedGenres.map(id => availableGenres.find(g => g.id === id)?.name).filter(Boolean).join(', ')}
+                </Text>
+              )}
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
+                Your Location (Optional)
+              </Text>
+              <CountrySelector
+                value={country}
+                onChange={setCountry}
+              />
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text,
+                  marginTop: 12,
+                }]}
+                value={location}
+                onChangeText={setLocation}
+                placeholder="City (e.g., London, Manchester)"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.modernButtonContainer,
+                (!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || selectedGenres.length < 3 || selectedGenres.length > 5) && styles.buttonDisabled
+              ]}
+              onPress={handleNext}
+              disabled={!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || selectedGenres.length < 3 || selectedGenres.length > 5 || loading}
+            >
+              <LinearGradient
+                colors={(!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || selectedGenres.length < 3 || selectedGenres.length > 5)
+                  ? ['#9CA3AF', '#9CA3AF']
+                  : ['#7C3AED', '#6D28D9', '#5B21B6']
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.modernButtonGradient}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modernButtonText}>Continue</Text>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 
@@ -1855,132 +2476,155 @@ export default function OnboardingScreen() {
         <View style={styles.backButtonPlaceholder} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Animated.View 
-          style={[
-            styles.headerContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
-            }
-          ]}
-        >
-          <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
-            Let's set up your profile
-          </Text>
-        </Animated.View>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Animated.View
+            style={[
+              styles.headerContainer,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
+              }
+            ]}
+          >
+            <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
+              Let's set up your profile
+            </Text>
+          </Animated.View>
 
-        <Animated.View 
-          style={[
-            styles.formContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }]
-            }
-          ]}
-        >
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Display Name</Text>
-            <TextInput
-              style={[styles.textInput, { 
-                backgroundColor: theme.colors.surface, 
-                borderColor: theme.colors.border,
-                color: theme.colors.text 
-              }]}
-              value={displayName}
-              onChangeText={setDisplayName}
-              placeholder="How should people call you?"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
-          </View>
+          <Animated.View
+            style={[
+              styles.formContainer,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }]
+              }
+            ]}
+          >
+            {/* Profile Photo */}
+            <TouchableOpacity style={styles.avatarPickerContainer} onPress={handleAvatarPick}>
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={styles.avatarPickerImage} />
+              ) : (
+                <View style={styles.avatarPickerPlaceholder}>
+                  <Ionicons name="camera" size={28} color="#9CA3AF" />
+                </View>
+              )}
+              <View style={styles.avatarPickerBadge}>
+                <Ionicons name="add" size={16} color="#FFFFFF" />
+              </View>
+            </TouchableOpacity>
+            <Text style={[styles.avatarPickerLabel, { color: theme.colors.textSecondary }]}>
+              Add profile photo (optional)
+            </Text>
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Username</Text>
-            <View style={styles.usernameContainer}>
-              <Text style={[styles.usernamePrefix, { color: theme.colors.textSecondary }]}>@</Text>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Display Name</Text>
               <TextInput
-                style={[styles.textInput, styles.usernameInput, { 
-                  backgroundColor: theme.colors.surface, 
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
                   borderColor: theme.colors.border,
-                  color: theme.colors.text 
+                  color: theme.colors.text
                 }]}
-                value={username}
-                onChangeText={(text) => setUsername(text.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                placeholder="yourname"
+                value={displayName}
+                onChangeText={setDisplayName}
+                placeholder="How should people call you?"
                 placeholderTextColor={theme.colors.textSecondary}
-                autoCapitalize="none"
               />
             </View>
-            {checkingUsername ? (
-              <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
-                Checking...
-              </Text>
-            ) : usernameAvailable === true ? (
-              <Text style={[styles.usernameStatus, { color: '#10B981' }]}>
-                ✓ Available
-              </Text>
-            ) : usernameAvailable === false ? (
-              <Text style={[styles.usernameStatus, { color: '#EF4444' }]}>
-                ✗ Already taken
-              </Text>
-            ) : username.length > 0 && username.length < 3 ? (
-              <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
-                Minimum 3 characters
-              </Text>
-            ) : null}
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-              Your Location (Optional)
-            </Text>
-            <CountrySelector
-              value={country}
-              onChange={setCountry}
-            />
-            <TextInput
-              style={[styles.textInput, { 
-                backgroundColor: theme.colors.surface, 
-                borderColor: theme.colors.border,
-                color: theme.colors.text,
-                marginTop: 12,
-              }]}
-              value={location}
-              onChangeText={setLocation}
-              placeholder="City (e.g., London, Manchester)"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
-          </View>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Username</Text>
+              <View style={styles.usernameContainer}>
+                <Text style={[styles.usernamePrefix, { color: theme.colors.textSecondary }]}>@</Text>
+                <TextInput
+                  style={[styles.textInput, styles.usernameInput, {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                    color: theme.colors.text
+                  }]}
+                  value={username}
+                  onChangeText={(text) => setUsername(text.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                  placeholder="yourname"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  autoCapitalize="none"
+                />
+              </View>
+              {checkingUsername ? (
+                <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
+                  Checking...
+                </Text>
+              ) : usernameAvailable === true ? (
+                <Text style={[styles.usernameStatus, { color: '#10B981' }]}>
+                  ✓ Available
+                </Text>
+              ) : usernameAvailable === false ? (
+                <Text style={[styles.usernameStatus, { color: '#EF4444' }]}>
+                  ✗ Already taken
+                </Text>
+              ) : username.length > 0 && username.length < 3 ? (
+                <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
+                  Minimum 3 characters
+                </Text>
+              ) : null}
+            </View>
 
-          <TouchableOpacity
-            style={[
-              styles.modernButtonContainer,
-              (!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false) && styles.buttonDisabled
-            ]}
-            onPress={handleNext}
-            disabled={!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || loading}
-          >
-        <LinearGradient
-              colors={(!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false)
-                ? ['#9CA3AF', '#9CA3AF']
-                : ['#7C3AED', '#6D28D9', '#5B21B6']
-              }
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.modernButtonGradient}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
+                Your Location (Optional)
+              </Text>
+              <CountrySelector
+                value={country}
+                onChange={setCountry}
+              />
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text,
+                  marginTop: 12,
+                }]}
+                value={location}
+                onChangeText={setLocation}
+                placeholder="City (e.g., London, Manchester)"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.modernButtonContainer,
+                (!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false) && styles.buttonDisabled
+              ]}
+              onPress={handleNext}
+              disabled={!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || loading}
             >
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.modernButtonText}>Continue</Text>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-        </Animated.View>
-      </ScrollView>
-      </View>
+              <LinearGradient
+                colors={(!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false)
+                  ? ['#9CA3AF', '#9CA3AF']
+                  : ['#7C3AED', '#6D28D9', '#5B21B6']
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.modernButtonGradient}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modernButtonText}>Continue</Text>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
-        
+
   // Render Music Creator Genres Selection
   const renderMusicCreatorGenres = () => (
     <View style={styles.stepContainer}>
@@ -2016,7 +2660,7 @@ export default function OnboardingScreen() {
             Select the genres you work with so we can personalize your experience
           </Text>
           <Text style={[styles.inputHint, { color: theme.colors.textSecondary, marginTop: 8 }]}>
-            (Select at least 3)
+            (Select 3-5 genres)
         </Text>
       </Animated.View>
 
@@ -2032,7 +2676,7 @@ export default function OnboardingScreen() {
           {selectedGenres.length > 0 && (
             <View style={[styles.selectedCountBadge, { backgroundColor: theme.colors.primary + '20' }]}>
               <Text style={[styles.selectedCountText, { color: theme.colors.primary }]}>
-                Selected: {selectedGenres.length} genres
+                Selected: {selectedGenres.length} of 5
         </Text>
             </View>
           )}
@@ -2077,13 +2721,13 @@ export default function OnboardingScreen() {
           <TouchableOpacity
             style={[
               styles.modernButtonContainer,
-              selectedGenres.length < 3 && styles.buttonDisabled
+              (selectedGenres.length < 3 || selectedGenres.length > 5) && styles.buttonDisabled
             ]}
             onPress={handleNext}
-            disabled={selectedGenres.length < 3 || loading}
+            disabled={selectedGenres.length < 3 || selectedGenres.length > 5 || loading}
           >
             <LinearGradient
-              colors={selectedGenres.length < 3
+              colors={(selectedGenres.length < 3 || selectedGenres.length > 5)
                 ? ['#9CA3AF', '#9CA3AF']
                 : ['#7C3AED', '#6D28D9', '#5B21B6']
               }
@@ -2401,7 +3045,7 @@ export default function OnboardingScreen() {
             ]}
           >
             {demoCreators.map((creator, index) => {
-              const isConnecting = connectingIds.has(creator.id);
+              const isFollowing = followedCreators.has(creator.id) || followingIds.has(creator.id);
               return (
                 <View
                   key={creator.id || index}
@@ -2444,14 +3088,16 @@ export default function OnboardingScreen() {
                       </View>
                     </View>
                     <TouchableOpacity
-                      style={[styles.connectButton, isConnecting && styles.connectButtonLoading]}
-                      onPress={() => handleConnectToCreator(creator.id)}
-                      disabled={isConnecting}
+                      style={[styles.followButton, followingIds.has(creator.id) && styles.followButtonLoading]}
+                      onPress={() => handleFollowCreator(creator.id)}
+                      disabled={followingIds.has(creator.id)}
                     >
-                      {isConnecting ? (
+                      {followingIds.has(creator.id) ? (
                         <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : followedCreators.has(creator.id) ? (
+                        <Text style={styles.followButtonText}>Following</Text>
                       ) : (
-                        <Text style={styles.connectButtonText}>Connect</Text>
+                        <Text style={styles.followButtonText}>Follow</Text>
                       )}
                     </TouchableOpacity>
                   </View>
@@ -2518,129 +3164,152 @@ export default function OnboardingScreen() {
         <View style={styles.backButtonPlaceholder} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Animated.View 
-          style={[
-            styles.headerContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
-            }
-          ]}
-        >
-          <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
-            Let's set up your profile
-          </Text>
-        </Animated.View>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Animated.View
+            style={[
+              styles.headerContainer,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
+              }
+            ]}
+          >
+            <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
+              Let's set up your profile
+            </Text>
+          </Animated.View>
 
-        <Animated.View 
-          style={[
-            styles.formContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }]
-            }
-          ]}
-        >
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Display Name</Text>
-            <TextInput
-              style={[styles.textInput, { 
-                backgroundColor: theme.colors.surface, 
-                borderColor: theme.colors.border,
-                color: theme.colors.text 
-              }]}
-              value={displayName}
-              onChangeText={setDisplayName}
-              placeholder="How should people call you?"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
-          </View>
+          <Animated.View
+            style={[
+              styles.formContainer,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }]
+              }
+            ]}
+          >
+            {/* Profile Photo */}
+            <TouchableOpacity style={styles.avatarPickerContainer} onPress={handleAvatarPick}>
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={styles.avatarPickerImage} />
+              ) : (
+                <View style={styles.avatarPickerPlaceholder}>
+                  <Ionicons name="camera" size={28} color="#9CA3AF" />
+                </View>
+              )}
+              <View style={styles.avatarPickerBadge}>
+                <Ionicons name="add" size={16} color="#FFFFFF" />
+              </View>
+            </TouchableOpacity>
+            <Text style={[styles.avatarPickerLabel, { color: theme.colors.textSecondary }]}>
+              Add profile photo (optional)
+            </Text>
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Username</Text>
-            <View style={styles.usernameContainer}>
-              <Text style={[styles.usernamePrefix, { color: theme.colors.textSecondary }]}>@</Text>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Display Name</Text>
               <TextInput
-                style={[styles.textInput, styles.usernameInput, { 
-                  backgroundColor: theme.colors.surface, 
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
                   borderColor: theme.colors.border,
-                  color: theme.colors.text 
+                  color: theme.colors.text
                 }]}
-                value={username}
-                onChangeText={(text) => setUsername(text.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                placeholder="yourname"
+                value={displayName}
+                onChangeText={setDisplayName}
+                placeholder="How should people call you?"
                 placeholderTextColor={theme.colors.textSecondary}
-                autoCapitalize="none"
               />
             </View>
-            {checkingUsername ? (
-              <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
-                Checking...
-              </Text>
-            ) : usernameAvailable === true ? (
-              <Text style={[styles.usernameStatus, { color: '#10B981' }]}>
-                ✓ Available
-              </Text>
-            ) : usernameAvailable === false ? (
-              <Text style={[styles.usernameStatus, { color: '#EF4444' }]}>
-                ✗ Already taken
-              </Text>
-            ) : username.length > 0 && username.length < 3 ? (
-              <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
-                Minimum 3 characters
-              </Text>
-            ) : null}
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-              Your Location (Optional)
-            </Text>
-            <CountrySelector
-              value={country}
-              onChange={setCountry}
-            />
-            <TextInput
-              style={[styles.textInput, { 
-                backgroundColor: theme.colors.surface, 
-                borderColor: theme.colors.border,
-                color: theme.colors.text,
-                marginTop: 12,
-              }]}
-              value={location}
-              onChangeText={setLocation}
-              placeholder="City (e.g., London, Manchester)"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
-          </View>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Username</Text>
+              <View style={styles.usernameContainer}>
+                <Text style={[styles.usernamePrefix, { color: theme.colors.textSecondary }]}>@</Text>
+                <TextInput
+                  style={[styles.textInput, styles.usernameInput, {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                    color: theme.colors.text
+                  }]}
+                  value={username}
+                  onChangeText={(text) => setUsername(text.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                  placeholder="yourname"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  autoCapitalize="none"
+                />
+              </View>
+              {checkingUsername ? (
+                <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
+                  Checking...
+                </Text>
+              ) : usernameAvailable === true ? (
+                <Text style={[styles.usernameStatus, { color: '#10B981' }]}>
+                  ✓ Available
+                </Text>
+              ) : usernameAvailable === false ? (
+                <Text style={[styles.usernameStatus, { color: '#EF4444' }]}>
+                  ✗ Already taken
+                </Text>
+              ) : username.length > 0 && username.length < 3 ? (
+                <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
+                  Minimum 3 characters
+                </Text>
+              ) : null}
+            </View>
 
-          <TouchableOpacity
-            style={[
-              styles.modernButtonContainer,
-              (!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false) && styles.buttonDisabled
-            ]}
-            onPress={handleNext}
-            disabled={!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || loading}
-          >
-            <LinearGradient
-              colors={(!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false)
-                ? ['#9CA3AF', '#9CA3AF']
-                : ['#7C3AED', '#6D28D9', '#5B21B6']
-              }
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.modernButtonGradient}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
+                Your Location (Optional)
+              </Text>
+              <CountrySelector
+                value={country}
+                onChange={setCountry}
+              />
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text,
+                  marginTop: 12,
+                }]}
+                value={location}
+                onChangeText={setLocation}
+                placeholder="City (e.g., London, Manchester)"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.modernButtonContainer,
+                (!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false) && styles.buttonDisabled
+              ]}
+              onPress={handleNext}
+              disabled={!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || loading}
             >
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.modernButtonText}>Continue</Text>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-        </Animated.View>
-      </ScrollView>
+              <LinearGradient
+                colors={(!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false)
+                  ? ['#9CA3AF', '#9CA3AF']
+                  : ['#7C3AED', '#6D28D9', '#5B21B6']
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.modernButtonGradient}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modernButtonText}>Continue</Text>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 
@@ -3064,7 +3733,7 @@ export default function OnboardingScreen() {
             ]}
           >
             {demoCreators.map((creator, index) => {
-              const isConnecting = connectingIds.has(creator.id);
+              const isFollowing = followedCreators.has(creator.id) || followingIds.has(creator.id);
               return (
                 <View
                   key={creator.id || index}
@@ -3110,16 +3779,18 @@ export default function OnboardingScreen() {
                   </View>
                   <TouchableOpacity
                     style={[
-                      styles.connectButton,
-                      isConnecting && styles.connectButtonLoading
+                      styles.followButton,
+                      followingIds.has(creator.id) && styles.followButtonLoading
                     ]}
-                    onPress={() => handleConnectToCreator(creator.id)}
-                    disabled={isConnecting}
+                    onPress={() => handleFollowCreator(creator.id)}
+                    disabled={followingIds.has(creator.id)}
                   >
-                    {isConnecting ? (
+                    {followingIds.has(creator.id) ? (
                       <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : followedCreators.has(creator.id) ? (
+                      <Text style={styles.followButtonText}>Following</Text>
                     ) : (
-                      <Text style={styles.connectButtonText}>Connect</Text>
+                      <Text style={styles.followButtonText}>Follow</Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -3185,149 +3856,172 @@ export default function OnboardingScreen() {
         <View style={styles.backButtonPlaceholder} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Animated.View 
-          style={[
-            styles.headerContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
-            }
-          ]}
-        >
-        <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
-            Let's set up your professional profile
-        </Text>
-        </Animated.View>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Animated.View
+            style={[
+              styles.headerContainer,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
+              }
+            ]}
+          >
+            <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
+              Let's set up your professional profile
+            </Text>
+          </Animated.View>
 
-        <Animated.View 
-          style={[
-            styles.formContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }]
-            }
-          ]}
-        >
-        <View style={styles.inputGroup}>
-          <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Display Name</Text>
-          <TextInput
-            style={[styles.textInput, { 
-              backgroundColor: theme.colors.surface, 
-              borderColor: theme.colors.border,
-              color: theme.colors.text 
-            }]}
-            value={displayName}
-            onChangeText={setDisplayName}
-              placeholder="How should people call you?"
-            placeholderTextColor={theme.colors.textSecondary}
-          />
-        </View>
+          <Animated.View
+            style={[
+              styles.formContainer,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }]
+              }
+            ]}
+          >
+            {/* Profile Photo */}
+            <TouchableOpacity style={styles.avatarPickerContainer} onPress={handleAvatarPick}>
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={styles.avatarPickerImage} />
+              ) : (
+                <View style={styles.avatarPickerPlaceholder}>
+                  <Ionicons name="camera" size={28} color="#9CA3AF" />
+                </View>
+              )}
+              <View style={styles.avatarPickerBadge}>
+                <Ionicons name="add" size={16} color="#FFFFFF" />
+              </View>
+            </TouchableOpacity>
+            <Text style={[styles.avatarPickerLabel, { color: theme.colors.textSecondary }]}>
+              Add profile photo (optional)
+            </Text>
 
-        <View style={styles.inputGroup}>
-          <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Username</Text>
-            <View style={styles.usernameContainer}>
-              <Text style={[styles.usernamePrefix, { color: theme.colors.textSecondary }]}>@</Text>
-          <TextInput
-                style={[styles.textInput, styles.usernameInput, { 
-              backgroundColor: theme.colors.surface, 
-              borderColor: theme.colors.border,
-              color: theme.colors.text 
-            }]}
-            value={username}
-                onChangeText={(text) => setUsername(text.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                placeholder="yourname"
-            placeholderTextColor={theme.colors.textSecondary}
-            autoCapitalize="none"
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Display Name</Text>
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text
+                }]}
+                value={displayName}
+                onChangeText={setDisplayName}
+                placeholder="How should people call you?"
+                placeholderTextColor={theme.colors.textSecondary}
               />
             </View>
-            {checkingUsername ? (
-              <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
-                Checking...
-              </Text>
-            ) : usernameAvailable === true ? (
-              <Text style={[styles.usernameStatus, { color: '#10B981' }]}>
-                ✓ Available
-              </Text>
-            ) : usernameAvailable === false ? (
-              <Text style={[styles.usernameStatus, { color: '#EF4444' }]}>
-                ✗ Already taken
-              </Text>
-            ) : username.length > 0 && username.length < 3 ? (
-              <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
-                Minimum 3 characters
-              </Text>
-            ) : null}
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-              Company/Organization (Optional)
-            </Text>
-            <TextInput
-              style={[styles.textInput, { 
-                backgroundColor: theme.colors.surface, 
-                borderColor: theme.colors.border,
-                color: theme.colors.text 
-              }]}
-              value={company}
-              onChangeText={setCompany}
-              placeholder="e.g., Premier Studios, Record Label Name"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
-          </View>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Username</Text>
+              <View style={styles.usernameContainer}>
+                <Text style={[styles.usernamePrefix, { color: theme.colors.textSecondary }]}>@</Text>
+                <TextInput
+                  style={[styles.textInput, styles.usernameInput, {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                    color: theme.colors.text
+                  }]}
+                  value={username}
+                  onChangeText={(text) => setUsername(text.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                  placeholder="yourname"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  autoCapitalize="none"
+                />
+              </View>
+              {checkingUsername ? (
+                <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
+                  Checking...
+                </Text>
+              ) : usernameAvailable === true ? (
+                <Text style={[styles.usernameStatus, { color: '#10B981' }]}>
+                  ✓ Available
+                </Text>
+              ) : usernameAvailable === false ? (
+                <Text style={[styles.usernameStatus, { color: '#EF4444' }]}>
+                  ✗ Already taken
+                </Text>
+              ) : username.length > 0 && username.length < 3 ? (
+                <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
+                  Minimum 3 characters
+                </Text>
+              ) : null}
+            </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-              Your Location
-            </Text>
-            <Text style={[styles.inputHint, { color: theme.colors.textSecondary }]}>
-              (Recommended - helps with local talent search)
-            </Text>
-            <CountrySelector
-              value={country}
-              onChange={setCountry}
-            />
-            <TextInput
-              style={[styles.textInput, { 
-                backgroundColor: theme.colors.surface, 
-                borderColor: theme.colors.border,
-                color: theme.colors.text,
-                marginTop: 12,
-              }]}
-              value={location}
-              onChangeText={setLocation}
-              placeholder="City (e.g., London, Manchester)"
-              placeholderTextColor={theme.colors.textSecondary}
-          />
-        </View>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
+                Company/Organization (Optional)
+              </Text>
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text
+                }]}
+                value={company}
+                onChangeText={setCompany}
+                placeholder="e.g., Premier Studios, Record Label Name"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
 
-        <TouchableOpacity
-            style={[
-              styles.modernButtonContainer,
-              (!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false) && styles.buttonDisabled
-            ]}
-          onPress={handleNext}
-            disabled={!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || loading}
-        >
-          <LinearGradient
-              colors={(!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false)
-                ? ['#9CA3AF', '#9CA3AF']
-                : ['#7C3AED', '#6D28D9', '#5B21B6']
-              }
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.modernButtonGradient}
-          >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.modernButtonText}>Continue</Text>
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
-        </Animated.View>
-      </ScrollView>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
+                Your Location
+              </Text>
+              <Text style={[styles.inputHint, { color: theme.colors.textSecondary }]}>
+                (Recommended - helps with local talent search)
+              </Text>
+              <CountrySelector
+                value={country}
+                onChange={setCountry}
+              />
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text,
+                  marginTop: 12,
+                }]}
+                value={location}
+                onChangeText={setLocation}
+                placeholder="City (e.g., London, Manchester)"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.modernButtonContainer,
+                (!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false) && styles.buttonDisabled
+              ]}
+              onPress={handleNext}
+              disabled={!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || loading}
+            >
+              <LinearGradient
+                colors={(!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false)
+                  ? ['#9CA3AF', '#9CA3AF']
+                  : ['#7C3AED', '#6D28D9', '#5B21B6']
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.modernButtonGradient}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modernButtonText}>Continue</Text>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 
@@ -3471,7 +4165,7 @@ export default function OnboardingScreen() {
             We'll match you with relevant creators and opportunities
           </Text>
           <Text style={[styles.inputHint, { color: theme.colors.textSecondary, marginTop: 8 }]}>
-            (Select at least 2)
+            (Select 2-5 genres)
           </Text>
         </Animated.View>
 
@@ -3487,7 +4181,7 @@ export default function OnboardingScreen() {
           {selectedGenres.length > 0 && (
             <View style={[styles.selectedCountBadge, { backgroundColor: theme.colors.primary + '20' }]}>
               <Text style={[styles.selectedCountText, { color: theme.colors.primary }]}>
-                Selected: {selectedGenres.length} genres
+                Selected: {selectedGenres.length} of 5
               </Text>
             </View>
           )}
@@ -3532,13 +4226,13 @@ export default function OnboardingScreen() {
           <TouchableOpacity
             style={[
               styles.modernButtonContainer,
-              selectedGenres.length < 2 && styles.buttonDisabled
+              (selectedGenres.length < 2 || selectedGenres.length > 5) && styles.buttonDisabled
             ]}
             onPress={handleNext}
-            disabled={selectedGenres.length < 2 || loading}
+            disabled={selectedGenres.length < 2 || selectedGenres.length > 5 || loading}
           >
             <LinearGradient
-              colors={selectedGenres.length < 2
+              colors={(selectedGenres.length < 2 || selectedGenres.length > 5)
                 ? ['#9CA3AF', '#9CA3AF']
                 : ['#7C3AED', '#6D28D9', '#5B21B6']
               }
@@ -3722,7 +4416,7 @@ export default function OnboardingScreen() {
             ]}
           >
             {demoCreators.map((creator, index) => {
-              const isConnecting = connectingIds.has(creator.id);
+              const isFollowing = followedCreators.has(creator.id) || followingIds.has(creator.id);
               return (
                 <View
                   key={creator.id || index}
@@ -3767,14 +4461,16 @@ export default function OnboardingScreen() {
                     </View>
                   </View>
                   <TouchableOpacity
-                    style={[styles.connectButton, isConnecting && styles.connectButtonLoading]}
-                    onPress={() => handleConnectToCreator(creator.id)}
-                    disabled={isConnecting}
+                    style={[styles.followButton, followingIds.has(creator.id) && styles.followButtonLoading]}
+                    onPress={() => handleFollowCreator(creator.id)}
+                    disabled={followingIds.has(creator.id)}
                   >
-                    {isConnecting ? (
+                    {followingIds.has(creator.id) ? (
                       <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : followedCreators.has(creator.id) ? (
+                      <Text style={styles.followButtonText}>Following</Text>
                     ) : (
-                      <Text style={styles.connectButtonText}>Connect</Text>
+                      <Text style={styles.followButtonText}>Follow</Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -3840,129 +4536,152 @@ export default function OnboardingScreen() {
         <View style={styles.backButtonPlaceholder} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Animated.View 
-          style={[
-            styles.headerContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
-            }
-          ]}
-        >
-          <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
-            Let's set up your profile
-          </Text>
-        </Animated.View>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Animated.View
+            style={[
+              styles.headerContainer,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
+              }
+            ]}
+          >
+            <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
+              Let's set up your profile
+            </Text>
+          </Animated.View>
 
-        <Animated.View 
-          style={[
-            styles.formContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }]
-            }
-          ]}
-        >
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Display Name</Text>
-            <TextInput
-              style={[styles.textInput, { 
-                backgroundColor: theme.colors.surface, 
-                borderColor: theme.colors.border,
-                color: theme.colors.text 
-              }]}
-              value={displayName}
-              onChangeText={setDisplayName}
-              placeholder="How should people call you?"
-              placeholderTextColor={theme.colors.textSecondary}
-        />
-      </View>
-      
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Username</Text>
-            <View style={styles.usernameContainer}>
-              <Text style={[styles.usernamePrefix, { color: theme.colors.textSecondary }]}>@</Text>
+          <Animated.View
+            style={[
+              styles.formContainer,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }]
+              }
+            ]}
+          >
+            {/* Profile Photo */}
+            <TouchableOpacity style={styles.avatarPickerContainer} onPress={handleAvatarPick}>
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={styles.avatarPickerImage} />
+              ) : (
+                <View style={styles.avatarPickerPlaceholder}>
+                  <Ionicons name="camera" size={28} color="#9CA3AF" />
+                </View>
+              )}
+              <View style={styles.avatarPickerBadge}>
+                <Ionicons name="add" size={16} color="#FFFFFF" />
+              </View>
+            </TouchableOpacity>
+            <Text style={[styles.avatarPickerLabel, { color: theme.colors.textSecondary }]}>
+              Add profile photo (optional)
+            </Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Display Name</Text>
               <TextInput
-                style={[styles.textInput, styles.usernameInput, { 
-                  backgroundColor: theme.colors.surface, 
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
                   borderColor: theme.colors.border,
-                  color: theme.colors.text 
+                  color: theme.colors.text
                 }]}
-                value={username}
-                onChangeText={(text) => setUsername(text.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                placeholder="yourname"
+                value={displayName}
+                onChangeText={setDisplayName}
+                placeholder="How should people call you?"
                 placeholderTextColor={theme.colors.textSecondary}
-                autoCapitalize="none"
               />
             </View>
-            {checkingUsername ? (
-              <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
-                Checking...
-              </Text>
-            ) : usernameAvailable === true ? (
-              <Text style={[styles.usernameStatus, { color: '#10B981' }]}>
-                ✓ Available
-              </Text>
-            ) : usernameAvailable === false ? (
-              <Text style={[styles.usernameStatus, { color: '#EF4444' }]}>
-                ✗ Already taken
-              </Text>
-            ) : username.length > 0 && username.length < 3 ? (
-              <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
-                Minimum 3 characters
-              </Text>
-            ) : null}
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-              Your Location (Optional)
-            </Text>
-            <CountrySelector
-              value={country}
-              onChange={setCountry}
-            />
-            <TextInput
-              style={[styles.textInput, { 
-                backgroundColor: theme.colors.surface, 
-                borderColor: theme.colors.border,
-                color: theme.colors.text,
-                marginTop: 12,
-              }]}
-              value={location}
-              onChangeText={setLocation}
-              placeholder="City (e.g., London, Manchester)"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
-          </View>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Username</Text>
+              <View style={styles.usernameContainer}>
+                <Text style={[styles.usernamePrefix, { color: theme.colors.textSecondary }]}>@</Text>
+                <TextInput
+                  style={[styles.textInput, styles.usernameInput, {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                    color: theme.colors.text
+                  }]}
+                  value={username}
+                  onChangeText={(text) => setUsername(text.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                  placeholder="yourname"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  autoCapitalize="none"
+                />
+              </View>
+              {checkingUsername ? (
+                <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
+                  Checking...
+                </Text>
+              ) : usernameAvailable === true ? (
+                <Text style={[styles.usernameStatus, { color: '#10B981' }]}>
+                  ✓ Available
+                </Text>
+              ) : usernameAvailable === false ? (
+                <Text style={[styles.usernameStatus, { color: '#EF4444' }]}>
+                  ✗ Already taken
+                </Text>
+              ) : username.length > 0 && username.length < 3 ? (
+                <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>
+                  Minimum 3 characters
+                </Text>
+              ) : null}
+            </View>
 
-          <TouchableOpacity
-            style={[
-              styles.modernButtonContainer,
-              (!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false) && styles.buttonDisabled
-            ]}
-            onPress={handleNext}
-            disabled={!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || loading}
-          >
-            <LinearGradient
-              colors={(!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false)
-                ? ['#9CA3AF', '#9CA3AF']
-                : ['#7C3AED', '#6D28D9', '#5B21B6']
-              }
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.modernButtonGradient}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
+                Your Location (Optional)
+              </Text>
+              <CountrySelector
+                value={country}
+                onChange={setCountry}
+              />
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text,
+                  marginTop: 12,
+                }]}
+                value={location}
+                onChangeText={setLocation}
+                placeholder="City (e.g., London, Manchester)"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.modernButtonContainer,
+                (!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false) && styles.buttonDisabled
+              ]}
+              onPress={handleNext}
+              disabled={!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false || loading}
             >
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.modernButtonText}>Continue</Text>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-        </Animated.View>
-      </ScrollView>
+              <LinearGradient
+                colors={(!displayName.trim() || !username.trim() || username.length < 3 || usernameAvailable === false)
+                  ? ['#9CA3AF', '#9CA3AF']
+                  : ['#7C3AED', '#6D28D9', '#5B21B6']
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.modernButtonGradient}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modernButtonText}>Continue</Text>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 
@@ -4001,7 +4720,7 @@ export default function OnboardingScreen() {
             We'll recommend creators and music you'll enjoy
         </Text>
           <Text style={[styles.inputHint, { color: theme.colors.textSecondary, marginTop: 8 }]}>
-            (Select at least 3)
+            (Select 3-5 genres)
           </Text>
         </Animated.View>
 
@@ -4017,7 +4736,7 @@ export default function OnboardingScreen() {
           {selectedGenres.length > 0 && (
             <View style={[styles.selectedCountBadge, { backgroundColor: theme.colors.primary + '20' }]}>
               <Text style={[styles.selectedCountText, { color: theme.colors.primary }]}>
-                Selected: {selectedGenres.length} genres
+                Selected: {selectedGenres.length} of 5
         </Text>
       </View>
           )}
@@ -4062,13 +4781,13 @@ export default function OnboardingScreen() {
           <TouchableOpacity
             style={[
               styles.modernButtonContainer,
-              selectedGenres.length < 3 && styles.buttonDisabled
+              (selectedGenres.length < 3 || selectedGenres.length > 5) && styles.buttonDisabled
             ]}
             onPress={handleNext}
-            disabled={selectedGenres.length < 3 || loading}
+            disabled={selectedGenres.length < 3 || selectedGenres.length > 5 || loading}
           >
             <LinearGradient
-              colors={selectedGenres.length < 3
+              colors={(selectedGenres.length < 3 || selectedGenres.length > 5)
                 ? ['#9CA3AF', '#9CA3AF']
                 : ['#7C3AED', '#6D28D9', '#5B21B6']
               }
@@ -4273,7 +4992,7 @@ export default function OnboardingScreen() {
             ]}
           >
             {demoCreators.map((creator, index) => {
-              const isConnecting = connectingIds.has(creator.id);
+              const isFollowing = followedCreators.has(creator.id) || followingIds.has(creator.id);
               return (
                 <View
                   key={creator.id || index}
@@ -4316,14 +5035,16 @@ export default function OnboardingScreen() {
                       </View>
                     </View>
                     <TouchableOpacity
-                      style={[styles.connectButton, isConnecting && styles.connectButtonLoading]}
-                      onPress={() => handleConnectToCreator(creator.id)}
-                      disabled={isConnecting}
+                      style={[styles.followButton, followingIds.has(creator.id) && styles.followButtonLoading]}
+                      onPress={() => handleFollowCreator(creator.id)}
+                      disabled={followingIds.has(creator.id)}
                     >
-                      {isConnecting ? (
+                      {followingIds.has(creator.id) ? (
                         <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : followedCreators.has(creator.id) ? (
+                        <Text style={styles.followButtonText}>Following</Text>
                       ) : (
-                        <Text style={styles.connectButtonText}>Connect</Text>
+                        <Text style={styles.followButtonText}>Follow</Text>
                       )}
                     </TouchableOpacity>
                   </View>
@@ -4553,7 +5274,7 @@ export default function OnboardingScreen() {
             ]}
           >
             {demoCreators.map((creator, index) => {
-              const isConnecting = connectingIds.has(creator.id);
+              const isFollowing = followedCreators.has(creator.id) || followingIds.has(creator.id);
               return (
                 <View
                   key={creator.id || index}
@@ -4596,14 +5317,16 @@ export default function OnboardingScreen() {
                       </View>
                     </View>
                     <TouchableOpacity
-                      style={[styles.connectButton, isConnecting && styles.connectButtonLoading]}
-                      onPress={() => handleConnectToCreator(creator.id)}
-                      disabled={isConnecting}
+                      style={[styles.followButton, followingIds.has(creator.id) && styles.followButtonLoading]}
+                      onPress={() => handleFollowCreator(creator.id)}
+                      disabled={followingIds.has(creator.id)}
                     >
-                      {isConnecting ? (
+                      {followingIds.has(creator.id) ? (
                         <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : followedCreators.has(creator.id) ? (
+                        <Text style={styles.followButtonText}>Following</Text>
                       ) : (
-                        <Text style={styles.connectButtonText}>Connect</Text>
+                        <Text style={styles.followButtonText}>Follow</Text>
                       )}
                     </TouchableOpacity>
                   </View>
@@ -4648,6 +5371,679 @@ export default function OnboardingScreen() {
     </View>
   );
 
+  // ============================================================
+  // EVENT ORGANISER PATH RENDERERS
+  // ============================================================
+
+  const renderEventOrganiserProfileSetup = () => (
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.7)' }]} />
+      </ImageBackground>
+      <View style={styles.headerWithBack}>
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
+        <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
+          {getStepIndicatorText(currentStep, userType)}
+        </Text>
+        <View style={styles.backButtonPlaceholder} />
+      </View>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Animated.View style={[styles.headerContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: scaleAnim }] }]}>
+            <Text style={[styles.stepTitle, { color: theme.colors.text }]}>Set up your organiser profile</Text>
+            <Text style={[styles.stepSubtitle, { color: theme.colors.textSecondary }]}>How should the community find you?</Text>
+          </Animated.View>
+          <Animated.View style={[styles.formContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+            {/* Profile Photo */}
+            <TouchableOpacity style={styles.avatarPickerContainer} onPress={handleAvatarPick}>
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={styles.avatarPickerImage} />
+              ) : (
+                <View style={styles.avatarPickerPlaceholder}>
+                  <Ionicons name="camera" size={28} color="#9CA3AF" />
+                </View>
+              )}
+              <View style={styles.avatarPickerBadge}>
+                <Ionicons name="add" size={16} color="#FFFFFF" />
+              </View>
+            </TouchableOpacity>
+            <Text style={[styles.avatarPickerLabel, { color: theme.colors.textSecondary }]}>
+              Add profile photo (optional)
+            </Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Display Name</Text>
+              <TextInput
+                style={[styles.textInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
+                value={displayName}
+                onChangeText={setDisplayName}
+                placeholder="Your name or organisation name"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Username</Text>
+              <View style={styles.usernameContainer}>
+                <Text style={[styles.usernamePrefix, { color: theme.colors.textSecondary }]}>@</Text>
+                <TextInput
+                  style={[styles.textInput, styles.usernameInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
+                  value={username}
+                  onChangeText={(text) => setUsername(text.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                  placeholder="yourhandle"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  autoCapitalize="none"
+                />
+              </View>
+              {checkingUsername ? (
+                <Text style={[styles.usernameStatus, { color: theme.colors.textSecondary }]}>Checking...</Text>
+              ) : usernameAvailable === true ? (
+                <Text style={[styles.usernameStatus, { color: '#10B981' }]}>✓ Available</Text>
+              ) : usernameAvailable === false ? (
+                <Text style={[styles.usernameStatus, { color: '#EF4444' }]}>✗ Already taken</Text>
+              ) : null}
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Location (Optional)</Text>
+              <CountrySelector value={country} onChange={setCountry} />
+              <TextInput
+                style={[styles.textInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text, marginTop: 12 }]}
+                value={location}
+                onChangeText={setLocation}
+                placeholder="City (e.g., London, Lagos)"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+            <TouchableOpacity style={styles.modernButtonContainer} onPress={handleNext} disabled={loading}>
+              <LinearGradient colors={['#F59E0B', '#D97706', '#B45309']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.modernButtonGradient}>
+                {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.modernButtonText}>Continue</Text>}
+              </LinearGradient>
+            </TouchableOpacity>
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
+  );
+
+  const renderEventOrganiserEventTypes = () => (
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.7)' }]} />
+      </ImageBackground>
+      <View style={styles.headerWithBack}>
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
+        <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
+          {getStepIndicatorText(currentStep, userType)}
+        </Text>
+        <View style={styles.backButtonPlaceholder} />
+      </View>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <Animated.View style={[styles.headerContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: scaleAnim }] }]}>
+          <Text style={[styles.stepTitle, { color: theme.colors.text }]}>What kinds of events do you organise?</Text>
+          <Text style={[styles.stepSubtitle, { color: theme.colors.textSecondary }]}>Select all that apply</Text>
+        </Animated.View>
+        <Animated.View style={[{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+          <View style={styles.genresList}>
+            {eventOrganiserEventTypes.map((item) => {
+              const isSelected = selectedOrgEventTypes.includes(item.id);
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.genreChip, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, isSelected && styles.genreChipSelected]}
+                  onPress={() => {
+                    setSelectedOrgEventTypes(prev =>
+                      prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]
+                    );
+                  }}
+                >
+                  <Text style={{ marginRight: 4 }}>{item.emoji}</Text>
+                  <Text style={[styles.genreText, { color: theme.colors.text }, isSelected && styles.genreTextSelected]}>{item.name}</Text>
+                  {isSelected && <Ionicons name="checkmark-circle" size={16} color="#FFFFFF" style={styles.genreCheckmark} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <TouchableOpacity style={[styles.modernButtonContainer, { marginTop: 24 }]} onPress={handleNext} disabled={loading}>
+            <LinearGradient colors={['#F59E0B', '#D97706', '#B45309']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.modernButtonGradient}>
+              {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.modernButtonText}>Continue</Text>}
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
+      </ScrollView>
+    </View>
+  );
+
+  const renderEventOrganiserLocation = () => (
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.7)' }]} />
+      </ImageBackground>
+      <View style={styles.headerWithBack}>
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
+        <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
+          {getStepIndicatorText(currentStep, userType)}
+        </Text>
+        <View style={styles.backButtonPlaceholder} />
+      </View>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <Animated.View style={[styles.headerContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: scaleAnim }] }]}>
+          <Text style={[styles.stepTitle, { color: theme.colors.text }]}>What's your event reach?</Text>
+          <Text style={[styles.stepSubtitle, { color: theme.colors.textSecondary }]}>This helps us surface your events to the right audience</Text>
+        </Animated.View>
+        <Animated.View style={[{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+          {eventOrganiserReachOptions.map((option) => (
+            <TouchableOpacity
+              key={option.id}
+              style={[
+                styles.roleCard,
+                { marginBottom: 12 },
+                selectedOrgReach === option.id && styles.roleCardSelected,
+              ]}
+              onPress={() => setSelectedOrgReach(option.id)}
+            >
+              <View style={styles.roleTextContent}>
+                <View style={styles.roleHeader}>
+                  <Text style={[styles.roleTitle, { color: theme.colors.text }]}>{option.label}</Text>
+                  <View style={[styles.radioCircle, selectedOrgReach === option.id && styles.radioCircleChecked]}>
+                    {selectedOrgReach === option.id && <View style={styles.radioCircleInner} />}
+                  </View>
+                </View>
+              </View>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity style={[styles.modernButtonContainer, { marginTop: 12 }]} onPress={handleNext} disabled={loading}>
+            <LinearGradient colors={['#F59E0B', '#D97706', '#B45309']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.modernButtonGradient}>
+              {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.modernButtonText}>Continue</Text>}
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
+      </ScrollView>
+    </View>
+  );
+
+  const renderEventOrganiserValueDemo = () => (
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.7)' }]} />
+      </ImageBackground>
+      <View style={styles.headerWithBack}>
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
+        <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
+          {getStepIndicatorText(currentStep, userType)}
+        </Text>
+        <View style={styles.backButtonPlaceholder} />
+      </View>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <Animated.View style={[styles.headerContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: scaleAnim }] }]}>
+          <Text style={[styles.stepTitle, { color: theme.colors.text }]}>Organisers like you are thriving here</Text>
+          <Text style={[styles.stepSubtitle, { color: theme.colors.textSecondary }]}>
+            SoundBridge gives you tools to sell tickets, reach local audiences, and grow your event brand.
+          </Text>
+        </Animated.View>
+        <Animated.View style={[{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+          <View style={[styles.valuePropContainer, { backgroundColor: theme.colors.surface + 'CC', borderRadius: 16, padding: 20, marginBottom: 20 }]}>
+            {[
+              { icon: 'ticket', text: 'Sell tickets directly — no middlemen' },
+              { icon: 'location', text: 'Reach audiences in your city and beyond' },
+              { icon: 'analytics', text: 'Track RSVPs, sales, and reach in one dashboard' },
+              { icon: 'megaphone', text: 'Promote to genre-matched music lovers' },
+            ].map((item, i) => (
+              <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#F59E0B20', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                  <Ionicons name={item.icon as any} size={18} color="#F59E0B" />
+                </View>
+                <Text style={[styles.tierFeatureText, { color: theme.colors.text, flex: 1 }]}>{item.text}</Text>
+              </View>
+            ))}
+          </View>
+          <TouchableOpacity style={styles.modernButtonContainer} onPress={handleNext} disabled={loading}>
+            <LinearGradient colors={['#F59E0B', '#D97706', '#B45309']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.modernButtonGradient}>
+              {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.modernButtonText}>Let's go →</Text>}
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
+      </ScrollView>
+    </View>
+  );
+
+  // ============================================================
+  // FOLLOW SUGGESTIONS STEP
+  // ============================================================
+
+  const renderFollowSuggestions = () => {
+    const followedCount = suggestedCreators.filter(c => followedCreators.has(c.id)).length;
+    return (
+      <View style={styles.stepContainer}>
+        <ImageBackground
+          source={require('../../assets/images/logos/bg01.jpg')}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+        >
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.75)' }]} />
+        </ImageBackground>
+        <View style={styles.headerWithBack}>
+          <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
+          <Text style={[styles.headerStepText, { color: theme.colors.textSecondary }]}>
+            {getStepIndicatorText(currentStep, userType)}
+          </Text>
+          <View style={styles.backButtonPlaceholder} />
+        </View>
+        <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 }]} showsVerticalScrollIndicator={false}>
+          <Animated.View style={[styles.headerContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: scaleAnim }] }]}>
+            <Text style={[styles.stepTitle, { color: '#FFFFFF', fontSize: 28, textAlign: 'center' }]}>
+              You're joining an amazing community
+            </Text>
+            <Text style={[styles.stepSubtitle, { color: 'rgba(255,255,255,0.65)', textAlign: 'center' }]}>
+              Follow creators who match your taste — they'll fill your feed with great music.
+            </Text>
+          </Animated.View>
+          <Animated.View style={[{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+            {loadingSuggestions ? (
+              <ActivityIndicator size="large" color="#EC4899" style={{ marginVertical: 48 }} />
+            ) : (
+              <>
+                {/* Follow All pill */}
+                <TouchableOpacity
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    alignSelf: 'center',
+                    paddingHorizontal: 20,
+                    paddingVertical: 8,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: 'rgba(255,255,255,0.3)',
+                    backgroundColor: 'rgba(255,255,255,0.08)',
+                    marginBottom: 20,
+                  }}
+                  onPress={() => {
+                    const allIds = new Set(suggestedCreators.map(c => c.id));
+                    setSuggestionFollowedIds(allIds);
+                    suggestedCreators.forEach(c => {
+                      if (!suggestionFollowedIds.has(c.id)) handleFollowCreator(c.id);
+                    });
+                  }}
+                >
+                  <Ionicons name="people" size={14} color="rgba(255,255,255,0.8)" />
+                  <Text style={{ color: 'rgba(255,255,255,0.8)', fontWeight: '600', fontSize: 13, marginLeft: 6 }}>Follow All</Text>
+                </TouchableOpacity>
+
+                {/* Creator cards — vertical list */}
+                <View style={{ gap: 12 }}>
+                  {suggestedCreators.map((creator) => {
+                    const isFollowed = followedCreators.has(creator.id);
+                    const isLoadingFollow = followingIds.has(creator.id);
+                    return (
+                      <BlurView
+                        key={creator.id}
+                        intensity={18}
+                        tint="dark"
+                        style={{
+                          borderRadius: 18,
+                          overflow: 'hidden',
+                          borderWidth: 1,
+                          borderColor: isFollowed ? 'rgba(236,72,153,0.6)' : 'rgba(255,255,255,0.12)',
+                        }}
+                      >
+                        <View style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          padding: 16,
+                          backgroundColor: isFollowed ? 'rgba(236,72,153,0.08)' : 'rgba(255,255,255,0.04)',
+                        }}>
+                          {/* Avatar */}
+                          {creator.avatar_url ? (
+                            <Image
+                              source={{ uri: creator.avatar_url }}
+                              style={{ width: 58, height: 58, borderRadius: 29, borderWidth: 2, borderColor: isFollowed ? '#EC4899' : 'rgba(255,255,255,0.2)' }}
+                            />
+                          ) : (
+                            <LinearGradient
+                              colors={['#EC4899', '#9333EA']}
+                              style={{ width: 58, height: 58, borderRadius: 29, alignItems: 'center', justifyContent: 'center' }}
+                            >
+                              <Text style={{ fontSize: 24, fontWeight: '700', color: '#FFFFFF' }}>
+                                {(creator.display_name || creator.username || '?')[0].toUpperCase()}
+                              </Text>
+                            </LinearGradient>
+                          )}
+
+                          {/* Info */}
+                          <View style={{ flex: 1, marginLeft: 14 }}>
+                            <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 15 }} numberOfLines={1}>
+                              {creator.display_name || creator.username}
+                            </Text>
+                            <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+                              {creator.location || 'Music Creator'}
+                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 12 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Ionicons name="people-outline" size={12} color="rgba(255,255,255,0.4)" />
+                                <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>
+                                  {creator.followers_count ?? 0}
+                                </Text>
+                              </View>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Ionicons name="musical-notes-outline" size={12} color="rgba(255,255,255,0.4)" />
+                                <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>
+                                  {creator.tracks_count ?? 0}
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+
+                          {/* Follow button */}
+                          <TouchableOpacity
+                            style={{
+                              paddingHorizontal: 18,
+                              paddingVertical: 9,
+                              borderRadius: 999,
+                              backgroundColor: isFollowed ? '#EC4899' : 'rgba(255,255,255,0.12)',
+                              borderWidth: 1,
+                              borderColor: isFollowed ? '#EC4899' : 'rgba(255,255,255,0.25)',
+                              minWidth: 90,
+                              alignItems: 'center',
+                            }}
+                            onPress={() => handleFollowCreator(creator.id)}
+                            disabled={isLoadingFollow}
+                          >
+                            {isLoadingFollow ? (
+                              <ActivityIndicator size="small" color="#FFFFFF" />
+                            ) : (
+                              <Text style={{ fontSize: 13, fontWeight: '700', color: '#FFFFFF' }}>
+                                {isFollowed ? '✓ Following' : 'Follow'}
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      </BlurView>
+                    );
+                  })}
+                </View>
+
+                {/* Progress hint */}
+                {followedCount > 0 && (
+                  <Text style={{ color: 'rgba(255,255,255,0.45)', fontSize: 13, textAlign: 'center', marginTop: 16 }}>
+                    Following {followedCount} creator{followedCount !== 1 ? 's' : ''}
+                  </Text>
+                )}
+              </>
+            )}
+
+            {/* Wide pill Continue button */}
+            <TouchableOpacity
+              style={{ marginTop: 28, borderRadius: 999, overflow: 'hidden' }}
+              onPress={handleNext}
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              <LinearGradient
+                colors={['#EC4899', '#9333EA']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={{ paddingVertical: 17, alignItems: 'center', borderRadius: 999 }}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={{ color: '#FFFFFF', fontSize: 17, fontWeight: '700', letterSpacing: 0.3 }}>
+                    Continue
+                  </Text>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </Animated.View>
+        </ScrollView>
+      </View>
+    );
+  };
+
+  // ============================================================
+  // FIRST POST STEP
+  // ============================================================
+
+  const renderFirstPost = () => (
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.75)' }]} />
+      </ImageBackground>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Animated.View style={[styles.headerContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: scaleAnim }] }]}>
+            <Text style={[styles.stepTitle, { color: theme.colors.text }]}>Introduce yourself 👋</Text>
+            <Text style={[styles.stepSubtitle, { color: theme.colors.textSecondary }]}>
+              Your first post is how the community meets you. Make it yours.
+            </Text>
+          </Animated.View>
+
+          <Animated.View style={[{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+            {/* Post preview card */}
+            <View style={{
+              backgroundColor: theme.colors.surface,
+              borderRadius: 16,
+              padding: 16,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              marginBottom: 16,
+            }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: theme.colors.primary + '40', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
+                  <Text style={{ fontSize: 18 }}>{(displayName || username || '?')[0].toUpperCase()}</Text>
+                </View>
+                <View>
+                  <Text style={[{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }]}>{displayName || username}</Text>
+                  <Text style={[{ color: theme.colors.textSecondary, fontSize: 12 }]}>@{username}</Text>
+                </View>
+              </View>
+              <TextInput
+                style={[{
+                  color: theme.colors.text,
+                  fontSize: 15,
+                  lineHeight: 22,
+                  minHeight: 90,
+                  textAlignVertical: 'top',
+                }]}
+                value={firstPostText}
+                onChangeText={(text) => {
+                  if (text.length <= 280) setFirstPostText(text);
+                }}
+                multiline
+                placeholder="Write your intro..."
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+              <Text style={[{ color: theme.colors.textSecondary, fontSize: 11, textAlign: 'right', marginTop: 6 }]}>
+                {firstPostText.length}/280
+              </Text>
+
+              {/* Photo preview */}
+              {firstPostImage ? (
+                <View style={{ marginTop: 10, position: 'relative' }}>
+                  <Image source={{ uri: firstPostImage }} style={{ width: '100%', height: 160, borderRadius: 10 }} resizeMode="cover" />
+                  <TouchableOpacity
+                    style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 12, padding: 4 }}
+                    onPress={() => setFirstPostImage(null)}
+                  >
+                    <Ionicons name="close" size={16} color="#FFFFFF" />
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, paddingVertical: 8 }}
+                  onPress={handleFirstPostImagePick}
+                >
+                  <Ionicons name="image-outline" size={20} color={theme.colors.primary} />
+                  <Text style={[{ color: theme.colors.primary, fontSize: 14, marginLeft: 8 }]}>Add a photo (optional)</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={styles.modernButtonContainer}
+              onPress={handlePublishFirstPost}
+              disabled={publishingPost}
+            >
+              <LinearGradient
+                colors={['#10B981', '#059669', '#047857']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.modernButtonGradient}
+              >
+                {publishingPost ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modernButtonText}>Publish & Enter SoundBridge 🎉</Text>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
+  );
+
+  // ============================================================
+  // NOTIFICATION PERMISSION STEP
+  // ============================================================
+
+  const handleRequestNotifications = async () => {
+    try {
+      await Notifications.requestPermissionsAsync();
+    } catch (_) {
+      // permission errors are non-fatal
+    }
+    animateStepTransition('tierSelection');
+  };
+
+  const handleSkipNotifications = async () => {
+    await AsyncStorage.setItem('notif_permission_dismissed', '1').catch(() => {});
+    animateStepTransition('tierSelection');
+  };
+
+  const isCreatorType = userType === 'music_creator' || userType === 'podcast_creator' || userType === 'industry_professional' || userType === 'event_organiser';
+
+  const renderNotificationPermission = () => {
+    const bullets = isCreatorType
+      ? [
+          { icon: 'calendar-outline' as const, text: 'Fans find your events — direct to the right audience, no ad spend.' },
+          { icon: 'cash-outline' as const, text: 'Sales moments — someone else sees the nudge first if you don\'t.' },
+          { icon: 'trending-up-outline' as const, text: 'AI career nudges — personalised next steps, delivered at the right time.' },
+          { icon: 'flash-outline' as const, text: 'Urgent gigs — time-sensitive. Miss the push, miss the gig.' },
+        ]
+      : [
+          { icon: 'location-outline' as const, text: 'Local shows that match you — not random spam, precision matched.' },
+          { icon: 'pricetag-outline' as const, text: 'Audio deals you opted into — someone else gets there first.' },
+          { icon: 'flash-outline' as const, text: 'Urgent gigs nearby — miss the push, miss the moment.' },
+          { icon: 'notifications-outline' as const, text: 'Smart reminders for events you care about.' },
+        ];
+
+    return (
+      <View style={styles.stepContainer}>
+        <ImageBackground
+          source={require('../../assets/images/logos/bg01.jpg')}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+        >
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.78)' }]} />
+        </ImageBackground>
+
+        <View style={styles.headerWithBack}>
+          <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
+          <Text style={[styles.headerStepText, { color: 'rgba(255,255,255,0.5)' }]}>
+            {getStepIndicatorText(currentStep, userType)}
+          </Text>
+          <View style={styles.backButtonPlaceholder} />
+        </View>
+
+        <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 48 }]} showsVerticalScrollIndicator={false}>
+          <Animated.View style={[{ opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: scaleAnim }] }]}>
+            {/* Bell icon */}
+            <View style={{ alignItems: 'center', marginBottom: 24 }}>
+              <LinearGradient
+                colors={['#EC4899', '#9333EA']}
+                style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Ionicons name="notifications" size={38} color="#FFFFFF" />
+              </LinearGradient>
+            </View>
+
+            {/* Headline */}
+            <Text style={{ color: '#FFFFFF', fontSize: 26, fontWeight: '800', textAlign: 'center', marginBottom: 10, letterSpacing: -0.3 }}>
+              Don't miss a thing
+            </Text>
+            <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 15, textAlign: 'center', marginBottom: 30, lineHeight: 22 }}>
+              {isCreatorType
+                ? 'With alerts off, fans miss your events and you miss sales and growth nudges.'
+                : 'With alerts off, you miss events matched to you, deals, and gigs that others will see first.'}
+            </Text>
+
+            {/* FOMO bullets */}
+            <BlurView intensity={14} tint="dark" style={{ borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', marginBottom: 28 }}>
+              <View style={{ padding: 20, gap: 18 }}>
+                {bullets.map((item, i) => (
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
+                    <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(236,72,153,0.18)', alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>
+                      <Ionicons name={item.icon} size={17} color="#EC4899" />
+                    </View>
+                    <Text style={{ flex: 1, color: 'rgba(255,255,255,0.82)', fontSize: 14, lineHeight: 21 }}>
+                      {item.text}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </BlurView>
+
+            {/* Platform truth line */}
+            <Text style={{ color: 'rgba(255,255,255,0.38)', fontSize: 12, textAlign: 'center', marginBottom: 28, lineHeight: 18 }}>
+              SoundBridge isn't noise. It's the right alert at the right time.{'\n'}Off = you fall behind on events, sales, and growth others are getting.
+            </Text>
+
+            {/* Primary CTA */}
+            <TouchableOpacity
+              style={{ borderRadius: 999, overflow: 'hidden', marginBottom: 14 }}
+              onPress={handleRequestNotifications}
+              activeOpacity={0.85}
+            >
+              <LinearGradient
+                colors={['#EC4899', '#9333EA']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={{ paddingVertical: 17, alignItems: 'center', borderRadius: 999 }}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 17, fontWeight: '700', letterSpacing: 0.2 }}>
+                  Turn on Notifications
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {/* Secondary — Not now */}
+            <TouchableOpacity onPress={handleSkipNotifications} activeOpacity={0.6} style={{ alignItems: 'center', paddingVertical: 10 }}>
+              <Text style={{ color: 'rgba(255,255,255,0.38)', fontSize: 14 }}>Not now</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </ScrollView>
+      </View>
+    );
+  };
+
   // Render Tier Selection (Free vs Pro) - Path-aware
   const renderTierSelection = () => {
     const isMusicLover = userType === 'music_lover';
@@ -4680,10 +6076,10 @@ export default function OnboardingScreen() {
             ]}
           >
             <Text style={[styles.stepTitle, { color: theme.colors.text }]}>
-              You're All Set! 🎉
+              One last thing 🎉
             </Text>
             <Text style={[styles.stepSubtitle, { color: theme.colors.textSecondary, marginTop: 8 }]}>
-              Choose how you want to start your creative journey
+              Start free — upgrade anytime from your profile
             </Text>
           </Animated.View>
 
@@ -4714,19 +6110,11 @@ export default function OnboardingScreen() {
               <View style={styles.tierFeatures}>
                 <View style={styles.tierFeatureItem}>
                   <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>30MB storage (~3 tracks)</Text>
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>250MB storage (~30-40 tracks)</Text>
                 </View>
                 <View style={styles.tierFeatureItem}>
                   <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>3 uploads total</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Basic profile & networking</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Receive tips (keep 95%)</Text>
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Unlimited event promotion</Text>
                 </View>
                 <View style={styles.tierFeatureItem}>
                   <Ionicons name="checkmark-circle" size={18} color="#10B981" />
@@ -4734,11 +6122,15 @@ export default function OnboardingScreen() {
                 </View>
                 <View style={styles.tierFeatureItem}>
                   <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Browse & discover music</Text>
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Basic analytics</Text>
                 </View>
                 <View style={styles.tierFeatureItem}>
                   <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Basic analytics</Text>
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Professional networking</Text>
+                </View>
+                <View style={styles.tierFeatureItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Transaction fees apply (you still make money)</Text>
                 </View>
               </View>
               <View style={styles.tierPricing}>
@@ -4747,9 +6139,12 @@ export default function OnboardingScreen() {
               </View>
               <View style={[styles.tierButton, styles.tierButtonFree]}>
                 <Text style={[styles.tierButtonText, { color: theme.colors.text }]}>
-                  Start Free
+                  Start for Free →
                 </Text>
               </View>
+              <Text style={[{ color: theme.colors.textSecondary, fontSize: 11, textAlign: 'center', marginTop: 8 }]}>
+                No card required • Upgrade anytime
+              </Text>
             </TouchableOpacity>
 
             {/* Premium Tier */}
@@ -4897,14 +6292,6 @@ export default function OnboardingScreen() {
             <Text style={[styles.socialProofText, { color: theme.colors.textSecondary, marginBottom: 16 }]}>
               Start with basics, upgrade anytime
             </Text>
-            <TouchableOpacity
-              onPress={() => handleTierSelection('free')}
-              style={{ paddingVertical: 12 }}
-            >
-              <Text style={[styles.skipButtonText, { color: theme.colors.textSecondary, textDecorationLine: 'underline' }]}>
-                Skip for now
-              </Text>
-            </TouchableOpacity>
           </View>
         </ScrollView>
       </View>
@@ -5184,7 +6571,7 @@ export default function OnboardingScreen() {
       <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor={theme.colors.background} />
       
       {/* Progress indicator - Circular Dots */}
-      {currentStep !== 'welcome' && currentStep !== 'welcomeConfirmation' && (
+      {currentStep !== 'welcome' && currentStep !== 'welcomeConfirmation' && currentStep !== 'firstPost' && (
         <View style={styles.progressContainer}>
           <View style={styles.progressDotsContainer}>
             {Array.from({ length: getPathTotalSteps(userType) }).map((_, index) => {
@@ -5240,15 +6627,24 @@ export default function OnboardingScreen() {
       {currentStep === 'musicLover_genres' && renderMusicLoverGenres()}
       {currentStep === 'musicLover_events' && renderMusicLoverEvents()}
       {currentStep === 'musicLover_valueDemo' && renderMusicLoverValueDemo()}
-      
+
+      {/* Event Organiser Path */}
+      {currentStep === 'eventOrganiser_profileSetup' && renderEventOrganiserProfileSetup()}
+      {currentStep === 'eventOrganiser_eventTypes' && renderEventOrganiserEventTypes()}
+      {currentStep === 'eventOrganiser_location' && renderEventOrganiserLocation()}
+      {currentStep === 'eventOrganiser_valueDemo' && renderEventOrganiserValueDemo()}
+
       {/* Legacy screens (for backward compatibility) */}
       {currentStep === 'quickSetup' && renderQuickSetup()}
       {currentStep === 'eventPreferences' && renderEventPreferences()}
       {currentStep === 'valueDemo' && renderValueDemo()}
-      
+
       {/* Shared screens */}
+      {currentStep === 'followSuggestions' && renderFollowSuggestions()}
+      {currentStep === 'notificationPermission' && renderNotificationPermission()}
       {currentStep === 'tierSelection' && renderTierSelection()}
       {currentStep === 'payment' && renderPayment()}
+      {currentStep === 'firstPost' && renderFirstPost()}
       {currentStep === 'welcomeConfirmation' && renderWelcomeConfirmation()}
       </SafeAreaView>
   );
@@ -5503,6 +6899,42 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 4,
   },
+  avatarPickerContainer: {
+    alignSelf: 'center',
+    marginBottom: 8,
+    position: 'relative',
+  },
+  avatarPickerImage: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+  },
+  avatarPickerPlaceholder: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarPickerBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#7C3AED',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarPickerLabel: {
+    textAlign: 'center',
+    fontSize: 13,
+    marginBottom: 24,
+  },
   genresList: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -5671,7 +7103,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 12,
   },
-  connectButton: {
+  followButton: {
     backgroundColor: '#DC2626',
     paddingVertical: 10,
     paddingHorizontal: 24,
@@ -5681,10 +7113,10 @@ const styles = StyleSheet.create({
     minHeight: 40,
     marginLeft: 8,
   },
-  connectButtonLoading: {
+  followButtonLoading: {
     opacity: 0.7,
   },
-  connectButtonText: {
+  followButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',

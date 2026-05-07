@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import BackButton from '../components/BackButton';
 import {
   View,
@@ -20,12 +20,22 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { apiFetch } from '../lib/apiClient';
+import { config } from '../config/environment';
+import RevenueCatService from '../services/RevenueCatService';
+import { subscriptionService } from '../services/SubscriptionService';
+import { SystemTypography as Typography } from '../constants/Typography';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { GooglePlacesAutocomplete, GooglePlaceData, GooglePlaceDetail } from 'react-native-google-places-autocomplete';
+import BecomeCreatorModal from '../components/BecomeCreatorModal';
+import UpgradeForPaidEventsModal from '../components/UpgradeForPaidEventsModal';
+import { SubscriptionStatusService } from '../services/SubscriptionStatusService';
 
 // Country-specific address field configurations
 interface AddressFieldConfig {
@@ -236,13 +246,109 @@ const EVENT_CATEGORIES = [
 export default function CreateEventScreen() {
   const navigation = useNavigation();
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { user, userProfile, updateUserProfile, refreshUser, session } = useAuth();
 
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Modals for paid event gating
+  const [showBecomeCreatorModal, setShowBecomeCreatorModal] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [becomeCreatorLoading, setBecomeCreatorLoading] = useState(false);
+
+  // User role and subscription state
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [subscriptionTier, setSubscriptionTier] = useState<'free' | 'premium' | 'unlimited'>('free');
+  const [subscriptionStatus, setSubscriptionStatus] = useState<'active' | 'cancelled' | 'expired' | 'past_due' | null>(null);
+
+  // Fetch user role and subscription tier on mount
+  const fetchUserDetails = useCallback(async () => {
+    if (!user?.id) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      if (!error && data) {
+        setUserRole(data.role || 'listener');
+      }
+    } catch (err) {
+      console.error('Error fetching user role:', err);
+    }
+  }, [user?.id]);
+
+  const fetchSubscriptionTier = useCallback(async () => {
+    if (!user?.id) return;
+
+    try {
+      // Development bypass
+      if (config.bypassRevenueCat && config.developmentTier) {
+        setSubscriptionTier(config.developmentTier);
+        setSubscriptionStatus('active');
+        return;
+      }
+
+      // Prefer RevenueCat if ready (TestFlight)
+      let attempts = 0;
+      while (!RevenueCatService.isReady() && attempts < 10) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        attempts++;
+      }
+
+      if (RevenueCatService.isReady()) {
+        const customerInfo = await RevenueCatService.getCustomerInfo();
+        if (customerInfo) {
+          const tier = RevenueCatService.getUserTier(customerInfo);
+          setSubscriptionTier(tier);
+          setSubscriptionStatus(tier === 'free' ? null : 'active');
+          return;
+        }
+      }
+
+      // Fallback to backend subscription status if we have a session
+      if (session) {
+        const subscription = await subscriptionService.getSubscriptionStatus(session);
+        setSubscriptionTier(subscription.tier);
+        setSubscriptionStatus(subscription.status);
+        return;
+      }
+
+      // Final fallback to profile-based status
+      const profileStatus = await SubscriptionStatusService.getSubscriptionStatus(user.id);
+      if (profileStatus) {
+        setSubscriptionTier(profileStatus.tier);
+        setSubscriptionStatus(profileStatus.status);
+      }
+    } catch (err) {
+      console.error('Error fetching subscription status:', err);
+    }
+  }, [user?.id, session]);
+
+  useEffect(() => {
+    fetchUserDetails();
+    fetchSubscriptionTier();
+  }, [fetchUserDetails, fetchSubscriptionTier]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchSubscriptionTier();
+    }, [fetchSubscriptionTier])
+  );
+
+  // All tiers can create paid events — no subscription required
+  const canCreatePaidEvents = true;
+
+  // Date/Time picker state
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [selectedTime, setSelectedTime] = useState<Date>(new Date());
 
   const [formData, setFormData] = useState<EventFormData>({
     title: '',
@@ -275,6 +381,105 @@ export default function CreateEventScreen() {
 
   const handleInputChange = (field: keyof EventFormData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  // Handle toggling paid event - all tiers can create paid events
+  const handleToggleFreeEvent = (isFree: boolean) => {
+    setFormData(prev => ({ ...prev, isFree }));
+  };
+
+  // Handle becoming a creator
+  const handleBecomeCreator = async (): Promise<boolean> => {
+    setBecomeCreatorLoading(true);
+    try {
+      // Update user role to 'creator'
+      const result = await updateUserProfile({ role: 'creator' as any });
+
+      if (result.success) {
+        // Update local state
+        setUserRole('creator');
+
+        // Refresh user data
+        await refreshUser();
+
+        Alert.alert(
+          'Welcome, Creator!',
+          'Your account has been upgraded to a creator account. To host paid events, you\'ll need a subscription.',
+          [
+            {
+              text: 'View Plans',
+              onPress: () => {
+                setShowBecomeCreatorModal(false);
+                navigation.navigate('Upgrade' as never);
+              },
+            },
+            {
+              text: 'Later',
+              style: 'cancel',
+            },
+          ]
+        );
+        return true;
+      } else {
+        Alert.alert('Error', 'Failed to upgrade to creator account. Please try again.');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error becoming creator:', error);
+      Alert.alert('Error', 'Something went wrong. Please try again.');
+      return false;
+    } finally {
+      setBecomeCreatorLoading(false);
+    }
+  };
+
+  // Date picker handler
+  const handleDateChange = (event: DateTimePickerEvent, date?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+    if (event.type === 'set' && date) {
+      setSelectedDate(date);
+      // Format as YYYY-MM-DD
+      const formattedDate = date.toISOString().split('T')[0];
+      handleInputChange('event_date', formattedDate);
+    }
+  };
+
+  // Time picker handler
+  const handleTimeChange = (event: DateTimePickerEvent, time?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowTimePicker(false);
+    }
+    if (event.type === 'set' && time) {
+      setSelectedTime(time);
+      // Format as HH:MM
+      const hours = time.getHours().toString().padStart(2, '0');
+      const minutes = time.getMinutes().toString().padStart(2, '0');
+      handleInputChange('event_time', `${hours}:${minutes}`);
+    }
+  };
+
+  // Format date for display
+  const formatDisplayDate = (dateStr: string): string => {
+    if (!dateStr) return 'Select date';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-GB', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  };
+
+  // Format time for display
+  const formatDisplayTime = (timeStr: string): string => {
+    if (!timeStr) return 'Select time';
+    const [hours, minutes] = timeStr.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${minutes} ${ampm}`;
   };
 
   const handleAddressFieldChange = (fieldName: string, value: string) => {
@@ -430,8 +635,18 @@ export default function CreateEventScreen() {
     }
 
     // Validate required address fields
+    // If we have coordinates from Google Places, street field is auto-filled via the search
+    // so we only strictly require city for submission
     const requiredFields = selectedCountryConfig.fields.filter(f => f.required);
     for (const field of requiredFields) {
+      // Skip street validation if we have valid coordinates (Google Places was used)
+      if (field.name === 'street' && formData.latitude !== null && formData.longitude !== null) {
+        continue;
+      }
+      // Skip state validation if we have coordinates - Google Places provides location accuracy
+      if (field.name === 'state' && formData.latitude !== null && formData.longitude !== null) {
+        continue;
+      }
       if (!formData.addressFields[field.name]?.trim()) {
         Alert.alert('Error', `Please enter ${field.label}`);
         return false;
@@ -447,6 +662,21 @@ export default function CreateEventScreen() {
 
       if (!hasAnyPrice) {
         Alert.alert('Error', 'Please set at least one price, or mark the event as free');
+        return false;
+      }
+
+      // Ticket purchases currently support GBP/NGN only
+      const hasSupportedPrice = ['GBP', 'NGN'].some((currency) => {
+        const value = formData.prices[currency];
+        const numPrice = parseFloat(value);
+        return !isNaN(numPrice) && numPrice > 0;
+      });
+
+      if (!hasSupportedPrice) {
+        Alert.alert(
+          'Unsupported Currency',
+          'Ticket purchases currently support GBP or NGN. Please set at least one of those prices.'
+        );
         return false;
       }
     }
@@ -480,13 +710,14 @@ export default function CreateEventScreen() {
                        formData.addressFields['town'] || '';
 
       // Prepare event data
+      // Note: Backend API handles category mapping internally - send display format
       const eventData: any = {
         title: formData.title.trim(),
         description: formData.description.trim(),
         event_date: eventDateTime.toISOString(),
         location: location,
         city: cityField.trim(), // Add city field for proximity notifications
-        category: formData.category,
+        category: formData.category, // Send display format - backend maps to enum
         country: formData.country,
       };
 
@@ -528,29 +759,33 @@ export default function CreateEventScreen() {
         });
       }
 
-      // Store structured address data
-      eventData.address_data = {
-        country: formData.country,
-        fields: formData.addressFields,
-      };
+      // Note: address_data column doesn't exist in database yet
+      // The address is already captured in the 'location' field as a string
+      // Country is stored separately in 'country' field
 
-      console.log('📤 Sending event data:', eventData);
+      console.log('📤 Sending event data:', JSON.stringify(eventData, null, 2));
 
-      // Call API endpoint
-      const response = await fetch('https://www.soundbridge.live/api/events', {
+      // Call API endpoint using apiFetch for proper authentication
+      const result = await apiFetch<{ success: boolean; event?: any; error?: string; message?: string }>('/api/events', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
+        session,
         body: JSON.stringify(eventData),
       });
 
-      const result = await response.json();
+      console.log('📥 API result:', result);
 
-      if (!response.ok) {
-        const errorMessage = result.error || result.message || `HTTP ${response.status}: Failed to create event`;
+      if (!result.success) {
+        const errorMessage = result.error || result.message || 'Failed to create event';
+        console.error('❌ API error response:', result);
         throw new Error(errorMessage);
+      }
+
+      // Queue push notifications to nearby genre-matched users (fire-and-forget)
+      if (result.event?.id) {
+        apiFetch(`/api/events/${result.event.id}/queue-notifications`, {
+          method: 'POST',
+          session,
+        }).catch((err) => console.warn('⚠️ Failed to queue event notifications:', err));
       }
 
       Alert.alert(
@@ -605,7 +840,7 @@ export default function CreateEventScreen() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled={true}>
           <View style={styles.contentContainer}>
             {/* Event Image */}
             <View style={styles.imageSection}>
@@ -660,21 +895,102 @@ export default function CreateEventScreen() {
             <View style={styles.inputSection}>
               <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Date & Time *</Text>
               <View style={styles.dateTimeRow}>
-                <TextInput
-                  style={[styles.dateInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={theme.colors.textSecondary}
-                  value={formData.event_date}
-                  onChangeText={(value) => handleInputChange('event_date', value)}
-                />
-                <TextInput
-                  style={[styles.timeInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-                  placeholder="HH:MM"
-                  placeholderTextColor={theme.colors.textSecondary}
-                  value={formData.event_time}
-                  onChangeText={(value) => handleInputChange('event_time', value)}
-                />
+                {/* Date Picker Button */}
+                <TouchableOpacity
+                  style={[styles.datePickerButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <Ionicons name="calendar-outline" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
+                  <Text style={[styles.datePickerText, { color: formData.event_date ? theme.colors.text : theme.colors.textSecondary }]}>
+                    {formatDisplayDate(formData.event_date)}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Time Picker Button */}
+                <TouchableOpacity
+                  style={[styles.timePickerButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                  onPress={() => setShowTimePicker(true)}
+                >
+                  <Ionicons name="time-outline" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
+                  <Text style={[styles.datePickerText, { color: formData.event_time ? theme.colors.text : theme.colors.textSecondary }]}>
+                    {formatDisplayTime(formData.event_time)}
+                  </Text>
+                </TouchableOpacity>
               </View>
+
+              {/* Date Picker Modal/Component */}
+              {showDatePicker && (
+                Platform.OS === 'ios' ? (
+                  <Modal transparent animationType="slide" visible={showDatePicker}>
+                    <View style={styles.pickerModalOverlay}>
+                      <View style={[styles.pickerModalContent, { backgroundColor: theme.colors.card }]}>
+                        <View style={styles.pickerModalHeader}>
+                          <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                            <Text style={[styles.pickerModalCancel, { color: theme.colors.textSecondary }]}>Cancel</Text>
+                          </TouchableOpacity>
+                          <Text style={[styles.pickerModalTitle, { color: theme.colors.text }]}>Select Date</Text>
+                          <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                            <Text style={[styles.pickerModalDone, { color: theme.colors.primary }]}>Done</Text>
+                          </TouchableOpacity>
+                        </View>
+                        <DateTimePicker
+                          value={selectedDate}
+                          mode="date"
+                          display="spinner"
+                          onChange={handleDateChange}
+                          minimumDate={new Date()}
+                          textColor={theme.colors.text}
+                          style={styles.dateTimePicker}
+                        />
+                      </View>
+                    </View>
+                  </Modal>
+                ) : (
+                  <DateTimePicker
+                    value={selectedDate}
+                    mode="date"
+                    display="default"
+                    onChange={handleDateChange}
+                    minimumDate={new Date()}
+                  />
+                )
+              )}
+
+              {/* Time Picker Modal/Component */}
+              {showTimePicker && (
+                Platform.OS === 'ios' ? (
+                  <Modal transparent animationType="slide" visible={showTimePicker}>
+                    <View style={styles.pickerModalOverlay}>
+                      <View style={[styles.pickerModalContent, { backgroundColor: theme.colors.card }]}>
+                        <View style={styles.pickerModalHeader}>
+                          <TouchableOpacity onPress={() => setShowTimePicker(false)}>
+                            <Text style={[styles.pickerModalCancel, { color: theme.colors.textSecondary }]}>Cancel</Text>
+                          </TouchableOpacity>
+                          <Text style={[styles.pickerModalTitle, { color: theme.colors.text }]}>Select Time</Text>
+                          <TouchableOpacity onPress={() => setShowTimePicker(false)}>
+                            <Text style={[styles.pickerModalDone, { color: theme.colors.primary }]}>Done</Text>
+                          </TouchableOpacity>
+                        </View>
+                        <DateTimePicker
+                          value={selectedTime}
+                          mode="time"
+                          display="spinner"
+                          onChange={handleTimeChange}
+                          textColor={theme.colors.text}
+                          style={styles.dateTimePicker}
+                        />
+                      </View>
+                    </View>
+                  </Modal>
+                ) : (
+                  <DateTimePicker
+                    value={selectedTime}
+                    mode="time"
+                    display="default"
+                    onChange={handleTimeChange}
+                  />
+                )
+              )}
             </View>
 
             {/* Category */}
@@ -706,60 +1022,340 @@ export default function CreateEventScreen() {
               </View>
             </View>
 
-            {/* Country Selection */}
-            <View style={styles.inputSection}>
-              <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Country *</Text>
-              <TouchableOpacity
-                style={[styles.countrySelector, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border}]}
-                onPress={() => setShowCountryPicker(true)}
-              >
-                <Text style={[styles.countrySelectorText, { color: theme.colors.text}]}>
-                  {selectedCountryConfig.countryName}
-                </Text>
-                <Ionicons name="chevron-down" size={20} color={theme.colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
+            {/* Location Search with Google Places */}
+            <View style={[styles.inputSection, { zIndex: 1000 }]}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Location *</Text>
+              <Text style={[styles.helperText, { color: theme.colors.textSecondary, marginBottom: 8 }]}>
+                Search for an address or venue
+              </Text>
 
-            {/* Dynamic Address Fields */}
-            <View style={styles.inputSection}>
-              <View style={styles.sectionHeader}>
-                <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Address *</Text>
-                <TouchableOpacity
-                  style={[styles.geocodeButton, { backgroundColor: theme.colors.primary}]}
-                  onPress={geocodeLocation}
-                  disabled={geocoding}
-                >
-                  {geocoding ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <>
-                      <Ionicons name="location" size={16} color="#FFFFFF" />
-                      <Text style={styles.geocodeButtonText}>Get Coordinates</Text>
-                    </>
+              {config.googlePlacesApiKey ? (
+                <GooglePlacesAutocomplete
+                  placeholder="Search address or venue..."
+                  onPress={(data: GooglePlaceData, details: GooglePlaceDetail | null = null) => {
+                    console.log('📍 Place selected:', data.description);
+                    console.log('📍 Place details received:', details ? 'YES' : 'NO');
+                    console.log('📍 place_id:', data.place_id);
+
+                    // Always set the street address from the selection
+                    const updateData: any = {
+                      street: data.description,
+                    };
+
+                    if (details) {
+                      console.log('📍 Details:', JSON.stringify(details, null, 2));
+
+                      // Extract address components
+                      if (details.address_components) {
+                        const addressComponents = details.address_components;
+                        let city = '';
+                        let country = '';
+                        let countryCode = '';
+                        let postalCode = '';
+                        let state = '';
+
+                        addressComponents.forEach((component: any) => {
+                          if (component.types.includes('locality')) {
+                            city = component.long_name;
+                          }
+                          if (component.types.includes('postal_town') && !city) {
+                            city = component.long_name;
+                          }
+                          if (component.types.includes('country')) {
+                            country = component.long_name;
+                            countryCode = component.short_name;
+                          }
+                          if (component.types.includes('postal_code')) {
+                            postalCode = component.long_name;
+                          }
+                          if (component.types.includes('administrative_area_level_1')) {
+                            state = component.long_name;
+                          }
+                          if (component.types.includes('administrative_area_level_2') && !state) {
+                            state = component.long_name;
+                          }
+                        });
+
+                        if (city) updateData.city = city;
+                        if (postalCode) {
+                          updateData.postCode = postalCode;
+                          updateData.postalCode = postalCode;
+                          updateData.zipCode = postalCode;
+                        }
+                        if (state) {
+                          updateData.state = state;
+                          updateData.county = state;
+                        }
+
+                        // Update form data with all extracted fields
+                        setFormData(prev => ({
+                          ...prev,
+                          addressFields: {
+                            ...prev.addressFields,
+                            ...updateData,
+                          },
+                          country: countryCode || prev.country,
+                          latitude: details.geometry?.location?.lat || null,
+                          longitude: details.geometry?.location?.lng || null,
+                        }));
+
+                        console.log('✅ Location set:', { city, postalCode, state, country: countryCode });
+                      }
+                    } else {
+                      // No details - fetch them manually using place_id
+                      console.log('⚠️ No details from library, fetching manually...');
+
+                      if (data.place_id) {
+                        // Fetch place details manually
+                        fetch(`https://maps.googleapis.com/maps/api/place/details/json?place_id=${data.place_id}&fields=address_component,geometry,formatted_address&key=${config.googlePlacesApiKey}`)
+                          .then(res => res.json())
+                          .then(result => {
+                            console.log('📍 Manual fetch result:', JSON.stringify(result, null, 2));
+
+                            if (result.result) {
+                              const placeDetails = result.result;
+                              let city = '';
+                              let countryCode = '';
+                              let postalCode = '';
+                              let state = '';
+
+                              if (placeDetails.address_components) {
+                                placeDetails.address_components.forEach((component: any) => {
+                                  if (component.types.includes('locality')) {
+                                    city = component.long_name;
+                                  }
+                                  if (component.types.includes('postal_town') && !city) {
+                                    city = component.long_name;
+                                  }
+                                  if (component.types.includes('country')) {
+                                    countryCode = component.short_name;
+                                  }
+                                  if (component.types.includes('postal_code')) {
+                                    postalCode = component.long_name;
+                                  }
+                                  if (component.types.includes('administrative_area_level_1')) {
+                                    state = component.long_name;
+                                  }
+                                });
+                              }
+
+                              setFormData(prev => ({
+                                ...prev,
+                                addressFields: {
+                                  ...prev.addressFields,
+                                  street: data.description,
+                                  city: city || prev.addressFields.city,
+                                  postCode: postalCode || prev.addressFields.postCode,
+                                  postalCode: postalCode || prev.addressFields.postalCode,
+                                  zipCode: postalCode || prev.addressFields.zipCode,
+                                  state: state || prev.addressFields.state,
+                                  county: state || prev.addressFields.county,
+                                },
+                                country: countryCode || prev.country,
+                                latitude: placeDetails.geometry?.location?.lat || prev.latitude,
+                                longitude: placeDetails.geometry?.location?.lng || prev.longitude,
+                              }));
+
+                              console.log('✅ Manual fetch - Location set:', { city, postalCode, state, country: countryCode });
+                            }
+                          })
+                          .catch(err => {
+                            console.error('❌ Manual fetch error:', err);
+                            // Still update the street address
+                            setFormData(prev => ({
+                              ...prev,
+                              addressFields: {
+                                ...prev.addressFields,
+                                street: data.description,
+                              },
+                            }));
+                          });
+                      } else {
+                        // No place_id, just set the address
+                        setFormData(prev => ({
+                          ...prev,
+                          addressFields: {
+                            ...prev.addressFields,
+                            street: data.description,
+                          },
+                        }));
+                      }
+                    }
+                  }}
+                  query={{
+                    key: config.googlePlacesApiKey,
+                    language: 'en',
+                  }}
+                  fetchDetails={true}
+                  enablePoweredByContainer={false}
+                  onFail={(error) => {
+                    console.error('❌ Google Places error:', error);
+                    console.error('❌ Error details:', JSON.stringify(error, null, 2));
+                  }}
+                  onNotFound={() => console.log('⚠️ No results found')}
+                  onTimeout={() => console.log('⏱️ Google Places timeout')}
+                  debounce={300}
+                  minLength={2}
+                  GooglePlacesDetailsQuery={{
+                    fields: 'address_component,geometry,formatted_address',
+                  }}
+                  styles={{
+                    container: {
+                      flex: 0,
+                      zIndex: 1000,
+                    },
+                    textInputContainer: {
+                      backgroundColor: 'transparent',
+                    },
+                    textInput: {
+                      height: 50,
+                      borderRadius: 12,
+                      paddingHorizontal: 16,
+                      fontSize: 16,
+                      fontFamily: Typography.body.fontFamily,
+                      backgroundColor: theme.colors.surface,
+                      color: theme.colors.text,
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                    },
+                    listView: {
+                      backgroundColor: theme.colors.card,
+                      borderRadius: 12,
+                      marginTop: 8,
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                      zIndex: 1001,
+                      elevation: 5,
+                    },
+                    row: {
+                      backgroundColor: theme.colors.card,
+                      padding: 14,
+                      minHeight: 44,
+                    },
+                    separator: {
+                      height: 1,
+                      backgroundColor: theme.colors.border,
+                    },
+                    description: {
+                      color: theme.colors.text,
+                      fontSize: 14,
+                      fontFamily: Typography.label.fontFamily,
+                    },
+                    poweredContainer: {
+                      display: 'none',
+                    },
+                  }}
+                  textInputProps={{
+                    placeholderTextColor: theme.colors.textSecondary,
+                  }}
+                  listViewDisplayed="auto"
+                  disableScroll={true}
+                />
+              ) : (
+                // Fallback to manual input if no API key - log only in dev
+                <View>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
+                    placeholder="Enter full address"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={formData.addressFields['street'] || ''}
+                    onChangeText={(value) => handleAddressFieldChange('street', value)}
+                  />
+                </View>
+              )}
+
+              {/* Street Address field - auto-filled from Google Places or manual entry */}
+              <View style={{ marginTop: 12 }}>
+                <Text style={[styles.fieldLabel, { color: theme.colors.text }]}>Street Address</Text>
+                <View style={{ position: 'relative' }}>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
+                    placeholder="Street address (auto-filled from search)"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={formData.addressFields['street'] || ''}
+                    onChangeText={(value) => handleAddressFieldChange('street', value)}
+                  />
+                  {formData.addressFields['street'] && formData.latitude && (
+                    <View style={styles.autoFilledBadge}>
+                      <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                    </View>
                   )}
+                </View>
+              </View>
+
+              {/* City field - auto-filled from Google Places or manual entry */}
+              <View style={{ marginTop: 12 }}>
+                <Text style={[styles.fieldLabel, { color: theme.colors.text }]}>City *</Text>
+                <View style={{ position: 'relative' }}>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
+                    placeholder="City"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={formData.addressFields['city'] || ''}
+                    onChangeText={(value) => handleAddressFieldChange('city', value)}
+                  />
+                  {formData.addressFields['city'] && formData.latitude && (
+                    <View style={styles.autoFilledBadge}>
+                      <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              {/* Postcode/ZIP field - auto-filled from Google Places or manual entry */}
+              {selectedCountryConfig.fields.some(f =>
+                ['postCode', 'postalCode', 'zipCode', 'postleitzahl', 'codePostal', 'pinCode', 'cep', 'codigoPostal', 'postcode'].includes(f.name)
+              ) && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={[styles.fieldLabel, { color: theme.colors.text }]}>
+                    {selectedCountryConfig.countryCode === 'GB' ? 'Postcode' :
+                     selectedCountryConfig.countryCode === 'US' ? 'ZIP Code' :
+                     'Postal Code'} *
+                  </Text>
+                  <View style={{ position: 'relative' }}>
+                    <TextInput
+                      style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
+                      placeholder={selectedCountryConfig.countryCode === 'GB' ? 'SW1A 2AA' :
+                                   selectedCountryConfig.countryCode === 'US' ? '10001' :
+                                   'Enter postal code'}
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={formData.addressFields['postCode'] || formData.addressFields['postalCode'] || formData.addressFields['zipCode'] || ''}
+                      onChangeText={(value) => {
+                        // Update all postal code field variants
+                        handleAddressFieldChange('postCode', value);
+                        handleAddressFieldChange('postalCode', value);
+                        handleAddressFieldChange('zipCode', value);
+                      }}
+                      autoCapitalize="characters"
+                    />
+                    {(formData.addressFields['postCode'] || formData.addressFields['postalCode']) && formData.latitude && (
+                      <View style={styles.autoFilledBadge}>
+                        <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                      </View>
+                    )}
+                  </View>
+                </View>
+              )}
+
+              {/* Country selector */}
+              <View style={{ marginTop: 12 }}>
+                <Text style={[styles.fieldLabel, { color: theme.colors.text }]}>Country *</Text>
+                <TouchableOpacity
+                  style={[styles.countrySelector, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                  onPress={() => setShowCountryPicker(true)}
+                >
+                  <Text style={[styles.countrySelectorText, { color: theme.colors.text }]}>
+                    {selectedCountryConfig.countryName}
+                  </Text>
+                  <Ionicons name="chevron-down" size={20} color={theme.colors.textSecondary} />
                 </TouchableOpacity>
               </View>
 
-              {selectedCountryConfig.fields.map((field) => (
-                <View key={field.name} style={styles.addressFieldContainer}>
-                  <Text style={[styles.fieldLabel, { color: theme.colors.text}]}>
-                    {field.label} {field.required && '*'}
-                  </Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-                    placeholder={field.placeholder}
-                    placeholderTextColor={theme.colors.textSecondary}
-                    value={formData.addressFields[field.name] || ''}
-                    onChangeText={(value) => handleAddressFieldChange(field.name, value)}
-                    keyboardType={field.keyboardType || 'default'}
-                  />
-                </View>
-              ))}
-
+              {/* Show coordinates if available */}
               {formData.latitude !== null && formData.longitude !== null && (
-                <View style={[styles.coordinatesDisplay, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border}]}>
+                <View style={[styles.coordinatesDisplay, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, marginTop: 12 }]}>
                   <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                  <Text style={[styles.coordinatesText, { color: theme.colors.textSecondary}]}>
+                  <Text style={[styles.coordinatesText, { color: theme.colors.textSecondary }]}>
                     Coordinates: {formData.latitude.toFixed(4)}, {formData.longitude.toFixed(4)}
                   </Text>
                 </View>
@@ -786,7 +1382,7 @@ export default function CreateEventScreen() {
                   <Text style={[styles.freeToggleLabel, { color: theme.colors.text}]}>Free Event</Text>
                   <Switch
                     value={formData.isFree}
-                    onValueChange={(value) => handleInputChange('isFree', value)}
+                    onValueChange={handleToggleFreeEvent}
                     trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
                     thumbColor="#FFFFFF"
                   />
@@ -959,6 +1555,20 @@ export default function CreateEventScreen() {
             </TouchableOpacity>
           </KeyboardAvoidingView>
         </Modal>
+
+        {/* Become Creator Modal */}
+        <BecomeCreatorModal
+          visible={showBecomeCreatorModal}
+          onClose={() => setShowBecomeCreatorModal(false)}
+          onBecomeCreator={handleBecomeCreator}
+          loading={becomeCreatorLoading}
+        />
+
+        {/* Upgrade Modal */}
+        <UpgradeForPaidEventsModal
+          visible={showUpgradeModal}
+          onClose={() => setShowUpgradeModal(false)}
+        />
       </SafeAreaView>
     </View>
   );
@@ -989,15 +1599,19 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...Typography.headerLarge,
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: '300',
+    letterSpacing: -0.4,
     flex: 1,
     textAlign: 'center',
     marginHorizontal: 16,
   },
   headerButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.button,
+    fontSize: 15,
+    lineHeight: 20,
   },
   scrollView: {
     flex: 1,
@@ -1010,8 +1624,9 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   sectionTitle: {
+    ...Typography.headerMedium,
     fontSize: 16,
-    fontWeight: '600',
+    lineHeight: 22,
     marginBottom: 12,
   },
   sectionHeader: {
@@ -1039,7 +1654,9 @@ const styles = StyleSheet.create({
   },
   imagePlaceholderText: {
     marginTop: 8,
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
   },
   inputSection: {
     marginBottom: 24,
@@ -1049,14 +1666,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   textArea: {
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     textAlignVertical: 'top',
     minHeight: 100,
   },
@@ -1070,7 +1691,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   timeInput: {
     flex: 1,
@@ -1078,7 +1701,69 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
+  },
+  datePickerButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  timePickerButton: {
+    flex: 0.7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  datePickerText: {
+    ...Typography.button,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  pickerModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  pickerModalContent: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 30,
+  },
+  pickerModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  pickerModalTitle: {
+    ...Typography.button,
+    fontSize: 17,
+    lineHeight: 22,
+  },
+  pickerModalCancel: {
+    ...Typography.body,
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  pickerModalDone: {
+    ...Typography.button,
+    fontSize: 16,
+    lineHeight: 20,
+  },
+  dateTimePicker: {
+    height: 200,
   },
   categoryGrid: {
     flexDirection: 'row',
@@ -1092,8 +1777,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   categoryChipText: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '500',
+    lineHeight: 18,
   },
   countrySelector: {
     flexDirection: 'row',
@@ -1105,14 +1791,17 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   countrySelectorText: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   addressFieldContainer: {
     marginBottom: 12,
   },
   fieldLabel: {
+    ...Typography.label,
     fontSize: 14,
-    fontWeight: '500',
+    lineHeight: 20,
     marginBottom: 6,
   },
   geocodeButton: {
@@ -1125,8 +1814,9 @@ const styles = StyleSheet.create({
   },
   geocodeButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
+    lineHeight: 18,
   },
   coordinatesDisplay: {
     flexDirection: 'row',
@@ -1138,8 +1828,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   coordinatesText: {
+    ...Typography.label,
     fontSize: 12,
-    fontWeight: '500',
+    lineHeight: 16,
   },
   pricingHeader: {
     flexDirection: 'row',
@@ -1153,8 +1844,24 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   freeToggleLabel: {
+    ...Typography.label,
     fontSize: 14,
-    fontWeight: '500',
+    lineHeight: 20,
+  },
+  paidEventRequirement: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  paidEventRequirementText: {
+    flex: 1,
+    ...Typography.label,
+    fontSize: 13,
+    lineHeight: 18,
   },
   pricingSection: {
     gap: 12,
@@ -1165,8 +1872,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   currencyLabel: {
+    ...Typography.button,
     fontSize: 14,
-    fontWeight: '600',
+    lineHeight: 18,
     width: 80,
   },
   priceInput: {
@@ -1175,10 +1883,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   helperText: {
+    ...Typography.label,
     fontSize: 12,
+    lineHeight: 16,
     fontStyle: 'italic',
   },
   modalOverlay: {
@@ -1200,8 +1912,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   modalTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: '600',
+    lineHeight: 24,
   },
   searchInput: {
     margin: 16,
@@ -1209,7 +1922,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   countryItem: {
     flexDirection: 'row',
@@ -1220,9 +1935,19 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   countryItemText: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
   },
   countryItemCurrency: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
+  },
+  autoFilledBadge: {
+    position: 'absolute',
+    right: 12,
+    top: '50%',
+    marginTop: -8,
   },
 });

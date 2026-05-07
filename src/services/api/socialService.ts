@@ -1,5 +1,4 @@
 import { supabase } from '../../lib/supabase';
-import { apiFetch } from '../../lib/apiClient';
 
 export interface BookmarkRequest {
   content_id: string;
@@ -26,39 +25,7 @@ export class SocialService {
       if (!session) {
         throw new Error('Not authenticated');
       }
-
-      try {
-        console.log('📌 Toggling bookmark via API:', request);
-        const response = await apiFetch<{ success: boolean; data: Bookmark | null }>(
-          '/api/social/bookmark',
-          {
-            method: 'POST',
-            session,
-            body: JSON.stringify(request),
-          }
-        );
-
-        const isSaved = response.data !== null;
-        console.log(`✅ Bookmark toggled via API: ${isSaved ? 'saved' : 'unsaved'}`);
-        return { data: response.data || null, error: null, isSaved };
-      } catch (apiError: any) {
-        // If 405, 401, or 400 with RLS error, fall back to Supabase direct query
-        // 405 = endpoint not deployed
-        // 401 = backend auth misconfigured
-        // 400 with RLS = backend RLS policy missing or incorrect
-        
-        // Check for RLS error in the error body
-        const isRlsError = apiError?.status === 400 && 
-          (apiError?.message?.includes('row-level security') || 
-           apiError?.body?.error?.message?.includes('row-level security') ||
-           apiError?.body?.message?.includes('row-level security'));
-        
-        if (apiError?.status === 405 || apiError?.status === 401 || isRlsError) {
-          console.log(`⚠️ Bookmark API not available (${apiError?.status}), using direct Supabase query`);
-          return await this.toggleBookmarkSupabase(request, session);
-        }
-        throw apiError;
-      }
+      return await this.toggleBookmarkSupabase(request, session);
     } catch (error) {
       console.error('❌ SocialService.toggleBookmark:', error);
       return { data: null, error, isSaved: false };

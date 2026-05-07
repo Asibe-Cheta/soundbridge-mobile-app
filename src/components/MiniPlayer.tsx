@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,9 @@ import { BlurView as ExpoBlurView } from 'expo-blur';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
 import TipModal from './TipModal';
+import TipIconAnimated from './TipIconAnimated';
 
 export default function MiniPlayer() {
   const {
@@ -29,13 +31,32 @@ export default function MiniPlayer() {
 
   const navigation = useNavigation();
   const { theme } = useTheme();
+  const { user } = useAuth();
   const [showTipModal, setShowTipModal] = useState(false);
+  const [showTipAnimation, setShowTipAnimation] = useState(false);
+  const animatedTracks = useRef(new Set<string>()).current;
 
   const currentRouteName = useNavigationState((state) => {
     if (!state || !state.routes) return null;
     const route = state.routes[state.index];
     return route?.name;
   });
+
+  // Hooks must be above the early return — Rules of Hooks
+  useEffect(() => {
+    const trackId = currentTrack?.id;
+    if (!trackId || !isPlaying) return;
+    const isOwn = !user?.id || !currentTrack?.creator?.id || currentTrack.creator.id === user.id;
+    if (isOwn || animatedTracks.has(trackId)) return;
+    if (position >= 30) {
+      animatedTracks.add(trackId);
+      setShowTipAnimation(true);
+    }
+  }, [position, currentTrack?.id, isPlaying]);
+
+  useEffect(() => {
+    setShowTipAnimation(false);
+  }, [currentTrack?.id]);
 
   if (
     !currentTrack ||
@@ -78,12 +99,14 @@ export default function MiniPlayer() {
   return (
     <View style={styles.container}>
       <ExpoBlurView
-        intensity={Platform.OS === 'ios' ? 40 : 70}
+        intensity={Platform.OS === 'ios' ? 40 : 0}
         tint={isDark ? 'dark' : 'light'}
         style={[
           styles.blurContainer,
           {
-            backgroundColor: 'transparent',
+            backgroundColor: Platform.OS === 'android'
+              ? (isDark ? 'rgba(15,10,30,0.93)' : 'rgba(245,245,250,0.97)')
+              : 'transparent',
             borderColor: 'rgba(255, 255, 255, 0.12)',
             shadowColor: isDark ? '#000' : '#0F172A',
             shadowOffset: { width: 0, height: 4 },
@@ -173,9 +196,13 @@ export default function MiniPlayer() {
           <View style={styles.controls}>
             {/* Tip Button */}
             {currentTrack?.creator?.id && (
-              <TouchableOpacity style={styles.tipIconButton} onPress={handleTipPress}>
-                <Ionicons name="gift" size={20} color="#FACC15" />
-              </TouchableOpacity>
+              <View style={styles.tipIconButton}>
+                <TipIconAnimated
+                  size={20}
+                  onPress={handleTipPress}
+                  showAnimation={showTipAnimation}
+                />
+              </View>
             )}
 
             <TouchableOpacity style={styles.controlButton} onPress={handlePlayPause}>

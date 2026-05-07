@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { reportService } from '../services/api/reportService';
+import DMCANoticeModal from './DMCANoticeModal';
 import type { ReportType, ContentType } from '../types/report.types';
 
 interface ReportContentModalProps {
@@ -76,6 +77,8 @@ export default function ReportContentModal({
 }: ReportContentModalProps) {
   const { theme } = useTheme();
   const [reportType, setReportType] = useState<ReportType | null>(null);
+  const [copyrightPath, setCopyrightPath] = useState<'quick' | 'formal' | null>(null);
+  const [showDMCAModal, setShowDMCAModal] = useState(false);
   const [reason, setReason] = useState('');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
@@ -128,6 +131,7 @@ export default function ReportContentModal({
   const handleClose = () => {
     if (!loading) {
       setReportType(null);
+      setCopyrightPath(null);
       setReason('');
       setDescription('');
       setError(null);
@@ -138,9 +142,14 @@ export default function ReportContentModal({
   const descriptionLength = description.length;
   const reasonLength = reason.length;
   const isOtherSelected = reportType === 'other';
-  const canSubmit = reportType && reasonLength >= 10 && (!isOtherSelected || description.trim().length > 0);
+  // For copyright_infringement, only allow quick-report submission here (formal path opens DMCANoticeModal)
+  const canSubmit = reportType
+    && reasonLength >= 10
+    && (!isOtherSelected || description.trim().length > 0)
+    && (reportType !== 'copyright_infringement' || copyrightPath === 'quick');
 
   return (
+    <>
     <Modal
       visible={visible}
       animationType="slide"
@@ -214,6 +223,7 @@ export default function ReportContentModal({
                 ]}
                 onPress={() => {
                   setReportType(type.value);
+                  setCopyrightPath(null);
                   setError(null);
                 }}
                 disabled={loading}
@@ -247,6 +257,67 @@ export default function ReportContentModal({
                 </View>
               </TouchableOpacity>
             ))}
+
+            {/* Copyright infringement sub-path selector */}
+            {reportType === 'copyright_infringement' && (
+              <View style={[styles.reportTypeOption, { borderColor: theme.colors.border, backgroundColor: theme.colors.card, marginTop: 4 }]}>
+                <Text style={[styles.radioLabel, { color: theme.colors.text, marginBottom: 10 }]}>
+                  How would you like to proceed?
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.reportTypeOption,
+                    {
+                      backgroundColor: copyrightPath === 'quick' ? theme.colors.primary + '20' : theme.colors.background,
+                      borderColor: copyrightPath === 'quick' ? theme.colors.primary : theme.colors.border,
+                      marginBottom: 8,
+                    },
+                  ]}
+                  onPress={() => setCopyrightPath('quick')}
+                  disabled={loading}
+                >
+                  <View style={styles.radioContainer}>
+                    <View style={[styles.radio, { borderColor: copyrightPath === 'quick' ? theme.colors.primary : theme.colors.textSecondary }]}>
+                      {copyrightPath === 'quick' && <View style={[styles.radioInner, { backgroundColor: theme.colors.primary }]} />}
+                    </View>
+                    <View style={styles.radioContent}>
+                      <Text style={[styles.radioLabel, { color: theme.colors.text }]}>Quick report</Text>
+                      <Text style={[styles.radioDescription, { color: theme.colors.textSecondary }]}>Flag for our moderation team to review</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.reportTypeOption,
+                    {
+                      backgroundColor: copyrightPath === 'formal' ? '#7C3AED20' : theme.colors.background,
+                      borderColor: copyrightPath === 'formal' ? '#7C3AED' : theme.colors.border,
+                    },
+                  ]}
+                  onPress={() => setCopyrightPath('formal')}
+                  disabled={loading}
+                >
+                  <View style={styles.radioContainer}>
+                    <View style={[styles.radio, { borderColor: copyrightPath === 'formal' ? '#7C3AED' : theme.colors.textSecondary }]}>
+                      {copyrightPath === 'formal' && <View style={[styles.radioInner, { backgroundColor: '#7C3AED' }]} />}
+                    </View>
+                    <View style={styles.radioContent}>
+                      <Text style={[styles.radioLabel, { color: theme.colors.text }]}>Formal DMCA / CDPA notice</Text>
+                      <Text style={[styles.radioDescription, { color: theme.colors.textSecondary }]}>Submit a legal copyright takedown notice</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+                {copyrightPath === 'formal' && (
+                  <TouchableOpacity
+                    style={[styles.submitButton, { backgroundColor: '#7C3AED', marginTop: 12, borderRadius: 8, paddingVertical: 14, alignItems: 'center' }]}
+                    onPress={() => { onClose(); setShowDMCAModal(true); }}
+                    disabled={loading}
+                  >
+                    <Text style={[styles.submitButtonText, { color: '#FFFFFF' }]}>Open Formal Notice Form →</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
           </View>
 
           {/* Reason Input (REQUIRED) */}
@@ -444,6 +515,20 @@ export default function ReportContentModal({
         </View>
       </SafeAreaView>
     </Modal>
+
+    {/* DMCA formal notice — opened after the report modal closes */}
+    <DMCANoticeModal
+      visible={showDMCAModal}
+      contentId={contentId}
+      contentType={contentType as 'track' | 'post' | 'playlist'}
+      contentTitle={contentTitle}
+      onClose={() => setShowDMCAModal(false)}
+      onSubmitted={() => {
+        setShowDMCAModal(false);
+        onReported?.();
+      }}
+    />
+    </>
   );
 }
 

@@ -26,6 +26,7 @@ import { useAuth } from '../contexts/AuthContext';
 // Create walkthroughable component for tour
 const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
 import { supabase, dbHelpers } from '../lib/supabase';
+import { apiFetch } from '../lib/apiClient';
 import { resetTour } from '../services/tourService';
 import { 
   loadQueriesInParallel, 
@@ -45,8 +46,6 @@ import * as BiometricAuth from '../services/biometricAuth';
 import ConnectionsPreview from '../components/ConnectionsPreview';
 import { uploadImage } from '../services/UploadService';
 import { profileService } from '../services/ProfileService';
-import { walletService } from '../services/WalletService';
-import { payoutService } from '../services/PayoutService';
 import { ModerationBadge } from '../components/ModerationBadge';
 import { ExternalLinksDisplay } from '../components/ExternalLinks/ExternalLinksDisplay';
 import PromptModal from '../components/PromptModal';
@@ -56,6 +55,10 @@ import { SystemTypography as Typography } from '../constants/Typography';
 import { getRelativeTime } from '../utils/collaborationUtils';
 import { Connection } from '../types/network.types';
 import { ratingsService, type RatingSummary } from '../services/RatingsService';
+import { useBranding } from '../hooks/useBranding';
+import VenuePreferencesModal from '../components/VenuePreferencesModal';
+import QRCodeModal from '../components/QRCodeModal';
+import ShareDiagonalIcon from '../components/ShareDiagonalIcon';
 
 const { width } = Dimensions.get('window');
 
@@ -77,6 +80,7 @@ interface UserProfile {
   tracks_count: number;
   is_creator: boolean;
   is_verified: boolean;
+  early_adopter?: boolean;
   rating_avg?: number | null;
   rating_count?: number | null;
   created_at: string;
@@ -116,6 +120,7 @@ export default function ProfileScreen() {
   const navigation = useNavigation();
   const { start: startTour } = useCopilot();
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const { branding } = useBranding(user?.id);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [connectionsPreview, setConnectionsPreview] = useState<Connection[]>([]);
@@ -123,15 +128,20 @@ export default function ProfileScreen() {
   const [userAlbums, setUserAlbums] = useState<any[]>([]);
   const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
   const [ratingSummary, setRatingSummary] = useState<RatingSummary | null>(null);
+  const [createdEventsCount, setCreatedEventsCount] = useState<number>(0);
+  const [bookedEventsCount, setBookedEventsCount] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<'overview' | 'settings' | 'earnings'>('overview');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(false); // Start as false for instant cache display
   const initialCacheLoadRef = useRef(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [showVenuePrefsModal, setShowVenuePrefsModal] = useState(false);
+  const [showQRModal, setShowQRModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingProfile, setEditingProfile] = useState<Partial<UserProfile>>({});
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [becomingServiceProvider, setBecomingServiceProvider] = useState(false);
+  const [hasSpProfile, setHasSpProfile] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricType, setBiometricType] = useState('');
@@ -156,6 +166,7 @@ export default function ProfileScreen() {
     if (user?.id) {
       loadProfileData();
       loadExternalLinks();
+      checkSpProfileExists();
     }
     checkBiometricAvailability();
 
@@ -195,6 +206,8 @@ export default function ProfileScreen() {
         setProfile(cached.profile);
         setStats(cached.stats);
         setUserTracks(cached.tracks || []);
+        setCreatedEventsCount(cached.createdEventsCount || 0);
+        setBookedEventsCount(cached.bookedEventsCount || 0);
         initialCacheLoadRef.current = true;
         
         // Fetch fresh data in background
@@ -340,61 +353,42 @@ export default function ProfileScreen() {
         tips: {
           name: 'tips',
           query: async () => {
-            // Use wallet service to get tip transactions (same source as WalletScreen)
-            // Get fresh session to avoid 401 errors
-            const { data: { session: freshSession } } = await supabase.auth.getSession();
-
-            if (!freshSession) {
-              console.warn('⚠️ No session available for tips query');
-              return { data: 0, error: null };
-            }
-
-            try {
-              console.log('💰 Fetching tips with fresh session...');
-              // Get all transactions and filter for tip_received (including pending)
-              const transactionsResult = await walletService.getWalletTransactionsSafe(freshSession, 100, 0);
-              const tipTransactions = transactionsResult.transactions.filter(
-                (t) => t.transaction_type === 'tip_received' && (t.status === 'completed' || t.status === 'pending')
-              );
-
-              // Sum up all tip amounts (including pending tips)
-              const totalTips = tipTransactions.reduce((sum: number, transaction) => {
-                return sum + (transaction.amount || 0);
-              }, 0);
-
-              console.log(`💰 Total tips from wallet: $${totalTips.toFixed(2)} (${tipTransactions.length} transactions - completed + pending)`);
-              return { data: totalTips, error: null };
-            } catch (error) {
-              console.warn('Error fetching tips from wallet:', error);
-              return { data: 0, error: error instanceof Error ? error : new Error(String(error)) };
-            }
+            const { data, error } = await supabase
+              .from('wallet_transactions')
+              .select('amount')
+              .eq('user_id', user.id)
+              .eq('transaction_type', 'tip_received')
+              .in('status', ['completed', 'pending']);
+            if (error) return { data: 0, error };
+            const total = (data || []).reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+            return { data: total, error: null };
           },
-          timeout: 5000,
+          timeout: 8000,
           fallback: 0,
         },
         creatorRevenue: {
           name: 'creatorRevenue',
           query: async () => {
-            // Use payout service to get creator revenue (same source as WalletScreen)
-            // Get fresh session to avoid 401 errors
-            const { data: { session: freshSession } } = await supabase.auth.getSession();
-
-            if (!freshSession) {
-              console.warn('⚠️ No session available for creator revenue query');
-              return { data: null, error: null };
-            }
-
-            try {
-              const revenue = await payoutService.getCreatorRevenue(freshSession);
-              console.log(`💰 Creator revenue: $${revenue?.total_earned?.toFixed(2) || '0.00'}`);
-              return { data: revenue, error: null };
-            } catch (error) {
-              // Graceful fallback - revenue might not exist yet
-              console.warn('Error fetching creator revenue (may not exist yet):', error);
-              return { data: null, error: error instanceof Error ? error : new Error(String(error)) };
-            }
+            const now = new Date();
+            const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+            const { data, error } = await supabase
+              .from('wallet_transactions')
+              .select('amount, transaction_type, created_at')
+              .eq('user_id', user.id)
+              .in('transaction_type', ['tip_received', 'gig_payment'])
+              .in('status', ['completed', 'pending']);
+            if (error) return { data: null, error };
+            const rows = data || [];
+            const totalEarned = rows.reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+            const thisMonthEarned = rows
+              .filter((t: any) => t.created_at >= monthStart)
+              .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+            return {
+              data: { total_earned: totalEarned, this_month_earnings: thisMonthEarned, pending_balance: 0 },
+              error: null,
+            };
           },
-          timeout: 5000,
+          timeout: 8000,
           fallback: null,
         },
         ratingSummary: {
@@ -409,6 +403,32 @@ export default function ProfileScreen() {
           },
           timeout: 5000,
           fallback: { average: 0, count: 0 },
+        },
+        createdEventsCount: {
+          name: 'createdEventsCount',
+          query: async () => {
+            const response = await supabase
+              .from('events')
+              .select('*', { count: 'exact', head: true })
+              .eq('creator_id', user.id);
+            return { data: response.count ?? 0, error: response.error };
+          },
+          timeout: 3000,
+          fallback: 0,
+        },
+        bookedEventsCount: {
+          name: 'bookedEventsCount',
+          query: async () => {
+            const { data: { session: freshSession } } = await supabase.auth.getSession();
+            if (!freshSession) return { data: 0, error: null };
+            const result = await apiFetch<{ count: number }>(
+              '/api/users/me/booked-events-count',
+              { session: freshSession }
+            );
+            return { data: result.count ?? 0, error: null };
+          },
+          timeout: 3000,
+          fallback: 0,
         },
       });
 
@@ -426,8 +446,10 @@ export default function ProfileScreen() {
       const recentReactionsData = results.recentReactions?.data || results.recentReactions || [];
       const recentConnectionsData = results.recentConnections?.data || results.recentConnections || [];
       const totalTipsReceived = results.tips?.data ?? results.tips ?? 0;
-      const creatorRevenue = results.creatorRevenue?.data ?? null;
+      const creatorRevenue = results.creatorRevenue?.data ?? results.creatorRevenue ?? null;
       const ratingData = results.ratingSummary?.data ?? results.ratingSummary ?? null;
+      const createdEventsCountResult = results.createdEventsCount?.data ?? results.createdEventsCount ?? 0;
+      const bookedEventsCountResult = results.bookedEventsCount?.data ?? results.bookedEventsCount ?? 0;
 
       // Use creator revenue for total earnings (same as WalletScreen)
       // Falls back to tips if creator revenue not available
@@ -451,7 +473,7 @@ export default function ProfileScreen() {
         total_tips_received: totalTipsReceived,
         total_earnings: totalEarnings,
         monthly_plays: 0,
-        monthly_earnings: Math.floor(totalEarnings * 0.3),
+        monthly_earnings: creatorRevenue?.this_month_earnings ?? 0,
       };
 
       if (profileData && !results.profile?.error) {
@@ -474,6 +496,7 @@ export default function ProfileScreen() {
           tracks_count: tracksCount,
           is_creator: profileData.is_creator || false,
           is_verified: profileData.is_verified || false,
+          early_adopter: profileData.early_adopter || false,
           rating_avg: profileData.rating_avg ?? null,
           rating_count: profileData.rating_count ?? null,
           created_at: profileData.created_at,
@@ -557,7 +580,7 @@ export default function ProfileScreen() {
           total_tips_received: totalTipsReceived,
           total_earnings: totalEarnings, // Use creator revenue total_earned (includes tips + other earnings)
           monthly_plays: Math.floor(totalPlays * 0.3),
-          monthly_earnings: Math.floor(totalEarnings * 0.3),
+          monthly_earnings: creatorRevenue?.this_month_earnings ?? 0,
         };
         console.log('📊 Setting ProfileScreen stats:', {
           tips: totalTipsReceived,
@@ -583,6 +606,9 @@ export default function ProfileScreen() {
           count: profileData?.rating_count ?? ratingData?.count ?? 0,
         });
       }
+
+      setCreatedEventsCount(typeof createdEventsCountResult === 'number' ? createdEventsCountResult : 0);
+      setBookedEventsCount(typeof bookedEventsCountResult === 'number' ? bookedEventsCountResult : 0);
 
       let connectionsMap = new Map<string, any>();
       if (recentConnectionsData.length > 0) {
@@ -746,6 +772,8 @@ export default function ProfileScreen() {
           profile: profileObj,
           stats: cacheStats,
           tracks: cacheTracks,
+          createdEventsCount: createdEventsCountResult,
+          bookedEventsCount: bookedEventsCountResult,
         });
       }
 
@@ -780,7 +808,9 @@ export default function ProfileScreen() {
       };
       setStats(fallbackStats);
       setRatingSummary({ average: 0, count: 0 });
-      
+      setCreatedEventsCount(0);
+      setBookedEventsCount(0);
+
       // Save fallback to cache if we don't have cached data
       if (!profile) {
         await contentCacheService.saveCache('PROFILE', cacheKey, {
@@ -809,6 +839,22 @@ export default function ProfileScreen() {
       console.error('❌ Error loading external links:', error);
       // Don't show alert - external links are optional
       setExternalLinks([]);
+    }
+  };
+
+  // Fallback SP check: query the DB directly so the button reflects reality even
+  // when the /api/users/:id/creator-types endpoint returns stale or empty data.
+  const checkSpProfileExists = async () => {
+    if (!user?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from('service_provider_profiles')
+        .select('user_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      setHasSpProfile(!!data && !error);
+    } catch {
+      // Non-critical — fall through to creator_types check
     }
   };
 
@@ -896,14 +942,14 @@ export default function ProfileScreen() {
           return;
         }
         result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images, // Keep deprecated API for now - works in v17.0.8
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
           allowsEditing: true,
           aspect: [1, 1],
           quality: 0.8,
         });
       } else {
         result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images, // Keep deprecated API for now - works in v17.0.8
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
           allowsEditing: true,
           aspect: [1, 1],
           quality: 0.8,
@@ -1029,6 +1075,13 @@ export default function ProfileScreen() {
       return;
     }
 
+    // If a service provider profile already exists in the DB, go straight to the dashboard.
+    // This handles the case where the web app created the profile but creator_types hasn't synced.
+    if (hasSpProfile) {
+      navigation.navigate('ServiceProviderDashboard' as never, { userId: user.id } as never);
+      return;
+    }
+
     Alert.alert(
       'Become a Service Provider',
       'Join SoundBridge as a service provider to offer your professional services (mixing, mastering, sound engineering, etc.) to creators. You\'ll be able to set your rates, showcase your portfolio, and manage bookings.',
@@ -1143,7 +1196,6 @@ export default function ProfileScreen() {
     }
 
     if (biometricEnabled) {
-      // Disable biometric login
       const result = await BiometricAuth.disableBiometricLogin();
       if (result.success) {
         setBiometricEnabled(false);
@@ -1151,8 +1203,36 @@ export default function ProfileScreen() {
       } else {
         Alert.alert('Error', result.error || 'Failed to disable biometric login');
       }
+      return;
+    }
+
+    // Detect OAuth-only accounts (Google Sign-In, no password)
+    const isOAuthUser = user?.app_metadata?.provider !== 'email' ||
+      (user?.identities ?? []).every((id: any) => id.provider !== 'email');
+
+    if (isOAuthUser) {
+      // OAuth users don't have a password — just verify biometrics and store OAuth marker
+      Alert.alert(
+        `Enable ${biometricType} Login`,
+        `Use ${biometricType} to quickly sign in. Your Google account session handles authentication.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Enable',
+            onPress: async () => {
+              const result = await BiometricAuth.enableBiometricLoginOAuth();
+              if (result.success) {
+                setBiometricEnabled(true);
+                Alert.alert('Success', `${biometricType} login enabled!`);
+              } else {
+                Alert.alert('Error', result.error || 'Failed to enable biometric login');
+              }
+            },
+          },
+        ]
+      );
     } else {
-      // Enable biometric login - need to get current credentials
+      // Email/password users — prompt for password to store in SecureStore
       Alert.alert(
         `Enable ${biometricType} Login`,
         'Please enter your password to enable biometric login',
@@ -1160,9 +1240,7 @@ export default function ProfileScreen() {
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Continue',
-            onPress: () => {
-              setShowBiometricPasswordPrompt(true);
-            },
+            onPress: () => setShowBiometricPasswordPrompt(true),
           },
         ]
       );
@@ -1200,10 +1278,6 @@ export default function ProfileScreen() {
 
   const handlePrivacyPolicy = () => {
     navigation.navigate('PrivacyPolicy' as never);
-  };
-
-  const handleAccountDeletion = () => {
-    navigation.navigate('AccountDeletion' as never);
   };
 
   const handleAbout = () => {
@@ -1276,32 +1350,39 @@ export default function ProfileScreen() {
     <View style={styles.tabContent}>
       {/* Stats Cards */}
       <View style={styles.statsContainer}>
-        <View style={[styles.statCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <View style={[styles.statCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, marginLeft: 0 }]}>
+          <Ionicons name="play-circle" size={18} color={theme.colors.primary} style={{ marginBottom: 6 }} />
           <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(stats?.total_plays || 0)}</Text>
-          <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Total Plays</Text>
+          <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Plays</Text>
         </View>
         <View style={[styles.statCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <Ionicons name="heart" size={18} color="#EC4899" style={{ marginBottom: 6 }} />
           <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(stats?.total_likes || 0)}</Text>
           <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Likes</Text>
         </View>
-        <View style={[styles.statCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-          <Text style={[styles.statNumber, { color: theme.colors.text }]}>{formatNumber(stats?.total_tips_received || 0)}</Text>
+        <View style={[styles.statCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, marginRight: 0 }]}>
+          <Ionicons name="cash" size={18} color="#10B981" style={{ marginBottom: 6 }} />
+          <Text style={[styles.statNumber, { color: theme.colors.text }]}>${(stats?.total_tips_received || 0).toFixed(0)}</Text>
           <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>Tips</Text>
         </View>
       </View>
 
       {/* Ratings Summary */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Ratings</Text>
-        <View style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-          <Ionicons name="star" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>
-            {ratingSummary?.average ? ratingSummary.average.toFixed(1) : 'No ratings yet'}
-          </Text>
-          <View style={[styles.activityMeta, styles.rowEnd]}>
-            <Text style={[styles.activityMetaText, { color: theme.colors.textSecondary }]}>
-              {ratingSummary?.count || 0}
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Ratings</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          <View style={styles.groupedRow}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(251,191,36,0.15)' }]}>
+              <Ionicons name="star" size={18} color="#FBBF24" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>
+              {ratingSummary?.average ? ratingSummary.average.toFixed(1) : 'No ratings yet'}
             </Text>
+            {!!ratingSummary?.count && (
+              <Text style={[styles.rowValue, { color: theme.colors.textSecondary }]}>
+                {ratingSummary.count} reviews
+              </Text>
+            )}
           </View>
         </View>
       </View>
@@ -1314,105 +1395,135 @@ export default function ProfileScreen() {
 
       {/* Recent Activity */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Activity</Text>
-        <TouchableOpacity
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-          onPress={handleRecentActivity}
-        >
-          <Ionicons name="time" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>View Recent Activity</Text>
-          <View style={[styles.activityMeta, styles.rowEnd]}>
-            <Text style={[styles.activityMetaText, { color: theme.colors.textSecondary }]}>
-              {recentActivity.length}
-            </Text>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-          </View>
-        </TouchableOpacity>
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Recent Activity</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          <TouchableOpacity style={styles.groupedRow} onPress={handleRecentActivity}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.15)' }]}>
+              <Ionicons name="time" size={18} color="#6366F1" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>View Recent Activity</Text>
+            <Text style={[styles.rowValue, { color: theme.colors.textSecondary }]}>{recentActivity.length}</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Quick Actions */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Quick Actions</Text>
-        <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleUploadTrack}>
-          <Ionicons name="add-circle" size={24} color={theme.colors.primary} />
-          <Text style={[styles.actionText, { color: theme.colors.text }]}>Upload New Track</Text>
-          <View style={styles.rowEnd}>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-          </View>
-        </TouchableOpacity>
-        {/* Step 5: Create Events - Targeted Audience */}
-        <WalkthroughableTouchable
-          order={5}
-          name="create_events_targeted"
-          text="Create events and sell tickets directly to YOUR followers. Your events appear in their feeds FIRST - targeted audience, not random. Keep 95% of ticket sales (97% for Unlimited). Build your network through live events."
-        >
-          <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleCreateEvent}>
-            <Ionicons name="calendar" size={24} color={theme.colors.primary} />
-            <Text style={[styles.actionText, { color: theme.colors.text }]}>Create Event</Text>
-            <View style={styles.rowEnd}>
-              <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Quick Actions</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleUploadTrack}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+              <Ionicons name="add-circle" size={18} color={theme.colors.primary} />
             </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Upload New Track</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
-        </WalkthroughableTouchable>
-        <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleManageAvailability}>
-          <Ionicons name="time" size={24} color={theme.colors.primary} />
-          <Text style={[styles.actionText, { color: theme.colors.text }]}>Manage Availability</Text>
-          <View style={styles.rowEnd}>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleCreatePlaylist}>
-          <Ionicons name="musical-notes" size={24} color={theme.colors.primary} />
-          <Text style={[styles.actionText, { color: theme.colors.text }]}>Create Playlist</Text>
-          <View style={styles.rowEnd}>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.actionButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
-          onPress={() => navigation.navigate('SavedPosts' as never)}
-        >
-          <Ionicons name="bookmark" size={24} color={theme.colors.primary} />
-          <Text style={[styles.actionText, { color: theme.colors.text }]}>Saved Posts</Text>
-          <View style={styles.rowEnd}>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-          </View>
-        </TouchableOpacity>
+          {/* Step 5: Create Events - Targeted Audience */}
+          <WalkthroughableTouchable
+            order={5}
+            name="create_events_targeted"
+            text="Create events and sell tickets directly to YOUR followers. Your events appear in their feeds FIRST - targeted audience, not random. Keep 95% of ticket sales (97% for Unlimited). Build your network through live events."
+          >
+            <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleCreateEvent}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
+                <Ionicons name="calendar" size={18} color="#8B5CF6" />
+              </View>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Create Event</Text>
+              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          </WalkthroughableTouchable>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleManageAvailability}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
+              <Ionicons name="time" size={18} color="#F59E0B" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Manage Availability</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleCreatePlaylist}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
+              <Ionicons name="musical-notes" size={18} color="#10B981" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Create Playlist</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.groupedRow} onPress={() => navigation.navigate('SavedPosts' as never)}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+              <Ionicons name="bookmark" size={18} color={theme.colors.primary} />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Saved Posts</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* My Content */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>My Content</Text>
-        <TouchableOpacity
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-          onPress={() => navigation.navigate('TracksList' as never, { userId: profile?.id } as never)}
-        >
-          <Ionicons name="musical-notes" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>My Tracks</Text>
-          <View style={styles.rowEnd}>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-          onPress={() => navigation.navigate('AllAlbums' as never, { title: 'My Albums', userId: profile?.id } as never)}
-        >
-          <Ionicons name="albums" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>My Albums</Text>
-          <View style={styles.rowEnd}>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-          onPress={() => navigation.navigate('AllPlaylists' as never, { title: 'My Playlists', userId: profile?.id } as never)}
-        >
-          <Ionicons name="list" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>My Playlists</Text>
-          <View style={styles.rowEnd}>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-          </View>
-        </TouchableOpacity>
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>My Content</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          <TouchableOpacity
+            style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}
+            onPress={() => navigation.navigate('TracksList' as never, { userId: profile?.id } as never)}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+              <Ionicons name="musical-notes" size={18} color={theme.colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>My Tracks</Text>
+              <Text style={[{ fontSize: 11, color: theme.colors.textSecondary, marginTop: 1 }]}>Tap any track to set or edit pricing</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}
+            onPress={() => navigation.navigate('AllAlbums' as never, { title: 'My Albums', userId: profile?.id } as never)}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.12)' }]}>
+              <Ionicons name="albums" size={18} color="#6366F1" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>My Albums</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.groupedRow}
+            onPress={() => navigation.navigate('AllPlaylists' as never, { title: 'My Playlists', userId: profile?.id } as never)}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
+              <Ionicons name="list" size={18} color="#10B981" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>My Playlists</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* My Events */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>My Events</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          <TouchableOpacity
+            style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}
+            onPress={() => navigation.navigate('AllEvents' as never, { mode: 'created', title: 'Created Events', userId: profile?.id } as never)}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
+              <Ionicons name="calendar" size={18} color="#8B5CF6" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Created Events</Text>
+            <Text style={[styles.rowValue, { color: theme.colors.textSecondary }]}>{createdEventsCount}</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.groupedRow}
+            onPress={() => navigation.navigate('AllEvents' as never, { mode: 'booked', title: 'Booked Events', userId: profile?.id } as never)}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
+              <Ionicons name="ticket" size={18} color="#10B981" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Booked Events</Text>
+            <Text style={[styles.rowValue, { color: theme.colors.textSecondary }]}>{bookedEventsCount}</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -1421,6 +1532,9 @@ export default function ProfileScreen() {
     <View style={styles.tabContent}>
       {/* Earnings Overview */}
       <View style={[styles.earningsOverview, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(16,185,129,0.15)', width: 48, height: 48, borderRadius: 14, marginBottom: 12 }]}>
+          <Ionicons name="trending-up" size={24} color="#10B981" />
+        </View>
         <Text style={[styles.earningsTotal, { color: theme.colors.text }]}>${stats?.total_earnings?.toFixed(2) || '0.00'}</Text>
         <Text style={[styles.earningsLabel, { color: theme.colors.textSecondary }]}>Total Earnings</Text>
         <Text style={[styles.earningsMonthly, { color: theme.colors.textSecondary }]}>
@@ -1431,8 +1545,8 @@ export default function ProfileScreen() {
       {/* Earnings Breakdown */}
       <View style={styles.section}>
         <View style={styles.earningsHeader}>
-          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Earnings Breakdown</Text>
-          <TouchableOpacity 
+          <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Earnings Breakdown</Text>
+          <TouchableOpacity
             style={[styles.upgradeButton, { backgroundColor: theme.colors.primary }]}
             onPress={() => navigation.navigate('Upgrade' as never)}
           >
@@ -1440,357 +1554,464 @@ export default function ProfileScreen() {
             <Text style={styles.upgradeButtonText}>Upgrade</Text>
           </TouchableOpacity>
         </View>
-        <View style={[styles.earningsItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-          <Ionicons name="heart" size={20} color={theme.colors.primary} />
-          <View style={styles.earningsItemContent}>
-            <Text style={[styles.earningsItemTitle, { color: theme.colors.text }]}>Tips Received</Text>
-            <Text style={[styles.earningsItemAmount, { color: theme.colors.text }]}>${(stats?.total_tips_received || 0).toFixed(2)}</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          <View style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+              <Ionicons name="heart" size={18} color={theme.colors.primary} />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Tips Received</Text>
+            <Text style={[styles.rowValue, { color: theme.colors.text }]}>${(stats?.total_tips_received || 0).toFixed(2)}</Text>
           </View>
-        </View>
-        <View style={[styles.earningsItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-          <Ionicons name="people" size={20} color={theme.colors.warning} />
-          <View style={styles.earningsItemContent}>
-            <Text style={[styles.earningsItemTitle, { color: theme.colors.text }]}>Collaborations</Text>
-            <Text style={[styles.earningsItemAmount, { color: theme.colors.text }]}>$0.00</Text>
+          <View style={styles.groupedRow}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
+              <Ionicons name="people" size={18} color="#F59E0B" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Collaborations</Text>
+            <Text style={[styles.rowValue, { color: theme.colors.text }]}>$0.00</Text>
           </View>
         </View>
       </View>
 
       {/* Content & Purchases */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Content & Purchases</Text>
-        <TouchableOpacity
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-          onPress={() => navigation.navigate('PurchasedContent' as never)}
-        >
-          <Ionicons name="musical-notes" size={20} color="#10B981" />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>My Purchased Content</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Content & Purchases</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          <TouchableOpacity
+            style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}
+            onPress={() => navigation.navigate('PurchasedContent' as never)}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
+              <Ionicons name="musical-notes" size={18} color="#10B981" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>My Purchased Content</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}
+            onPress={() => navigation.navigate('CreatorSalesAnalytics' as never)}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
+              <Ionicons name="bar-chart" size={18} color="#8B5CF6" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>My Sales Dashboard</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.groupedRow}
+            onPress={() => navigation.navigate('TicketWallet' as never)}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
+              <Ionicons name="ticket" size={18} color="#F59E0B" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>My Tickets</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Payout Settings */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Payout Settings</Text>
-        {/* Step 4: Digital Wallet - Get Paid */}
-        <WalkthroughableTouchable
-          order={4}
-          name="wallet_setup"
-          text="Set up your digital wallet HERE to receive tips and event ticket payments. Withdraw earnings anytime (minimum £20 for Premium, £10 for Unlimited). This is how money reaches YOU and funds your professional growth."
-        >
-          <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleWallet}>
-            <Ionicons name="wallet" size={20} color="#8B5CF6" />
-            <Text style={[styles.settingText, { color: theme.colors.text }]}>Digital Wallet</Text>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Payout Settings</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          {/* Step 4: Digital Wallet - Get Paid */}
+          <WalkthroughableTouchable
+            order={4}
+            name="wallet_setup"
+            text="Set up your digital wallet HERE to receive tips and event ticket payments. Withdraw earnings anytime (minimum £20 for Premium, £10 for Unlimited). This is how money reaches YOU and funds your professional growth."
+          >
+            <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleWallet}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
+                <Ionicons name="wallet" size={18} color="#8B5CF6" />
+              </View>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Digital Wallet</Text>
+              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          </WalkthroughableTouchable>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handlePaymentMethods}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.12)' }]}>
+              <Ionicons name="card" size={18} color="#6366F1" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Payment Methods</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
-        </WalkthroughableTouchable>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handlePaymentMethods}>
-          <Ionicons name="card" size={20} color={theme.colors.textSecondary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Payment Methods</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handlePayoutSchedule}>
-          <Ionicons name="calendar" size={20} color={theme.colors.textSecondary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Payout Schedule</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleTaxInfo}>
-          <Ionicons name="document-text" size={20} color={theme.colors.textSecondary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Tax Information</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handlePayoutSchedule}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
+              <Ionicons name="calendar" size={18} color="#F59E0B" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Payout Schedule</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.groupedRow} onPress={handleTaxInfo}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
+              <Ionicons name="document-text" size={18} color="#10B981" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Tax Information</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
 
   const renderSettingsTab = () => (
     <View style={styles.tabContent}>
-      {/* Professional Sections */}
+      {/* Professional Profile */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Professional Profile</Text>
-        <TouchableOpacity 
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
-          onPress={() => navigation.navigate('ExperienceManagement' as never)}
-        >
-          <Ionicons name="briefcase-outline" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Experience</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
-          onPress={() => navigation.navigate('SkillsManagement' as never)}
-        >
-          <Ionicons name="star-outline" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Skills</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
-          onPress={() => navigation.navigate('InstrumentsManagement' as never)}
-        >
-          <Ionicons name="musical-notes-outline" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Instruments</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        {/* Step 6: Analytics - Track Your Growth */}
-        <WalkthroughableTouchable
-          order={6}
-          name="analytics_insights"
-          text="See who's engaging with your drops, where your audience is, top-performing content, and earnings over time. Use this data to grow your network strategically and book more paid work."
-        >
-          <TouchableOpacity
-            style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-            onPress={() => navigation.navigate('AnalyticsDashboard' as never)}
-          >
-            <Ionicons name="bar-chart-outline" size={20} color={theme.colors.primary} />
-            <Text style={[styles.settingText, { color: theme.colors.text }]}>Analytics</Text>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Professional Profile</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('ExperienceManagement' as never)}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+              <Ionicons name="briefcase-outline" size={18} color={theme.colors.primary} />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Experience</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
-        </WalkthroughableTouchable>
-        <TouchableOpacity
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-          onPress={() => navigation.navigate('CreatorInsightsDashboard' as never)}
-        >
-          <Ionicons name="stats-chart-outline" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Creator Insights</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-          onPress={() => navigation.navigate('CreatorEarningsDashboard' as never)}
-        >
-          <Ionicons name="cash-outline" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Earnings Dashboard</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        {(user?.subscription_tier === 'premium' || user?.subscription_tier === 'unlimited') && (
-          <TouchableOpacity
-            style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-            onPress={() => navigation.navigate('CreatorSalesAnalytics' as never)}
-          >
-            <Ionicons name="trending-up" size={20} color={theme.colors.primary} />
-            <Text style={[styles.settingText, { color: theme.colors.text }]}>Sales Analytics</Text>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('SkillsManagement' as never)}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
+              <Ionicons name="star-outline" size={18} color="#F59E0B" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Skills</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
-        )}
-        <TouchableOpacity
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-          onPress={() => navigation.navigate('BrandingCustomization' as never)}
-        >
-          <Ionicons name="color-palette-outline" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Branding</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('InstrumentsManagement' as never)}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.12)' }]}>
+              <Ionicons name="musical-notes-outline" size={18} color="#6366F1" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Instruments</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          {/* Step 6: Analytics - Track Your Growth */}
+          <WalkthroughableTouchable
+            order={6}
+            name="analytics_insights"
+            text="See who's engaging with your drops, where your audience is, top-performing content, and earnings over time. Use this data to grow your network strategically and book more paid work."
+          >
+            <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('AnalyticsDashboard' as never)}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
+                <Ionicons name="bar-chart-outline" size={18} color="#10B981" />
+              </View>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Analytics</Text>
+              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          </WalkthroughableTouchable>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('CreatorInsightsDashboard' as never)}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
+              <Ionicons name="stats-chart-outline" size={18} color="#8B5CF6" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Creator Insights</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('CreatorEarningsDashboard' as never)}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
+              <Ionicons name="cash-outline" size={18} color="#10B981" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Earnings Dashboard</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          {(user?.subscription_tier === 'premium' || user?.subscription_tier === 'unlimited') && (
+            <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('CreatorSalesAnalytics' as never)}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+                <Ionicons name="trending-up" size={18} color={theme.colors.primary} />
+              </View>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Sales Analytics</Text>
+              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.groupedRow} onPress={() => navigation.navigate('BrandingCustomization' as never)}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(236,72,153,0.12)' }]}>
+              <Ionicons name="color-palette-outline" size={18} color="#EC4899" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Branding</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* Portfolio Links Section */}
+      {/* Portfolio Links */}
       {session && user?.id && (
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Portfolio</Text>
-          <TouchableOpacity
-            style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-            onPress={() => navigation.navigate('ExternalLinks' as never)}
-          >
-            <Ionicons name="link" size={20} color={theme.colors.textSecondary} />
-            <Text style={[styles.settingText, { color: theme.colors.text }]}>External Links</Text>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-          </TouchableOpacity>
+          <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Portfolio</Text>
+          <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+            <TouchableOpacity style={styles.groupedRow} onPress={() => navigation.navigate('ExternalLinks' as never)}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.12)' }]}>
+                <Ionicons name="link" size={18} color="#6366F1" />
+              </View>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>External Links</Text>
+              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
-      {/* Account Settings */}
+      {/* Account */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Account</Text>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleEditProfile}>
-          <Ionicons name="person" size={20} color={theme.colors.textSecondary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Edit Profile</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handlePrivacySecurity}>
-          <Ionicons name="shield-checkmark" size={20} color={theme.colors.textSecondary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Privacy & Security</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} 
-          onPress={() => (navigation as any).navigate('TwoFactorSettings')}
-        >
-          <Ionicons name="lock-closed" size={20} color="#4ECDC4" />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Two-Factor Authentication</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleChangePassword}>
-          <Ionicons name="key" size={20} color={theme.colors.textSecondary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Change Password</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        {/* Biometric Login Toggle */}
-        {biometricAvailable && (
-          <View style={[styles.settingRow, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-            <View style={styles.settingInfo}>
-              <Ionicons 
-                name={Platform.OS === 'ios' ? 'finger-print' : 'fingerprint'} 
-                size={20} 
-                color={biometricEnabled ? '#10B981' : theme.colors.textSecondary} 
-              />
-              <View style={{ flex: 1, flexShrink: 1 }}>
-                <Text style={[styles.settingText, { color: theme.colors.text }]}>
-                  {biometricType} Login
-                </Text>
-                <Text style={[styles.settingSubtext, { color: theme.colors.textSecondary }]}>
-                  Quick login with biometrics
-                </Text>
-              </View>
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Account</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleEditProfile}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+              <Ionicons name="person" size={18} color={theme.colors.primary} />
             </View>
-            <Switch
-              value={biometricEnabled}
-              onValueChange={handleBiometricToggle}
-              trackColor={{ false: theme.colors.border, true: '#10B981' + '40' }}
-              thumbColor={biometricEnabled ? '#10B981' : theme.colors.textSecondary}
-              style={{ marginLeft: 8 }}
-            />
-          </View>
-        )}
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleOfflineDownloads}>
-          <Ionicons name="download" size={20} color={theme.colors.textSecondary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Offline Downloads</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.error }]}
-          onPress={handleAccountDeletion}
-        >
-          <Ionicons name="trash-outline" size={20} color={theme.colors.error} />
-          <Text style={[styles.settingText, { color: theme.colors.error }]}>Delete Account</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.error} />
-        </TouchableOpacity>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Edit Profile</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handlePrivacySecurity}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
+              <Ionicons name="shield-checkmark" size={18} color="#10B981" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Privacy & Security</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => (navigation as any).navigate('TwoFactorSettings')}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(78,205,196,0.12)' }]}>
+              <Ionicons name="lock-closed" size={18} color="#4ECDC4" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Two-Factor Authentication</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleChangePassword}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
+              <Ionicons name="key" size={18} color="#F59E0B" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Change Password</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          {biometricAvailable && (
+            <View style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}>
+              <View style={[styles.rowIconWrap, { backgroundColor: biometricEnabled ? 'rgba(16,185,129,0.15)' : 'rgba(107,114,128,0.12)' }]}>
+                <Ionicons
+                  name={Platform.OS === 'ios' ? 'finger-print' : 'fingerprint'}
+                  size={18}
+                  color={biometricEnabled ? '#10B981' : theme.colors.textSecondary}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.rowLabel, { color: theme.colors.text }]}>{biometricType} Login</Text>
+                <Text style={[styles.rowValue, { color: theme.colors.textSecondary, fontSize: 12 }]}>Quick login with biometrics</Text>
+              </View>
+              <Switch
+                value={biometricEnabled}
+                onValueChange={handleBiometricToggle}
+                trackColor={{ false: theme.colors.border, true: '#10B981' + '40' }}
+                thumbColor={biometricEnabled ? '#10B981' : theme.colors.textSecondary}
+              />
+            </View>
+          )}
+          <TouchableOpacity style={styles.groupedRow} onPress={handleOfflineDownloads}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.12)' }]}>
+              <Ionicons name="download" size={18} color="#6366F1" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Offline Downloads</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Creator Tools */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Creator Tools</Text>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleManageAvailability}>
-          <Ionicons name="calendar-outline" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Collaboration Availability</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => navigation.navigate('CollaborationRequests' as never)}>
-          <Ionicons name="people-outline" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Collaboration Requests</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        {userProfile?.creator_types?.includes('service_provider') ? (
-          <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => navigation.navigate('ServiceProviderDashboard' as never, { userId: user?.id } as never)}>
-            <Ionicons name="briefcase" size={20} color={theme.colors.accentPurple} />
-            <Text style={[styles.settingText, { color: theme.colors.text }]}>Service Provider Dashboard</Text>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Creator Tools</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('AICareerAdvisor' as never)}>
+            <LinearGradient
+              colors={['#ef4444', '#a855f7', '#60a5fa']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              style={[styles.rowIconWrap, { borderRadius: 8 }]}
+            >
+              <Ionicons name="sparkles" size={18} color="#FFFFFF" />
+            </LinearGradient>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>AI Career Advisor</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleBecomeServiceProvider}>
-            <Ionicons name="briefcase-outline" size={20} color={theme.colors.accentPurple} />
-            <Text style={[styles.settingText, { color: theme.colors.text }]}>Become a Service Provider</Text>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleManageAvailability}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+              <Ionicons name="calendar-outline" size={18} color={theme.colors.primary} />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Collaboration Availability</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
-        )}
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('ProviderAvailability' as never)}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
+              <Ionicons name="flash-outline" size={18} color="#F59E0B" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Urgent Gig Availability</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('CollaborationRequests' as never)}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.12)' }]}>
+              <Ionicons name="people-outline" size={18} color="#6366F1" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Collaboration Requests</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          {(userProfile?.creator_types?.includes('service_provider') || hasSpProfile) ? (
+            <TouchableOpacity style={styles.groupedRow} onPress={() => navigation.navigate('ServiceProviderDashboard' as never, { userId: user?.id } as never)}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
+                <Ionicons name="briefcase" size={18} color={theme.colors.accentPurple} />
+              </View>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Service Provider Dashboard</Text>
+              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.groupedRow} onPress={handleBecomeServiceProvider}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
+                <Ionicons name="briefcase-outline" size={18} color={theme.colors.accentPurple} />
+              </View>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Become a Service Provider</Text>
+              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {/* App Settings */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>App Settings</Text>
-        <View style={[styles.settingRow, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-          <View style={styles.settingInfo}>
-            <Ionicons name="notifications" size={20} color={theme.colors.textSecondary} />
-            <Text style={[styles.settingText, { color: theme.colors.text }]}>Push Notifications</Text>
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>App Settings</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          <View style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+              <Ionicons name="notifications" size={18} color={theme.colors.primary} />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text, flex: 1 }]}>Push Notifications</Text>
+            <Switch
+              value={notificationsEnabled}
+              onValueChange={setNotificationsEnabled}
+              trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+              thumbColor={notificationsEnabled ? theme.colors.primary : theme.colors.textSecondary}
+            />
           </View>
-          <Switch
-            value={notificationsEnabled}
-            onValueChange={setNotificationsEnabled}
-            trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
-            thumbColor={notificationsEnabled ? theme.colors.primary : theme.colors.textSecondary}
-            style={{ marginLeft: 8 }}
-          />
-        </View>
-        <TouchableOpacity
-          style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-          onPress={handleNotificationSettings}
-        >
-          <Ionicons name="options-outline" size={20} color={theme.colors.textSecondary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Notification Preferences</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        {/* Step 7: Settings - Wallet, Privacy, Themes */}
-        <WalkthroughableTouchable
-          order={7}
-          name="profile_settings_control"
-          text="Control everything: Manage privacy (who sees your drops), customize theme colors, notification preferences, and wallet settings. Your platform, your rules, your professional brand."
-        >
-          <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => navigation.navigate('ThemeSettings' as never)}>
-            <Ionicons name="moon" size={20} color={theme.colors.textSecondary} />
-            <Text style={[styles.settingText, { color: theme.colors.text }]}>Theme Settings</Text>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleNotificationSettings}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.12)' }]}>
+              <Ionicons name="options-outline" size={18} color="#6366F1" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Notification Preferences</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
-        </WalkthroughableTouchable>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={() => (navigation as any).navigate('AudioEnhancementExpo')}>
-          <Ionicons name="musical-notes" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Audio Enhancement</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <View style={[styles.settingRow, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-          <View style={styles.settingInfo}>
-            <Ionicons name="play-circle" size={20} color={theme.colors.textSecondary} />
-            <Text style={[styles.settingText, { color: theme.colors.text }]}>Auto-play</Text>
+          {/* Step 7: Settings - Wallet, Privacy, Themes */}
+          <WalkthroughableTouchable
+            order={7}
+            name="profile_settings_control"
+            text="Control everything: Manage privacy (who sees your drops), customize theme colors, notification preferences, and wallet settings. Your platform, your rules, your professional brand."
+          >
+            <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('ThemeSettings' as never)}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
+                <Ionicons name="moon" size={18} color="#8B5CF6" />
+              </View>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Theme Settings</Text>
+              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          </WalkthroughableTouchable>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => (navigation as any).navigate('AudioEnhancementExpo')}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+              <Ionicons name="musical-notes" size={18} color={theme.colors.primary} />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Audio Enhancement</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <View style={styles.groupedRow}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.12)' }]}>
+              <Ionicons name="play-circle" size={18} color="#6366F1" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text, flex: 1 }]}>Auto-play</Text>
+            <Switch
+              value={autoPlay}
+              onValueChange={toggleAutoPlay}
+              trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+              thumbColor={autoPlay ? theme.colors.primary : theme.colors.textSecondary}
+            />
           </View>
-          <Switch
-            value={autoPlay}
-            onValueChange={toggleAutoPlay}
-            trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
-            thumbColor={autoPlay ? theme.colors.primary : theme.colors.textSecondary}
-            style={{ marginLeft: 8 }}
-          />
+        </View>
+      </View>
+
+      {/* Venues */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Venues</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          <TouchableOpacity
+            style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}
+            onPress={() => (navigation as any).navigate('MyVenues')}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(5,150,105,0.12)' }]}>
+              <Ionicons name="business-outline" size={18} color="#059669" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>My Venues</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}
+            onPress={() => (navigation as any).navigate('ListVenue')}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(5,150,105,0.12)' }]}>
+              <Ionicons name="add-circle-outline" size={18} color="#059669" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>List a Venue</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.groupedRow}
+            onPress={() => setShowVenuePrefsModal(true)}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(37,99,235,0.12)' }]}>
+              <Ionicons name="options-outline" size={18} color="#2563EB" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Venue Preferences</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
         </View>
       </View>
 
       {/* TEST BUTTON - Temporary */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Testing</Text>
-        <TouchableOpacity 
-          style={[styles.testButton, { backgroundColor: '#7C3AED', borderColor: '#7C3AED' }]} 
-          onPress={() => (navigation as any).navigate('OnboardingTest')}
-        >
-          <Ionicons name="flask" size={20} color="#FFFFFF" />
-          <Text style={[styles.testButtonText, { color: '#FFFFFF' }]}>Test Onboarding Flow</Text>
-          <Ionicons name="chevron-forward" size={16} color="#FFFFFF" />
-        </TouchableOpacity>
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Testing</Text>
+        <View style={[styles.groupedCard, { backgroundColor: 'rgba(124,58,237,0.08)' }]}>
+          <TouchableOpacity style={styles.groupedRow} onPress={() => (navigation as any).navigate('OnboardingTest')}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(124,58,237,0.18)' }]}>
+              <Ionicons name="flask" size={18} color="#7C3AED" />
+            </View>
+            <Text style={[styles.rowLabel, { color: '#7C3AED' }]}>Test Onboarding Flow</Text>
+            <Ionicons name="chevron-forward" size={15} color="#7C3AED" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Support & About */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Support & About</Text>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleRestartTour}>
-          <Ionicons name="footsteps" size={20} color={theme.colors.primary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Restart App Tour</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleHelpSupport}>
-          <Ionicons name="help-circle" size={20} color={theme.colors.textSecondary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Help & Support</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleTermsOfService}>
-          <Ionicons name="document-text" size={20} color={theme.colors.textSecondary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Terms of Service</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handlePrivacyPolicy}>
-          <Ionicons name="shield" size={20} color={theme.colors.textSecondary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>Privacy Policy</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingButton, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]} onPress={handleAbout}>
-          <Ionicons name="information-circle" size={20} color={theme.colors.textSecondary} />
-          <Text style={[styles.settingText, { color: theme.colors.text }]}>About SoundBridge</Text>
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Support & About</Text>
+        <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleRestartTour}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+              <Ionicons name="footsteps" size={18} color={theme.colors.primary} />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Restart App Tour</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleHelpSupport}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.12)' }]}>
+              <Ionicons name="help-circle" size={18} color="#6366F1" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Help & Support</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleTermsOfService}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(107,114,128,0.12)' }]}>
+              <Ionicons name="document-text" size={18} color={theme.colors.textSecondary} />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Terms of Service</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handlePrivacyPolicy}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(107,114,128,0.12)' }]}>
+              <Ionicons name="shield" size={18} color={theme.colors.textSecondary} />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Privacy Policy</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.groupedRow} onPress={handleAbout}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+              <Ionicons name="information-circle" size={18} color={theme.colors.primary} />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>About SoundBridge</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Sign Out */}
@@ -1841,8 +2062,11 @@ export default function ProfileScreen() {
                   <TouchableOpacity style={styles.headerButton} onPress={handleEditProfile}>
                     <Ionicons name="pencil-outline" size={24} color={theme.colors.text} />
                   </TouchableOpacity>
+                  <TouchableOpacity style={styles.headerButton} onPress={() => setShowQRModal(true)}>
+                    <Ionicons name="qr-code-outline" size={24} color={theme.colors.text} />
+                  </TouchableOpacity>
                   <TouchableOpacity style={styles.headerButton} onPress={handleShareProfile}>
-                    <Ionicons name="share-outline" size={24} color={theme.colors.text} />
+                    <ShareDiagonalIcon size={24} color={theme.colors.text} />
                   </TouchableOpacity>
                 </>
               )}
@@ -1881,12 +2105,29 @@ export default function ProfileScreen() {
               />
             ) : (
               <LinearGradient
-                colors={['#DC2626', '#EC4899']}
+                colors={[branding.primary_color || '#DC2626', branding.accent_color || '#EC4899']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.profileBannerImage}
               />
             )}
+            {/* Custom logo — glassmorphic pill container */}
+            {branding.custom_logo_url ? (
+              <View
+                style={[
+                  styles.profileBrandingLogoContainer,
+                  branding.custom_logo_position === 'top-right' && { right: 12, left: undefined },
+                  branding.custom_logo_position === 'bottom-left' && { bottom: 80, top: undefined },
+                  branding.custom_logo_position === 'bottom-right' && { bottom: 80, right: 12, top: undefined, left: undefined },
+                ]}
+              >
+                <Image
+                  source={{ uri: branding.custom_logo_url }}
+                  style={styles.profileBrandingLogoImage}
+                  resizeMode="contain"
+                />
+              </View>
+            ) : null}
             
             {/* Dark Overlay for Text Readability */}
             <LinearGradient
@@ -1945,6 +2186,12 @@ export default function ProfileScreen() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
                       <Text style={styles.displayNameOverlay}>{profile?.display_name}</Text>
                       {profile?.is_verified && <VerifiedBadge size={16} />}
+                      {profile?.early_adopter && (
+                        <View style={styles.earlyAdopterBadge}>
+                          <Ionicons name="rocket" size={10} color="#FFFFFF" />
+                          <Text style={styles.earlyAdopterBadgeText}>Early</Text>
+                        </View>
+                      )}
                     </View>
                     <Text style={styles.usernameOverlay}>@{profile?.username}</Text>
                     {profile?.professional_headline && (
@@ -1988,6 +2235,11 @@ export default function ProfileScreen() {
                 <Text style={styles.joinDateOverlay}>
                   Joined {formatDate(profile?.created_at || new Date().toISOString())}
                 </Text>
+                {branding.show_powered_by === true && (
+                  <View style={styles.poweredByBadge}>
+                    <Text style={styles.poweredByBadgeText}>♪ SoundBridge</Text>
+                  </View>
+                )}
               </View>
             </View>
           </View>
@@ -1995,30 +2247,32 @@ export default function ProfileScreen() {
 
         {/* Tabs - Scroll up with content */}
         <View style={[styles.tabsContainer, { backgroundColor: theme.colors.surface }]}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'overview' && [styles.activeTab, { borderBottomColor: theme.colors.primary }]]}
-            onPress={() => setActiveTab('overview')}
-          >
-            <Text style={[styles.tabText, { color: activeTab === 'overview' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'overview' && styles.activeTabText]}>
-              Overview
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'earnings' && [styles.activeTab, { borderBottomColor: theme.colors.primary }]]}
-            onPress={() => setActiveTab('earnings')}
-          >
-            <Text style={[styles.tabText, { color: activeTab === 'earnings' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'earnings' && styles.activeTabText]}>
-              Earnings
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'settings' && [styles.activeTab, { borderBottomColor: theme.colors.primary }]]}
-            onPress={() => setActiveTab('settings')}
-          >
-            <Text style={[styles.tabText, { color: activeTab === 'settings' ? theme.colors.primary : theme.colors.textSecondary }, activeTab === 'settings' && styles.activeTabText]}>
-              Settings
-            </Text>
-          </TouchableOpacity>
+          <View style={[styles.tabsInner, { backgroundColor: theme.colors.card }]}>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'overview' && [styles.activeTab, { backgroundColor: theme.colors.primary }]]}
+              onPress={() => setActiveTab('overview')}
+            >
+              <Text style={[styles.tabText, { color: activeTab === 'overview' ? '#fff' : theme.colors.textSecondary }, activeTab === 'overview' && styles.activeTabText]}>
+                Overview
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'earnings' && [styles.activeTab, { backgroundColor: theme.colors.primary }]]}
+              onPress={() => setActiveTab('earnings')}
+            >
+              <Text style={[styles.tabText, { color: activeTab === 'earnings' ? '#fff' : theme.colors.textSecondary }, activeTab === 'earnings' && styles.activeTabText]}>
+                Earnings
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'settings' && [styles.activeTab, { backgroundColor: theme.colors.primary }]]}
+              onPress={() => setActiveTab('settings')}
+            >
+              <Text style={[styles.tabText, { color: activeTab === 'settings' ? '#fff' : theme.colors.textSecondary }, activeTab === 'settings' && styles.activeTabText]}>
+                Settings
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Tab Content - Scrolls with the rest */}
@@ -2056,6 +2310,24 @@ export default function ProfileScreen() {
         onCancel={() => setShowBiometricPasswordPrompt(false)}
         onConfirm={handleBiometricPasswordConfirm}
       />
+
+      {user?.id && (
+        <VenuePreferencesModal
+          visible={showVenuePrefsModal}
+          userId={user.id}
+          onClose={() => setShowVenuePrefsModal(false)}
+        />
+      )}
+
+      {profile && (
+        <QRCodeModal
+          visible={showQRModal}
+          onClose={() => setShowQRModal(false)}
+          creatorUsername={profile.username}
+          creatorName={profile.display_name}
+          avatarUrl={profile.avatar_url}
+        />
+      )}
       </SafeAreaView>
     </View>
   );
@@ -2138,6 +2410,43 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
   },
+  profileBrandingLogoContainer: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 5,
+    zIndex: 10,
+  },
+  profileBrandingLogoImage: {
+    width: 88,
+    height: 32,
+  },
+  poweredByBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 6,
+    paddingVertical: 3,
+    paddingHorizontal: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  poweredByBadgeText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 9.5,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
   profileOverlay: {
     position: 'absolute',
     bottom: 0,
@@ -2169,6 +2478,22 @@ const styles = StyleSheet.create({
   },
   profileInfoOverlay: {
     alignItems: 'flex-start',
+  },
+  earlyAdopterBadge: {
+    backgroundColor: '#7C3AED',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 3,
+    marginLeft: 6,
+  },
+  earlyAdopterBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '700' as const,
+    letterSpacing: 0.3,
   },
   displayNameOverlay: {
     ...Typography.headerLarge,
@@ -2252,23 +2577,26 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   tabsContainer: {
-    flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 4,
+    paddingVertical: 12,
+  },
+  tabsInner: {
+    flexDirection: 'row',
+    borderRadius: 14,
+    padding: 4,
   },
   tab: {
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    marginRight: 12,
+    paddingVertical: 9,
     alignItems: 'center',
+    borderRadius: 11,
   },
   activeTab: {
-    borderBottomWidth: 2,
+    // backgroundColor applied dynamically
   },
   tabText: {
-    fontSize: 16,
+    ...Typography.label,
+    fontSize: 14,
     fontWeight: '500',
   },
   activeTabText: {
@@ -2290,23 +2618,66 @@ const styles = StyleSheet.create({
     flex: 1,
     // backgroundColor applied dynamically in JSX
     borderRadius: 18,
-    paddingVertical: 18,
+    borderWidth: 1,
+    paddingVertical: 20,
     paddingHorizontal: 12,
     alignItems: 'center',
-    marginHorizontal: 6,
+    marginHorizontal: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.15,
     shadowRadius: 12,
     elevation: 3,
   },
+  statNumber: {
+    ...Typography.headerMedium,
+    fontSize: 26,
+    letterSpacing: -0.5,
+    marginBottom: 4,
+  },
+  statLabel: {
+    ...Typography.label,
+    fontSize: 11,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  groupedCard: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  groupedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  rowIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowLabel: {
+    ...Typography.body,
+    fontSize: 15,
+    flex: 1,
+  },
+  rowValue: {
+    ...Typography.label,
+    fontSize: 14,
+  },
   section: {
     marginBottom: 20,
   },
   sectionTitle: {
     ...Typography.label,
-    // color applied dynamically in JSX
-    marginBottom: 12,
+    fontSize: 11,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+    marginLeft: 4,
   },
   activityItem: {
     flexDirection: 'row',

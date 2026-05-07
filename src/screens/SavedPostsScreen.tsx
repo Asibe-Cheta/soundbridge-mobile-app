@@ -16,6 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { socialService } from '../services/api/socialService';
 import PostCard from '../components/PostCard';
 import type { Post } from '../types/feed.types';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 export default function SavedPostsScreen() {
   const navigation = useNavigation();
@@ -275,8 +276,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
+    ...Typography.headerMedium,
     fontSize: 18,
-    fontWeight: 'bold',
+    lineHeight: 24,
   },
   loadingContainer: {
     flex: 1,
@@ -285,7 +287,9 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 16,
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
   },
   emptyListContent: {
     flexGrow: 1,
@@ -305,14 +309,16 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   emptyTitle: {
+    ...Typography.headerMedium,
     fontSize: 24,
-    fontWeight: 'bold',
+    lineHeight: 30,
     marginBottom: 8,
   },
   emptyDescription: {
+    ...Typography.label,
     fontSize: 14,
-    textAlign: 'center',
     lineHeight: 20,
+    textAlign: 'center',
     marginBottom: 24,
   },
   emptyButton: {
@@ -322,7 +328,9 @@ const styles = StyleSheet.create({
   },
   emptyButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
   },
   errorContainer: {
@@ -332,7 +340,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   errorText: {
+    ...Typography.body,
     fontSize: 16,
+    lineHeight: 22,
     marginTop: 16,
     marginBottom: 24,
     textAlign: 'center',
@@ -344,7 +354,9 @@ const styles = StyleSheet.create({
   },
   retryButtonText: {
     color: '#FFFFFF',
+    ...Typography.button,
     fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
   },
   footerLoading: {
@@ -355,7 +367,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   footerText: {
+    ...Typography.label,
     fontSize: 14,
+    lineHeight: 20,
   },
 });
 

@@ -94,7 +94,7 @@ const ValuePropCard: React.FC<ValuePropCardProps> = ({ storageKey = STORAGE_KEY_
 };
 
 const valuePoints = [
-  'Upload music free (3 tracks)',
+  'Upload your music & podcasts for free',
   'Only see what you like',
   'Tip artists directly',
   'Connect with creators',
