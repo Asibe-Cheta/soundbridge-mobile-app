@@ -49,7 +49,7 @@
         "backgroundImage": "./assets/images/logos/logo-background.png"
       },
       "package": "com.soundbridge.mobile",
-      "versionCode": 42,
+      "versionCode": 43,
       "permissions": [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
