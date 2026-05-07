@@ -414,11 +414,11 @@ export default function UploadScreen() {
     // Remove hyphens and spaces, convert to uppercase
     const normalized = isrc.replace(/[-\s]/g, '').toUpperCase();
 
-    // Must be exactly 12 characters
+    // Must be exactly 12 characters (user_provided ISRCs are standard canonical 12-char)
     if (normalized.length !== 12) {
       return {
         valid: false,
-        error: 'Invalid ISRC — must be 12 characters, e.g. GB-KTZ-26-00001'
+        error: 'Invalid ISRC — must be 12 characters, e.g. USRC12345678'
       };
     }
 
@@ -426,7 +426,7 @@ export default function UploadScreen() {
     if (!/^[A-Z0-9]{2}[A-Z0-9]{3}[A-Z0-9]{2}[0-9]{5}$/.test(normalized)) {
       return {
         valid: false,
-        error: 'Invalid ISRC format. Expected XX-XXX-YY-NNNNN, e.g. GB-KTZ-26-00001'
+        error: 'Invalid ISRC format. Expected XX-XXX-YY-NNNNN, e.g. US-RC1-23-45678'
       };
     }
 
