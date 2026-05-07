@@ -144,7 +144,8 @@
       "expo-font",
       "expo-apple-authentication",
       "expo-asset",
-      "expo-audio"
+      "expo-audio",
+      "./plugins/withAndroidOldArch"
     ]
   }
 }
