@@ -546,21 +546,72 @@ export default function AllEventsScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          !mode ? (
+            <View style={[styles.infoNote, { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }]}>
+              <Ionicons name="information-circle-outline" size={14} color={theme.colors.textSecondary} style={{ marginRight: 6, marginTop: 1 }} />
+              <Text style={[styles.infoNoteText, { color: theme.colors.textSecondary }]}>
+                Showing events created by SoundBridge artists. External events are on the Discover tab.
+              </Text>
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="calendar-outline" size={64} color={theme.colors.textSecondary} />
             <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
-              No events found
+              {searchQuery ? 'No events found' : mode === 'created' ? 'No events created yet' : mode === 'booked' ? 'No booked events' : 'No SoundBridge events yet'}
             </Text>
-            <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
-              {searchQuery
-                ? 'Try adjusting your search'
-                : mode === 'created'
-                  ? "You haven't created any events yet"
-                  : mode === 'booked'
-                    ? "You haven't booked any events yet"
-                    : 'Check back later for new events'}
-            </Text>
+            {searchQuery ? (
+              <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+                Try adjusting your search
+              </Text>
+            ) : mode === 'created' ? (
+              <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+                You haven't created any events yet
+              </Text>
+            ) : mode === 'booked' ? (
+              <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+                You haven't booked any events yet
+              </Text>
+            ) : (
+              <>
+                <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+                  This screen shows events created directly by artists on SoundBridge.
+                </Text>
+
+                <View style={[styles.whyCreateBox, { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: theme.colors.primary + '40' }]}>
+                  <Text style={[styles.whyCreateTitle, { color: theme.colors.text }]}>
+                    Are you an artist? Create your event here
+                  </Text>
+                  <View style={styles.whyCreateItem}>
+                    <Ionicons name="megaphone-outline" size={15} color={theme.colors.primary} style={styles.whyCreateIcon} />
+                    <Text style={[styles.whyCreateText, { color: theme.colors.textSecondary }]}>
+                      Free promotion — your event is automatically shown to nearby fans who follow your genre. No ad spend needed.
+                    </Text>
+                  </View>
+                  <View style={styles.whyCreateItem}>
+                    <Ionicons name="people-outline" size={15} color={theme.colors.primary} style={styles.whyCreateIcon} />
+                    <Text style={[styles.whyCreateText, { color: theme.colors.textSecondary }]}>
+                      Right audience only — fans who opted in for your event category (Gospel Concert, Jazz Room, etc.) get notified, not random people.
+                    </Text>
+                  </View>
+                  <View style={styles.whyCreateItem}>
+                    <Ionicons name="cash-outline" size={15} color={theme.colors.primary} style={styles.whyCreateIcon} />
+                    <Text style={[styles.whyCreateText, { color: theme.colors.textSecondary }]}>
+                      Keep 85% of ticket revenue — just a 15% platform fee, with no advertising costs eating into your earnings.
+                    </Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity style={styles.goBackTip} onPress={() => navigation.goBack()} activeOpacity={0.7}>
+                  <Ionicons name="arrow-back-outline" size={14} color={theme.colors.primary} />
+                  <Text style={[styles.goBackTipText, { color: theme.colors.primary }]}>
+                    Looking for concerts to attend? Go back and tap "Get Tickets" on any external event.
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         }
       />
@@ -820,5 +871,69 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
     fontSize: 16,
     textAlign: 'center',
+    paddingHorizontal: 16,
+  },
+  infoNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  infoNoteText: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 17,
+  },
+  whyCreateBox: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 24,
+    marginHorizontal: 4,
+    width: '100%',
+  },
+  whyCreateTitle: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '600',
+    letterSpacing: -0.4,
+    fontSize: 15,
+    marginBottom: 14,
+  },
+  whyCreateItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  whyCreateIcon: {
+    marginRight: 10,
+    marginTop: 1,
+  },
+  whyCreateText: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    fontSize: 13,
+    lineHeight: 19,
+    flex: 1,
+  },
+  goBackTip: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 20,
+    paddingHorizontal: 4,
+    gap: 6,
+  },
+  goBackTipText: {
+    fontFamily: Typography.body.fontFamily,
+    fontWeight: '400',
+    letterSpacing: -0.4,
+    fontSize: 13,
+    lineHeight: 18,
+    flex: 1,
   },
 });
