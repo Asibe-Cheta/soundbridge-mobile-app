@@ -1173,6 +1173,24 @@ export const dbHelpers = {
     }
   },
 
+  // External events pulled from Songkick via background sync job
+  async getExternalEvents(limit = 20) {
+    try {
+      const { data, error } = await supabase
+        .from('external_events')
+        .select(
+          'id, source, title, artist_name, venue_name, venue_address, city, country, latitude, longitude, genre, event_date, ticket_url, image_url, is_claimed, claimed_by_user_id'
+        )
+        .gte('event_date', new Date().toISOString())
+        .eq('is_claimed', false)
+        .order('event_date', { ascending: true })
+        .limit(limit);
+      return { data: data || [], error: error || null };
+    } catch (error) {
+      return { data: [], error };
+    }
+  },
+
   // ===== COLLABORATION CALENDAR SYSTEM =====
 
   // Get creator's availability slots

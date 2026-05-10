@@ -49,6 +49,8 @@ import UploadPromptCard from '../components/UploadPromptCard';
 import { SkeletonHtmlCardRow, SkeletonAlbumCardRow, SkeletonRowCards } from '../components/SkeletonLoader';
 import { venueService, VenueDisplayItem } from '../services/VenueService';
 import VenuePreferencesModal from '../components/VenuePreferencesModal';
+import ExternalEventCard, { ExternalEvent } from '../components/ExternalEventCard';
+import ClaimEventModal from '../modals/ClaimEventModal';
 
 const { width } = Dimensions.get('window');
 
@@ -492,6 +494,8 @@ function DiscoverScreen() {
   const [loadingAlbums, setLoadingAlbums] = useState(false);
   const [loadingArtists, setLoadingArtists] = useState(false);
   const [loadingEvents, setLoadingEvents] = useState(false);
+  const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
+  const [claimingEvent, setClaimingEvent] = useState<ExternalEvent | null>(null);
   const [loadingPlaylists, setLoadingPlaylists] = useState(false);
   const [loadingServices, setLoadingServices] = useState(false);
   const [loadingVenues, setLoadingVenues] = useState(false);
@@ -875,6 +879,7 @@ function DiscoverScreen() {
           });
           const eventsData = eventsResult.events?.data || eventsResult.events || [];
           setEvents(user?.id ? eventsData : (eventsData.length > 0 ? eventsData : DISCOVER_MOCK_EVENTS));
+          loadExternalEvents();
           loadingManager.setLoading('events', false, 0);
           break;
         }
@@ -982,6 +987,7 @@ function DiscoverScreen() {
           setFeaturedArtists(allResults.artists?.data || allResults.artists || DISCOVER_MOCK_ARTISTS);
           const eventsData = allResults.events?.data || allResults.events || [];
           setEvents(user?.id ? eventsData : (eventsData.length > 0 ? eventsData : DISCOVER_MOCK_EVENTS));
+          loadExternalEvents();
           setPlaylists(allResults.playlists?.data || allResults.playlists || DISCOVER_MOCK_PLAYLISTS);
           break;
         }
@@ -1394,6 +1400,29 @@ function DiscoverScreen() {
     }
   };
 
+  const loadExternalEvents = async () => {
+    try {
+      const { data } = await dbHelpers.getExternalEvents();
+      if (Array.isArray(data) && data.length > 0) {
+        setExternalEvents(data as ExternalEvent[]);
+      }
+    } catch {
+      // External events are additive — never block SoundBridge events on error
+    }
+  };
+
+  const handleClaimEvent = (event: ExternalEvent) => {
+    if (!user) {
+      (navigation as any).navigate('Login');
+      return;
+    }
+    setClaimingEvent(event);
+  };
+
+  const handleClaimSuccess = (claimedId: string) => {
+    setExternalEvents(prev => prev.filter(e => e.id !== claimedId));
+  };
+
   const loadPlaylists = async (forceRefresh = false) => {
     const cacheKey = 'public_playlists';
     
@@ -1492,6 +1521,7 @@ function DiscoverScreen() {
     await Promise.all([
       loadFeaturedArtists(true),
       loadEvents(true),
+      loadExternalEvents(),
       loadTrendingTracks(true),
       loadRecentTracks(true),
       loadPlaylists(true)
@@ -2716,8 +2746,9 @@ function DiscoverScreen() {
               
               {loadingEvents ? (
                 <SkeletonRowCards count={3} />
-              ) : events.length > 0 ? (
+              ) : (events.length > 0 || externalEvents.length > 0) ? (
                 <View style={styles.eventsContainer}>
+                  {/* SoundBridge-created events — always first */}
                   {events.map((event) => (
                     <TouchableOpacity
                       key={event.id}
@@ -2766,6 +2797,28 @@ function DiscoverScreen() {
                       </View>
                     </TouchableOpacity>
                   ))}
+
+                  {/* External events — shown below SoundBridge events */}
+                  {externalEvents.length > 0 && (
+                    <>
+                      {events.length > 0 && (
+                        <View style={styles.externalDivider}>
+                          <View style={[styles.externalDividerLine, { backgroundColor: 'rgba(255,255,255,0.1)' }]} />
+                          <Text style={[styles.externalDividerText, { color: theme.colors.textSecondary }]}>
+                            More events near you
+                          </Text>
+                          <View style={[styles.externalDividerLine, { backgroundColor: 'rgba(255,255,255,0.1)' }]} />
+                        </View>
+                      )}
+                      {externalEvents.map((event) => (
+                        <ExternalEventCard
+                          key={event.id}
+                          event={event}
+                          onClaim={handleClaimEvent}
+                        />
+                      ))}
+                    </>
+                  )}
                 </View>
               ) : (
                 <View style={styles.emptyState}>
@@ -3318,6 +3371,13 @@ function DiscoverScreen() {
           </SafeAreaView>
         </BlurView>
       </Modal>
+
+      <ClaimEventModal
+        event={claimingEvent}
+        visible={claimingEvent !== null}
+        onClose={() => setClaimingEvent(null)}
+        onClaimed={handleClaimSuccess}
+      />
 
       </SafeAreaView>
     </View>
@@ -3985,6 +4045,21 @@ const styles = StyleSheet.create<any>({
     marginLeft: 12,
   },
   // Events Tab Styles
+  externalDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 16,
+    gap: 10,
+  },
+  externalDividerLine: {
+    flex: 1,
+    height: 1,
+  },
+  externalDividerText: {
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.3,
+  },
   eventsContainer: {
     paddingHorizontal: 16,
   },
