@@ -11,6 +11,7 @@ export interface CreateTipRequest {
   isAnonymous?: boolean;
   userTier?: string;
   paymentMethod?: TipPaymentMethod;
+  trackId?: string;
 }
 
 export interface CreateTipResponse {

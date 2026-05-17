@@ -113,6 +113,13 @@ import ShareProfileScreen from './src/screens/ShareProfileScreen';
 import TaxInformationScreen from './src/screens/TaxInformationScreen';
 import RecentActivityScreen from './src/screens/RecentActivityScreen';
 import AccountDeletionScreen from './src/screens/AccountDeletionScreen';
+import PayoutInfoScreen from './src/screens/PayoutInfoScreen';
+import EventPromotionInfoScreen from './src/screens/EventPromotionInfoScreen';
+import ComingSoonScreen from './src/screens/ComingSoonScreen';
+import ServicePreferencesScreen from './src/screens/ServicePreferencesScreen';
+
+// Supabase client for launch-counter updates
+import { supabase } from './src/lib/supabase';
 
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -122,6 +129,8 @@ import { CollaborationProvider } from './src/contexts/CollaborationContext';
 import { ToastProvider } from './src/contexts/ToastContext';
 
 // Import components
+import CreatorTeaserModal from './src/components/CreatorTeaserModal';
+import ShareMyCardModal from './src/components/ShareMyCardModal';
 import MiniPlayer from './src/components/MiniPlayer';
 import SoundBridgeErrorBoundary from './src/components/SoundBridgeErrorBoundary';
 import ScreenCaptureBanner from './src/components/ScreenCaptureBanner';
@@ -382,7 +391,10 @@ function MainTabs() {
 // Main App Navigator
 function AppNavigator() {
   console.log('🧭 AppNavigator RENDERING');
-  const { user, loading, needsOnboarding, pendingPasswordReset, clearPendingPasswordReset } = useAuth();
+  const { user, userProfile, updateUserProfile, loading, needsOnboarding, pendingPasswordReset, clearPendingPasswordReset } = useAuth();
+  const [showCreatorTeaser, setShowCreatorTeaser] = React.useState(false);
+  const [showCreatorCard, setShowCreatorCard] = React.useState(false);
+  const launchCountedRef = React.useRef(false);
   const { theme } = useTheme();
   const navigationRef = React.useRef<any>(null);
 
@@ -450,6 +462,43 @@ function AppNavigator() {
       });
     }
   }, [user?.id]); // Only re-run if user ID changes
+
+  // Creator launch counter — runs once when userProfile first loads for a creator
+  React.useEffect(() => {
+    if (!user?.id || !userProfile || launchCountedRef.current) return;
+    if (userProfile.role !== 'creator') { launchCountedRef.current = true; return; }
+    if (userProfile.fan_link_shared) { launchCountedRef.current = true; return; }
+
+    launchCountedRef.current = true;
+
+    const incrementAndCheckTeaser = async () => {
+      try {
+        // Read fresh values to avoid stale-closure issues
+        const { data: fresh } = await supabase
+          .from('profiles')
+          .select('app_launch_count, teaser_last_shown_at_launch, fan_link_shared')
+          .eq('id', user.id)
+          .single();
+
+        if (!fresh || fresh.fan_link_shared) return;
+
+        const newCount = (fresh.app_launch_count ?? 0) + 1;
+        const teaserLast = fresh.teaser_last_shown_at_launch ?? 0;
+        const shouldShowTeaser = newCount - teaserLast >= 4;
+
+        const updates: Record<string, any> = { app_launch_count: newCount };
+        if (shouldShowTeaser) updates.teaser_last_shown_at_launch = newCount;
+
+        await updateUserProfile(updates);
+
+        if (shouldShowTeaser) setShowCreatorTeaser(true);
+      } catch (err) {
+        console.warn('Creator launch counter update failed:', err);
+      }
+    };
+
+    incrementAndCheckTeaser();
+  }, [userProfile]); // fires once when profile loads
 
   // Handle deep link navigation
   const handleDeepLinkNavigation = (path: string, params: any) => {
@@ -1029,12 +1078,48 @@ function AppNavigator() {
             <Stack.Screen name="UrgentGigResponses" component={UrgentGigResponsesScreen} options={{ headerShown: false }} />
             <Stack.Screen name="UrgentGigConfirmation" component={UrgentGigConfirmationScreen} options={{ headerShown: false }} />
             <Stack.Screen name="ProviderGigDetail" component={ProviderGigDetailScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="PayoutInfo" component={PayoutInfoScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="EventPromotionInfo" component={EventPromotionInfoScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="ComingSoon" component={ComingSoonScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="ServicePreferences" component={ServicePreferencesScreen} options={{ headerShown: false }} />
             {/* Allow access to onboarding even after completion for testing */}
             <Stack.Screen name="OnboardingTest" component={OnboardingScreen} />
           </>
         )}
         </Stack.Navigator>
         {user && !needsOnboarding && <MiniPlayer />}
+
+        {/* Creator teaser — fires every 4th app launch until card is shared */}
+        {userProfile && userProfile.role === 'creator' && !userProfile.fan_link_shared && (
+          <>
+            <CreatorTeaserModal
+              visible={showCreatorTeaser}
+              creatorName={userProfile.display_name ?? userProfile.username ?? ''}
+              avatarUrl={userProfile.avatar_url}
+              genres={userProfile.genres}
+              onTryIt={() => { setShowCreatorTeaser(false); setTimeout(() => setShowCreatorCard(true), 200); }}
+              onMaybeLater={() => setShowCreatorTeaser(false)}
+            />
+            <ShareMyCardModal
+              visible={showCreatorCard}
+              onClose={() => setShowCreatorCard(false)}
+              creatorName={userProfile.display_name ?? userProfile.username ?? ''}
+              username={userProfile.username ?? ''}
+              avatarUrl={userProfile.avatar_url}
+              genres={userProfile.genres}
+              onShared={async () => {
+                if (!user?.id) return;
+                setShowCreatorCard(false);
+                setShowCreatorTeaser(false);
+                await updateUserProfile({
+                  fan_link_shared: true,
+                  fan_link_shared_at: new Date().toISOString(),
+                  fan_link_share_method: 'card',
+                });
+              }}
+            />
+          </>
+        )}
       </NavigationContainer>
     </View>
   );

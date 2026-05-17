@@ -1,7 +1,19 @@
 const { getDefaultConfig } = require('expo/metro-config');
+const { FileStore } = require('metro-cache');
 const path = require('path');
 
 const config = getDefaultConfig(__dirname);
+
+// Persist Metro transform cache inside the project so it survives reboots.
+// Without this, Metro uses /tmp which is wiped on restart, forcing a full
+// cold rebuild (~20 min) on every OTA push after a reboot.
+config.cacheStores = [
+  new FileStore({ root: path.join(__dirname, '.metro-cache') }),
+];
+
+// Watchman sync times out on this machine; Node crawler is slower but reliable.
+config.resolver.useWatchman = false;
+config.resolver.blockList = [/node_modules\/.* [0-9].*/];
 
 // Ensure Metro only looks in the local node_modules, not parent directories
 config.resolver.nodeModulesPaths = [

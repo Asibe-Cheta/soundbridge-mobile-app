@@ -198,6 +198,29 @@ class OpportunityService {
     });
   }
 
+  async updateOpportunity(id: string, data: {
+    title?: string;
+    description?: string;
+    skills_needed?: string[];
+    location?: string;
+    is_remote?: boolean;
+    budget_min?: number | null;
+    budget_max?: number | null;
+    budget_currency?: string;
+    visibility?: 'public' | 'connections';
+  }): Promise<void> {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+
+    const { error } = await supabase
+      .from('opportunity_posts')
+      .update({ ...data, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', session.user.id);
+
+    if (error) throw new Error(error.message);
+  }
+
   async deactivateOpportunity(id: string): Promise<void> {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('Not authenticated');

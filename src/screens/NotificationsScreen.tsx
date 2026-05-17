@@ -228,24 +228,26 @@ export default function NotificationsScreen() {
   };
 
   const handleNotificationPress = async (notification: Notification) => {
-    // Mark as read
     if (!notification.read) {
       await markAsRead(notification.id);
     }
 
-    console.log('🔔 Notification tapped:', notification.type, notification.data);
-
-    // Navigate based on notification type and data
     const { type, data } = notification;
 
     switch (type) {
       // Event notifications
       case 'event':
       case 'event_reminder':
-        if (data?.eventId) {
-          navigation.navigate('EventDetails' as never, { eventId: data.eventId } as never);
+      case 'event_2_weeks':
+      case 'event_1_week':
+      case 'event_24_hours':
+      case 'event_day': {
+        const eventId = data?.eventId || data?.entityId || data?.event_id;
+        if (eventId) {
+          navigation.navigate('EventDetails' as never, { eventId } as never);
         }
         break;
+      }
 
       // Message notifications
       case 'message':
@@ -256,76 +258,170 @@ export default function NotificationsScreen() {
         }
         break;
 
-      // Track/content notifications
+      // Tip notifications
+      case 'tip':
+        navigation.navigate('Wallet' as never, { tab: 'tips', tipId: data?.tipId || data?.entityId } as never);
+        break;
+
+      // Withdrawal notifications
+      case 'withdrawal':
+        navigation.navigate('Wallet' as never, { tab: 'withdrawals', withdrawalId: data?.withdrawalId || data?.entityId } as never);
+        break;
+
+      // Track moderation notifications
       case 'moderation':
       case 'track_approved':
-      case 'track_featured':
-      case 'content_purchase':
-        if (data?.trackId) {
-          navigation.navigate('TrackDetails' as never, { trackId: data.trackId } as never);
+      case 'track_featured': {
+        const trackId = data?.trackId || data?.entityId;
+        if (trackId) {
+          navigation.navigate('TrackDetails' as never, { trackId } as never);
         }
         break;
-
-      // Tip/wallet notifications
-      case 'tip':
-      case 'withdrawal':
-        navigation.navigate('Wallet' as never, { tab: 'tips' } as never);
-        break;
-
-      // Collaboration notifications
-      case 'collaboration_request':
-      case 'collaboration_accepted':
-      case 'collaboration_declined':
-      case 'collaboration_confirmed':
-        navigation.navigate('CollaborationRequests' as never);
-        break;
-
-      // Social notifications — navigate to the post
-      case 'reaction':
-      case 'like':
-      case 'post_reaction':
-      case 'comment':
-      case 'comment_reply':
-        if (data?.postId) {
-          navigation.navigate('PostDetail' as never, { postId: data.postId } as never);
-        }
-        break;
-
-      // Connection / follow notifications
-      case 'connection_request':
-      case 'connection_accepted':
-      case 'new_follower':
-        if (data?.followerId) {
-          navigation.navigate('CreatorProfile' as never, { creatorId: data.followerId } as never);
-        } else if (data?.creatorId) {
-          navigation.navigate('CreatorProfile' as never, { creatorId: data.creatorId } as never);
-        } else if (data?.requesterId) {
-          navigation.navigate('CreatorProfile' as never, { creatorId: data.requesterId } as never);
-        }
-        break;
-
-      // Creator/profile notifications
-      case 'creator_post':
-        if (data?.creatorId) {
-          navigation.navigate('CreatorProfile' as never, { creatorId: data.creatorId } as never);
-        }
-        break;
+      }
 
       // Live session notifications
-      case 'live_session':
-        if (data?.sessionId) {
-          navigation.navigate('LiveSessionRoom' as never, { sessionId: data.sessionId } as never);
+      case 'live_session': {
+        const sessionId = data?.sessionId || data?.entityId;
+        if (sessionId) {
+          navigation.navigate('LiveSessionRoom' as never, { sessionId } as never);
         } else {
           navigation.navigate('LiveSessions' as never);
         }
         break;
+      }
 
-      // Default: try to use trackId or eventId if present
+      // Collaboration notifications
+      case 'collaboration_request':
+      case 'collaboration.request.received':
+        navigation.navigate('CollaborationRequests' as never, { tab: 'received', requestId: data?.requestId || data?.entityId } as never);
+        break;
+
+      case 'collaboration_accepted':
+      case 'collaboration_declined':
+      case 'collaboration_confirmed':
+      case 'collaboration.request.accepted':
+      case 'collaboration.request.declined':
+        navigation.navigate('CollaborationRequests' as never, { tab: 'sent', requestId: data?.requestId || data?.entityId } as never);
+        break;
+
+      // Social — post reactions and comments
+      case 'reaction':
+      case 'like':
+      case 'post_reaction':
+      case 'comment':
+      case 'comment_reply': {
+        const postId = data?.postId || data?.entityId;
+        if (postId) {
+          navigation.navigate('PostDetail' as never, { postId } as never);
+        }
+        break;
+      }
+
+      // Follow / connection notifications
+      case 'new_follower':
+      case 'follow':
+      case 'connection_request':
+      case 'connection_accepted': {
+        const creatorId = data?.followerId || data?.requesterId || data?.creatorId || data?.entityId;
+        if (creatorId) {
+          navigation.navigate('CreatorProfile' as never, { creatorId } as never);
+        } else {
+          navigation.navigate('Profile' as never);
+        }
+        break;
+      }
+
+      // Creator post notifications
+      case 'creator_post': {
+        const creatorId = data?.creatorId || data?.entityId;
+        if (creatorId) {
+          navigation.navigate('CreatorProfile' as never, { creatorId } as never);
+        }
+        break;
+      }
+
+      // Opportunity notifications
+      case 'opportunity_interest': {
+        const oppId = data?.opportunityId || data?.entityId;
+        if (oppId) {
+          navigation.navigate('OpportunityInterestList' as never, { opportunityId: oppId } as never);
+        } else {
+          navigation.navigate('MyOpportunities' as never);
+        }
+        break;
+      }
+
+      case 'opportunity_agreement_received':
+      case 'opportunity': {
+        if (data?.projectId || data?.project_id) {
+          navigation.navigate('OpportunityProject' as never, { projectId: data.projectId || data.project_id } as never);
+        } else if (data?.opportunityId || data?.entityId) {
+          navigation.navigate('OpportunityInterestList' as never, { opportunityId: data.opportunityId || data.entityId } as never);
+        } else {
+          navigation.navigate('MyOpportunities' as never);
+        }
+        break;
+      }
+
+      // Gig lifecycle
+      case 'gig_accepted':
+      case 'gig_confirmed':
+      case 'gig_starting_soon': {
+        const gigId = data?.gigId || data?.gig_id || data?.entityId;
+        if (gigId) {
+          navigation.navigate('ProviderGigDetail' as never, { gigId } as never);
+        }
+        break;
+      }
+
+      case 'gig_expired':
+      case 'gig_payment':
+      case 'gig_refund':
+      case 'payout':
+      case 'content_purchase':
+        navigation.navigate('Wallet' as never);
+        break;
+
+      case 'gig_rating_received': {
+        const projId = data?.projectId || data?.project_id;
+        if (projId) {
+          navigation.navigate('PostGigRating' as never, { projectId: projId } as never);
+        } else {
+          navigation.navigate('Profile' as never);
+        }
+        break;
+      }
+
+      case 'dispute_raised': {
+        const projId = data?.projectId || data?.project_id || data?.entityId;
+        if (projId) {
+          navigation.navigate('DisputeDetail' as never, { projectId: projId } as never);
+        }
+        break;
+      }
+
+      // Subscription / billing
+      case 'subscription':
+        navigation.navigate('Billing' as never);
+        break;
+
+      // Nudge notifications — navigate to the screen stored in data.screen
+      case 'nudge':
+        if (data?.screen) {
+          navigation.navigate(data.screen as never, (data.screenParams ?? {}) as never);
+        }
+        break;
+
       default:
-        if (data?.trackId) {
-          navigation.navigate('TrackDetails' as never, { trackId: data.trackId } as never);
+        // Fallback: honour explicit deepLink or screen field present on any notification type
+        if (data?.screen) {
+          navigation.navigate(data.screen as never, (data.screenParams ?? {}) as never);
+        } else if (data?.trackId || data?.entityId) {
+          navigation.navigate('TrackDetails' as never, { trackId: data.trackId || data.entityId } as never);
         } else if (data?.eventId) {
           navigation.navigate('EventDetails' as never, { eventId: data.eventId } as never);
+        } else if (data?.postId) {
+          navigation.navigate('PostDetail' as never, { postId: data.postId } as never);
         }
         break;
     }

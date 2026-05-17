@@ -38,3 +38,4 @@ yarn-error.*
 # Native folders - let EAS generate them during build
 /ios
 /android
+.metro-cache

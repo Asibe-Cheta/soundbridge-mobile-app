@@ -125,18 +125,23 @@ export class AgoraService {
 
     try {
       console.log('🎤 Joining as broadcaster...', { channelName, uid });
-      
+
       // Set role to broadcaster (speaker)
       this.engine.setClientRole(ClientRoleType.ClientRoleBroadcaster);
-      
-      // Join channel
+
+      // Join channel with mic track enabled so the stream is registered
       this.engine.joinChannel(token, channelName, uid, {
         clientRoleType: ClientRoleType.ClientRoleBroadcaster,
+        publishMicrophoneTrack: true,
       });
-      
+
+      // Start muted — caller sets isMuted=true in UI; sync Agora state to match
+      this.engine.enableLocalAudio(true);    // keep hardware active
+      this.engine.muteLocalAudioStream(true); // but silence the stream
+
       this.currentChannelName = channelName;
-      console.log('✅ Joined channel as broadcaster');
-      
+      console.log('✅ Joined channel as broadcaster (muted until user unmutes)');
+
     } catch (error) {
       console.error('❌ Failed to join as broadcaster:', error);
       throw error;
@@ -164,7 +169,11 @@ export class AgoraService {
   }
 
   /**
-   * Mute/unmute local audio
+   * Mute/unmute local audio.
+   * Uses both enableLocalAudio and muteLocalAudioStream so that unmuting
+   * reliably restarts the capture hardware in ChannelProfileLiveBroadcasting.
+   * Using muteLocalAudioStream alone can leave the stream silenced after the
+   * first mute/unmute cycle in certain Agora SDK v4 builds.
    */
   async muteLocalAudio(muted: boolean): Promise<void> {
     if (!agoraModule || !this.engine) {
@@ -172,7 +181,8 @@ export class AgoraService {
     }
 
     try {
-      await this.engine.muteLocalAudioStream(muted);
+      this.engine.enableLocalAudio(!muted);    // restart/stop hardware capture
+      this.engine.muteLocalAudioStream(muted); // gate the outbound stream
       console.log(`🔇 Local audio ${muted ? 'muted' : 'unmuted'}`);
     } catch (error) {
       console.error('❌ Failed to mute/unmute:', error);
@@ -181,7 +191,15 @@ export class AgoraService {
   }
 
   /**
-   * Switch from listener to broadcaster (when promoted to speaker)
+   * Switch from listener to broadcaster (when promoted to speaker).
+   *
+   * Three steps are required in ChannelProfileLiveBroadcasting:
+   * 1. setClientRole — tells the server this client is now a broadcaster
+   * 2. updateChannelMediaOptions — explicitly registers the mic track for
+   *    publishing (setClientRole alone does not guarantee this in SDK v4)
+   * 3. Sync mute state — start muted so it matches the UI (isMuted=true after
+   *    promotion). Without this, Agora is live while the UI shows "Unmute",
+   *    and the first real mute/unmute cycle breaks the stream permanently.
    */
   async promoteToSpeaker(): Promise<void> {
     if (!agoraModule || !this.engine) {
@@ -190,8 +208,20 @@ export class AgoraService {
 
     try {
       console.log('🎤 Promoting to speaker...');
+
       this.engine.setClientRole(ClientRoleType.ClientRoleBroadcaster);
-      console.log('✅ Promoted to speaker');
+
+      // Explicitly register the mic track so audio is actually published
+      this.engine.updateChannelMediaOptions({
+        publishMicrophoneTrack: true,
+        clientRoleType: ClientRoleType.ClientRoleBroadcaster,
+      });
+
+      // Start muted — syncs Agora hardware/stream state with the UI's isMuted=true
+      this.engine.enableLocalAudio(true);    // hardware on, so first unmute is instant
+      this.engine.muteLocalAudioStream(true); // but stream is silent until user unmutes
+
+      console.log('✅ Promoted to speaker (muted until user unmutes)');
     } catch (error) {
       console.error('❌ Failed to promote to speaker:', error);
       throw error;
@@ -199,7 +229,7 @@ export class AgoraService {
   }
 
   /**
-   * Switch from broadcaster to listener (when demoted)
+   * Switch from broadcaster to listener (when demoted).
    */
   async demoteToListener(): Promise<void> {
     if (!agoraModule || !this.engine) {
@@ -208,9 +238,17 @@ export class AgoraService {
 
     try {
       console.log('🎧 Demoting to listener...');
+
+      // Stop publishing before switching role
+      this.engine.muteLocalAudioStream(true);
+      this.engine.enableLocalAudio(false);
+
       this.engine.setClientRole(ClientRoleType.ClientRoleAudience);
-      // Mute local audio when becoming listener
-      await this.muteLocalAudio(true);
+      this.engine.updateChannelMediaOptions({
+        publishMicrophoneTrack: false,
+        clientRoleType: ClientRoleType.ClientRoleAudience,
+      });
+
       console.log('✅ Demoted to listener');
     } catch (error) {
       console.error('❌ Failed to demote to listener:', error);

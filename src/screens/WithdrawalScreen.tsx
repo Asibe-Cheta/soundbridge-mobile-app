@@ -134,7 +134,7 @@ export default function WithdrawalScreen() {
       return false;
     }
 
-    const minWithdrawal = 5.00; // $5 minimum
+    const minWithdrawal = 20.00; // $20 minimum
     if (numValue < minWithdrawal) {
       Alert.alert('Minimum Amount', `Minimum withdrawal amount is ${currencyService.formatAmount(minWithdrawal, walletData?.currency || 'USD')}`);
       return false;

@@ -261,8 +261,9 @@ export default function CommentsModal({
   };
 
   const handlePressAuthor = (userId: string) => {
-    onClose();
+    if (!userId || userId === 'current-user') return;
     navigation.navigate('CreatorProfile' as never, { creatorId: userId } as never);
+    onClose();
   };
 
   const handleViewReplies = (commentId: string) => {

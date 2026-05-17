@@ -90,6 +90,7 @@ export default function AllTracksScreen() {
           title,
           description,
           audio_url,
+          file_url,
           cover_art_url,
           duration,
           play_count,

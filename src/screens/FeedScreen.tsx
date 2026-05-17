@@ -57,6 +57,7 @@ export default function FeedScreen() {
     loadMore,
     addReaction,
     deletePost,
+    updatePostLocally,
   } = useFeed();
   const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
   const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
@@ -432,8 +433,9 @@ export default function FeedScreen() {
           if (editingPost) {
             // Update existing post
             try {
-              await feedService.updatePost(editingPost.id, data);
-              await refresh();
+              const updatedPost = await feedService.updatePost(editingPost.id, data);
+              // Optimistically update UI immediately — no waiting for feed re-fetch
+              if (updatedPost) updatePostLocally(updatedPost);
               setEditingPost(null);
               setIsCreateModalVisible(false);
             } catch (error) {
@@ -598,5 +600,6 @@ const styles = StyleSheet.create({
     ...Typography.label,
     textAlign: 'center',
   },
+
 });
 

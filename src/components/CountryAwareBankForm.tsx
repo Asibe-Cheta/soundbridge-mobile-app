@@ -14,6 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { Session } from '@supabase/supabase-js';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService, CountryBankingInfo, Country } from '../services/WalletService';
 import { locationService, LocationDetectionResult } from '../services/LocationService';
@@ -185,22 +186,29 @@ interface CountryAwareBankFormProps {
   session: Session;
   onSubmit: (methodData: any) => Promise<void>;
   setAsDefault?: boolean;
+  // Edit-mode / country-lock props (web parity: cc5e3e58, 9149f295)
+  initialCountryCode?: string;   // Pin the form to a saved payout country; skips IP detection
+  lockedCountry?: boolean;       // When true, hides the country picker (Fincra edit flow)
+  initialData?: Record<string, string>; // Pre-fill bank fields (account_holder_name, etc.)
 }
 
 const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
   session,
   onSubmit,
   setAsDefault = false,
+  initialCountryCode,
+  lockedCountry = false,
+  initialData,
 }) => {
   const { theme } = useTheme();
-  const [selectedCountry, setSelectedCountry] = useState('GB'); // Default to UK
+  const [selectedCountry, setSelectedCountry] = useState(initialCountryCode || 'GB');
   const [countries, setCountries] = useState<Country[]>([]);
   const [countryInfo, setCountryInfo] = useState<CountryBankingInfo | null>(null);
-  const [formData, setFormData] = useState<Record<string, string>>({});
+  const [formData, setFormData] = useState<Record<string, string>>(initialData || {});
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [locationDetection, setLocationDetection] = useState<LocationDetectionResult | null>(null);
-  const [detectingLocation, setDetectingLocation] = useState(true);
+  const [detectingLocation, setDetectingLocation] = useState(!initialCountryCode);
   const [showCountryModal, setShowCountryModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showBankModal, setShowBankModal] = useState(false);
@@ -211,7 +219,11 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
 
   useEffect(() => {
     loadSupportedCountries();
-    detectUserLocation();
+    // Skip IP geolocation when the payout country is already known (e.g. editing
+    // an existing NGN account from the UK — must not override with UK location).
+    if (!initialCountryCode) {
+      detectUserLocation();
+    }
   }, []);
 
   useEffect(() => {
@@ -230,9 +242,8 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
     setAvailableBanks([]);
     setLoadingBanks(true);
 
-    // For Wise-supported currencies, fetch bank options from the Wise-backed endpoint.
-    // This gives us Wise's own internal bank codes, which are required for correct
-    // recipient creation when the admin triggers a payout via Wise.
+    // For Fincra-rail currencies (NGN/GHS/KES), load banks from the backend API.
+    // The API returns Fincra's own bank codes required for correct payout routing.
     if (FINCRA_BANK_DROPDOWN_CURRENCIES.has(currency)) {
       fetch(`${config.apiUrl}/payouts/bank-options?currency=${currency}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -240,7 +251,7 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         .then(r => r.ok ? r.json() : null)
         .then(data => {
           if (data?.banks?.length > 0) {
-            setAvailableBanks(data.banks); // { name, code } — Wise internal codes
+            setAvailableBanks(data.banks); // { name, code } — Fincra bank codes
             return;
           }
           // Fallback to built-in if endpoint not ready yet
@@ -255,7 +266,7 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
       return;
     }
 
-    // For non-Wise currencies, use curated built-in list first, then API fallback.
+    // For non-Fincra currencies, use curated built-in list first, then API fallback.
     const curated = BUILTIN_BANKS[selectedCountry];
     if (curated) {
       setAvailableBanks(curated);
@@ -280,7 +291,7 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
       // Any backend countries not in the built-in list are merged in at the end.
       {
         const allBuiltin = [
-          // ✅ All supported countries (Stripe Connect + Wise)
+          // ✅ All supported countries (Stripe Connect + Fincra)
 
           // Major Markets (Tier 1) - Fully Supported
           { country_code: 'US', country_name: 'United States', currency: 'USD', banking_system: 'ACH' },
@@ -323,8 +334,7 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
           { country_code: 'SE', country_name: 'Sweden', currency: 'SEK', banking_system: 'SEPA' },
           { country_code: 'CH', country_name: 'Switzerland', currency: 'CHF', banking_system: 'SEPA' },
 
-          // ✅ ALL WISE-SUPPORTED COUNTRIES (50 currencies, 160+ countries)
-          // Wise handles payouts for countries not supported by Stripe Connect
+          // ✅ Fincra (Africa: NGN/GHS/KES) + additional payout destinations
 
           // Middle East & North Africa
           { country_code: 'AE', country_name: 'United Arab Emirates', currency: 'AED', banking_system: 'UAEFTS' },
@@ -393,8 +403,8 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         setCountryInfo(getFallbackCountryInfo(countryCode));
       }
       
-      // Reset form data when country changes
-      setFormData({});
+      // Reset form data when country changes, but keep initialData on first render.
+      setFormData(prev => (Object.keys(prev).length === 0 ? initialData || {} : {}));
     } catch (error) {
       console.error('Error loading country info:', error);
       setCountryInfo(getFallbackCountryInfo(countryCode));
@@ -1310,14 +1320,23 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
           Country <Text style={styles.required}>*</Text>
         </Text>
         <TouchableOpacity
-          style={[styles.pickerContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-          onPress={() => setShowCountryModal(true)}
+          style={[styles.pickerContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, opacity: lockedCountry ? 0.6 : 1 }]}
+          onPress={() => !lockedCountry && setShowCountryModal(true)}
+          disabled={lockedCountry}
         >
           <Text style={[styles.pickerText, { color: theme.colors.text }]}>
             {countries.find(c => c.country_code === selectedCountry)?.country_name || 'Select Country'}
             {selectedCountry && ` (${countries.find(c => c.country_code === selectedCountry)?.currency})`}
           </Text>
+          {lockedCountry && (
+            <Ionicons name="lock-closed" size={14} color={theme.colors.textSecondary} style={{ marginLeft: 6 }} />
+          )}
         </TouchableOpacity>
+        {lockedCountry && (
+          <Text style={[styles.detectionSubtext, { color: theme.colors.textSecondary, marginTop: 4 }]}>
+            Using your saved payout country ({countries.find(c => c.country_code === selectedCountry)?.country_name || selectedCountry}), not your current location.
+          </Text>
+        )}
       </View>
 
       {/* Country Selection Modal - SAFE REPLACEMENT FOR PICKER */}

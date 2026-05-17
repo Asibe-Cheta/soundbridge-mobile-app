@@ -36,12 +36,14 @@ interface OpportunityCardProps {
   opportunity: Opportunity;
   onPress?: (opportunityId: string) => void;
   onApply?: (opportunityId: string) => void;
+  onEdit?: (opportunity: Opportunity) => void;
 }
 
 export default function OpportunityCard({
   opportunity,
   onPress,
   onApply,
+  onEdit,
 }: OpportunityCardProps) {
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -178,6 +180,16 @@ export default function OpportunityCard({
           <View style={styles.ownPostRow}>
             <Ionicons name="person-circle-outline" size={15} color={theme.colors.textSecondary} />
             <Text style={[styles.ownPostText, { color: theme.colors.textSecondary }]}>Your post</Text>
+            {onEdit && (
+              <TouchableOpacity
+                style={styles.editButton}
+                onPress={() => onEdit(opportunity)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="pencil-outline" size={13} color={theme.colors.primary} />
+                <Text style={[styles.editButtonText, { color: theme.colors.primary }]}>Edit</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : (
           <TouchableOpacity
@@ -325,6 +337,22 @@ const styles = StyleSheet.create({
   ownPostText: {
     fontSize: 13,
     fontWeight: '500',
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginLeft: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(139,92,246,0.4)',
+    backgroundColor: 'rgba(139,92,246,0.1)',
+  },
+  editButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
 });
 

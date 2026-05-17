@@ -35,6 +35,8 @@ interface AudioTrack {
   is_paid?: boolean;
   price?: number;
   currency?: string;
+  // Live interest
+  live_interest_enabled?: boolean;
 }
 
 interface AudioPlayerContextType {
@@ -387,15 +389,23 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       // Update UI state BEFORE awaiting TrackPlayer — so MiniPlayer appears
       // immediately even if the native audio setup takes time or hangs (e.g.
       // post-SIGABRT on Android where TrackPlayer calls may block indefinitely).
-      // Normalize creator — some API responses use flat creator_id instead of nested creator.id
+      // Normalize creator — some API responses use flat creator_id instead of nested creator object,
+      // or provide artist_name as a flat string (TracksListScreen, AlbumDetailsScreen patterns).
       const creatorId = track.creator?.id || (track as any).creator_id || '';
+      const flatArtistName = (track as any).artist_name || '';
       const normalizedTrack = {
         ...track,
         creator: track.creator
-          ? { ...track.creator, id: creatorId }
+          ? {
+              ...track.creator,
+              id: creatorId,
+              // Patch null/empty display_name with flat artist_name if available
+              display_name: track.creator.display_name || track.creator.username || flatArtistName,
+              username: track.creator.username || flatArtistName,
+            }
           : creatorId
-            ? { id: creatorId, username: '', display_name: '' }
-            : track.creator,
+            ? { id: creatorId, username: flatArtistName, display_name: flatArtistName }
+            : { id: '', username: flatArtistName, display_name: flatArtistName },
       };
       setCurrentTrack(normalizedTrack);
       setIsPlaying(true);

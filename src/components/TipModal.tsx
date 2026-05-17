@@ -36,9 +36,11 @@ interface TipModalProps {
   creatorName: string;
   onClose: () => void;
   onTipSuccess: (amount: number, message?: string) => void;
+  initialAmount?: number;
+  trackId?: string;
 }
 
-export default function TipModal({ visible, creatorId, creatorName, onClose, onTipSuccess }: TipModalProps) {
+export default function TipModal({ visible, creatorId, creatorName, onClose, onTipSuccess, initialAmount, trackId }: TipModalProps) {
   const { theme } = useTheme();
   const { user, userProfile, session } = useAuth();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
@@ -66,14 +68,19 @@ export default function TipModal({ visible, creatorId, creatorName, onClose, onT
   }, [user?.user_metadata, userProfile]);
 
   useEffect(() => {
-    if (!visible) {
+    if (visible) {
+      if (initialAmount != null) {
+        setSelectedAmount(initialAmount);
+        setCustomAmount('');
+      }
+    } else {
       setSelectedAmount(5);
       setCustomAmount('');
       setTipMessage('');
       setIsAnonymous(false);
       setProcessingMessage(null);
     }
-  }, [visible]);
+  }, [visible, initialAmount]);
 
   const getFinalAmount = () => {
     const amountInput = customAmount ? parseFloat(customAmount) : selectedAmount;
@@ -133,6 +140,7 @@ export default function TipModal({ visible, creatorId, creatorName, onClose, onT
         isAnonymous,
         userTier,
         paymentMethod: 'card',
+        trackId,
       });
 
       if (!createResponse?.success || !createResponse.clientSecret) {

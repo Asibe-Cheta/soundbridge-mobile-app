@@ -18,6 +18,7 @@ import { useNavigation } from '@react-navigation/native';
 import { profileService } from '../services/ProfileService';
 import { contentCacheService } from '../services/contentCacheService';
 import { supabase } from '../lib/supabase';
+import { liveInterestService, LiveInterestStats } from '../services/liveInterestService';
 import { SystemTypography as Typography } from '../constants/Typography';
 
 interface AnalyticsData {
@@ -67,9 +68,13 @@ export default function AnalyticsDashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const lastFetchTime = useRef<number>(0);
+  const [liveInterestStats, setLiveInterestStats] = useState<LiveInterestStats[]>([]);
 
   useEffect(() => {
     loadAnalytics();
+    if (user?.id) {
+      liveInterestService.getStatsForCreator(user.id).then(setLiveInterestStats);
+    }
   }, []);
 
   const loadAnalytics = async (forceRefresh = false) => {
@@ -519,6 +524,76 @@ export default function AnalyticsDashboardScreen() {
             ))}
           </View>
         )}
+
+        {/* Live Interest Section */}
+        {liveInterestStats.length > 0 && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Live Interest</Text>
+            <Text style={[styles.liveInterestNote, { color: theme.colors.textSecondary }]}>
+              Data is based on listener profile locations. Use this to inform where and when to plan your next event.
+            </Text>
+            {liveInterestStats.map((stat) => {
+              const hasEnoughData = stat.yesCount >= 3;
+              const totalAvailability =
+                stat.availabilityBreakdown.weekends +
+                stat.availabilityBreakdown.weekday_evenings +
+                stat.availabilityBreakdown.any_time +
+                stat.availabilityBreakdown.not_sure;
+
+              return (
+                <View
+                  key={stat.trackId}
+                  style={[styles.liveInterestCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+                >
+                  <Text style={[styles.liveInterestTrackTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                    {stat.trackTitle}
+                  </Text>
+
+                  {!hasEnoughData ? (
+                    <Text style={[styles.liveInterestInsufficient, { color: theme.colors.textSecondary }]}>
+                      Not enough data yet. Keep sharing your music to gather more insights.
+                    </Text>
+                  ) : (
+                    <>
+                      <Text style={[styles.liveInterestYesCount, { color: theme.colors.primary }]}>
+                        {stat.yesCount} listener{stat.yesCount !== 1 ? 's' : ''} want to hear this live
+                      </Text>
+
+                      {stat.locationBreakdown.slice(0, 5).map((loc, i) => (
+                        <View key={i} style={styles.liveInterestLocationRow}>
+                          <Ionicons name="location-outline" size={14} color={theme.colors.textSecondary} />
+                          <Text style={[styles.liveInterestLocationText, { color: theme.colors.textSecondary }]}>
+                            {[loc.city, loc.country].filter(Boolean).join(', ')} — {loc.count} listener{loc.count !== 1 ? 's' : ''}
+                          </Text>
+                        </View>
+                      ))}
+
+                      {totalAvailability > 0 && (
+                        <View style={styles.liveInterestAvailability}>
+                          {stat.availabilityBreakdown.weekends > 0 && (
+                            <Text style={[styles.liveInterestAvailText, { color: theme.colors.textSecondary }]}>
+                              Weekends: {Math.round((stat.availabilityBreakdown.weekends / totalAvailability) * 100)}%
+                            </Text>
+                          )}
+                          {stat.availabilityBreakdown.weekday_evenings > 0 && (
+                            <Text style={[styles.liveInterestAvailText, { color: theme.colors.textSecondary }]}>
+                              Weekday evenings: {Math.round((stat.availabilityBreakdown.weekday_evenings / totalAvailability) * 100)}%
+                            </Text>
+                          )}
+                          {stat.availabilityBreakdown.any_time > 0 && (
+                            <Text style={[styles.liveInterestAvailText, { color: theme.colors.textSecondary }]}>
+                              Any time: {Math.round((stat.availabilityBreakdown.any_time / totalAvailability) * 100)}%
+                            </Text>
+                          )}
+                        </View>
+                      )}
+                    </>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -815,6 +890,50 @@ const styles = StyleSheet.create({
     ...Typography.label,
     fontSize: 12,
     lineHeight: 16,
+  },
+  liveInterestNote: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  liveInterestCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 10,
+  },
+  liveInterestTrackTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  liveInterestInsufficient: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontStyle: 'italic',
+  },
+  liveInterestYesCount: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  liveInterestLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 3,
+  },
+  liveInterestLocationText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  liveInterestAvailability: {
+    marginTop: 8,
+    gap: 2,
+  },
+  liveInterestAvailText: {
+    fontSize: 12,
+    lineHeight: 17,
   },
 });
 

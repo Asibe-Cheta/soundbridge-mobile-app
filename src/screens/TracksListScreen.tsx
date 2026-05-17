@@ -37,6 +37,7 @@ interface Track {
   is_paid?: boolean;
   price?: number;
   currency?: string;
+  live_interest_enabled?: boolean;
 }
 
 export default function TracksListScreen() {
@@ -100,17 +101,21 @@ export default function TracksListScreen() {
         artist_name: track.creator?.display_name || track.creator?.username || '',
         cover_url: track.cover_art_url || null,
         audio_url: track.file_url || '',
+        file_url: track.file_url || '',
+        cover_image_url: track.cover_art_url || null,
         duration: track.duration || 0,
         play_count: track.play_count || 0,
         likes_count: track.likes_count || 0,
         created_at: track.created_at,
         is_liked: likedTrackIds.includes(track.id),
         creator_id: track.creator_id,
+        creator: track.creator ?? null,
         moderation_status: track.moderation_status,
         moderation_confidence: track.moderation_confidence,
         is_paid: track.is_paid,
         price: track.price,
         currency: track.currency,
+        live_interest_enabled: track.live_interest_enabled ?? false,
       }));
 
       setTracks(tracksData);

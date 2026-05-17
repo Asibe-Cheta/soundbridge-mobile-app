@@ -1,8 +1,11 @@
 import React, { useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable, Animated } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Animated, Easing } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Circle, Rect, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
+
+const AnimatedRect = Animated.createAnimatedComponent(Rect);
 import { SystemTypography as Typography } from '../constants/Typography';
 import { useNavigation } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
@@ -27,31 +30,158 @@ const BAR_CONFIGS = Array.from({ length: BAR_COUNT }, (_, i) => {
   };
 });
 
-export function MicGlowIcon({ size = 40 }: { size?: number }) {
+const RING_R = 11;
+const RING_CIRC = 2 * Math.PI * RING_R;
+
+export function MicGlowIcon({
+  size = 40,
+  glowOpacity,
+}: {
+  size?: number;
+  glowOpacity: Animated.Value;
+}) {
   return (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{
-        position: 'absolute',
-        shadowColor: '#EC4899',
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 1,
-        shadowRadius: 18,
-        elevation: 20,
-      }}>
+      {/* Wide pink glow — large icon + semi-transparent for spread */}
+      <Animated.View style={{ position: 'absolute', opacity: glowOpacity }}>
+        <Ionicons name="mic" size={size * 1.7} color="rgba(236,72,153,0.45)" />
+      </Animated.View>
+      <Animated.View style={{ position: 'absolute', opacity: glowOpacity }}>
+        <Ionicons name="mic" size={size * 1.35} color="rgba(236,72,153,0.7)" />
+      </Animated.View>
+      <Animated.View style={{ position: 'absolute', opacity: glowOpacity }}>
         <Ionicons name="mic" size={size} color="#EC4899" />
-      </View>
-      <View style={{
-        position: 'absolute',
-        shadowColor: '#F43F5E',
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.7,
-        shadowRadius: 8,
-        elevation: 10,
-      }}>
-        <Ionicons name="mic" size={size} color="#EC4899" />
-      </View>
+      </Animated.View>
+      {/* Sharp white icon always on top */}
       <Ionicons name="mic" size={size} color="#FFFFFF" />
     </View>
+  );
+}
+
+function TravellingRingArrow() {
+  const rotateAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const runCycle = (onDone: () => void) => {
+      rotateAnim.setValue(0);
+      Animated.sequence([
+        Animated.timing(rotateAnim, {
+          toValue: 0.75,
+          duration: 1000,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(rotateAnim, {
+          toValue: 1,
+          duration: 280,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => { if (finished) onDone(); });
+    };
+    runCycle(() => runCycle(() => runCycle(() => {})));
+  }, []);
+
+  const spin = rotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  return (
+    <View style={styles.arrowCircle}>
+      <Svg width={24} height={24} style={{ position: 'absolute' }}>
+        <Circle cx={12} cy={12} r={RING_R} fill="none" stroke="rgba(255,255,255,0.18)" strokeWidth={1} />
+      </Svg>
+      <Animated.View style={{ position: 'absolute', width: 24, height: 24, transform: [{ rotate: spin }] }}>
+        <Svg width={24} height={24}>
+          <Defs>
+            <SvgLinearGradient id="rrRing" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%"   stopColor="#EC4899" stopOpacity={1} />
+              <Stop offset="33%"  stopColor="#FFFFFF"  stopOpacity={1} />
+              <Stop offset="66%"  stopColor="#EF4444"  stopOpacity={1} />
+              <Stop offset="100%" stopColor="#3B82F6"  stopOpacity={1} />
+            </SvgLinearGradient>
+          </Defs>
+          <Circle
+            cx={12} cy={12} r={RING_R}
+            fill="none"
+            stroke="url(#rrRing)"
+            strokeWidth={1.5}
+            strokeDasharray={`${RING_CIRC * 0.55} ${RING_CIRC * 0.45}`}
+            strokeLinecap="round"
+          />
+        </Svg>
+      </Animated.View>
+      <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
+    </View>
+  );
+}
+
+function TravellingPillBorder({ onPress }: { onPress: () => void }) {
+  const [dims, setDims] = React.useState({ w: 0, h: 0 });
+  const dashAnim = useRef(new Animated.Value(0)).current;
+  const loopRef = useRef<Animated.CompositeAnimation | null>(null);
+
+  // Pill perimeter: 2×(width−height) + π×height  (full borderRadius = height/2)
+  const perim = dims.w > 0 ? 2 * (dims.w - dims.h) + Math.PI * dims.h : 0;
+  const arcLen = perim * 0.28;
+
+  useEffect(() => {
+    if (perim === 0) return;
+    dashAnim.setValue(0);
+    loopRef.current = Animated.loop(
+      Animated.timing(dashAnim, {
+        toValue: -perim,
+        duration: 2800,
+        easing: Easing.linear,
+        useNativeDriver: false, // SVG strokeDashoffset cannot use native driver
+      })
+    );
+    loopRef.current.start();
+    return () => loopRef.current?.stop();
+  }, [perim]);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onLayout={e => {
+        const { width, height } = e.nativeEvent.layout;
+        setDims(prev => (prev.w === width && prev.h === height ? prev : { w: width, h: height }));
+      }}
+      style={styles.button}
+    >
+      {dims.w > 0 && (
+        <Svg width={dims.w} height={dims.h} style={{ position: 'absolute', top: 0, left: 0 }} pointerEvents="none">
+          <Defs>
+            <SvgLinearGradient id="pillBdr" x1="0%" y1="0%" x2="100%" y2="0%">
+              <Stop offset="0%"   stopColor="#EC4899" stopOpacity={1} />
+              <Stop offset="35%"  stopColor="#FFFFFF"  stopOpacity={1} />
+              <Stop offset="70%"  stopColor="#EF4444"  stopOpacity={1} />
+              <Stop offset="100%" stopColor="#3B82F6"  stopOpacity={1} />
+            </SvgLinearGradient>
+          </Defs>
+          {/* Dim base ring */}
+          <Rect
+            x={1} y={1} width={dims.w - 2} height={dims.h - 2}
+            rx={dims.h / 2 - 1} ry={dims.h / 2 - 1}
+            fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={1}
+          />
+          {/* Travelling gradient arc */}
+          <AnimatedRect
+            x={1} y={1} width={dims.w - 2} height={dims.h - 2}
+            rx={dims.h / 2 - 1} ry={dims.h / 2 - 1}
+            fill="none"
+            stroke="url(#pillBdr)"
+            strokeWidth={1.5}
+            strokeDasharray={`${arcLen} ${perim - arcLen}`}
+            strokeDashoffset={dashAnim as any}
+            strokeLinecap="round"
+          />
+        </Svg>
+      )}
+      <Text style={styles.buttonText}>Open Request Room</Text>
+      <TravellingRingArrow />
+    </Pressable>
   );
 }
 
@@ -111,6 +241,7 @@ export default function RequestRoomBanner({ onPress }: RequestRoomBannerProps) {
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
+  const micGlowAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
 
@@ -131,7 +262,15 @@ export default function RequestRoomBanner({ onPress }: RequestRoomBannerProps) {
     );
     glow.start();
 
-    return () => { pulse.stop(); glow.stop(); };
+    const micGlow = Animated.loop(
+      Animated.sequence([
+        Animated.timing(micGlowAnim, { toValue: 0.85, duration: 1500, useNativeDriver: true }),
+        Animated.timing(micGlowAnim, { toValue: 0, duration: 1500, useNativeDriver: true }),
+      ])
+    );
+    micGlow.start();
+
+    return () => { pulse.stop(); glow.stop(); micGlow.stop(); };
   }, []);
 
   const handlePressIn = () =>
@@ -160,7 +299,7 @@ export default function RequestRoomBanner({ onPress }: RequestRoomBannerProps) {
 
           <Animated.View style={{ transform: [{ translateX: slideAnim }] }}>
             <View style={styles.header}>
-              <MicGlowIcon size={40} />
+              <MicGlowIcon size={40} glowOpacity={micGlowAnim} />
               <View style={styles.livePulseWrapper}>
                 <Animated.View style={[styles.glowRing, { opacity: glowAnim }]} />
                 <Animated.View style={[styles.liveDotOuter, { transform: [{ scale: pulseAnim }] }]} />
@@ -175,12 +314,7 @@ export default function RequestRoomBanner({ onPress }: RequestRoomBannerProps) {
                   <Text style={styles.subtitle}>
                     Set a tip • Share your link • Take live requests
                   </Text>
-                  <View style={styles.button}>
-                    <Text style={styles.buttonText}>Open Request Room</Text>
-                    <View style={styles.arrowCircle}>
-                      <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
-                    </View>
-                  </View>
+                  <TravellingPillBorder onPress={handlePress} />
                 </View>
               </BlurView>
             </View>

@@ -67,11 +67,22 @@ export default function WithdrawalMethodsScreen() {
     navigation.navigate('AddWithdrawalMethod' as never);
   };
 
-  const handleEditMethod = () => {
-    Alert.alert(
-      'Edit Not Available',
-      'Editing withdrawal methods is not available yet. Please add a new method instead.'
-    );
+  const FINCRA_CURRENCIES = new Set(['NGN', 'GHS', 'KES']);
+
+  const CURRENCY_COUNTRY_MAP: Record<string, string> = {
+    NGN: 'NG', GHS: 'GH', KES: 'KE',
+    GBP: 'GB', USD: 'US', EUR: 'DE',
+  };
+
+  const handleEditMethod = (method: WithdrawalMethod) => {
+    const isFincra = FINCRA_CURRENCIES.has(method.currency || '');
+    const countryCode = method.country || CURRENCY_COUNTRY_MAP[method.currency || ''] || 'GB';
+    navigation.navigate('AddWithdrawalMethod' as never, {
+      methodId: method.id,
+      initialCountryCode: countryCode,
+      lockedCountry: isFincra,
+      mode: 'edit',
+    } as never);
   };
 
   const handleDeleteMethod = async (method: WithdrawalMethod) => {
@@ -233,7 +244,7 @@ export default function WithdrawalMethodsScreen() {
         
         <TouchableOpacity 
           style={[styles.actionButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-          onPress={handleEditMethod}
+          onPress={() => handleEditMethod(method)}
         >
           <Ionicons name="pencil" size={16} color={theme.colors.text} />
           <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>Edit</Text>

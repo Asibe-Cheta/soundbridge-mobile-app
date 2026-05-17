@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { GooglePlacesAutocomplete, GooglePlaceData, GooglePlaceDetail } from 'react-native-google-places-autocomplete';
 import { useTheme } from '../contexts/ThemeContext';
 import { opportunityService } from '../services/OpportunityService';
@@ -32,21 +32,41 @@ const TYPE_OPTIONS = [
 
 type OpportunityType = 'collaboration' | 'event' | 'job';
 
+type EditingOpportunity = {
+  id: string;
+  type: OpportunityType;
+  title: string;
+  description: string;
+  skills_needed?: string[];
+  location?: string;
+  is_remote?: boolean;
+  budget_min?: number;
+  budget_max?: number;
+  budget_currency?: string;
+  visibility?: 'public' | 'connections';
+};
+
+type CreateOpportunityRouteParams = {
+  CreateOpportunity: { editing?: EditingOpportunity };
+};
+
 export default function CreateOpportunityScreen() {
   const { theme } = useTheme();
   const navigation = useNavigation();
+  const route = useRoute<RouteProp<CreateOpportunityRouteParams, 'CreateOpportunity'>>();
+  const editing = route.params?.editing;
 
-  const [type, setType] = useState<OpportunityType>('collaboration');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
+  const [type, setType] = useState<OpportunityType>(editing?.type ?? 'collaboration');
+  const [title, setTitle] = useState(editing?.title ?? '');
+  const [description, setDescription] = useState(editing?.description ?? '');
   const [skillInput, setSkillInput] = useState('');
-  const [skills, setSkills] = useState<string[]>([]);
-  const [location, setLocation] = useState('');
-  const [isRemote, setIsRemote] = useState(false);
-  const [budgetMin, setBudgetMin] = useState('');
-  const [budgetMax, setBudgetMax] = useState('');
-  const [budgetCurrency, setBudgetCurrency] = useState('GBP');
-  const [visibility, setVisibility] = useState<'public' | 'connections'>('public');
+  const [skills, setSkills] = useState<string[]>(editing?.skills_needed ?? []);
+  const [location, setLocation] = useState(editing?.location ?? '');
+  const [isRemote, setIsRemote] = useState(editing?.is_remote ?? false);
+  const [budgetMin, setBudgetMin] = useState(editing?.budget_min != null ? String(editing.budget_min) : '');
+  const [budgetMax, setBudgetMax] = useState(editing?.budget_max != null ? String(editing.budget_max) : '');
+  const [budgetCurrency, setBudgetCurrency] = useState(editing?.budget_currency ?? 'GBP');
+  const [visibility, setVisibility] = useState<'public' | 'connections'>(editing?.visibility ?? 'public');
   const [submitting, setSubmitting] = useState(false);
 
   const addSkill = () => {
@@ -83,8 +103,7 @@ export default function CreateOpportunityScreen() {
     try {
       setSubmitting(true);
 
-      await opportunityService.createOpportunity({
-        type,
+      const payload = {
         title: title.trim(),
         description: description.trim(),
         skills_needed: skills,
@@ -94,16 +113,27 @@ export default function CreateOpportunityScreen() {
         budget_max: budgetMax ? parseFloat(budgetMax) : undefined,
         budget_currency: budgetCurrency,
         visibility,
-      });
+      };
 
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert(
-        'Opportunity Posted!',
-        'Your opportunity is now live. You\'ll be notified when creators express interest.',
-        [{ text: 'Great!', onPress: () => navigation.goBack() }]
-      );
+      if (editing) {
+        await opportunityService.updateOpportunity(editing.id, payload);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert(
+          'Opportunity Updated!',
+          'Your changes are now live.',
+          [{ text: 'Done', onPress: () => navigation.goBack() }]
+        );
+      } else {
+        await opportunityService.createOpportunity({ type, ...payload });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert(
+          'Opportunity Posted!',
+          'Your opportunity is now live. You\'ll be notified when creators express interest.',
+          [{ text: 'Great!', onPress: () => navigation.goBack() }]
+        );
+      }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to post opportunity.');
+      Alert.alert('Error', error.message || editing ? 'Failed to update opportunity.' : 'Failed to post opportunity.');
     } finally {
       setSubmitting(false);
     }
@@ -133,7 +163,7 @@ export default function CreateOpportunityScreen() {
         {/* Header */}
         <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
           <BackButton />
-          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Post Opportunity</Text>
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>{editing ? 'Edit Opportunity' : 'Post Opportunity'}</Text>
           <View style={{ width: 44 }} />
         </View>
 
@@ -427,7 +457,7 @@ export default function CreateOpportunityScreen() {
                 end={{ x: 1, y: 0 }}
                 style={styles.submitGradient}
               >
-                <Text style={styles.submitText}>{submitting ? 'Posting...' : 'Post Opportunity'}</Text>
+                <Text style={styles.submitText}>{submitting ? (editing ? 'Saving...' : 'Posting...') : (editing ? 'Save Changes' : 'Post Opportunity')}</Text>
                 {!submitting && <Ionicons name="send" size={18} color="#FFFFFF" />}
               </LinearGradient>
             </TouchableOpacity>

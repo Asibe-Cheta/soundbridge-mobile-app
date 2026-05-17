@@ -77,24 +77,6 @@ export default function NetworkScreen() {
     }
   }, [activeTab]);
 
-  // Extract the country/region from a location string like "London, UK" → "uk"
-  const extractLocationCountry = (loc?: string): string | null => {
-    if (!loc) return null;
-    const parts = loc.split(',').map((p) => p.trim());
-    return parts[parts.length - 1].toLowerCase();
-  };
-
-  // Returns true if this opportunity is relevant to the viewer's location
-  const isLocationRelevant = (opp: { location?: string; is_remote: boolean }): boolean => {
-    if (opp.is_remote) return true;
-    if (!opp.location) return true; // no restriction set — show to all
-    const userCountry = extractLocationCountry((userProfile as any)?.location);
-    if (!userCountry) return true; // viewer has no location set — show all
-    const oppCountry = extractLocationCountry(opp.location);
-    if (!oppCountry) return true;
-    return oppCountry === userCountry;
-  };
-
   const loadOpportunities = async () => {
     setOpportunitiesLoading(true);
     try {
@@ -103,8 +85,7 @@ export default function NetworkScreen() {
         opportunityService.getMyOpportunities().catch(() => []),
       ]);
 
-      // Filter feed by viewer's location — remote or matching country pass through
-      const locationFiltered = feedItems.filter(isLocationRelevant);
+      const locationFiltered = feedItems;
 
       // Merge own active posts at the top, dedup by id
       // Backfill posted_by from current user since /api/opportunities/mine omits it
@@ -472,6 +453,21 @@ export default function NetworkScreen() {
                     }}
                     onPress={() => handleOpportunityPress(opportunity.id)}
                     onApply={handleApply}
+                    onEdit={(opp) => navigation.navigate('CreateOpportunity' as never, {
+                      editing: {
+                        id: opp.id,
+                        type: opp.type,
+                        title: opp.title,
+                        description: opp.description,
+                        skills_needed: (opp as any).skills_needed,
+                        location: (opp as any).location,
+                        is_remote: (opp as any).is_remote,
+                        budget_min: (opp as any).budget_min,
+                        budget_max: (opp as any).budget_max,
+                        budget_currency: (opp as any).budget_currency,
+                        visibility: (opp as any).visibility,
+                      },
+                    } as never)}
                   />
                 ))
               )}

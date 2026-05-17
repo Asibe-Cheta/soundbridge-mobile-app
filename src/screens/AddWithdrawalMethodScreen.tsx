@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { walletService } from '../services/WalletService';
@@ -62,12 +62,33 @@ const METHOD_OPTIONS: MethodOption[] = [
   },
 ];
 
+interface EditModeParams {
+  methodId?: string;
+  initialCountryCode?: string;
+  lockedCountry?: boolean;
+  initialData?: Record<string, string>;
+  mode?: 'add' | 'edit';
+}
+
 export default function AddWithdrawalMethodScreen() {
   const navigation = useNavigation();
+  const route = useRoute();
   const { user, session } = useAuth();
   const { theme } = useTheme();
-  
-  const [selectedMethod, setSelectedMethod] = useState<MethodType | null>(null);
+
+  const {
+    methodId,
+    initialCountryCode,
+    lockedCountry = false,
+    initialData,
+    mode = 'add',
+  } = (route.params as EditModeParams) || {};
+
+  const isEditMode = mode === 'edit' && !!methodId;
+
+  const [selectedMethod, setSelectedMethod] = useState<MethodType | null>(
+    isEditMode ? 'bank_transfer' : null
+  );
   const [submitting, setSubmitting] = useState(false);
 
 
@@ -97,15 +118,27 @@ export default function AddWithdrawalMethodScreen() {
 
   const [makeDefault, setMakeDefault] = useState(false);
 
-  // Handler for CountryAwareBankForm
+  // Handler for CountryAwareBankForm — handles both add and edit (PUT) flows
   const handleAddMethod = async (methodData: any) => {
     try {
       if (!session) {
-        Alert.alert('Error', 'You must be logged in to add a withdrawal method');
+        Alert.alert('Error', 'You must be logged in to save a withdrawal method');
         return;
       }
       setSubmitting(true);
-      
+
+      if (isEditMode) {
+        const result = await walletService.updateWithdrawalMethod(session, methodId!, methodData);
+        if (result.success) {
+          Alert.alert('Bank Updated', 'Your bank details have been updated successfully.', [
+            { text: 'OK', onPress: () => navigation.goBack() },
+          ]);
+        } else {
+          Alert.alert('Error', result.error || 'Failed to update bank details');
+        }
+        return;
+      }
+
       const result = await walletService.addWithdrawalMethod(session, methodData);
 
       if (result.success && result.pending_verification) {
@@ -121,8 +154,8 @@ export default function AddWithdrawalMethodScreen() {
         Alert.alert('Error', result.error || 'Failed to add withdrawal method');
       }
     } catch (error) {
-      console.error('Error adding withdrawal method:', error);
-      Alert.alert('Error', 'Failed to add withdrawal method');
+      console.error('Error saving withdrawal method:', error);
+      Alert.alert('Error', 'Failed to save withdrawal method');
     } finally {
       setSubmitting(false);
     }
@@ -456,12 +489,14 @@ export default function AddWithdrawalMethodScreen() {
             style={styles.backButton}
             onPress={() => navigation.goBack()}
            />
-          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Add Withdrawal Method</Text>
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
+            {isEditMode ? 'Change Bank Details' : 'Add Withdrawal Method'}
+          </Text>
           <View style={styles.placeholder} />
         </View>
 
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {renderMethodSelection()}
+        {!isEditMode && renderMethodSelection()}
 
         {selectedMethod === 'bank_transfer' && (
           session ? (
@@ -469,6 +504,9 @@ export default function AddWithdrawalMethodScreen() {
               session={session}
               onSubmit={handleAddMethod}
               setAsDefault={makeDefault}
+              initialCountryCode={initialCountryCode}
+              lockedCountry={lockedCountry}
+              initialData={initialData}
             />
           ) : (
             <View style={[styles.infoBox, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
@@ -482,7 +520,7 @@ export default function AddWithdrawalMethodScreen() {
         {selectedMethod === 'paypal' && renderPayPalForm()}
         {selectedMethod === 'crypto' && renderCryptoForm()}
 
-        {selectedMethod && (
+        {selectedMethod && !isEditMode && (
           <View style={[styles.defaultSection, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
             <View style={styles.defaultOption}>
               <View style={styles.defaultInfo}>

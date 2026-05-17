@@ -61,6 +61,9 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
   
   // Role & Audio State
   const [myRole, setMyRole] = useState<'listener' | 'speaker' | 'host'>('listener');
+  // Ref mirror of myRole — keeps the cleanup function (which closes over the
+  // mount-time scope) from reading a stale 'listener' value on unmount.
+  const myRoleRef = useRef<'listener' | 'speaker' | 'host'>('listener');
   const [isMuted, setIsMuted] = useState(true); // Speakers start muted
   const [handRaised, setHandRaised] = useState(false);
   
@@ -129,6 +132,7 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
       // For Phase 4, we'll always start as listener or host
 
       setMyRole(userRole);
+      myRoleRef.current = userRole;
       console.log('👤 Joining as:', userRole);
 
       // 4. Initialize Agora engine
@@ -332,10 +336,10 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
 
   const cleanup = async () => {
     console.log('🧹 Cleaning up session...');
-    
+
     try {
-      // If host is leaving, end the session
-      if (myRole === 'host' && user && !sessionEnded) {
+      // Use the ref so this works even when captured by the mount-time effect closure
+      if (myRoleRef.current === 'host' && user && !sessionEnded) {
         console.log('🔴 Host leaving - ending session...');
         await dbHelpers.endLiveSession(sessionId, user.id);
       }
@@ -565,9 +569,10 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
       const newRole = myParticipant.role as 'listener' | 'speaker' | 'host';
       const previousRole = myRole;
       console.log('🔄 Role changed from', previousRole, 'to', newRole);
-      
-      // Update local state
+
+      // Update local state and keep the ref in sync
       setMyRole(newRole);
+      myRoleRef.current = newRole;
       
       // Only show alerts and update Agora if this is a real role change (not initial sync)
       // Skip if we're just joining (no previous participants) or if going from undefined to initial role
@@ -577,8 +582,10 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
         // Update Agora role
         if (newRole === 'speaker' || newRole === 'host') {
           if (previousRole === 'listener') {
+            // promoteToSpeaker now sets Agora to muted (matching isMuted=true),
+            // registers the mic track, and keeps hardware active for fast unmute.
             agoraService.promoteToSpeaker().then(() => {
-              setIsMuted(true); // Start muted
+              setIsMuted(true);
               Alert.alert(
                 '🎤 You\'re now a speaker!',
                 'You can now unmute and speak in the session.',
@@ -587,6 +594,7 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
             });
           }
         } else if (newRole === 'listener' && (previousRole === 'speaker' || previousRole === 'host')) {
+          // demoteToListener now stops the mic and unpublishes the track internally.
           agoraService.demoteToListener().then(() => {
             setIsMuted(true);
             setHandRaised(false);
@@ -602,23 +610,42 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
   }, [participants, user?.id, myRole]);
 
   const handleLeave = () => {
-    Alert.alert(
-      'Leave Session',
-      'Are you sure you want to leave this live session?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Leave',
-          style: 'destructive',
-          onPress: () => {
-            navigation.goBack();
+    if (myRole === 'host') {
+      Alert.alert(
+        'End Session',
+        'You are the host. Leaving will end the session for all participants.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'End & Leave',
+            style: 'destructive',
+            onPress: async () => {
+              if (!user) return;
+              try {
+                await dbHelpers.endLiveSession(sessionId, user.id);
+                setSessionEnded(true);
+              } catch (err) {
+                console.error('❌ Error ending session on leave:', err);
+              }
+              navigation.goBack();
+            },
           },
-        },
-      ]
-    );
+        ]
+      );
+    } else {
+      Alert.alert(
+        'Leave Session',
+        'Are you sure you want to leave this live session?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Leave',
+            style: 'destructive',
+            onPress: () => navigation.goBack(),
+          },
+        ]
+      );
+    }
   };
 
   const handleEndSession = () => {

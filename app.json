@@ -2,7 +2,7 @@
   "expo": {
     "name": "SoundBridge",
     "slug": "soundbridge-mobile",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "orientation": "portrait",
     "icon": "./assets/images/logos/sb-app-icon.png",
     "userInterfaceStyle": "dark",
@@ -26,7 +26,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.soundbridge.mobile",
-      "buildNumber": "86",
+      "buildNumber": "87",
       "infoPlist": {
         "UIBackgroundModes": [
           "audio"
@@ -108,20 +108,6 @@
     },
     "plugins": [
       [
-        "expo-build-properties",
-        {
-          "ios": {
-            "useFrameworks": "static"
-          },
-          "android": {
-            "compileSdkVersion": 35,
-            "targetSdkVersion": 35,
-            "minSdkVersion": 24,
-            "kotlinVersion": "2.1.20"
-          }
-        }
-      ],
-      [
         "expo-image-picker",
         {
           "photosPermission": "SoundBridge needs access to your photos to upload images for posts and profile pictures.",
@@ -144,8 +130,7 @@
       "expo-font",
       "expo-apple-authentication",
       "expo-asset",
-      "expo-audio",
-      "./plugins/withTrackPlayerFix"
+      "expo-audio"
     ]
   }
 }

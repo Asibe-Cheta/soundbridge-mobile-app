@@ -31,6 +31,7 @@ import { useNetwork } from '../hooks/useNetwork';
 import CountrySelector from '../components/CountrySelector';
 import { supabase } from '../lib/supabase';
 import { config } from '../config/environment';
+import { deepLinkingService } from '../services/DeepLinkingService';
 import * as ImagePicker from 'expo-image-picker';
 
 const { width, height } = Dimensions.get('window');
@@ -535,7 +536,14 @@ export default function OnboardingScreen() {
     try {
       const url = `${config.apiUrl}/api/genres?category=music`;
       console.log('🎵 Loading genres from:', url);
-      const response = await fetch(url);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch(url, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session && { 'Authorization': `Bearer ${session.access_token}` }),
+        },
+      });
 
       console.log('📡 Genres API response:', {
         status: response.status,
@@ -823,24 +831,11 @@ export default function OnboardingScreen() {
           headers: { 'Authorization': `Bearer ${session.access_token}` },
           body: formData,
         });
-        // If API is down/returning HTML, fall back to direct Supabase insert
         if (!postResponse.ok) {
-          throw new Error('API post failed');
+          console.warn('⚠️ First post API call returned non-ok status:', postResponse.status);
         }
       } catch (postError) {
-        console.warn('⚠️ API post failed, falling back to direct Supabase insert:', postError);
-        try {
-          await supabase.from('posts').insert({
-            user_id: user?.id,
-            content: firstPostText.trim(),
-            post_type: 'text',
-            is_published: true,
-            created_at: new Date().toISOString(),
-          });
-          console.log('✅ First post published via Supabase fallback');
-        } catch (supabaseError) {
-          console.warn('⚠️ Supabase post fallback also failed:', supabaseError);
-        }
+        console.warn('⚠️ First post publish failed (non-critical):', postError);
       }
 
       // Complete onboarding
@@ -859,6 +854,24 @@ export default function OnboardingScreen() {
         index: 0,
         routes: [{ name: 'MainTabs' }],
       });
+
+      // If user arrived via artist fan landing page, navigate to that artist after onboarding
+      const deferredUsername = await deepLinkingService.consumeDeferredArtistLink();
+      if (deferredUsername) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('username', deferredUsername)
+          .single();
+        if (profile?.id) {
+          setTimeout(() => {
+            (navigation as any).navigate('CreatorProfile', {
+              creatorId: profile.id,
+              fromFanLanding: true,
+            });
+          }, 600);
+        }
+      }
     } catch (error) {
       console.error('❌ Error publishing first post:', error);
       Alert.alert('Error', 'Something went wrong. Please try again.');
@@ -1873,7 +1886,13 @@ export default function OnboardingScreen() {
     setLoadingPodcastCategories(true);
     try {
       console.log('🎙️ Loading podcast categories for onboarding...');
-      const response = await fetch(`${config.apiUrl}/api/genres?category=podcast`);
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch(`${config.apiUrl}/api/genres?category=podcast`, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session && { 'Authorization': `Bearer ${session.access_token}` }),
+        },
+      });
 
       // Check if response is OK and content-type is JSON
       const contentType = response.headers.get('content-type');
@@ -1942,7 +1961,7 @@ export default function OnboardingScreen() {
     <View style={styles.stepContainer}>
       {/* Background Image */}
       <ImageBackground
-        source={require('../../assets/images/logos/bg03.jpg')}
+        source={require('../../assets/images/logos/bg03.png')}
         style={StyleSheet.absoluteFill}
         resizeMode="cover"
       >

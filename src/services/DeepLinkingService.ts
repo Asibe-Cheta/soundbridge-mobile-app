@@ -13,6 +13,8 @@ export interface DeepLinkData {
   tab?: string;
 }
 
+const DEFERRED_ARTIST_LINK_KEY = 'deferredArtistLink';
+
 class DeepLinkingService {
   private navigationRef: NavigationContainerRef<any> | null = null;
   private isReady = false;
@@ -128,7 +130,23 @@ class DeepLinkingService {
             return { screen: 'CreatorProfile', params: { creatorId: data.id } };
           }
         } catch (_) {}
-        // Fallback: navigate home if username not found
+        return { screen: 'Home' };
+      }
+
+      // Handle soundbridge.live/[username]/home universal links from fan landing page
+      if (pathSegments.length === 2 && rest[0] === 'home') {
+        const username = section;
+        await this.saveDeferredArtistLink(username);
+        try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('username', username)
+            .single();
+          if (data?.id) {
+            return { screen: 'CreatorProfile', params: { creatorId: data.id, fromFanLanding: true } };
+          }
+        } catch (_) {}
         return { screen: 'Home' };
       }
 
@@ -168,6 +186,9 @@ class DeepLinkingService {
 
         case 'creator':
           return this.parseCreatorUrl(rest, urlObj.searchParams);
+
+        case 'artist':
+          return await this.parseArtistUrl(rest);
 
         default:
           console.log('⚠️ Unknown deep link section:', section);
@@ -357,6 +378,46 @@ class DeepLinkingService {
     };
   }
 
+  private async parseArtistUrl(pathSegments: string[]): Promise<DeepLinkData> {
+    const [username] = pathSegments;
+    if (!username) return { screen: 'Home' };
+
+    // Store as deferred link so onboarding can pick it up if user isn't onboarded yet
+    await this.saveDeferredArtistLink(username);
+
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', username)
+        .single();
+      if (data?.id) {
+        return { screen: 'CreatorProfile', params: { creatorId: data.id, fromFanLanding: true } };
+      }
+    } catch (_) {}
+    return { screen: 'Home' };
+  }
+
+  // ===== DEFERRED ARTIST LINK (fan landing page) =====
+
+  async saveDeferredArtistLink(username: string): Promise<void> {
+    try {
+      await AsyncStorage.setItem(DEFERRED_ARTIST_LINK_KEY, username);
+    } catch (_) {}
+  }
+
+  async consumeDeferredArtistLink(): Promise<string | null> {
+    try {
+      const username = await AsyncStorage.getItem(DEFERRED_ARTIST_LINK_KEY);
+      if (username) {
+        await AsyncStorage.removeItem(DEFERRED_ARTIST_LINK_KEY);
+      }
+      return username;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ===== NOTIFICATION DEEP LINKING =====
 
   handleNotificationDeepLink(data: NotificationData) {
@@ -509,6 +570,14 @@ class DeepLinkingService {
           };
           break;
 
+        // ===== NUDGE NOTIFICATIONS =====
+        case 'nudge':
+          deepLinkData = {
+            screen: (data as any).screen || 'Home',
+            params: (data as any).screenParams,
+          };
+          break;
+
         default:
           console.log('⚠️ Unknown notification type:', data.type, '- navigating to Home');
           deepLinkData = { screen: 'Home' };
@@ -623,6 +692,14 @@ class DeepLinkingService {
     return `https://soundbridge.live/@${username}`;
   }
 
+  generateArtistLandingLink(username: string): string {
+    return `https://soundbridge.live/${username}/home`;
+  }
+
+  generateArtistDeepLink(username: string): string {
+    return `soundbridge://artist/${username}`;
+  }
+
   generateOpportunityLink(opportunityId: string): string {
     return `https://soundbridge.live/opportunity/${opportunityId}`;
   }
@@ -669,7 +746,6 @@ class DeepLinkingService {
         : `https://soundbridge.live/profile/${creatorId}`;
       await Share.share({
         message: `Check out ${creatorName} on SoundBridge:\n${link}`,
-        url: link,
       });
     } catch (error) {
       console.error('❌ Error sharing profile:', error);
@@ -684,10 +760,9 @@ class DeepLinkingService {
     
     try {
       await Share.share({
-        message: postTitle 
+        message: postTitle
           ? `Check out this post on SoundBridge: ${postTitle}\n${link}`
           : `Check out this post on SoundBridge:\n${link}`,
-        url: link,
       });
     } catch (error) {
       console.error('Error sharing post:', error);
@@ -700,7 +775,6 @@ class DeepLinkingService {
       const byLine = artistName ? ` by ${artistName}` : '';
       await Share.share({
         message: `Check out "${title}"${byLine} on SoundBridge!\n${link}`,
-        url: link,
       });
     } catch (error) {
       console.error('Error sharing track:', error);
@@ -713,7 +787,6 @@ class DeepLinkingService {
       const venueText = venueName ? ` at ${venueName}` : '';
       await Share.share({
         message: `Check out "${title}"${venueText} on SoundBridge!\n${link}`,
-        url: link,
       });
     } catch (error) {
       console.error('Error sharing event:', error);

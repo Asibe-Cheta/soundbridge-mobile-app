@@ -546,9 +546,8 @@ const PostCard = memo(function PostCard({
           <Text
             style={[styles.postContent, { color: theme.colors.text }]}
             numberOfLines={isExpanded ? undefined : 8}
-            onLongPress={handleTextLongPress}
-            delayLongPress={500}
-            suppressHighlighting
+            selectable
+            selectionColor="#8B5CF640"
           >
             {post.content}
           </Text>

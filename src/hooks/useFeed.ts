@@ -352,6 +352,11 @@ export const useFeed = () => {
   }, [authLoading, user?.id, session?.access_token]); // Use stable identifiers instead of objects
 
   // Delete post optimistically
+  const updatePostLocally = useCallback((updatedPost: Post) => {
+    setPosts((prev) => prev.map((p) => p.id === updatedPost.id ? { ...p, ...updatedPost } : p));
+    feedCacheService.updatePostInCache(updatedPost.id, updatedPost);
+  }, []);
+
   const deletePost = useCallback(async (postId: string) => {
     try {
       // Optimistic update - remove from UI immediately
@@ -383,6 +388,7 @@ export const useFeed = () => {
     addReaction,
     removeReaction,
     deletePost,
+    updatePostLocally,
   };
 };
 

@@ -14,6 +14,7 @@ import {
   Image,
   Platform,
   ActivityIndicator,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -42,7 +43,7 @@ import { collectDeviceInfo } from '../utils/deviceInfo';
 
 const { width } = Dimensions.get('window');
 
-type ContentType = 'music' | 'podcast' | 'mixtape';
+type ContentType = 'music' | 'podcast' | 'mixtape' | 'audio_book';
 type UploadMode = 'single' | 'album';
 
 // ACRCloud TypeScript Interfaces
@@ -95,6 +96,10 @@ interface UploadFormData {
   // Mixtape-specific fields
   djName: string;
   tracklist: string;
+  // Audio book-specific fields
+  narrator: string;
+  chapterNumber: string;
+  bookGenre: string;
   // Common fields
   tags: string;
   lyrics: string;
@@ -108,6 +113,7 @@ interface UploadFormData {
   isPaid: boolean;
   price: string;
   currency: 'USD' | 'GBP' | 'EUR';
+  liveInterestEnabled: boolean;
 }
 
 interface AlbumTrack {
@@ -191,6 +197,9 @@ export default function UploadScreen() {
     tracklist: '',
     episodeNumber: '',
     podcastCategory: '',
+    narrator: '',
+    chapterNumber: '',
+    bookGenre: '',
     tags: '',
     lyrics: '',
     lyricsLanguage: 'en',
@@ -202,6 +211,7 @@ export default function UploadScreen() {
     isPaid: false,
     price: '',
     currency: 'USD',
+    liveInterestEnabled: false,
   });
   
   // Album-specific state
@@ -223,8 +233,14 @@ export default function UploadScreen() {
   ];
 
   const podcastCategories = [
-    'Technology', 'Business', 'Education', 'Entertainment', 'News', 
+    'Technology', 'Business', 'Education', 'Entertainment', 'News',
     'Sports', 'Health', 'Science', 'Arts', 'Comedy', 'True Crime', 'History', 'Other'
+  ];
+
+  const bookGenres = [
+    'Fiction', 'Non-Fiction', 'Self-Help', 'Romance', 'Thriller',
+    'Science Fiction', 'Fantasy', 'Biography', 'History', 'Business',
+    "Children's", 'Mystery', 'Spirituality', 'Poetry', 'Other'
   ];
 
   // Supported audio file types — must stay in sync with UploadService.ts ALLOWED_AUDIO_TYPES.
@@ -865,6 +881,10 @@ export default function UploadScreen() {
       if (!formData.genre) {
         errors.push('Genre is required for mixtapes');
       }
+    } else if (formData.contentType === 'audio_book') {
+      if (!formData.bookGenre) {
+        errors.push('Book genre is required');
+      }
     }
 
     // Cover art validation
@@ -1323,6 +1343,12 @@ export default function UploadScreen() {
         if (enhancedDescription) parts.push(enhancedDescription);
         if (formData.tracklist.trim()) parts.push(`TRACKLIST:\n${formData.tracklist.trim()}`);
         enhancedDescription = parts.join('\n\n');
+      } else if (formData.contentType === 'audio_book') {
+        const parts: string[] = [];
+        if (formData.narrator.trim()) parts.push(`Narrated by: ${formData.narrator.trim()}`);
+        if (formData.chapterNumber.trim()) parts.push(`Chapter: ${formData.chapterNumber.trim()}`);
+        if (enhancedDescription) parts.push(enhancedDescription);
+        enhancedDescription = parts.join('\n\n');
       }
 
       const trackData = {
@@ -1335,7 +1361,10 @@ export default function UploadScreen() {
         tags: tagsArray.length > 0 ? tagsArray.join(',') : null,
         is_public: formData.privacy === 'public',
         visibility: formData.privacy === 'public' ? 'public' : formData.privacy === 'followers' ? 'followers_only' : 'private',
-        genre: formData.contentType === 'music' ? formData.genre : formData.contentType === 'mixtape' ? formData.genre : formData.podcastCategory,
+        genre: formData.contentType === 'music' ? formData.genre
+          : formData.contentType === 'mixtape' ? formData.genre
+          : formData.contentType === 'audio_book' ? formData.bookGenre
+          : formData.podcastCategory,
         lyrics: formData.lyrics.trim() || null,
         lyrics_language: formData.lyricsLanguage,
         has_lyrics: formData.lyrics.trim().length > 0,
@@ -1373,6 +1402,8 @@ export default function UploadScreen() {
         is_paid: formData.isPaid,
         price: formData.isPaid && formData.price ? parseFloat(formData.price) : null,
         currency: formData.isPaid ? formData.currency : null,
+        // Live interest prompt (music only)
+        live_interest_enabled: formData.contentType === 'music' ? formData.liveInterestEnabled : false,
       };
 
       const trackResult = await createAudioTrack(user.id, trackData);
@@ -1403,6 +1434,9 @@ export default function UploadScreen() {
         tracklist: '',
         episodeNumber: '',
         podcastCategory: '',
+        narrator: '',
+        chapterNumber: '',
+        bookGenre: '',
         tags: '',
         lyrics: '',
         lyricsLanguage: 'en',
@@ -1414,6 +1448,7 @@ export default function UploadScreen() {
         isPaid: false,
         price: '',
         currency: 'USD',
+        liveInterestEnabled: false,
       });
       setAgreedToCopyright(false);
       setAgreedToMixtapeTerms(false);
@@ -1726,6 +1761,26 @@ export default function UploadScreen() {
             <View style={styles.contentTypeText}>
               <Text style={[styles.contentTypeLabel, { color: theme.colors.text }]}>DJ Mixtape</Text>
               <Text style={[styles.contentTypeDescription, { color: theme.colors.textSecondary }]}>Upload DJ mixes and continuous sets</Text>
+            </View>
+          </TouchableOpacity>
+        </GradientOption>
+
+        <GradientOption
+          selected={formData.contentType === 'audio_book'}
+          radius={18}
+          backgroundColor={optionSurface}
+        >
+          <TouchableOpacity
+            style={styles.contentTypeOption}
+            onPress={() => handleInputChange('contentType', 'audio_book')}
+            activeOpacity={0.9}
+          >
+            <View style={[styles.contentTypeIcon, { backgroundColor: '#0EA5E9' }]}>
+              <Ionicons name="book" size={24} color="white" />
+            </View>
+            <View style={styles.contentTypeText}>
+              <Text style={[styles.contentTypeLabel, { color: theme.colors.text }]}>Audio Book</Text>
+              <Text style={[styles.contentTypeDescription, { color: theme.colors.textSecondary }]}>Share chapters, stories, or spoken word</Text>
             </View>
           </TouchableOpacity>
         </GradientOption>
@@ -2416,6 +2471,57 @@ export default function UploadScreen() {
     </View>
             </View>
               </>
+            ) : formData.contentType === 'audio_book' ? (
+              <>
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>Narrator (optional)</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
+                    placeholder="e.g., John Smith"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={formData.narrator}
+                    onChangeText={(value) => handleInputChange('narrator', value)}
+                    textContentType="none"
+                    autoComplete="off"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>Chapter / Part (optional)</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, color: theme.colors.text }]}
+                    placeholder="e.g., Chapter 1, Part 2"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={formData.chapterNumber}
+                    onChangeText={(value) => handleInputChange('chapterNumber', value)}
+                    textContentType="none"
+                    autoComplete="off"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>Book Genre *</Text>
+                  <View style={styles.genreContainer}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      {bookGenres.map((g) => (
+                        <TouchableOpacity
+                          key={g}
+                          style={[
+                            styles.genreChip,
+                            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                            formData.bookGenre === g && { backgroundColor: '#0EA5E9', borderColor: '#0EA5E9' }
+                          ]}
+                          onPress={() => handleInputChange('bookGenre', g)}
+                        >
+                          <Text style={[styles.genreChipText, { color: theme.colors.text }, formData.bookGenre === g && { color: '#FFFFFF' }]}>
+                            {g}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                </View>
+              </>
             ) : formData.contentType === 'podcast' ? (
               <>
                 <View style={styles.inputGroup}>
@@ -2898,6 +3004,28 @@ export default function UploadScreen() {
                 )}
               </View>
             )}
+          </GlassSection>
+        )}
+
+        {/* Live Interest Toggle — music only */}
+        {formData.contentType === 'music' && (
+          <GlassSection>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginBottom: 4 }]}>
+                  Ask listeners if they'd like to hear this live
+                </Text>
+                <Text style={[styles.hintText, { color: theme.colors.textSecondary }]}>
+                  This helps us gather data on where your audience wants to see you perform. We'll show a subtle prompt to listeners after they've played this track.
+                </Text>
+              </View>
+              <Switch
+                value={formData.liveInterestEnabled}
+                onValueChange={(value) => handleInputChange('liveInterestEnabled', value)}
+                trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+                thumbColor={formData.liveInterestEnabled ? theme.colors.primary : theme.colors.textSecondary}
+              />
+            </View>
           </GlassSection>
         )}
 

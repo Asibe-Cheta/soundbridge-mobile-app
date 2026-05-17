@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,10 @@ import {
   ActivityIndicator,
   Modal,
   Platform,
+  Share,
+  Clipboard,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -59,6 +62,9 @@ import { useBranding } from '../hooks/useBranding';
 import VenuePreferencesModal from '../components/VenuePreferencesModal';
 import QRCodeModal from '../components/QRCodeModal';
 import ShareDiagonalIcon from '../components/ShareDiagonalIcon';
+import ShareMyCardModal from '../components/ShareMyCardModal';
+import CreatorNudgeModal from '../components/CreatorNudgeModal';
+import { useToast } from '../contexts/ToastContext';
 
 const { width } = Dimensions.get('window');
 
@@ -117,6 +123,7 @@ export default function ProfileScreen() {
   const { user, userProfile, signOut, updatePassword, refreshUser, updateUserProfile, session, loading: authLoading } = useAuth();
   const { autoPlay, toggleAutoPlay } = useAudioPlayer();
   const { theme } = useTheme();
+  const { showToast } = useToast();
   const navigation = useNavigation();
   const { start: startTour } = useCopilot();
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -137,6 +144,9 @@ export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [showVenuePrefsModal, setShowVenuePrefsModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
+  const [showShareCardModal, setShowShareCardModal] = useState(false);
+  const [showNudgeModal, setShowNudgeModal] = useState(false);
+  const [nudgeDismissedThisSession, setNudgeDismissedThisSession] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingProfile, setEditingProfile] = useState<Partial<UserProfile>>({});
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -175,6 +185,52 @@ export default function ProfileScreen() {
       loadingManager.reset();
     };
   }, [user?.id]);
+
+  // Show nudge when creator navigates to their own profile, once per session
+  useFocusEffect(
+    useCallback(() => {
+      if (profile?.is_creator && !userProfile?.fan_link_shared && !nudgeDismissedThisSession) {
+        const timer = setTimeout(() => setShowNudgeModal(true), 700);
+        return () => clearTimeout(timer);
+      }
+    }, [profile?.is_creator, userProfile?.fan_link_shared, nudgeDismissedThisSession]),
+  );
+
+  const handleMarkFanLinkShared = async (method: 'link' | 'card') => {
+    if (!user?.id) return;
+    await supabase.from('profiles').update({
+      fan_link_shared: true,
+      fan_link_shared_at: new Date().toISOString(),
+      fan_link_share_method: method,
+    }).eq('id', user.id);
+    updateUserProfile({
+      fan_link_shared: true,
+      fan_link_share_method: method,
+    });
+    setShowNudgeModal(false);
+    setShowShareCardModal(false);
+  };
+
+  const handleShareLink = async () => {
+    if (!profile) return;
+    const fanUrl = `https://soundbridge.live/${profile.username}/home`;
+    setShowNudgeModal(false);
+    try {
+      const result = await Share.share({
+        message: `Discover my content and support me directly on SoundBridge\n${fanUrl}`,
+        url: fanUrl,
+      });
+      if (result.action === Share.sharedAction) {
+        await handleMarkFanLinkShared('link');
+        showToast('Link shared. Your audience can now find you on SoundBridge 🙏🏾', 'success', 4500);
+      }
+    } catch {}
+  };
+
+  const handleNudgeShareCard = () => {
+    setShowNudgeModal(false);
+    setTimeout(() => setShowShareCardModal(true), 200);
+  };
 
   const checkBiometricAvailability = async () => {
     const capability = await BiometricAuth.checkBiometricAvailability();
@@ -2062,8 +2118,15 @@ export default function ProfileScreen() {
                   <TouchableOpacity style={styles.headerButton} onPress={handleEditProfile}>
                     <Ionicons name="pencil-outline" size={24} color={theme.colors.text} />
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.headerButton} onPress={() => setShowQRModal(true)}>
-                    <Ionicons name="qr-code-outline" size={24} color={theme.colors.text} />
+                  <TouchableOpacity
+                    style={styles.headerButton}
+                    onPress={() => profile?.is_creator ? setShowShareCardModal(true) : setShowQRModal(true)}
+                  >
+                    <Ionicons
+                      name={profile?.is_creator ? 'card-outline' : 'qr-code-outline'}
+                      size={24}
+                      color={theme.colors.text}
+                    />
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.headerButton} onPress={handleShareProfile}>
                     <ShareDiagonalIcon size={24} color={theme.colors.text} />
@@ -2327,6 +2390,29 @@ export default function ProfileScreen() {
           creatorName={profile.display_name}
           avatarUrl={profile.avatar_url}
         />
+      )}
+
+      {profile?.is_creator && (
+        <>
+          <CreatorNudgeModal
+            visible={showNudgeModal}
+            onShareLink={handleShareLink}
+            onShareCard={handleNudgeShareCard}
+            onMaybeLater={() => {
+              setShowNudgeModal(false);
+              setNudgeDismissedThisSession(true);
+            }}
+          />
+          <ShareMyCardModal
+            visible={showShareCardModal}
+            onClose={() => setShowShareCardModal(false)}
+            creatorName={profile.display_name}
+            username={profile.username}
+            avatarUrl={profile.avatar_url}
+            genres={profile.genres}
+            onShared={() => handleMarkFanLinkShared('card')}
+          />
+        </>
       )}
       </SafeAreaView>
     </View>

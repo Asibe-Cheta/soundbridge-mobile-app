@@ -3,6 +3,7 @@
   "compilerOptions": {
     "strict": false,
     "skipLibCheck": true,
-    "noImplicitAny": false
+    "noImplicitAny": false,
+    "typeRoots": ["./node_modules/@types"]
   }
 }

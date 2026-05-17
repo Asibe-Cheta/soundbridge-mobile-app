@@ -582,24 +582,24 @@ export default function AllEventsScreen() {
 
                 <View style={[styles.whyCreateBox, { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: theme.colors.primary + '40' }]}>
                   <Text style={[styles.whyCreateTitle, { color: theme.colors.text }]}>
-                    Are you an artist? Create your event here
+                    Want to host an event?
                   </Text>
                   <View style={styles.whyCreateItem}>
                     <Ionicons name="megaphone-outline" size={15} color={theme.colors.primary} style={styles.whyCreateIcon} />
                     <Text style={[styles.whyCreateText, { color: theme.colors.textSecondary }]}>
-                      Free promotion — your event is automatically shown to nearby fans who follow your genre. No ad spend needed.
+                      We send personalised push notifications directly to every nearby fan who follows your genre, with follow-up reminders right up to the day of your event. Zero ad spend.
                     </Text>
                   </View>
                   <View style={styles.whyCreateItem}>
                     <Ionicons name="people-outline" size={15} color={theme.colors.primary} style={styles.whyCreateIcon} />
                     <Text style={[styles.whyCreateText, { color: theme.colors.textSecondary }]}>
-                      Right audience only — fans who opted in for your event category (Gospel Concert, Jazz Room, etc.) get notified, not random people.
+                      Only fans who opted in for your event category (Gospel Concert, Jazz Room, etc.) get notified. The right people, no wasted impressions.
                     </Text>
                   </View>
                   <View style={styles.whyCreateItem}>
                     <Ionicons name="cash-outline" size={15} color={theme.colors.primary} style={styles.whyCreateIcon} />
                     <Text style={[styles.whyCreateText, { color: theme.colors.textSecondary }]}>
-                      Keep 85% of ticket revenue — just a 15% platform fee, with no advertising costs eating into your earnings.
+                      Keep 85% of ticket revenue. Just a 15% platform fee, with no advertising costs eating into your earnings.
                     </Text>
                   </View>
                 </View>
@@ -899,9 +899,9 @@ const styles = StyleSheet.create({
   },
   whyCreateTitle: {
     fontFamily: Typography.body.fontFamily,
-    fontWeight: '600',
+    fontWeight: '300',
     letterSpacing: -0.4,
-    fontSize: 15,
+    fontSize: 17,
     marginBottom: 14,
   },
   whyCreateItem: {
@@ -930,7 +930,7 @@ const styles = StyleSheet.create({
   },
   goBackTipText: {
     fontFamily: Typography.body.fontFamily,
-    fontWeight: '400',
+    fontWeight: '300',
     letterSpacing: -0.4,
     fontSize: 13,
     lineHeight: 18,

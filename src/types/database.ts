@@ -181,6 +181,7 @@ export interface Database {
           reviewed_at: string | null
           file_hash: string | null
           appeal_text: string | null
+          live_interest_enabled: boolean
           created_at: string
           updated_at: string | null
           deleted_at: string | null
@@ -207,6 +208,7 @@ export interface Database {
           lyrics?: string | null
           lyrics_language?: string | null
           has_lyrics?: boolean | null
+          live_interest_enabled?: boolean
           created_at?: string
           updated_at?: string | null
           deleted_at?: string | null
@@ -233,6 +235,7 @@ export interface Database {
           lyrics?: string | null
           lyrics_language?: string | null
           has_lyrics?: boolean | null
+          live_interest_enabled?: boolean
           created_at?: string
           updated_at?: string | null
           deleted_at?: string | null
@@ -909,6 +912,12 @@ export type ServiceCategory =
   | 'videography'
   | 'lighting'
   | 'event_management'
+  | 'bgv'
+  | 'choir_director'
+  | 'musician'
+  | 'sound_engineer'
+  | 'instrument_teacher'
+  | 'singer'
   | 'other'
 
 export type ProviderBadgeTier = 'new_provider' | 'rising_star' | 'established' | 'top_rated'

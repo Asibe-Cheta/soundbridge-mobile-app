@@ -27,6 +27,8 @@ import { offlineDownloadService } from '../services/OfflineDownloadService';
 import TipModal from '../components/TipModal';
 import TipIconAnimated from '../components/TipIconAnimated';
 import AudioPlayerErrorBoundary from '../components/AudioPlayerErrorBoundary';
+import LiveInterestPrompt, { LiveInterestPromptHandle } from '../components/LiveInterestPrompt';
+import { liveInterestService } from '../services/liveInterestService';
 import { BlurView as ExpoBlurView } from 'expo-blur';
 import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 // import type { AudioTrack } from '@soundbridge/types'; // Commented out - using local type
@@ -92,6 +94,31 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   const [showTipModal, setShowTipModal] = useState(false);
   const [showTipAnimation, setShowTipAnimation] = useState(false);
   const animatedTracks = useRef(new Set<string>()).current;
+
+  // Like button animation
+  const likeScaleAnim = useRef(new Animated.Value(1)).current;
+  const heartAnims = useRef(
+    ([-8, 2, 10] as const).map(xOffset => ({
+      y: new Animated.Value(0),
+      opacity: new Animated.Value(0),
+      xOffset,
+    }))
+  ).current;
+
+  // Tip suggestion after like
+  const [showTipSuggestion, setShowTipSuggestion] = useState(false);
+  const [tipPresetAmount, setTipPresetAmount] = useState(1);
+  const [hasTippedCurrentTrack, setHasTippedCurrentTrack] = useState(false);
+  const tipSuggestionOpacity = useRef(new Animated.Value(0)).current;
+  const tipSuggestionSlide = useRef(new Animated.Value(8)).current;
+  const seenTipSuggestion = useRef(new Set<string>()).current;
+  const tippedTracks = useRef(new Set<string>()).current;
+  const tipDismissTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Live interest prompt
+  const liveInterestRef = useRef<LiveInterestPromptHandle>(null);
+  const liveInterestShownTracks = useRef(new Set<string>()).current;
+
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
   const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
@@ -102,14 +129,13 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   const lyricsModalOpacity = useRef(new Animated.Value(0)).current;
   const [lyricsModalDragOffset, setLyricsModalDragOffset] = useState(0);
 
-  // Check like status and reset lyrics when track changes
+  // Check like status and tip status when track changes; reset lyrics
   useEffect(() => {
     const checkLikeStatus = async () => {
       if (!currentTrack || !user) {
         setIsLiked(false);
         return;
       }
-      
       try {
         const { data, error } = await supabase
           .from('likes')
@@ -118,7 +144,6 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
           .eq('content_id', currentTrack.id)
           .eq('content_type', 'track')
           .maybeSingle();
-        
         if (error) {
           console.error('❌ Error checking like status:', error);
           setIsLiked(false);
@@ -130,8 +155,28 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
         setIsLiked(false);
       }
     };
-    
+
+    const checkTipStatus = async () => {
+      if (!currentTrack || !user) {
+        setHasTippedCurrentTrack(false);
+        return;
+      }
+      try {
+        const { data } = await supabase
+          .from('tips')
+          .select('id')
+          .eq('sender_id', user.id)
+          .eq('track_id', currentTrack.id)
+          .eq('status', 'completed')
+          .limit(1);
+        setHasTippedCurrentTrack((data?.length ?? 0) > 0);
+      } catch {
+        setHasTippedCurrentTrack(false);
+      }
+    };
+
     checkLikeStatus();
+    checkTipStatus();
     setShowLyrics(false);
     setLyricsData(null);
     lyricsRecoveryAttempted.current = false;
@@ -152,6 +197,38 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   useEffect(() => {
     setShowTipAnimation(false);
   }, [currentTrack?.id]);
+
+  // Dismiss tip suggestion when track changes or on unmount
+  useEffect(() => {
+    return () => {
+      if (tipDismissTimeout.current) {
+        clearTimeout(tipDismissTimeout.current);
+        tipDismissTimeout.current = null;
+      }
+      setShowTipSuggestion(false);
+    };
+  }, [currentTrack?.id]);
+
+  // Live interest prompt trigger — after 60s OR one full play, once per user per track
+  useEffect(() => {
+    const trackId = currentTrack?.id;
+    const liveEnabled = currentTrack?.live_interest_enabled;
+    if (!trackId || !user || !isPlaying || !liveEnabled) return;
+    if (liveInterestShownTracks.has(trackId)) return;
+
+    const isOwn = currentTrack?.creator?.id === user.id;
+    if (isOwn) return;
+
+    const fullPlay = duration > 0 && position >= duration - 1;
+    const sixtySeconds = position >= 60;
+
+    if (fullPlay || sixtySeconds) {
+      liveInterestShownTracks.add(trackId);
+      liveInterestService.hasResponded(user.id, trackId).then((already) => {
+        if (!already) liveInterestRef.current?.show();
+      });
+    }
+  }, [position, currentTrack?.id, isPlaying]);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -437,7 +514,8 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     
     try {
       setIsLiked(newLikeStatus);
-      
+      if (newLikeStatus) playLikeAnimation();
+
       if (newLikeStatus) {
         // Like: Insert into likes table using polymorphic design
         const { error } = await supabase
@@ -494,8 +572,70 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
     // TODO: Implement follow functionality
   };
 
+  const dismissTipSuggestion = () => {
+    if (tipDismissTimeout.current) {
+      clearTimeout(tipDismissTimeout.current);
+      tipDismissTimeout.current = null;
+    }
+    Animated.parallel([
+      Animated.timing(tipSuggestionOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
+      Animated.timing(tipSuggestionSlide, { toValue: 8, duration: 180, useNativeDriver: true }),
+    ]).start(() => setShowTipSuggestion(false));
+  };
+
+  const showTipSuggestionPill = () => {
+    if (!currentTrack) return;
+    seenTipSuggestion.add(currentTrack.id);
+    tipSuggestionOpacity.setValue(0);
+    tipSuggestionSlide.setValue(8);
+    setShowTipSuggestion(true);
+    Animated.parallel([
+      Animated.timing(tipSuggestionOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
+      Animated.timing(tipSuggestionSlide, { toValue: 0, duration: 220, useNativeDriver: true }),
+    ]).start();
+    tipDismissTimeout.current = setTimeout(dismissTipSuggestion, 4000);
+  };
+
+  const playLikeAnimation = () => {
+    // Heart button scale pulse
+    likeScaleAnim.setValue(1);
+    Animated.sequence([
+      Animated.timing(likeScaleAnim, { toValue: 1.3, duration: 150, useNativeDriver: true }),
+      Animated.timing(likeScaleAnim, { toValue: 1.0, duration: 150, useNativeDriver: true }),
+    ]).start();
+
+    // Three floating hearts drift upward and fade out
+    heartAnims.forEach((anim, i) => {
+      anim.y.setValue(0);
+      anim.opacity.setValue(0);
+      Animated.sequence([
+        Animated.delay(i * 90),
+        Animated.parallel([
+          Animated.timing(anim.y, { toValue: -52, duration: 700, useNativeDriver: true }),
+          Animated.sequence([
+            Animated.timing(anim.opacity, { toValue: 0.85, duration: 180, useNativeDriver: true }),
+            Animated.timing(anim.opacity, { toValue: 0, duration: 420, useNativeDriver: true }),
+          ]),
+        ]),
+      ]).start();
+    });
+
+    // Show the tip suggestion after the full 800ms animation window.
+    // Suppressed if already seen this session, already tipped this session, or server confirms prior tip.
+    if (
+      currentTrack &&
+      !seenTipSuggestion.has(currentTrack.id) &&
+      !tippedTracks.has(currentTrack.id) &&
+      !hasTippedCurrentTrack
+    ) {
+      setTimeout(showTipSuggestionPill, 800);
+    }
+  };
+
   const handleTipSuccess = () => {
     setShowTipModal(false);
+    if (currentTrack) tippedTracks.add(currentTrack.id);
+    setHasTippedCurrentTrack(true);
   };
 
   const handleShare = async () => {
@@ -1356,18 +1496,98 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
             </Text>
           </TouchableOpacity>
         </View>
-        <TouchableOpacity 
-          style={styles.heartButton} 
-          onPress={handleLike}
-          activeOpacity={0.7}
-        >
-          <Ionicons 
-            name={isLiked ? 'heart' : 'heart-outline'} 
-            size={28} 
-            color={isLiked ? theme.colors.primary : (theme.isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)')} 
-          />
-        </TouchableOpacity>
+        <View style={{ position: 'relative' }}>
+          <TouchableOpacity
+            style={styles.heartButton}
+            onPress={handleLike}
+            activeOpacity={0.7}
+          >
+            <Animated.View style={{ transform: [{ scale: likeScaleAnim }] }}>
+              <Ionicons
+                name={isLiked ? 'heart' : 'heart-outline'}
+                size={28}
+                color={isLiked ? theme.colors.primary : (theme.isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)')}
+              />
+            </Animated.View>
+          </TouchableOpacity>
+          {/* Floating hearts drift upward on like */}
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            {heartAnims.map((anim, i) => (
+              <Animated.View
+                key={i}
+                style={{
+                  position: 'absolute',
+                  left: 12 + anim.xOffset,
+                  top: 4,
+                  opacity: anim.opacity,
+                  transform: [{ translateY: anim.y }],
+                }}
+              >
+                <Ionicons name="heart" size={9} color={theme.colors.primary} />
+              </Animated.View>
+            ))}
+          </View>
+        </View>
       </View>
+
+      {/* Tip suggestion pill — appears after like animation, auto-dismisses in 4s */}
+      {showTipSuggestion && currentTrack?.creator && (
+        <Animated.View
+          style={[
+            styles.tipSuggestionWrap,
+            { opacity: tipSuggestionOpacity, transform: [{ translateY: tipSuggestionSlide }] },
+          ]}
+        >
+          <ExpoBlurView
+            intensity={Platform.OS === 'ios' ? 40 : 0}
+            tint={theme.isDark ? 'dark' : 'light'}
+            style={styles.tipSuggestionBlur}
+          >
+            <View
+              style={[
+                styles.tipSuggestionInner,
+                {
+                  backgroundColor: Platform.OS === 'android'
+                    ? (theme.isDark ? 'rgba(28, 18, 54, 0.96)' : 'rgba(248, 248, 255, 0.96)')
+                    : 'transparent',
+                  borderColor: theme.isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)',
+                },
+              ]}
+            >
+              <Text style={[styles.tipSuggestionText, { color: theme.colors.text }]} numberOfLines={1}>
+                Let{' '}
+                <Text style={{ color: theme.colors.primary, fontWeight: '600' }}>
+                  {currentTrack.creator.display_name || currentTrack.creator.username || 'the artist'}
+                </Text>
+                {' '}know you love them!
+              </Text>
+              <View style={styles.tipSuggestionRow}>
+                {[1, 5].map((amt) => (
+                  <TouchableOpacity
+                    key={amt}
+                    style={[styles.tipAmountButton, { backgroundColor: theme.colors.primary }]}
+                    onPress={() => {
+                      dismissTipSuggestion();
+                      setTipPresetAmount(amt);
+                      setShowTipModal(true);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.tipAmountText}>${amt}</Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  style={[styles.tipDismissButton, { backgroundColor: theme.isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.07)' }]}
+                  onPress={dismissTipSuggestion}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close" size={14} color={theme.colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ExpoBlurView>
+        </Animated.View>
+      )}
 
       {/* Main Visual / Player Ring - Matching HTML design */}
       <View style={styles.mainVisualContainer}>
@@ -1735,6 +1955,8 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
             currentTrack.creator.username ||
             'Creator'
           }
+          trackId={currentTrack.id}
+          initialAmount={tipPresetAmount}
           onClose={() => setShowTipModal(false)}
           onTipSuccess={(amount) => handleTipSuccess()}
         />
@@ -1928,6 +2150,16 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
           </View>
         </View>
       </Modal>
+
+      {/* Live Interest floating prompt — sits above all content, never blocks playback */}
+      {currentTrack && user && (
+        <LiveInterestPrompt
+          ref={liveInterestRef}
+          trackId={currentTrack.id}
+          creatorId={currentTrack.creator?.id ?? ''}
+          userId={user.id}
+        />
+      )}
         </Animated.View>
       </SafeAreaView>
     </View>
@@ -2840,5 +3072,57 @@ const styles = StyleSheet.create({
   },
   playlistMeta: {
     fontSize: 14,
+  },
+  tipSuggestionWrap: {
+    alignSelf: 'flex-end',
+    marginRight: 32,
+    marginTop: -4,
+    marginBottom: 8,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  tipSuggestionBlur: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  tipSuggestionInner: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+  },
+  tipSuggestionText: {
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  tipSuggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  tipAmountButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  tipAmountText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  tipDismissButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 2,
   },
 });

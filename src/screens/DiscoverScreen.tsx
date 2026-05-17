@@ -49,6 +49,14 @@ import UploadPromptCard from '../components/UploadPromptCard';
 import { SkeletonHtmlCardRow, SkeletonAlbumCardRow, SkeletonRowCards } from '../components/SkeletonLoader';
 import { venueService, VenueDisplayItem } from '../services/VenueService';
 import VenuePreferencesModal from '../components/VenuePreferencesModal';
+import {
+  serviceDiscoveryService,
+  ServiceDiscoveryPreferences,
+  DEFAULT_SERVICE_PREFS,
+  DISTANCE_OPTION_LABELS,
+  NATIONWIDE_KM,
+  SERVICE_CATEGORY_OPTIONS,
+} from '../services/ServiceDiscoveryService';
 import ExternalEventCard, { ExternalEvent } from '../components/ExternalEventCard';
 import ClaimEventModal from '../modals/ClaimEventModal';
 
@@ -156,7 +164,7 @@ interface Playlist {
   };
 }
 
-type TabType = 'Music' | 'Albums' | 'Podcasts' | 'Mixtapes' | 'Artists' | 'Events' | 'Playlists' | 'Services' | 'Venues';
+type TabType = 'Music' | 'Albums' | 'Podcasts' | 'Mixtapes' | 'Audio Books' | 'Artists' | 'Events' | 'Playlists' | 'Services' | 'Venues';
 
 const DISCOVER_MOCK_TRACKS: AudioTrack[] = [
   {
@@ -281,74 +289,6 @@ const DISCOVER_MOCK_EVENTS: Event[] = [
   },
 ];
 
-const DISCOVER_MOCK_SERVICES: ServiceProviderCard[] = [
-  {
-    provider_id: 'service-provider-1',
-    display_name: 'Studio Mix Pro',
-    headline: 'Professional mixing & mastering services',
-    image_url: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop',
-    categories: ['mixing_mastering'],
-    average_rating: 4.9,
-    review_count: 124,
-    price_band: '$75/hr',
-    is_verified: true,
-  },
-  {
-    provider_id: 'service-provider-2',
-    display_name: 'Beatmaker Studios',
-    headline: 'Custom beat production with fast turnaround',
-    image_url: 'https://images.unsplash.com/photo-1571902943202-507ec2618e8f?w=200&h=200&fit=crop',
-    categories: ['sound_engineering'],
-    average_rating: 4.8,
-    review_count: 89,
-    price_band: '$60/hr',
-    is_verified: true,
-  },
-  {
-    provider_id: 'service-provider-3',
-    display_name: 'Emma Clarke - Vocal Coach',
-    headline: 'Certified vocal coach for pop, soul, and R&B',
-    image_url: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200&h=200&fit=crop',
-    categories: ['music_lessons'],
-    average_rating: 5.0,
-    review_count: 23,
-    price_band: '$50/hr',
-    is_verified: false,
-  },
-  {
-    provider_id: 'service-provider-4',
-    display_name: 'Session Guitarist Pro',
-    headline: 'Session guitarist for rock, blues, and jazz',
-    image_url: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200&h=200&fit=crop',
-    categories: ['session_musician'],
-    average_rating: 4.7,
-    review_count: 62,
-    price_band: '$90/hr',
-    is_verified: true,
-  },
-  {
-    provider_id: 'service-provider-5',
-    display_name: 'Soundwave Graphics',
-    headline: 'Album artwork, branding, and visual design',
-    image_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop',
-    categories: ['other'],
-    average_rating: 4.9,
-    review_count: 112,
-    price_band: '$120/project',
-    is_verified: true,
-  },
-  {
-    provider_id: 'service-provider-6',
-    display_name: 'Music Promo UK',
-    headline: 'Social media marketing and PR for musicians',
-    image_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop',
-    categories: ['other'],
-    average_rating: 4.6,
-    review_count: 34,
-    price_band: '$200/campaign',
-    is_verified: true,
-  },
-];
 
 const DISCOVER_MOCK_VENUES: any[] = [
   {
@@ -483,6 +423,7 @@ function DiscoverScreen() {
   const [loadingGpVenues, setLoadingGpVenues] = useState(false);
   const [venueLocationDenied, setVenueLocationDenied] = useState(false);
   const [showVenuePrefs, setShowVenuePrefs] = useState(false);
+  const [servicePrefs, setServicePrefs] = useState<ServiceDiscoveryPreferences>(DEFAULT_SERVICE_PREFS);
 
   // Loading state management
   const loadingManager = useRef(new LoadingStateManager()).current;
@@ -501,13 +442,15 @@ function DiscoverScreen() {
   const [loadingVenues, setLoadingVenues] = useState(false);
   const [loadingPodcasts, setLoadingPodcasts] = useState(false);
   const [loadingMixtapes, setLoadingMixtapes] = useState(false);
+  const [audioBooks, setAudioBooks] = useState<AudioTrack[]>([]);
+  const [loadingAudioBooks, setLoadingAudioBooks] = useState(false);
   const [podcasts, setPodcasts] = useState<AudioTrack[]>([]);
   const [mixtapes, setMixtapes] = useState<AudioTrack[]>([]);
   
   // Track if initial cache load has happened
   const initialCacheLoadRef = useRef(false);
 
-  const tabs: TabType[] = ['Music', 'Albums', 'Podcasts', 'Mixtapes', 'Artists', 'Events', 'Playlists', 'Services', 'Venues'];
+  const tabs: TabType[] = ['Music', 'Albums', 'Podcasts', 'Mixtapes', 'Audio Books', 'Artists', 'Events', 'Playlists', 'Services', 'Venues'];
 
   // Track tier check attempts to prevent repeated failed requests
   const tierCheckAttemptedRef = useRef(false);
@@ -851,6 +794,31 @@ function DiscoverScreen() {
           }
           break;
 
+        case 'Audio Books':
+          setLoadingAudioBooks(true);
+          try {
+            const { data: bookData } = await supabase
+              .from('audio_tracks')
+              .select(`
+                id, title, description, audio_url, file_url,
+                cover_art_url, artwork_url, duration, play_count,
+                likes_count, created_at, creator_id,
+                moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
+                creator:profiles!creator_id(id, username, display_name, avatar_url)
+              `)
+              .eq('is_public', true)
+              .eq('content_type', 'audio_book')
+              .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved'])
+              .order('created_at', { ascending: false })
+              .limit(20);
+            setAudioBooks(bookData || []);
+          } catch {
+            setAudioBooks([]);
+          } finally {
+            setLoadingAudioBooks(false);
+          }
+          break;
+
         case 'Artists':
           loadingManager.setLoading('artists', true, 8000);
           const artistsResult = await loadQueriesInParallel({
@@ -898,12 +866,23 @@ function DiscoverScreen() {
           loadingManager.setLoading('playlists', false, 0);
           break;
 
-        case 'Services':
-          loadingManager.setLoading('services', true, 5000);
-          // Services tab - using mock data until web alignment is ready
-          setServiceProviders(DISCOVER_MOCK_SERVICES);
+        case 'Services': {
+          loadingManager.setLoading('services', true, 8000);
+          const savedPrefs = user?.id
+            ? await serviceDiscoveryService.getServicePreferences(user.id)
+            : null;
+          const resolvedPrefs = savedPrefs ?? DEFAULT_SERVICE_PREFS;
+          setServicePrefs(resolvedPrefs);
+          const loc = await serviceDiscoveryService.requestLocation();
+          const providers = await serviceDiscoveryService.getServiceProviders(
+            loc?.lat ?? null,
+            loc?.lng ?? null,
+            resolvedPrefs
+          );
+          setServiceProviders(providers);
           loadingManager.setLoading('services', false, 0);
           break;
+        }
 
         case 'Venues':
           setLoadingSbVenues(true);
@@ -2580,6 +2559,78 @@ function DiscoverScreen() {
           </>
         )}
 
+        {activeTab === 'Audio Books' && (
+          <>
+            <View style={[styles.section, styles.firstSection]}>
+              <View style={styles.sectionHeader}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="book" size={20} color="#0EA5E9" style={{ marginRight: 8 }} />
+                  <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Audio Books</Text>
+                </View>
+              </View>
+              {loadingAudioBooks ? (
+                <SkeletonHtmlCardRow count={3} />
+              ) : audioBooks.length > 0 ? (
+                <FlatList
+                  horizontal
+                  data={audioBooks}
+                  keyExtractor={(item) => item.id}
+                  showsHorizontalScrollIndicator={false}
+                  renderItem={({ item: track, index }) => (
+                    <TouchableOpacity
+                      style={[styles.htmlCard, index === 0 && { marginLeft: 24 }]}
+                      onPress={() => handleTrackPress(track)}
+                      activeOpacity={0.9}
+                    >
+                      <View style={{ position: 'absolute', top: 8, left: 8, zIndex: 10, backgroundColor: '#0EA5E9', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>BOOK</Text>
+                      </View>
+                      <View style={[StyleSheet.absoluteFill, { overflow: 'hidden', borderRadius: 24 }]}>
+                        {track.cover_art_url ? (
+                          <Image source={{ uri: track.cover_art_url }} style={styles.htmlCardImage} />
+                        ) : (
+                          <View style={[styles.htmlCardImage, { backgroundColor: '#0EA5E920', justifyContent: 'center', alignItems: 'center' }]}>
+                            <Ionicons name="book" size={60} color="#0EA5E9" />
+                          </View>
+                        )}
+                        <LinearGradient
+                          colors={['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.9)']}
+                          style={styles.htmlCardGradient}
+                        />
+                      </View>
+                      <Pressable
+                        style={styles.htmlPlayButton}
+                        onPress={(e: any) => { e.stopPropagation(); handleTrackPlay(track); }}
+                      >
+                        <BlurView intensity={20} tint={theme.isDark ? 'dark' : 'light'} style={styles.htmlPlayButtonBlur}>
+                          <Ionicons name="play-circle-outline" size={36} color={theme.isDark ? '#FFFFFF' : theme.colors.text} />
+                        </BlurView>
+                      </Pressable>
+                      <View style={styles.htmlCardContent}>
+                        <Text style={styles.htmlCardTitle} numberOfLines={2}>{track.title}</Text>
+                        <Text style={styles.htmlCardArtist} numberOfLines={1}>
+                          {track.creator?.display_name || track.creator?.username || 'Unknown Author'}
+                        </Text>
+                        <View style={styles.htmlCardMeta}>
+                          <Ionicons name="book-outline" size={12} color="rgba(255,255,255,0.4)" />
+                          <Text style={styles.htmlCardMetaText}>Audio Book</Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                />
+              ) : (
+                <View style={{ paddingHorizontal: 24, paddingVertical: 32, alignItems: 'center' }}>
+                  <Ionicons name="book-outline" size={48} color={theme.colors.textSecondary} />
+                  <Text style={{ color: theme.colors.textSecondary, marginTop: 12, textAlign: 'center' }}>
+                    No audio books yet. Be the first to upload one.
+                  </Text>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+
         {activeTab === 'Artists' && (
           <>
             {/* Featured Artists */}
@@ -2941,15 +2992,68 @@ function DiscoverScreen() {
                   <Ionicons name="briefcase" size={20} color="#DC2626" style={{ marginRight: 8 }} />
                   <Text style={[styles.sectionTitle, { color: '#FFFFFF' }]}>Service Providers</Text>
                 </View>
-                <TouchableOpacity
-                  style={{ flexDirection: 'row', alignItems: 'center' }}
-                  onPress={() => navigation.navigate('AllServices', { title: 'Service Providers' })}
-                >
-                  <Text style={[Typography.label, { color: '#DC2626', fontSize: 14, marginRight: 4 }]}>See all</Text>
-                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <TouchableOpacity
+                    onPress={() => navigation.navigate('ServicePreferences')}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="options-outline" size={20} color={theme.colors.primary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center' }}
+                    onPress={() => navigation.navigate('AllServices', { title: 'Service Providers' })}
+                  >
+                    <Text style={[Typography.label, { color: '#DC2626', fontSize: 14, marginRight: 4 }]}>See all</Text>
+                    <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
+                  </TouchableOpacity>
+                </View>
               </View>
-              
+
+              {/* Active filter pills */}
+              {(() => {
+                const pills: Array<{ label: string; key: string }> = [];
+                if (servicePrefs.max_distance_km !== DEFAULT_SERVICE_PREFS.max_distance_km) {
+                  pills.push({ label: DISTANCE_OPTION_LABELS[servicePrefs.max_distance_km] ?? `${servicePrefs.max_distance_km}km`, key: 'radius' });
+                }
+                if (servicePrefs.min_budget != null || servicePrefs.max_budget != null) {
+                  const budgetLabel = servicePrefs.min_budget != null && servicePrefs.max_budget != null
+                    ? `£${servicePrefs.min_budget}–£${servicePrefs.max_budget}`
+                    : servicePrefs.min_budget != null
+                    ? `From £${servicePrefs.min_budget}`
+                    : `Up to £${servicePrefs.max_budget}`;
+                  pills.push({ label: budgetLabel, key: 'budget' });
+                }
+                (servicePrefs.service_categories ?? []).forEach((cat) => {
+                  const found = SERVICE_CATEGORY_OPTIONS.find(o => o.value === cat);
+                  if (found) pills.push({ label: found.label, key: cat });
+                });
+                if (pills.length === 0) return null;
+                return (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                    {pills.map((pill) => (
+                      <TouchableOpacity
+                        key={pill.key}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          backgroundColor: 'rgba(220,38,38,0.12)',
+                          borderRadius: 20,
+                          paddingHorizontal: 10,
+                          paddingVertical: 4,
+                          gap: 4,
+                        }}
+                        onPress={() => navigation.navigate('ServicePreferences')}
+                      >
+                        <Text style={{ fontFamily: Typography.body.fontFamily, fontWeight: '300', fontSize: 12, color: '#DC2626', letterSpacing: -0.4 }}>
+                          {pill.label}
+                        </Text>
+                        <Ionicons name="close" size={12} color="#DC2626" />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                );
+              })()}
+
               {loadingServices ? (
                 <SkeletonRowCards count={3} />
               ) : serviceProviders.length > 0 ? (
@@ -3009,10 +3113,37 @@ function DiscoverScreen() {
               ) : (
                 <View style={styles.emptyState}>
                   <Ionicons name="briefcase-outline" size={48} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No service providers available yet</Text>
-                  <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
-                    Service providers will appear here once they start offering services!
-                  </Text>
+                  {(servicePrefs.min_budget != null || servicePrefs.max_budget != null || (servicePrefs.service_categories ?? []).length > 0) ? (
+                    <>
+                      <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No results for your filters</Text>
+                      <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
+                        Try adjusting your budget or category filters.
+                      </Text>
+                      <TouchableOpacity
+                        style={{ marginTop: 12, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#DC2626', borderRadius: 20 }}
+                        onPress={() => navigation.navigate('ServicePreferences')}
+                      >
+                        <Text style={{ fontFamily: Typography.body.fontFamily, fontWeight: '300', fontSize: 14, color: '#fff', letterSpacing: -0.4 }}>
+                          Adjust Filters
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No services listed in your area yet</Text>
+                      <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
+                        Be the first to offer your services on SoundBridge.
+                      </Text>
+                      <TouchableOpacity
+                        style={{ marginTop: 12, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#DC2626', borderRadius: 20 }}
+                        onPress={() => navigation.navigate('ServiceProviderDashboard')}
+                      >
+                        <Text style={{ fontFamily: Typography.body.fontFamily, fontWeight: '300', fontSize: 14, color: '#fff', letterSpacing: -0.4 }}>
+                          Offer My Services
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
                 </View>
               )}
             </WalkthroughableView>

@@ -66,6 +66,13 @@ import type {
 } from '../types';
 
 import { SERVICE_CATEGORY_LABELS, getServiceCategoryLabel, formatServiceCategories } from '../utils/serviceCategoryLabels';
+import {
+  serviceDiscoveryService,
+  GigAlertPreferences,
+  DEFAULT_GIG_ALERT_PREFS,
+  SERVICE_CATEGORY_OPTIONS,
+} from '../services/ServiceDiscoveryService';
+import { Switch } from 'react-native';
 
 // Valid categories as per web app team confirmation (WEB_TEAM_SERVICE_CATEGORIES_RESPONSE.md)
 // Complete list of 9 categories - API will reject any other category
@@ -111,6 +118,10 @@ export default function ServiceProviderDashboardScreen() {
   } | null>(null);
   const [loadingEarnings, setLoadingEarnings] = useState(false);
   const [subscriptionTier, setSubscriptionTier] = useState<'free' | 'premium' | 'unlimited'>('free');
+
+  // Gig alert preferences
+  const [gigAlertPrefs, setGigAlertPrefs] = useState<GigAlertPreferences>(DEFAULT_GIG_ALERT_PREFS);
+  const [savingGigAlerts, setSavingGigAlerts] = useState(false);
 
   // Getting Started checklist state
   const [checklistBasicProfile, setChecklistBasicProfile] = useState<{
@@ -321,13 +332,18 @@ export default function ServiceProviderDashboardScreen() {
       console.log('User ID:', userId);
       console.log('Session exists:', !!session);
 
-      const [profileData, bookingsData, badgeData, verificationData, reviewsData] = await Promise.allSettled([
+      const [profileData, bookingsData, badgeData, verificationData, reviewsData, gigAlertData] = await Promise.allSettled([
         fetchServiceProviderProfile(userId, ['offerings', 'portfolio', 'reviews', 'availability'], { session }),
         fetchProviderBookings(userId, { session }),
         fetchBadgeInsights(userId, { session }),
         fetchVerificationStatus(userId, { session }),
         fetchProviderReviews(userId, { session }),
+        serviceDiscoveryService.getGigAlertPreferences(userId),
       ]);
+
+      if (gigAlertData.status === 'fulfilled' && gigAlertData.value) {
+        setGigAlertPrefs(gigAlertData.value);
+      }
 
       // Handle profile data
       if (profileData.status === 'fulfilled') {
@@ -1667,6 +1683,123 @@ export default function ServiceProviderDashboardScreen() {
   };
 
   // ============================================================================
+  // GIG ALERTS SECTION (Section 9)
+  // ============================================================================
+
+  const renderGigAlertsSection = () => {
+    const saveGigAlerts = async (updated: GigAlertPreferences) => {
+      setSavingGigAlerts(true);
+      await serviceDiscoveryService.saveGigAlertPreferences(userId, updated);
+      setSavingGigAlerts(false);
+    };
+
+    const toggleAlertCategory = (cat: string) => {
+      setGigAlertPrefs((prev) => {
+        const current = prev.alert_categories ?? [];
+        const next = current.includes(cat as any)
+          ? current.filter((c) => c !== cat)
+          : [...current, cat as any];
+        const updated = { ...prev, alert_categories: next.length > 0 ? next : null };
+        saveGigAlerts(updated);
+        return updated;
+      });
+    };
+
+    return (
+      <View style={[styles.sectionCard, { backgroundColor: theme.colors.cardBackground, borderColor: theme.colors.borderCard }]}>
+        <View style={[styles.sectionHeader, { marginBottom: 4 }]}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Gig Alerts</Text>
+          {savingGigAlerts && <ActivityIndicator size="small" color={theme.colors.primary} />}
+        </View>
+        <Text style={[styles.gigAlertsSubtitle, { color: theme.colors.textSecondary }]}>
+          Get notified when someone near you needs your services.
+        </Text>
+
+        {/* Master toggle */}
+        <View style={[styles.gigAlertRow, { borderBottomColor: theme.colors.border }]}>
+          <Text style={[styles.gigAlertLabel, { color: theme.colors.text }]}>Enable gig notifications</Text>
+          <Switch
+            value={gigAlertPrefs.gig_alerts_enabled}
+            onValueChange={(v) => {
+              const updated = { ...gigAlertPrefs, gig_alerts_enabled: v };
+              setGigAlertPrefs(updated);
+              saveGigAlerts(updated);
+            }}
+            trackColor={{ false: theme.colors.border, true: '#DC2626' }}
+            thumbColor="#fff"
+          />
+        </View>
+
+        {/* Category selection */}
+        {gigAlertPrefs.gig_alerts_enabled && (
+          <>
+            <Text style={[styles.gigAlertSectionLabel, { color: theme.colors.textSecondary }]}>
+              NOTIFY ME FOR
+            </Text>
+            <Text style={[styles.gigAlertHint, { color: theme.colors.textSecondary }]}>
+              Select categories. Leave all unselected for all gig types.
+            </Text>
+            <View style={styles.gigCategoryChips}>
+              {SERVICE_CATEGORY_OPTIONS.map(({ value, label }) => {
+                const selected = (gigAlertPrefs.alert_categories ?? []).includes(value as any);
+                return (
+                  <TouchableOpacity
+                    key={value}
+                    style={[
+                      styles.gigCategoryChip,
+                      {
+                        backgroundColor: selected ? '#DC2626' : theme.colors.surface,
+                        borderColor: selected ? '#DC2626' : theme.colors.border,
+                      },
+                    ]}
+                    onPress={() => toggleAlertCategory(value)}
+                  >
+                    <Text style={[styles.gigCategoryChipText, { color: selected ? '#fff' : theme.colors.text }]}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Availability */}
+            <Text style={[styles.gigAlertSectionLabel, { color: theme.colors.textSecondary, marginTop: 16 }]}>
+              AVAILABILITY
+            </Text>
+            {(
+              [
+                { value: 'available', label: 'Available now' },
+                { value: 'not_available', label: 'Not available' },
+              ] as const
+            ).map(({ value, label }) => (
+              <TouchableOpacity
+                key={value}
+                style={styles.availabilityRow}
+                onPress={() => {
+                  const updated = { ...gigAlertPrefs, availability_status: value };
+                  setGigAlertPrefs(updated);
+                  saveGigAlerts(updated);
+                }}
+              >
+                <View
+                  style={[
+                    styles.radioOuter,
+                    { borderColor: gigAlertPrefs.availability_status === value ? '#DC2626' : theme.colors.border },
+                  ]}
+                >
+                  {gigAlertPrefs.availability_status === value && (
+                    <View style={styles.radioInner} />
+                  )}
+                </View>
+                <Text style={[styles.availabilityLabel, { color: theme.colors.text }]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </>
+        )}
+      </View>
+    );
+  };
+
   // REVIEWS SECTION (Section 8)
   // ============================================================================
 
@@ -1857,6 +1990,9 @@ export default function ServiceProviderDashboardScreen() {
 
         {/* Section 8: Reviews */}
         {renderReviewsSection()}
+
+        {/* Section 9: Gig Alerts */}
+        {renderGigAlertsSection()}
       </ScrollView>
 
       {/* Currency Picker Modal */}
@@ -2078,6 +2214,82 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
+  },
+  // Gig Alerts Section
+  gigAlertsSubtitle: {
+    fontSize: 13,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  gigAlertRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 14,
+    marginBottom: 14,
+    borderBottomWidth: 1,
+  },
+  gigAlertLabel: {
+    fontSize: 15,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    flex: 1,
+  },
+  gigAlertSectionLabel: {
+    fontSize: 11,
+    fontWeight: '300',
+    letterSpacing: 1.2,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  gigAlertHint: {
+    fontSize: 12,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+    marginBottom: 10,
+  },
+  gigCategoryChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  gigCategoryChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+  gigCategoryChipText: {
+    fontSize: 12,
+    fontWeight: '300',
+    letterSpacing: -0.4,
+  },
+  availabilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  radioOuter: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#DC2626',
+  },
+  availabilityLabel: {
+    fontSize: 14,
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   editButton: {
     fontSize: 14,

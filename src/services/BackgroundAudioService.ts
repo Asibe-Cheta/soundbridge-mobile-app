@@ -26,15 +26,14 @@ interface AudioRestoreState {
 }
 
 // Pre-check NativeModules.TrackPlayerModule before requiring the package.
-// react-native-track-player's Capability.ts enum accesses TrackPlayerModule.CAPABILITY_PLAY
-// at module init time — if the native module is null (Expo Go, post-SIGABRT), Metro's
-// guardedLoadModule promotes it to a fatal error before our try/catch runs.
+// react-native-track-player calls `new NativeEventEmitter(TrackPlayerModule)` at
+// module init time — if the native module is null (Expo Go / missing native build),
+// Metro's guardedLoadModule promotes it to a fatal error BEFORE any JS try/catch runs.
+// Checking NativeModules.TrackPlayerModule first is a synchronous pre-init check that
+// prevents Metro from loading the module at all when the native side isn't present.
 function getTrackPlayer() {
-  // TrackPlayerModule has a TurboModule method-signature mismatch on Android —
-  // accessing NativeModules.TrackPlayerModule via the TurboModule proxy throws at
-  // JNI level before any JS try/catch can intercept it. Since USE_EXPO_AV is already
-  // true on Android, we simply skip TrackPlayer there entirely.
   if (Platform.OS !== 'ios') return null;
+  if (!NativeModules.TrackPlayerModule) return null;
   try {
     const TP = require('react-native-track-player').default;
     if (!TP || typeof TP.setupPlayer !== 'function') return null;
@@ -46,6 +45,7 @@ function getTrackPlayer() {
 
 function getTrackPlayerConstants() {
   if (Platform.OS !== 'ios') return null;
+  if (!NativeModules.TrackPlayerModule) return null;
   try {
     return require('react-native-track-player');
   } catch {

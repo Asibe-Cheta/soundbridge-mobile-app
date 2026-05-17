@@ -34,6 +34,12 @@ interface UserProfile {
   nudge_gig_post_dismissed?: boolean;
   nudge_collaborator_dismissed?: boolean;
   onboarding_user_type?: string;
+  genres?: string[];
+  fan_link_shared?: boolean;
+  fan_link_shared_at?: string | null;
+  fan_link_share_method?: 'link' | 'card' | null;
+  app_launch_count?: number;
+  teaser_last_shown_at_launch?: number;
 }
 
 interface AuthContextType {

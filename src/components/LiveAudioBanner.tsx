@@ -1,9 +1,9 @@
 import React, { useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable, Animated } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Animated, Easing } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Line, Path } from 'react-native-svg';
+import Svg, { Line, Path, Circle, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 import { SystemTypography as Typography } from '../constants/Typography';
 import { useNavigation } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
@@ -25,33 +25,99 @@ function PodMicSvg({ size, color, strokeWidth }: { size: number; color: string; 
   )
 }
 
-function PodMicIcon({ size = 48 }: { size?: number }) {
+function PodMicIcon({
+  size = 48,
+  glowOpacity,
+}: {
+  size?: number;
+  glowOpacity: Animated.Value;
+}) {
   return (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      {/* Outer pink glow layer */}
-      <View style={{
-        position: 'absolute',
-        shadowColor: PINK,
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 1,
-        shadowRadius: 18,
-        elevation: 20,
-      }}>
-        <PodMicSvg size={size} color={PINK} strokeWidth={10} />
-      </View>
-      {/* Mid pink glow layer */}
-      <View style={{
-        position: 'absolute',
-        shadowColor: PINK,
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.7,
-        shadowRadius: 8,
-        elevation: 10,
-      }}>
-        <PodMicSvg size={size} color={PINK} strokeWidth={9} />
-      </View>
-      {/* Sharp white icon on top */}
+      {/* Wide outer glow — thick pink stroke creates visible spread at any display size */}
+      <Animated.View style={{ position: 'absolute', opacity: glowOpacity }}>
+        <PodMicSvg size={size} color={PINK} strokeWidth={32} />
+      </Animated.View>
+      {/* Mid glow — tighter but still wide */}
+      <Animated.View style={{ position: 'absolute', opacity: glowOpacity }}>
+        <PodMicSvg size={size} color={PINK} strokeWidth={20} />
+      </Animated.View>
+      {/* Sharp white icon on top — always visible, never moves */}
       <PodMicSvg size={size} color="#ffffff" strokeWidth={8} />
+    </View>
+  )
+}
+
+// Circle circumference at r=11
+const RING_R = 11
+const RING_CIRC = 2 * Math.PI * RING_R
+
+function TravellingRingArrow() {
+  const rotateAnim = useRef(new Animated.Value(0)).current
+
+  useEffect(() => {
+    const runCycle = (onDone: () => void) => {
+      rotateAnim.setValue(0)
+      Animated.sequence([
+        // Slow sweep — 75% of circle in 1000ms
+        Animated.timing(rotateAnim, {
+          toValue: 0.75,
+          duration: 1000,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+        // Rocket to end — remaining 25% in 280ms
+        Animated.timing(rotateAnim, {
+          toValue: 1,
+          duration: 280,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => { if (finished) onDone() })
+    }
+
+    // Run exactly 3 cycles then stop
+    runCycle(() => runCycle(() => runCycle(() => {})))
+  }, [])
+
+  const spin = rotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  })
+
+  return (
+    <View style={styles.arrowCircle}>
+      {/* Static dim background ring */}
+      <Svg width={24} height={24} style={{ position: 'absolute' }}>
+        <Circle
+          cx={12} cy={12} r={RING_R}
+          fill="none"
+          stroke="rgba(255,255,255,0.18)"
+          strokeWidth={1}
+        />
+      </Svg>
+      {/* Rotating gradient arc */}
+      <Animated.View style={{ position: 'absolute', width: 24, height: 24, transform: [{ rotate: spin }] }}>
+        <Svg width={24} height={24}>
+          <Defs>
+            <SvgLinearGradient id="liveRing" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%"   stopColor="#EC4899" stopOpacity={1} />
+              <Stop offset="33%"  stopColor="#FFFFFF"  stopOpacity={1} />
+              <Stop offset="66%"  stopColor="#EF4444"  stopOpacity={1} />
+              <Stop offset="100%" stopColor="#3B82F6"  stopOpacity={1} />
+            </SvgLinearGradient>
+          </Defs>
+          <Circle
+            cx={12} cy={12} r={RING_R}
+            fill="none"
+            stroke="url(#liveRing)"
+            strokeWidth={1.5}
+            strokeDasharray={`${RING_CIRC * 0.55} ${RING_CIRC * 0.45}`}
+            strokeLinecap="round"
+          />
+        </Svg>
+      </Animated.View>
+      <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
     </View>
   )
 }
@@ -92,6 +158,9 @@ export default function LiveAudioBanner({ onPress }: LiveAudioBannerProps) {
 
   // --- Live dot glow ring (opacity) ---
   const glowAnim = useRef(new Animated.Value(0)).current
+
+  // --- Mic neon glow opacity (0 = invisible, 0.85 = full neon) ---
+  const micGlowAnim = useRef(new Animated.Value(0)).current
 
   // --- Press scale ---
   const scaleAnim = useRef(new Animated.Value(1)).current
@@ -138,10 +207,20 @@ export default function LiveAudioBanner({ onPress }: LiveAudioBannerProps) {
     )
     glow.start()
 
+    // Mic neon glow — 0 → 0.85 → 0, clear visible pulse
+    const micGlow = Animated.loop(
+      Animated.sequence([
+        Animated.timing(micGlowAnim, { toValue: 0.85, duration: 1500, useNativeDriver: true }),
+        Animated.timing(micGlowAnim, { toValue: 0, duration: 1500, useNativeDriver: true }),
+      ])
+    )
+    micGlow.start()
+
     return () => {
       barLoops.forEach(l => l.stop())
       pulse.stop()
       glow.stop()
+      micGlow.stop()
     }
   }, [])
 
@@ -217,7 +296,7 @@ export default function LiveAudioBanner({ onPress }: LiveAudioBannerProps) {
           <Animated.View style={{ transform: [{ translateX: slideAnim }] }}>
           {/* Header: icon + live dot */}
           <View style={styles.header}>
-            <PodMicIcon size={40} />
+            <PodMicIcon size={40} glowOpacity={micGlowAnim} />
 
             {/* Live indicator with glow ring */}
             <View style={styles.livePulseWrapper}>
@@ -250,9 +329,7 @@ export default function LiveAudioBanner({ onPress }: LiveAudioBannerProps) {
                 </Text>
                 <View style={styles.button}>
                   <Text style={styles.buttonText}>Explore Live Rooms</Text>
-                  <View style={styles.arrowCircle}>
-                    <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
-                  </View>
+                  <TravellingRingArrow />
                 </View>
               </View>
             </BlurView>

@@ -112,8 +112,8 @@ export default function CreatorProfileScreen() {
   // Debug route params
   console.log('🔍 Route params:', route.params);
   
-  const params = route.params as { creatorId?: string; creator?: Creator } || {};
-  const { creatorId, creator: initialCreator } = params;
+  const params = route.params as { creatorId?: string; creator?: Creator; fromFanLanding?: boolean } || {};
+  const { creatorId, creator: initialCreator, fromFanLanding } = params;
   
   console.log('🔍 Extracted creatorId:', creatorId);
   console.log('🔍 Extracted initialCreator:', initialCreator);
@@ -203,6 +203,9 @@ export default function CreatorProfileScreen() {
   // QR code modal
   const [showQRModal, setShowQRModal] = useState(false);
 
+  // Fan landing page welcome prompt
+  const [showFanWelcome, setShowFanWelcome] = useState(false);
+
   const isOwnProfile = user?.id === creatorId;
   const { branding } = useBranding(creatorId);
 
@@ -224,6 +227,15 @@ export default function CreatorProfileScreen() {
     loadExternalLinks();
     loadCreatorProfessionalProfile();
   }, [creatorId]);
+
+  // Show welcome prompt for fans arriving via the artist fan landing page
+  useEffect(() => {
+    if (fromFanLanding && user?.id && !isOwnProfile) {
+      const timer = setTimeout(() => setShowFanWelcome(true), 800);
+      deepLinkingService.consumeDeferredArtistLink().catch(() => {});
+      return () => clearTimeout(timer);
+    }
+  }, [fromFanLanding, user?.id, isOwnProfile]);
 
   useEffect(() => {
     if (!loading) {
@@ -1996,12 +2008,120 @@ export default function CreatorProfileScreen() {
         onDontShowAgain={handleDontShowAgain}
       />
 
+      {/* Fan Landing Welcome Prompt */}
+      <Modal visible={showFanWelcome} animationType="fade" transparent statusBarTranslucent>
+        <View style={styles.fanWelcomeOverlay}>
+          <LinearGradient
+            colors={['rgba(124,58,237,0.18)', 'rgba(167,139,250,0.10)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.fanWelcomeCard, { borderColor: 'rgba(124,58,237,0.35)' }]}
+          >
+            <View style={styles.fanWelcomeGlow} />
+            <View style={styles.fanWelcomeBody}>
+              <Text style={styles.fanWelcomeTitle}>
+                You're now connected with {creator?.display_name || 'this artist'} on SoundBridge
+              </Text>
+              <Text style={styles.fanWelcomeSubtitle}>
+                Follow them to get notified about their music and events.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.fanWelcomeFollowBtn}
+              onPress={() => { setShowFanWelcome(false); if (!isFollowing) handleFollow(); }}
+              activeOpacity={0.85}
+            >
+              <LinearGradient
+                colors={['#7C3AED', '#A855F7']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.fanWelcomeFollowGradient}
+              >
+                <Ionicons name="person-add-outline" size={17} color="#FFF" />
+                <Text style={styles.fanWelcomeFollowText}>
+                  {isFollowing ? 'Following' : `Follow ${creator?.display_name || 'Artist'}`}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowFanWelcome(false)} style={styles.fanWelcomeDismiss}>
+              <Text style={styles.fanWelcomeDismissText}>Maybe later</Text>
+            </TouchableOpacity>
+          </LinearGradient>
+        </View>
+      </Modal>
+
       </SafeAreaView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // Fan landing welcome prompt
+  fanWelcomeOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
+    paddingBottom: 32,
+    paddingHorizontal: 16,
+  },
+  fanWelcomeCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: 'hidden',
+    paddingTop: 28,
+    paddingBottom: 24,
+    paddingHorizontal: 24,
+  },
+  fanWelcomeGlow: {
+    position: 'absolute',
+    top: -60,
+    left: '25%',
+    width: '50%',
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(124,58,237,0.22)',
+  },
+  fanWelcomeBody: {
+    marginBottom: 24,
+  },
+  fanWelcomeTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 8,
+    lineHeight: 25,
+  },
+  fanWelcomeSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.7)',
+    lineHeight: 20,
+  },
+  fanWelcomeFollowBtn: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  fanWelcomeFollowGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+  },
+  fanWelcomeFollowText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  fanWelcomeDismiss: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  fanWelcomeDismissText: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.45)',
+  },
   container: {
     flex: 1,
   },
