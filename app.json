@@ -108,6 +108,20 @@
     },
     "plugins": [
       [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          },
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "minSdkVersion": 24,
+            "kotlinVersion": "2.1.20"
+          }
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "SoundBridge needs access to your photos to upload images for posts and profile pictures.",
@@ -130,7 +144,8 @@
       "expo-font",
       "expo-apple-authentication",
       "expo-asset",
-      "expo-audio"
+      "expo-audio",
+      "./plugins/withTrackPlayerFix"
     ]
   }
 }
