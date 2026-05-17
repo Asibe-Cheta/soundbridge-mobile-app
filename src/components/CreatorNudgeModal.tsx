@@ -11,18 +11,22 @@ import {
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import QRCode from 'react-native-qrcode-svg';
 import { useTheme } from '../contexts/ThemeContext';
 
 interface Props {
   visible: boolean;
+  username: string;
   onShareLink: () => void;
   onShareCard: () => void;
   onMaybeLater: () => void;
 }
 
-export default function CreatorNudgeModal({ visible, onShareLink, onShareCard, onMaybeLater }: Props) {
+export default function CreatorNudgeModal({ visible, username, onShareLink, onShareCard, onMaybeLater }: Props) {
   const { theme } = useTheme();
   const isDark = theme.isDark;
+
+  const fanUrl = `https://soundbridge.live/${username}/home`;
 
   return (
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onMaybeLater}>
@@ -51,32 +55,23 @@ export default function CreatorNudgeModal({ visible, onShareLink, onShareCard, o
             style={styles.topStrip}
           />
 
-          {/* Icon */}
-          <View style={styles.iconWrap}>
-            <LinearGradient
-              colors={['#4facfe', '#7c3aed']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.iconGrad}
-            >
-              <Ionicons name="people" size={26} color="#fff" />
-            </LinearGradient>
+          {/* QR code */}
+          <View style={[styles.qrWrap, { backgroundColor: '#ffffff' }]}>
+            <QRCode value={fanUrl} size={72} backgroundColor="#ffffff" color="#111111" />
           </View>
 
           {/* Headline */}
           <Text style={[styles.headline, { color: theme.colors.text }]}>
-            Your audience is waiting for you.
+            Share your Identity Card
           </Text>
 
           {/* Body */}
           <Text style={[styles.body, { color: theme.colors.textSecondary }]}>
-            Share your SoundBridge home and let your audience discover your content, support you
-            directly, and stay connected with everything you do. One share is all it takes.
+            Anyone can join your community by tapping this card or scanning the QR code.
           </Text>
 
           {/* Action buttons */}
           <View style={styles.btnRow}>
-            {/* Share My Link */}
             <TouchableOpacity
               style={[styles.btn, { borderColor: isDark ? 'rgba(79,172,254,0.4)' : 'rgba(79,172,254,0.6)' }]}
               onPress={onShareLink}
@@ -86,12 +81,7 @@ export default function CreatorNudgeModal({ visible, onShareLink, onShareCard, o
               <Text style={[styles.btnText, { color: theme.colors.text }]}>Share My Link</Text>
             </TouchableOpacity>
 
-            {/* Share My Card */}
-            <TouchableOpacity
-              style={styles.btn}
-              onPress={onShareCard}
-              activeOpacity={0.82}
-            >
+            <TouchableOpacity style={styles.btn} onPress={onShareCard} activeOpacity={0.82}>
               <LinearGradient
                 colors={['#4facfe', '#7c3aed', '#ec4899']}
                 start={{ x: 0, y: 0 }}
@@ -103,7 +93,6 @@ export default function CreatorNudgeModal({ visible, onShareLink, onShareCard, o
             </TouchableOpacity>
           </View>
 
-          {/* Maybe later */}
           <TouchableOpacity style={styles.laterBtn} onPress={onMaybeLater} activeOpacity={0.6}>
             <Text style={[styles.laterText, { color: theme.colors.textSecondary }]}>Maybe later</Text>
           </TouchableOpacity>
@@ -129,20 +118,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingBottom: 28,
   },
-  topStrip: {
-    height: 4,
-    width: '100%',
-  },
-  iconWrap: {
-    marginTop: 28,
-    marginBottom: 16,
-  },
-  iconGrad: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
+  topStrip: { height: 4, width: '100%' },
+  qrWrap: {
+    marginTop: 24,
+    padding: 10,
+    borderRadius: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 4,
   },
   headline: {
     fontSize: 19,
@@ -150,14 +135,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 24,
     lineHeight: 26,
+    marginTop: 16,
   },
   body: {
     fontSize: 14,
     lineHeight: 21,
     textAlign: 'center',
     paddingHorizontal: 24,
-    marginTop: 10,
-    marginBottom: 24,
+    marginTop: 8,
+    marginBottom: 22,
   },
   btnRow: {
     flexDirection: 'row',
@@ -177,15 +163,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'transparent',
   },
-  btnText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  laterBtn: {
-    marginTop: 16,
-    paddingVertical: 4,
-  },
-  laterText: {
-    fontSize: 14,
-  },
+  btnText: { fontSize: 14, fontWeight: '700' },
+  laterBtn: { marginTop: 16, paddingVertical: 4 },
+  laterText: { fontSize: 14 },
 });

@@ -147,6 +147,7 @@ export default function ProfileScreen() {
   const [showShareCardModal, setShowShareCardModal] = useState(false);
   const [showNudgeModal, setShowNudgeModal] = useState(false);
   const [nudgeDismissedThisSession, setNudgeDismissedThisSession] = useState(false);
+  const [followerAvatars, setFollowerAvatars] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [editingProfile, setEditingProfile] = useState<Partial<UserProfile>>({});
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -558,6 +559,24 @@ export default function ProfileScreen() {
           created_at: profileData.created_at,
         };
         setProfile(profileObj);
+
+        // Fetch follower avatars for the identity card (fire-and-forget, non-blocking)
+        if (profileData.is_creator) {
+          supabase
+            .from('follows')
+            .select('follower:profiles!follower_id(avatar_url)')
+            .eq('following_id', user.id)
+            .limit(8)
+            .then(({ data }) => {
+              if (data) {
+                setFollowerAvatars(
+                  (data as any[])
+                    .map((r) => r.follower?.avatar_url)
+                    .filter(Boolean)
+                );
+              }
+            });
+        }
       } else {
         console.error('Failed to load profile:', results.profile?.error);
         // Fallback to basic user data
@@ -2396,6 +2415,7 @@ export default function ProfileScreen() {
         <>
           <CreatorNudgeModal
             visible={showNudgeModal}
+            username={profile.username}
             onShareLink={handleShareLink}
             onShareCard={handleNudgeShareCard}
             onMaybeLater={() => {
@@ -2410,6 +2430,7 @@ export default function ProfileScreen() {
             username={profile.username}
             avatarUrl={profile.avatar_url}
             genres={profile.genres}
+            followerAvatars={followerAvatars}
             onShared={() => handleMarkFanLinkShared('card')}
           />
         </>
