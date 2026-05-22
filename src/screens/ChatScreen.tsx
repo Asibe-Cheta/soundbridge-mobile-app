@@ -123,6 +123,7 @@ function getDisplayText(content: string): string {
   return content;
 }
 
+
 export default function ChatScreen({ navigation, route }: ChatScreenProps) {
   const { user, session } = useAuth();
   const { theme } = useTheme();

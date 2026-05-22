@@ -928,6 +928,18 @@ export default function AuthScreen() {
                       </Text>
                     </Text>
                   )}
+
+                  {!isSignUp && !isForgotPassword && (
+                    <Text style={[styles.signUpText, { marginTop: 16 }]}>
+                      Lost access?{' '}
+                      <Text
+                        style={styles.signUpLink}
+                        onPress={() => (navigation as any).navigate('CardRecovery')}
+                      >
+                        Recover with your SoundBridge card
+                      </Text>
+                    </Text>
+                  )}
                 </>
               )}
             </View>

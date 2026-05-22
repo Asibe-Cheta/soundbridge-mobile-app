@@ -2,6 +2,9 @@ import React from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, TouchableOpacity, Text, TextInput, Image } from 'react-native';
 import { useFonts, Inter_400Regular, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
+import { BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue';
+import { BarlowCondensed_400Regular, BarlowCondensed_400Regular_Italic } from '@expo-google-fonts/barlow-condensed';
+import { Cinzel_400Regular } from '@expo-google-fonts/cinzel';
 import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -24,6 +27,7 @@ const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
 // Import screens
 import SplashScreen from './src/screens/SplashScreen';
 import AuthScreen from './src/screens/AuthScreen';
+import CardRecoveryScreen from './src/screens/CardRecoveryScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import FeedScreen from './src/screens/FeedScreen';
 import DiscoverScreen from './src/screens/DiscoverScreen';
@@ -117,6 +121,8 @@ import PayoutInfoScreen from './src/screens/PayoutInfoScreen';
 import EventPromotionInfoScreen from './src/screens/EventPromotionInfoScreen';
 import ComingSoonScreen from './src/screens/ComingSoonScreen';
 import ServicePreferencesScreen from './src/screens/ServicePreferencesScreen';
+import ProResourcesScreen from './src/screens/ProResourcesScreen';
+import CourseDetailScreen from './src/screens/CourseDetailScreen';
 
 // Supabase client for launch-counter updates
 import { supabase } from './src/lib/supabase';
@@ -262,8 +268,15 @@ function MainTabs() {
             <GlobalSearchBar />
           </View>
 
-          {/* Right Icons - Notifications and Messages */}
+          {/* Right Icons - Pro Resources, Notifications and Messages */}
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('ProResources' as never)}
+              style={{ marginRight: 12 }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="school-outline" size={24} color={theme.colors.text} />
+            </TouchableOpacity>
             <NotificationBellButton size={24} color={theme.colors.text} />
             <TouchableOpacity
               onPress={() => navigation.navigate('Messages' as never)}
@@ -958,6 +971,7 @@ function AppNavigator() {
         {!user ? (
           <>
             <Stack.Screen name="Auth" component={AuthScreen} />
+            <Stack.Screen name="CardRecovery" component={CardRecoveryScreen} options={{ headerShown: false }} />
             <Stack.Screen 
               name="TwoFactorVerification" 
               component={TwoFactorVerificationScreen}
@@ -1082,6 +1096,8 @@ function AppNavigator() {
             <Stack.Screen name="EventPromotionInfo" component={EventPromotionInfoScreen} options={{ headerShown: false }} />
             <Stack.Screen name="ComingSoon" component={ComingSoonScreen} options={{ headerShown: false }} />
             <Stack.Screen name="ServicePreferences" component={ServicePreferencesScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="ProResources" component={ProResourcesScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="CourseDetail" component={CourseDetailScreen} options={{ headerShown: false }} />
             {/* Allow access to onboarding even after completion for testing */}
             <Stack.Screen name="OnboardingTest" component={OnboardingScreen} />
           </>
@@ -1139,6 +1155,10 @@ export default function App() {
     Inter_400Regular,
     Inter_600SemiBold,
     Inter_700Bold,
+    BebasNeue_400Regular,
+    BarlowCondensed_400Regular,
+    BarlowCondensed_400Regular_Italic,
+    Cinzel_400Regular,
   });
 
   // useFonts hangs indefinitely on some Android devices (expo/expo#17876).

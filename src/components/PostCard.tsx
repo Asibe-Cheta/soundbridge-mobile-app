@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable, Dimensions, Clipboard } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable, Dimensions, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import VerifiedAvatar from './VerifiedAvatar';
 import VerifiedBadge from './VerifiedBadge';
@@ -27,6 +27,34 @@ import { SystemTypography as Typography } from '../constants/Typography';
 
 // Create walkthroughable component for tour
 const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
+
+const URL_REGEX = /https?:\/\/[^\s<>"{}|\\^`[\]]+/gi;
+
+function renderTextWithLinks(content: string, linkColor: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  URL_REGEX.lastIndex = 0;
+  let match = URL_REGEX.exec(content);
+  while (match !== null) {
+    const url = match[0];
+    const start = match.index;
+    if (start > lastIndex) parts.push(content.slice(lastIndex, start));
+    parts.push(
+      <Text
+        key={start}
+        style={{ color: linkColor, textDecorationLine: 'underline' }}
+        onPress={() => Linking.openURL(url)}
+        suppressHighlighting
+      >
+        {url}
+      </Text>
+    );
+    lastIndex = start + url.length;
+    match = URL_REGEX.exec(content);
+  }
+  if (lastIndex < content.length) parts.push(content.slice(lastIndex));
+  return parts;
+}
 
 interface PostCardProps {
   post: Post;
@@ -110,7 +138,6 @@ const PostCard = memo(function PostCard({
   const [isConnecting, setIsConnecting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
-  const [showCopyMenu, setShowCopyMenu] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const handleReactionPress = (reactionType: 'support' | 'love' | 'fire' | 'congrats') => {
@@ -131,18 +158,6 @@ const PostCard = memo(function PostCard({
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
     }
-  };
-
-  // Long-press copy on post text
-  const handleTextLongPress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setShowCopyMenu(true);
-  };
-
-  const handleCopyText = () => {
-    Clipboard.setString(post.content);
-    showToast('Copied to clipboard', 'success');
-    setShowCopyMenu(false);
   };
 
   // Quick Support reaction (single tap)
@@ -481,10 +496,7 @@ const PostCard = memo(function PostCard({
             backgroundColor: theme.colors.card,
           },
         ]}
-        onPress={() => {
-          if (showCopyMenu) { setShowCopyMenu(false); return; }
-          onPress?.();
-        }}
+        onPress={() => onPress?.()}
         activeOpacity={0.95}
       >
         {/* Card Header - Redrop Indicator + Save and More buttons */}
@@ -522,34 +534,14 @@ const PostCard = memo(function PostCard({
 
       {/* Content Section - Only show for non-reposts OR reposts with comment */}
       {(!isRepost || (isRepost && post.content && post.content.trim().length > 0)) && (
-        <View style={[styles.contentSection, styles.contentSectionPositioned]}>
-
-          {/* Long-press copy popup — floats above the text */}
-          {showCopyMenu && (
-            <View style={styles.copyMenuWrapper} pointerEvents="box-none">
-              <View style={[styles.copyMenu, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-                <TouchableOpacity
-                  style={styles.copyMenuItem}
-                  onPress={handleCopyText}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="copy-outline" size={14} color={theme.colors.text} />
-                  <Text style={[styles.copyMenuLabel, { color: theme.colors.text }]}>Copy</Text>
-                </TouchableOpacity>
-              </View>
-              {/* Downward-pointing arrow: outer (border colour) + inner (fill colour) */}
-              <View style={[styles.copyMenuArrowOuter, { borderTopColor: theme.colors.border }]} />
-              <View style={[styles.copyMenuArrowInner, { borderTopColor: theme.colors.surface }]} />
-            </View>
-          )}
-
+        <View style={styles.contentSection}>
           <Text
             style={[styles.postContent, { color: theme.colors.text }]}
             numberOfLines={isExpanded ? undefined : 8}
             selectable
             selectionColor="#8B5CF640"
           >
-            {post.content}
+            {renderTextWithLinks(post.content, theme.colors.primary)}
           </Text>
           {post.content.length > 200 && (
             <TouchableOpacity onPress={() => setIsExpanded(prev => !prev)}>
@@ -1297,64 +1289,5 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
 
-  // ── Long-press copy menu ─────────────────────────────────
-  contentSectionPositioned: {
-    // Establishes a positioning context so the popup is anchored to this View.
-    // RN default is already 'relative', but explicit avoids surprises.
-    position: 'relative',
-    overflow: 'visible',
-  },
-  copyMenuWrapper: {
-    position: 'absolute',
-    // Sits 48px above the top of contentSection (menu ~36px + arrow 8px + 4px gap)
-    top: -48,
-    left: 0,
-    zIndex: 200,
-  },
-  copyMenu: {
-    borderRadius: 10,
-    borderWidth: 1,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
-    elevation: 12,
-  },
-  copyMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 9,
-    paddingHorizontal: 16,
-    gap: 8,
-  },
-  copyMenuLabel: {
-    ...Typography.button,
-    fontSize: 14,
-  },
-  // Outer triangle — rendered in border colour to create the outline
-  copyMenuArrowOuter: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 7,
-    borderRightWidth: 7,
-    borderTopWidth: 8,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    marginLeft: 16,
-  },
-  // Inner triangle — rendered in fill colour, 1px above outer, masks the interior
-  copyMenuArrowInner: {
-    position: 'absolute',
-    bottom: 1,
-    left: 17,
-    width: 0,
-    height: 0,
-    borderLeftWidth: 6,
-    borderRightWidth: 6,
-    borderTopWidth: 7,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-  },
 });
 

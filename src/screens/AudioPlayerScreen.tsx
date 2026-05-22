@@ -1758,7 +1758,7 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
               />
             ) : (
               <View style={[styles.albumArt, { justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)' }]}>
-                <Ionicons name="musical-notes" size={80} color="rgba(255,255,255,0.12)" />
+                <Ionicons name="musical-notes" size={96} color="rgba(255,255,255,0.12)" />
               </View>
             )}
             {/* Shine overlay */}
@@ -1900,8 +1900,8 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
                   <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.isDark ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.2)' }]} />
                   <LinearGradient colors={['rgba(255,255,255,0.35)', 'rgba(255,255,255,0.12)', 'transparent']} style={styles.glassHighlight} />
                   <View style={styles.miniPlayerContent}>
-                    <View style={styles.albumArtContainer}>
-                      <Image source={{ uri: currentTrack?.cover_image_url || currentTrack?.cover_art_url || currentTrack?.artwork_url || 'https://via.placeholder.com/56' }} style={styles.albumArt} />
+                    <View style={styles.miniAlbumArtContainer}>
+                      <Image source={{ uri: currentTrack?.cover_image_url || currentTrack?.cover_art_url || currentTrack?.artwork_url || 'https://via.placeholder.com/56' }} style={styles.miniAlbumArt} />
                     </View>
                     <View style={styles.songInfo}>
                       <Text style={styles.songTitle} numberOfLines={1}>{currentTrack?.title || 'Unknown Track'}</Text>
@@ -1915,8 +1915,8 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
               ) : (
                 <View style={[styles.miniPlayer, styles.miniPlayerAndroid]}>
                   <View style={styles.miniPlayerContent}>
-                    <View style={styles.albumArtContainer}>
-                      <Image source={{ uri: currentTrack?.cover_image_url || currentTrack?.cover_art_url || currentTrack?.artwork_url || 'https://via.placeholder.com/56' }} style={styles.albumArt} />
+                    <View style={styles.miniAlbumArtContainer}>
+                      <Image source={{ uri: currentTrack?.cover_image_url || currentTrack?.cover_art_url || currentTrack?.artwork_url || 'https://via.placeholder.com/56' }} style={styles.miniAlbumArt} />
                     </View>
                     <View style={styles.songInfo}>
                       <Text style={[styles.songTitle, { color: '#FFFFFF' }]} numberOfLines={1}>{currentTrack?.title || 'Unknown Track'}</Text>
@@ -2367,9 +2367,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   albumArtContainer: {
-    width: 192, // w-48 = 192px
-    height: 192,
-    borderRadius: 96,
+    width: 220,
+    height: 220,
+    borderRadius: 110,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
@@ -2387,7 +2387,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    borderRadius: 96,
+    borderRadius: 110,
   },
   timeLabel: {
     position: 'absolute',
@@ -2834,10 +2834,10 @@ const styles = StyleSheet.create({
     gap: 12,
     zIndex: 2,                  // Above highlight
   },
-  albumArtContainer: {
-    width: 48,                  // Apple Music mini-player artwork size
+  miniAlbumArtContainer: {
+    width: 48,
     height: 48,
-    borderRadius: 6,            // iOS 26 style rounded corners
+    borderRadius: 6,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -2845,7 +2845,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 4,
   },
-  albumArt: {
+  miniAlbumArt: {
     width: '100%',
     height: '100%',
   },

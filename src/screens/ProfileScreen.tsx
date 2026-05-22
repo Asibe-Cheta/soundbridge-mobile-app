@@ -84,7 +84,7 @@ interface UserProfile {
   followers_count: number;
   following_count: number;
   tracks_count: number;
-  is_creator: boolean;
+  role: string;
   is_verified: boolean;
   early_adopter?: boolean;
   rating_avg?: number | null;
@@ -190,11 +190,11 @@ export default function ProfileScreen() {
   // Show nudge when creator navigates to their own profile, once per session
   useFocusEffect(
     useCallback(() => {
-      if (profile?.is_creator && !userProfile?.fan_link_shared && !nudgeDismissedThisSession) {
+      if (profile?.role === 'creator' && !userProfile?.fan_link_shared && !nudgeDismissedThisSession) {
         const timer = setTimeout(() => setShowNudgeModal(true), 700);
         return () => clearTimeout(timer);
       }
-    }, [profile?.is_creator, userProfile?.fan_link_shared, nudgeDismissedThisSession]),
+    }, [profile?.role === 'creator', userProfile?.fan_link_shared, nudgeDismissedThisSession]),
   );
 
   const handleMarkFanLinkShared = async (method: 'link' | 'card') => {
@@ -551,7 +551,7 @@ export default function ProfileScreen() {
           followers_count: followersCount,
           following_count: followingCount,
           tracks_count: tracksCount,
-          is_creator: profileData.is_creator || false,
+          role: profileData.role || '',
           is_verified: profileData.is_verified || false,
           early_adopter: profileData.early_adopter || false,
           rating_avg: profileData.rating_avg ?? null,
@@ -561,7 +561,7 @@ export default function ProfileScreen() {
         setProfile(profileObj);
 
         // Fetch follower avatars for the identity card (fire-and-forget, non-blocking)
-        if (profileData.is_creator) {
+        if (profileData.role === 'creator') {
           supabase
             .from('follows')
             .select('follower:profiles!follower_id(avatar_url)')
@@ -590,7 +590,7 @@ export default function ProfileScreen() {
           followers_count: followersCount,
           following_count: followingCount,
           tracks_count: tracksCount,
-          is_creator: false,
+          role: '',
           is_verified: false,
           created_at: new Date().toISOString(),
         };
@@ -868,7 +868,7 @@ export default function ProfileScreen() {
         followers_count: 0,
         following_count: 0,
         tracks_count: 0,
-        is_creator: false,
+        role: '',
         is_verified: false,
         created_at: new Date().toISOString(),
       };
@@ -2139,10 +2139,10 @@ export default function ProfileScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.headerButton}
-                    onPress={() => profile?.is_creator ? setShowShareCardModal(true) : setShowQRModal(true)}
+                    onPress={() => profile?.role === 'creator' ? setShowShareCardModal(true) : setShowQRModal(true)}
                   >
                     <Ionicons
-                      name={profile?.is_creator ? 'card-outline' : 'qr-code-outline'}
+                      name={profile?.role === 'creator' ? 'card-outline' : 'qr-code-outline'}
                       size={24}
                       color={theme.colors.text}
                     />
@@ -2262,6 +2262,13 @@ export default function ProfileScreen() {
                       multiline
                       numberOfLines={3}
                     />
+                    <TextInput
+                      style={[styles.editInputOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)', color: '#FFFFFF' }]}
+                      value={editingProfile.location}
+                      onChangeText={(text) => setEditingProfile(prev => ({ ...prev, location: text }))}
+                      placeholder="Location (e.g., Lagos, Nigeria)"
+                      placeholderTextColor="rgba(255, 255, 255, 0.7)"
+                    />
                   </>
                 ) : (
                   <>
@@ -2281,6 +2288,12 @@ export default function ProfileScreen() {
                     )}
                     {profile?.bio && (
                       <Text style={styles.bioOverlay}>{profile.bio}</Text>
+                    )}
+                    {profile?.location && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                        <Ionicons name="location-outline" size={12} color="rgba(255,255,255,0.8)" />
+                        <Text style={[styles.bioOverlay, { marginTop: 0, marginLeft: 3 }]}>{profile.location}</Text>
+                      </View>
                     )}
                     {/* External Portfolio Links */}
                     {!isEditing && externalLinks.length > 0 && (
@@ -2411,7 +2424,7 @@ export default function ProfileScreen() {
         />
       )}
 
-      {profile?.is_creator && (
+      {profile?.role === 'creator' && (
         <>
           <CreatorNudgeModal
             visible={showNudgeModal}
@@ -2428,9 +2441,12 @@ export default function ProfileScreen() {
             onClose={() => setShowShareCardModal(false)}
             creatorName={profile.display_name}
             username={profile.username}
-            avatarUrl={profile.avatar_url}
-            genres={profile.genres}
-            followerAvatars={followerAvatars}
+            userId={user?.id}
+            avatarUrl={profile.card_photo_url ?? profile.avatar_url ?? undefined}
+            bio={profile.bio}
+            headline={profile.professional_headline}
+            role={profile.role}
+            session={session}
             onShared={() => handleMarkFanLinkShared('card')}
           />
         </>

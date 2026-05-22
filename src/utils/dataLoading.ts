@@ -17,9 +17,9 @@ interface QueryOptions {
  * Usage: await withQueryTimeout(supabase.from('table').select(), { timeout: 5000 })
  */
 export async function withQueryTimeout<T>(
-  queryPromise: Promise<{ data: T | null; error: any }>,
+  queryPromise: PromiseLike<{ data: T | null; error: any; count?: number | null }>,
   options: QueryOptions = {}
-): Promise<{ data: T | null; error: any; timedOut?: boolean }> {
+): Promise<{ data: T | null; error: any; count?: number | null; timedOut?: boolean }> {
   const {
     timeout = 8000, // 8 seconds default
     fallback = null,
@@ -42,7 +42,7 @@ export async function withQueryTimeout<T>(
       
       // If we got a result, return it
       if ('data' in result || 'error' in result) {
-        return result as { data: T | null; error: any };
+        return result;
       }
     } catch (error: any) {
       lastError = error;
@@ -111,8 +111,7 @@ export async function loadQueriesInParallel<T extends Record<string, any>>(
   // Convert array of results to object keyed by name
   const dataObject: any = {};
   results.forEach((result, index) => {
-    const { key } = queryEntries[index][1];
-    const finalKey = key || queryEntries[index][0];
+    const finalKey = queryEntries[index][0];
     
     if (result.status === 'fulfilled') {
       dataObject[finalKey] = result.value.data;

@@ -61,6 +61,11 @@ export interface Database {
           avatar_border_color: string | null
           avatar_border_gradient_start: string | null
           avatar_border_gradient_end: string | null
+          professional_headline: string | null
+          card_photo_url: string | null
+          card_generations_this_month: number | null
+          card_generations_lifetime: number | null
+          card_generation_month: string | null
           created_at: string
           updated_at: string | null
         }
@@ -93,6 +98,11 @@ export interface Database {
           subscription_amount?: number | null
           subscription_currency?: string | null
           early_adopter?: boolean | null
+          professional_headline?: string | null
+          card_photo_url?: string | null
+          card_generations_this_month?: number | null
+          card_generations_lifetime?: number | null
+          card_generation_month?: string | null
           created_at?: string
           updated_at?: string | null
         }
@@ -143,6 +153,11 @@ export interface Database {
           avatar_border_color?: string | null
           avatar_border_gradient_start?: string | null
           avatar_border_gradient_end?: string | null
+          professional_headline?: string | null
+          card_photo_url?: string | null
+          card_generations_this_month?: number | null
+          card_generations_lifetime?: number | null
+          card_generation_month?: string | null
           created_at?: string
           updated_at?: string | null
         }

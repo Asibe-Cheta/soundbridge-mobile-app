@@ -19,6 +19,9 @@
     "ota:preview": "EAS_SKIP_AUTO_FINGERPRINT=1 eas update --channel preview --non-interactive"
   },
   "dependencies": {
+    "@expo-google-fonts/barlow-condensed": "^0.4.1",
+    "@expo-google-fonts/bebas-neue": "^0.4.1",
+    "@expo-google-fonts/cinzel": "^0.4.2",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/cli": "^54.0.16",
     "@expo/config-plugins": "~54.0.4",
@@ -45,6 +48,7 @@
     "expo-background-fetch": "~14.0.8",
     "expo-blur": "^15.0.7",
     "expo-build-properties": "~1.0.10",
+    "expo-camera": "^55.0.18",
     "expo-constants": "~18.0.9",
     "expo-crypto": "~15.0.7",
     "expo-dev-client": "~6.0.18",
@@ -71,6 +75,7 @@
     "expo-task-manager": "~14.0.8",
     "expo-updates": "~29.0.16",
     "expo-web-browser": "~15.0.9",
+    "ffmpeg-kit-react-native": "^6.0.2",
     "has-tostringtag": "^1.0.2",
     "json5": "^2.2.3",
     "mime-db": "^1.54.0",

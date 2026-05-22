@@ -445,9 +445,32 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
         handleTrackFinishedRef.current();
       });
 
+      // When RNTP native layer skips to a different track (lock-screen Next/Previous),
+      // update the React currentTrack so the UI stays in sync.
+      backgroundAudioService.setRemoteTrackChangedCallback((bgTrack) => {
+        const match = queueRef.current.find(t => t.id === bgTrack.id);
+        if (match) {
+          setCurrentTrack(match);
+        } else {
+          setCurrentTrack({
+            id: bgTrack.id,
+            title: bgTrack.title,
+            audio_url: bgTrack.url,
+            file_url: bgTrack.url,
+            cover_image_url: bgTrack.artwork,
+            duration: bgTrack.duration,
+            created_at: new Date().toISOString(),
+            creator: { id: '', username: bgTrack.artist, display_name: bgTrack.artist },
+          });
+        }
+        setPosition(0);
+        setIsPlaying(true);
+      });
+
       statusUnsubscribeRef.current = () => {
         unsubscribe();
         backgroundAudioService.clearOnTrackFinished();
+        backgroundAudioService.clearRemoteTrackChangedCallback();
       };
 
       // Start polling as fallback for position/duration
@@ -456,9 +479,33 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       // Increment play count immediately (optimistic)
       incrementPlayCount(track.id);
 
+      // Build native queue from JS queue so lock-screen skip buttons work end-to-end.
+      // Only tracks with a valid URL are loaded; tracks without URLs are skipped.
+      const jsQueue = queueRef.current;
+      const bgQueueTracks: BackgroundAudioTrack[] | undefined = jsQueue.length > 0
+        ? jsQueue
+            .map(t => ({
+              id: t.id,
+              title: t.title,
+              artist: t.creator?.display_name || t.creator?.username || (t as any).artist_name || 'Unknown Artist',
+              url: t.file_url || t.audio_url || '',
+              artwork: t.cover_image_url,
+              duration: t.duration,
+              creatorId: t.creator?.id || (t as any).creator_id || '',
+            }))
+            .filter(t => !!t.url)
+        : undefined;
+      const nativeQueueIndex = bgQueueTracks
+        ? bgQueueTracks.findIndex(t => t.id === track.id)
+        : 0;
+
       // Kick off native audio in the background — don't await so that a hanging
       // TrackPlayer call (e.g. post-SIGABRT) never blocks the UI update above.
-      backgroundAudioService.playTrack(backgroundTrack).catch((err) => {
+      backgroundAudioService.playTrack(
+        backgroundTrack,
+        bgQueueTracks,
+        nativeQueueIndex >= 0 ? nativeQueueIndex : 0
+      ).catch((err) => {
         console.warn('Background audio service failed:', err);
       });
 
@@ -734,12 +781,10 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
 
   const toggleRepeat = () => {
     setRepeatMode(prev => {
-      // Cycle: off → all → one → off
-      if (prev === 'off') return 'all';
-      if (prev === 'all') return 'one';
-      return 'off';
+      const next: 'off' | 'all' | 'one' = prev === 'off' ? 'all' : prev === 'all' ? 'one' : 'off';
+      backgroundAudioService.setRepeatMode(next);
+      return next;
     });
-    console.log('Repeat mode cycled');
   };
 
   const toggleAutoPlay = () => {

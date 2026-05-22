@@ -86,6 +86,8 @@ class BackgroundAudioService {
   // Track reference saved at background time — survives even if PlaybackQueueEnded
   // fires spuriously in background and clears this.currentTrack.
   private _trackBeforeBackground: BackgroundAudioTrack | null = null;
+  // Called when RNTP native layer changes the active track (remote skip from lock screen).
+  private _onRemoteTrackChanged: ((track: BackgroundAudioTrack) => void) | null = null;
 
   constructor() {
     audioLog('TP_MODULE_AVAILABLE', {
@@ -319,7 +321,33 @@ class BackgroundAudioService {
         } catch {}
       }, 10000);
 
-      this.eventSubscriptions.push(stateSub, endSub, errSub, progressSub);
+      // Fires when RNTP native layer changes the active track — happens on remote skip
+      // (lock-screen Next/Previous) when the full queue is loaded into RNTP.
+      // We skip the event when the new track ID matches our own currentTrack (i.e. the
+      // event was triggered by our own playTrack() call, not a remote action).
+      const trackChangeSub = TrackPlayer.addEventListener(
+        Event.PlaybackActiveTrackChanged,
+        ({ track: newTrack }: { track: any }) => {
+          if (!newTrack) return;
+          if (newTrack.id === this.currentTrack?.id) return;
+          audioLog('TP_ACTIVE_TRACK_CHANGED', { title: newTrack.title });
+          this.currentTrack = {
+            id: newTrack.id,
+            title: newTrack.title,
+            artist: newTrack.artist || '',
+            url: newTrack.url,
+            artwork: newTrack.artwork,
+            duration: newTrack.duration,
+          };
+          this.position = 0;
+          this.duration = newTrack.duration || 0;
+          this._persistState();
+          this.notifyCallbacks();
+          if (this._onRemoteTrackChanged) this._onRemoteTrackChanged(this.currentTrack);
+        }
+      );
+
+      this.eventSubscriptions.push(stateSub, endSub, errSub, progressSub, trackChangeSub);
 
       this.isInitialized = true;
       audioLog('TP_INIT_OK');
@@ -346,7 +374,7 @@ class BackgroundAudioService {
     }
   }
 
-  async playTrack(track: BackgroundAudioTrack) {
+  async playTrack(track: BackgroundAudioTrack, queue?: BackgroundAudioTrack[], queueIndex?: number) {
     this._resumeGeneration++;
     this._userPaused = false;
     audioLog('PLAY_TRACK', { title: track.title });
@@ -371,17 +399,33 @@ class BackgroundAudioService {
     try {
       await this.initialize();
       await TrackPlayer.reset();
-      await TrackPlayer.add({
-        id: track.id,
-        url: track.url,
-        title: track.title,
-        artist: track.artist,
-        artwork: track.artwork,
-        duration: track.duration,
-      });
+      if (queue && queue.length > 1) {
+        // Load full queue so lock-screen skip buttons actually move between tracks.
+        for (const t of queue) {
+          await TrackPlayer.add({
+            id: t.id,
+            url: t.url,
+            title: t.title,
+            artist: t.artist,
+            artwork: t.artwork,
+            duration: t.duration,
+          });
+        }
+        const idx = queueIndex ?? 0;
+        if (idx > 0) await TrackPlayer.skip(idx);
+      } else {
+        await TrackPlayer.add({
+          id: track.id,
+          url: track.url,
+          title: track.title,
+          artist: track.artist,
+          artwork: track.artwork,
+          duration: track.duration,
+        });
+      }
       await TrackPlayer.play();
       this.isPlaying = true;
-      audioLog('TP_PLAY_OK', { title: track.title });
+      audioLog('TP_PLAY_OK', { title: track.title, queueSize: queue?.length ?? 1, queueIndex });
     } catch (error) {
       audioLog('TP_PLAY_ERR_FALLBACK', String(error));
       await this.playWithExpoAv(track);
@@ -555,6 +599,24 @@ class BackgroundAudioService {
 
   clearOnTrackFinished() {
     this.onTrackFinishedCallback = null;
+  }
+
+  setRemoteTrackChangedCallback(callback: (track: BackgroundAudioTrack) => void) {
+    this._onRemoteTrackChanged = callback;
+  }
+
+  clearRemoteTrackChangedCallback() {
+    this._onRemoteTrackChanged = null;
+  }
+
+  async setRepeatMode(mode: 'off' | 'all' | 'one') {
+    if (USE_EXPO_AV) return;
+    const TrackPlayer = getTrackPlayer();
+    const constants = getTrackPlayerConstants();
+    if (!TrackPlayer || !constants) return;
+    const { RepeatMode } = constants;
+    const native = mode === 'one' ? RepeatMode.Track : mode === 'all' ? RepeatMode.Queue : RepeatMode.Off;
+    try { await TrackPlayer.setRepeatMode(native); } catch {}
   }
 
   getCurrentTrack(): BackgroundAudioTrack | null {

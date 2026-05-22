@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Modal,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   TextInput,
   ScrollView,
   KeyboardAvoidingView,
@@ -23,11 +24,13 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as DocumentPicker from 'expo-document-picker';
+import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { feedService } from '../services/api/feedService';
 import type { PostType, PostVisibility, Post } from '../types/feed.types';
 import { SystemTypography as Typography } from '../constants/Typography';
+import AudioTrimmerModal from './AudioTrimmerModal';
 
 interface CreatePostModalProps {
   visible: boolean;
@@ -66,16 +69,29 @@ const MAX_IMAGES = 20;
 export default function CreatePostModal({ visible, onClose, onSubmit, editingPost }: CreatePostModalProps) {
   const { theme } = useTheme();
   const { userProfile } = useAuth();
+  const navigation = useNavigation();
+
   const [content, setContent] = useState('');
   const [postType, setPostType] = useState<PostType>('update');
   const [visibility, setVisibility] = useState<PostVisibility>('public');
   const [imageUris, setImageUris] = useState<string[]>([]);
   const [audioUri, setAudioUri] = useState<string | null>(null);
+  const [audioClipDuration, setAudioClipDuration] = useState<number | null>(null);
   const [compressingImages, setCompressingImages] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
   const [uploadingPost, setUploadingPost] = useState(false);
   const [showVisibilityPicker, setShowVisibilityPicker] = useState(false);
+
+  // Audio attachment options
+  const [showAudioOptions, setShowAudioOptions] = useState(false);
+  const [showTrimmer, setShowTrimmer] = useState(false);
+  const [pendingTrimUri, setPendingTrimUri] = useState<string | null>(null);
+  const [pendingTrimFileName, setPendingTrimFileName] = useState('');
+
+  const isPremiumOrUnlimited =
+    userProfile?.subscription_tier === 'premium' ||
+    userProfile?.subscription_tier === 'unlimited';
 
   // ── @mention refs ─────────────────────────────────────────
   const textInputRef = useRef<TextInput>(null);
@@ -117,12 +133,14 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
           : []
       );
       setAudioUri(editingPost.audio_url || null);
+      setAudioClipDuration(null);
     } else if (!editingPost && visible) {
       setContent('');
       setPostType('update');
       setVisibility('public');
       setImageUris([]);
       setAudioUri(null);
+      setAudioClipDuration(null);
     }
   }, [editingPost, visible]);
 
@@ -256,6 +274,7 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
       setContent('');
       setImageUris([]);
       setAudioUri(null);
+      setAudioClipDuration(null);
       setPostType('update');
       setVisibility('public');
       onClose();
@@ -328,13 +347,25 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
     setImageUris(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleAudioPress = async () => {
+  const handleAudioPress = () => {
+    if (audioUri) {
+      Alert.alert('Replace Audio', 'This will replace the current audio attachment.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Replace', onPress: () => setShowAudioOptions(true) },
+      ]);
+    } else {
+      setShowAudioOptions(true);
+    }
+  };
+
+  // Direct upload (existing behaviour — no trimmer)
+  const handleUploadClip = async () => {
+    setShowAudioOptions(false);
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['audio/*'],
         copyToCacheDirectory: true,
       });
-
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
         if (asset.size && asset.size > 10 * 1024 * 1024) {
@@ -342,11 +373,59 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
           return;
         }
         setAudioUri(asset.uri);
+        setAudioClipDuration(null);
       }
-    } catch (error) {
-      console.error('Error picking audio:', error);
+    } catch {
       Alert.alert('Error', 'Failed to pick audio file. Please try again.');
     }
+  };
+
+  // Trim from track — Premium/Unlimited only
+  const handleTrimOption = async () => {
+    if (!isPremiumOrUnlimited) {
+      setShowAudioOptions(false);
+      Alert.alert(
+        'Premium Feature',
+        'The audio trimmer is available on Premium and Unlimited plans.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          {
+            text: 'View plans',
+            onPress: () => {
+              onClose();
+              navigation.navigate('Upgrade' as never);
+            },
+          },
+        ]
+      );
+      return;
+    }
+    setShowAudioOptions(false);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['audio/*'],
+        copyToCacheDirectory: true,
+      });
+      if (!result.canceled && result.assets[0]) {
+        setPendingTrimUri(result.assets[0].uri);
+        setPendingTrimFileName(result.assets[0].name || 'Audio file');
+        setShowTrimmer(true);
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to pick audio file. Please try again.');
+    }
+  };
+
+  const handleTrimConfirm = (trimmedUri: string, durationSeconds: number) => {
+    setShowTrimmer(false);
+    setPendingTrimUri(null);
+    setAudioUri(trimmedUri);
+    setAudioClipDuration(durationSeconds);
+  };
+
+  const handleTrimCancel = () => {
+    setShowTrimmer(false);
+    setPendingTrimUri(null);
   };
 
   const handleEventPress = () => {
@@ -449,6 +528,7 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
   };
 
   return (
+    <>
     <Modal
       visible={visible}
       animationType="slide"
@@ -672,10 +752,12 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
                         <Ionicons name="musical-notes" size={24} color="#7C3AED" />
                         <View style={styles.audioInfo}>
                           <Text style={[styles.audioTitle, { color: theme.colors.text }]}>
-                            Audio Preview
+                            {audioClipDuration !== null ? 'Trimmed Clip' : 'Audio Preview'}
                           </Text>
                           <Text style={[styles.audioDuration, { color: theme.colors.textSecondary }]}>
-                            Ready to upload
+                            {audioClipDuration !== null
+                              ? `${audioClipDuration}s · Ready to upload`
+                              : 'Ready to upload'}
                           </Text>
                         </View>
                         <TouchableOpacity onPress={() => setAudioUri(null)}>
@@ -809,7 +891,87 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
           </KeyboardAvoidingView>
         </LinearGradient>
       </SafeAreaView>
+
+      {/* Audio options bottom sheet */}
+      <Modal
+        visible={showAudioOptions}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowAudioOptions(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowAudioOptions(false)}>
+          <View style={styles.audioOptionsOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.audioOptionsSheet, {
+                backgroundColor: theme.isDark ? '#1a1a2e' : '#fff',
+                borderColor: theme.colors.border,
+              }]}>
+                <Text style={[styles.audioOptionsTitle, { color: theme.colors.text }]}>Add Audio</Text>
+
+                {/* Upload a clip */}
+                <TouchableOpacity style={styles.audioOption} onPress={handleUploadClip} activeOpacity={0.7}>
+                  <View style={[styles.audioOptionIcon, { backgroundColor: 'rgba(124,58,237,0.1)' }]}>
+                    <Ionicons name="document-attach-outline" size={22} color="#7c3aed" />
+                  </View>
+                  <View style={styles.audioOptionInfo}>
+                    <Text style={[styles.audioOptionLabel, { color: theme.colors.text }]}>Upload a clip</Text>
+                    <Text style={[styles.audioOptionDesc, { color: theme.colors.textSecondary }]}>
+                      Choose a pre-trimmed audio file (max 10 MB)
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Trim from track */}
+                <TouchableOpacity style={styles.audioOption} onPress={handleTrimOption} activeOpacity={0.7}>
+                  <View style={[styles.audioOptionIcon, {
+                    backgroundColor: isPremiumOrUnlimited
+                      ? 'rgba(124,58,237,0.1)'
+                      : 'rgba(156,163,175,0.1)',
+                  }]}>
+                    <Ionicons
+                      name={isPremiumOrUnlimited ? 'cut-outline' : 'lock-closed-outline'}
+                      size={22}
+                      color={isPremiumOrUnlimited ? '#7c3aed' : theme.colors.textSecondary}
+                    />
+                  </View>
+                  <View style={styles.audioOptionInfo}>
+                    <View style={styles.audioOptionLabelRow}>
+                      <Text style={[styles.audioOptionLabel, {
+                        color: isPremiumOrUnlimited ? theme.colors.text : theme.colors.textSecondary,
+                      }]}>
+                        Trim from track
+                      </Text>
+                      {!isPremiumOrUnlimited && (
+                        <View style={styles.premiumTag}>
+                          <Text style={styles.premiumTagText}>Premium</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={[styles.audioOptionDesc, { color: theme.colors.textSecondary }]}>
+                      {isPremiumOrUnlimited
+                        ? 'Select exactly which 60 seconds to use'
+                        : 'Available on Premium and Unlimited plans'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </Modal>
+
+    {/* Audio trimmer — rendered outside the main Modal so it can present full screen */}
+    {showTrimmer && pendingTrimUri ? (
+      <AudioTrimmerModal
+        visible={showTrimmer}
+        audioUri={pendingTrimUri}
+        fileName={pendingTrimFileName}
+        onConfirm={handleTrimConfirm}
+        onCancel={handleTrimCancel}
+      />
+    ) : null}
+  </>
   );
 }
 
@@ -1127,5 +1289,67 @@ const styles = StyleSheet.create({
 
   bottomSpacer: {
     height: 80,
+  },
+
+  // ── Audio options modal ───────────────────────────────────
+  audioOptionsOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  audioOptionsSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    paddingHorizontal: 20,
+    paddingTop: 22,
+    paddingBottom: 44,
+  },
+  audioOptionsTitle: {
+    ...Typography.button,
+    fontSize: 17,
+    marginBottom: 16,
+  },
+  audioOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 14,
+  },
+  audioOptionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  audioOptionInfo: {
+    flex: 1,
+  },
+  audioOptionLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 3,
+  },
+  audioOptionLabel: {
+    ...Typography.button,
+    fontSize: 16,
+  },
+  audioOptionDesc: {
+    ...Typography.label,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  premiumTag: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+    backgroundColor: '#7c3aed',
+  },
+  premiumTagText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
   },
 });

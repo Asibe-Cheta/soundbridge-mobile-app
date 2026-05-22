@@ -1715,6 +1715,13 @@ function DiscoverScreen() {
             </TouchableOpacity>
               </View>
           <View style={styles.headerIcons}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('ProResources' as never)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={{ marginRight: 12 }}
+            >
+              <Ionicons name="school-outline" size={24} color={theme.isDark ? "white" : theme.colors.text} />
+            </TouchableOpacity>
             <NotificationBellButton size={24} color={theme.isDark ? "white" : theme.colors.text} />
             <TouchableOpacity onPress={() => navigation.navigate('Messages' as never)} style={{ marginLeft: 12 }}>
               <Ionicons name="chatbubbles-outline" size={24} color={theme.isDark ? "white" : theme.colors.text} />

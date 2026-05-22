@@ -1,5 +1,5 @@
 import React, { memo, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import VerifiedAvatar from './VerifiedAvatar';
 import VerifiedBadge from './VerifiedBadge';
@@ -15,6 +15,34 @@ interface RepostedPostCardProps {
   post: Post;
   onPress?: () => void;
   onAuthorPress?: (authorId: string) => void;
+}
+
+const URL_REGEX = /https?:\/\/[^\s<>"{}|\\^`[\]]+/gi;
+
+function renderTextWithLinks(content: string, linkColor: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  URL_REGEX.lastIndex = 0;
+  let match = URL_REGEX.exec(content);
+  while (match !== null) {
+    const url = match[0];
+    const start = match.index;
+    if (start > lastIndex) parts.push(content.slice(lastIndex, start));
+    parts.push(
+      <Text
+        key={start}
+        style={{ color: linkColor, textDecorationLine: 'underline' }}
+        onPress={() => Linking.openURL(url)}
+        suppressHighlighting
+      >
+        {url}
+      </Text>
+    );
+    lastIndex = start + url.length;
+    match = URL_REGEX.exec(content);
+  }
+  if (lastIndex < content.length) parts.push(content.slice(lastIndex));
+  return parts;
 }
 
 /**
@@ -219,10 +247,11 @@ export const RepostedPostCard = memo(function RepostedPostCard({
       >
 
       {/* Content */}
-      <Text style={[styles.content, { color: theme.colors.text }]}>
-        {isExpanded || !showSeeMore
-          ? post.content
-          : `${post.content.substring(0, CHAR_LIMIT)}...`}
+      <Text style={[styles.content, { color: theme.colors.text }]} selectable selectionColor="#8B5CF640">
+        {renderTextWithLinks(
+          isExpanded || !showSeeMore ? post.content : `${post.content.substring(0, CHAR_LIMIT)}...`,
+          theme.colors.primary,
+        )}
       </Text>
 
       {/* See More Button */}
