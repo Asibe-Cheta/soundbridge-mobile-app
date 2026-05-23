@@ -71,15 +71,18 @@ module.exports = async function () {
   TrackPlayer.addEventListener(Event.RemoteDuck, async ({ paused, permanent }: { paused: boolean; permanent: boolean }) => {
     headlessLog('RemoteDuck', { paused, permanent });
     if (permanent) {
-      // Permanent interruption (phone call ending session) — pause fully.
-      await TrackPlayer.pause();
+      // iOS sometimes incorrectly fires permanent=true (AVAudioSessionInterruptionBegan
+      // with shouldResume=false) when the user presses Home or switches apps — NOT only
+      // on phone calls. Pausing here is the #1 cause of music stopping when backgrounding.
+      // Duck to 0.15 instead: audio stays alive. For genuine permanent interruptions
+      // (phone calls), iOS takes over the audio session itself; ducking is still safe and
+      // volume is restored when paused=false fires at the end of the interruption.
+      await TrackPlayer.setVolume(0.15);
     } else if (paused) {
       // Transient interruption (notification, Siri, screen lock on some iOS versions).
-      // Duck volume rather than pausing so music continues in background.
-      // A full pause here is the #1 cause of music stopping on app backgrounding.
       await TrackPlayer.setVolume(0.15);
     } else {
-      // Interruption ended — restore volume and ensure playback is active.
+      // Interruption ended — restore full volume and ensure playback is active.
       await TrackPlayer.setVolume(1.0);
       const { State } = require('react-native-track-player');
       try {

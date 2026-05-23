@@ -109,6 +109,29 @@ class BackgroundAudioService {
         this._trackBeforeBackground = this.currentTrack;
         audioLog('BG_SNAPSHOT', { snapshot: this._playingSnapshotBeforeBackground, isPlaying: this.isPlaying, userPaused: this._userPaused });
       }
+      // Android has no 'inactive' state — goes directly active → background.
+      // Capture snapshot here and re-assert audio mode so the OS doesn't reclaim the session.
+      if (nextState === 'background' && USE_EXPO_AV) {
+        this._playingSnapshotBeforeBackground = this.isPlaying && !this._userPaused && !!this.currentTrack;
+        this._trackBeforeBackground = this.currentTrack;
+        audioLog('BG_SNAPSHOT_ANDROID', { snapshot: this._playingSnapshotBeforeBackground, isPlaying: this.isPlaying, userPaused: this._userPaused });
+        if (this.avSound) {
+          try {
+            await Audio.setAudioModeAsync({
+              staysActiveInBackground: true,
+              playsInSilentModeIOS: true,
+              interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+              interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+              shouldDuckAndroid: true,
+              allowsRecordingIOS: false,
+              playThroughEarpieceAndroid: false,
+            });
+            audioLog('AUDIO_MODE_ASSERTED_ON_BG');
+          } catch (e) {
+            audioLog('AUDIO_MODE_BG_ERR', String(e));
+          }
+        }
+      }
       // Log RNTP native state on every background transition for diagnostics
       if ((nextState === 'inactive' || nextState === 'background') && !USE_EXPO_AV) {
         const TrackPlayer = getTrackPlayer();
@@ -124,8 +147,8 @@ class BackgroundAudioService {
       }
 
       if (nextState === 'active') {
-        // expo-av path: re-assert audio session after interruption
-        if (this.avSound && this.isPlaying) {
+        // expo-av path (Android): re-assert audio session and resume if the OS stopped playback
+        if (USE_EXPO_AV && this.avSound) {
           try {
             await Audio.setAudioModeAsync({
               staysActiveInBackground: true,
@@ -139,6 +162,16 @@ class BackgroundAudioService {
             audioLog('AUDIO_MODE_REAPPLIED_ON_FOREGROUND');
           } catch (e) {
             audioLog('AUDIO_MODE_REAPPLY_ERR', String(e));
+          }
+          if (this._playingSnapshotBeforeBackground && !this.isPlaying) {
+            try {
+              await this.avSound.playAsync();
+              this.isPlaying = true;
+              this.notifyCallbacks();
+              audioLog('EXPO_AV_RESUMED_ON_FOREGROUND');
+            } catch (e) {
+              audioLog('EXPO_AV_RESUME_ERR', String(e));
+            }
           }
         }
         // TrackPlayer path (iOS): resume if audio was playing when we backgrounded.
@@ -167,6 +200,7 @@ class BackgroundAudioService {
                   if (this.position > 0) await TrackPlayer.seekTo(this.position);
                 }
                 audioLog('TP_RESUME_ON_FOREGROUND', { state });
+                await TrackPlayer.setVolume(1.0);
                 await TrackPlayer.play();
                 this.notifyCallbacks();
               }

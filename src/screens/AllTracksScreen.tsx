@@ -18,20 +18,24 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { supabase } from '../lib/supabase';
 import BackButton from '../components/BackButton';
+import { Typography } from '../constants/Typography';
 
 interface AudioTrack {
   id: string;
   title: string;
   description?: string;
   audio_url?: string;
+  file_url?: string;
   cover_art_url?: string;
   duration?: number;
   play_count?: number;
   likes_count?: number;
   genre?: string;
   created_at: string;
+  creator_id?: string;
   creator?: {
     id: string;
     username: string;
@@ -47,6 +51,7 @@ export default function AllTracksScreen() {
   const route = useRoute();
   const { theme } = useTheme();
   const { user } = useAuth();
+  const { play, currentTrack, isPlaying } = useAudioPlayer();
 
   const params = route.params as { category?: string; title?: string } | undefined;
   const category = params?.category || 'all';
@@ -165,8 +170,33 @@ export default function AllTracksScreen() {
     setFilteredTracks(filtered);
   };
 
+  const handlePlayTrack = async (track: AudioTrack) => {
+    try {
+      const audioUrl = track.file_url || track.audio_url || '';
+      if (!audioUrl) {
+        Alert.alert('Unavailable', 'This track has no audio file.');
+        return;
+      }
+      await play({
+        id: track.id,
+        title: track.title,
+        created_at: track.created_at,
+        file_url: audioUrl,
+        audio_url: audioUrl,
+        cover_image_url: track.cover_art_url || '',
+        duration: track.duration || 0,
+        creator_id: track.creator_id,
+        artist_name: track.creator?.display_name || track.creator?.username || '',
+      });
+      // Increment play count in background
+      supabase.from('audio_tracks').update({ play_count: (track.play_count || 0) + 1 }).eq('id', track.id).then(() => {});
+    } catch (err) {
+      console.error('Failed to play track:', err);
+      Alert.alert('Error', 'Failed to play track');
+    }
+  };
+
   const handleTrackPress = (track: AudioTrack) => {
-    console.log('Navigate to track details:', track.title);
     navigation.navigate('TrackDetails' as never, { trackId: track.id } as never);
   };
 
@@ -188,79 +218,107 @@ export default function AllTracksScreen() {
     loadTracks(true);
   };
 
-  const renderTrackCard = (track: AudioTrack) => (
-    <TouchableOpacity
-      key={track.id}
-      style={[styles.trackCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-      onPress={() => handleTrackPress(track)}
-    >
-      <View style={styles.trackHeader}>
-        {track.cover_art_url ? (
-          <Image source={{ uri: track.cover_art_url }} style={styles.trackCover} />
-        ) : (
-          <View style={[styles.defaultCover, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-            <Ionicons name="musical-notes" size={24} color={theme.colors.textSecondary} />
+  const renderTrackCard = (track: AudioTrack) => {
+    const isActiveTrack = currentTrack?.id === track.id;
+    const isCurrentlyPlaying = isActiveTrack && isPlaying;
+
+    return (
+      <TouchableOpacity
+        key={track.id}
+        style={[
+          styles.trackCard,
+          { backgroundColor: theme.colors.surface, borderColor: isActiveTrack ? theme.colors.primary + '60' : theme.colors.border },
+        ]}
+        onPress={() => handleTrackPress(track)}
+        activeOpacity={0.8}
+      >
+        <View style={styles.trackHeader}>
+          {/* Cover art with active overlay */}
+          <View style={styles.coverWrapper}>
+            {track.cover_art_url ? (
+              <Image source={{ uri: track.cover_art_url }} style={styles.trackCover} />
+            ) : (
+              <View style={[styles.defaultCover, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                <Ionicons name="musical-notes" size={22} color={theme.colors.textSecondary} />
+              </View>
+            )}
+            {isActiveTrack && (
+              <View style={styles.coverActiveOverlay}>
+                <Ionicons
+                  name={isCurrentlyPlaying ? 'pause-circle' : 'play-circle'}
+                  size={28}
+                  color="#FFFFFF"
+                />
+              </View>
+            )}
           </View>
-        )}
 
-        <View style={styles.trackInfo}>
-          <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
-            {track.title}
-          </Text>
-          <Text style={[styles.trackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-            {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
-          </Text>
-          {track.genre && (
-            <View style={[styles.genreTag, { backgroundColor: theme.colors.primary + '20' }]}>
-              <Text style={[styles.genreText, { color: theme.colors.primary }]}>
-                {track.genre}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.trackActions}>
-          <TouchableOpacity
-            style={[styles.playButton, { backgroundColor: theme.colors.primary + '20' }]}
-            onPress={(e) => {
-              e.stopPropagation();
-              // Handle play action
-              console.log('Play track:', track.title);
-            }}
-          >
-            <Ionicons name="play" size={20} color={theme.colors.primary} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <View style={styles.trackFooter}>
-        <View style={styles.trackStats}>
-          {track.duration && (
-            <View style={styles.stat}>
-              <Ionicons name="time-outline" size={12} color={theme.colors.textSecondary} />
-              <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
-                {formatDuration(track.duration)}
-              </Text>
-            </View>
-          )}
-          <View style={styles.stat}>
-            <Ionicons name="headset-outline" size={12} color={theme.colors.textSecondary} />
-            <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
-              {formatNumber(track.play_count || 0)}
+          <View style={styles.trackInfo}>
+            <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
+              {track.title}
             </Text>
+            <Text style={[styles.trackArtist, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+              {track.creator?.display_name || track.creator?.username || 'Unknown Artist'}
+            </Text>
+            {track.genre && (
+              <View style={[styles.genreTag, { backgroundColor: theme.colors.primary + '20' }]}>
+                <Text style={[styles.genreText, { color: theme.colors.primary }]}>
+                  {track.genre}
+                </Text>
+              </View>
+            )}
           </View>
-          {track.likes_count !== undefined && (
+
+          <View style={styles.trackActions}>
+            <TouchableOpacity
+              style={[
+                styles.playButton,
+                { backgroundColor: isActiveTrack ? theme.colors.primary : theme.colors.primary + '20' },
+              ]}
+              onPress={(e) => {
+                e.stopPropagation();
+                handlePlayTrack(track);
+              }}
+              activeOpacity={0.75}
+            >
+              <Ionicons
+                name={isCurrentlyPlaying ? 'pause' : 'play'}
+                size={18}
+                color={isActiveTrack ? '#FFFFFF' : theme.colors.primary}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={styles.trackFooter}>
+          <View style={styles.trackStats}>
+            {!!track.duration && (
+              <View style={styles.stat}>
+                <Ionicons name="time-outline" size={11} color={theme.colors.textSecondary} />
+                <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
+                  {formatDuration(track.duration)}
+                </Text>
+              </View>
+            )}
             <View style={styles.stat}>
-              <Ionicons name="heart-outline" size={12} color={theme.colors.textSecondary} />
+              <Ionicons name="headset-outline" size={11} color={theme.colors.textSecondary} />
               <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
-                {formatNumber(track.likes_count)}
+                {formatNumber(track.play_count || 0)}
               </Text>
             </View>
-          )}
+            {track.likes_count !== undefined && (
+              <View style={styles.stat}>
+                <Ionicons name="heart-outline" size={11} color={theme.colors.textSecondary} />
+                <Text style={[styles.statText, { color: theme.colors.textSecondary }]}>
+                  {formatNumber(track.likes_count)}
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   if (loading) {
     return (
@@ -405,7 +463,8 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 10,
-    fontSize: 16,
+    ...Typography.body,
+    fontSize: 15,
   },
   errorContainer: {
     padding: 16,
@@ -427,39 +486,41 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     flex: 1,
-    fontSize: 20,
-    fontWeight: 'bold',
+    ...Typography.headerMedium,
+    fontSize: 18,
     textAlign: 'center',
   },
   searchContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderBottomWidth: 1,
   },
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
+    paddingVertical: 9,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   searchInput: {
     flex: 1,
     marginLeft: 8,
-    fontSize: 16,
+    ...Typography.body,
+    fontSize: 15,
   },
   filtersContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderBottomWidth: 1,
   },
   filterLabel: {
-    fontSize: 16,
+    ...Typography.label,
     fontWeight: '600',
-    marginRight: 12,
+    fontSize: 14,
+    marginRight: 10,
   },
   filterOptions: {
     flexDirection: 'row',
@@ -468,78 +529,91 @@ const styles = StyleSheet.create({
   filterButton: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
     marginRight: 8,
   },
   filterButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
+    ...Typography.label,
+    fontSize: 13,
+    fontWeight: '600',
   },
   listContainer: {
     padding: 16,
     backgroundColor: 'transparent',
   },
   trackCard: {
-    padding: 16,
-    marginBottom: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    padding: 14,
+    marginBottom: 10,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   trackHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
+  },
+  coverWrapper: {
+    position: 'relative',
+    marginRight: 12,
   },
   trackCover: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-    marginRight: 12,
+    width: 58,
+    height: 58,
+    borderRadius: 10,
   },
   defaultCover: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
+    width: 58,
+    height: 58,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  coverActiveOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.38)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   trackInfo: {
     flex: 1,
+    minWidth: 0,
   },
   trackTitle: {
-    fontSize: 16,
+    ...Typography.body,
+    fontSize: 15,
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 3,
+    letterSpacing: -0.2,
   },
   trackArtist: {
-    fontSize: 14,
-    marginBottom: 6,
+    ...Typography.label,
+    fontSize: 13,
+    marginBottom: 5,
+    letterSpacing: -0.1,
   },
   genreTag: {
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingVertical: 3,
+    borderRadius: 20,
     alignSelf: 'flex-start',
   },
   genreText: {
+    ...Typography.label,
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '600',
+    letterSpacing: 0.1,
   },
   trackActions: {
-    marginLeft: 12,
+    marginLeft: 10,
   },
   playButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -550,7 +624,7 @@ const styles = StyleSheet.create({
   },
   trackStats: {
     flexDirection: 'row',
-    gap: 16,
+    gap: 14,
   },
   stat: {
     flexDirection: 'row',
@@ -558,7 +632,9 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   statText: {
-    fontSize: 12,
+    ...Typography.label,
+    fontSize: 11,
+    letterSpacing: -0.1,
   },
   emptyContainer: {
     flex: 1,
@@ -567,13 +643,14 @@ const styles = StyleSheet.create({
     paddingVertical: 64,
   },
   emptyTitle: {
+    ...Typography.headerMedium,
     fontSize: 20,
-    fontWeight: 'bold',
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtitle: {
-    fontSize: 16,
+    ...Typography.body,
+    fontSize: 15,
     textAlign: 'center',
   },
 });
