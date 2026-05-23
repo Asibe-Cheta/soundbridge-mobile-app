@@ -127,6 +127,11 @@ import CourseDetailScreen from './src/screens/CourseDetailScreen';
 // Supabase client for launch-counter updates
 import { supabase } from './src/lib/supabase';
 
+// Version check system
+import { checkAppVersion, VersionCheckResult, AppVersionConfig } from './src/services/versionCheckService';
+import ForceUpdateModal from './src/components/ForceUpdateModal';
+import SoftUpdateModal from './src/components/SoftUpdateModal';
+
 // Import contexts
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { AudioPlayerProvider } from './src/contexts/AudioPlayerContext';
@@ -409,6 +414,11 @@ function AppNavigator() {
   const [showCreatorCard, setShowCreatorCard] = React.useState(false);
   const launchCountedRef = React.useRef(false);
   const { theme } = useTheme();
+
+  // Version check state
+  const [versionCheckResult, setVersionCheckResult] = React.useState<VersionCheckResult | null>(null);
+  const [versionConfig, setVersionConfig] = React.useState<AppVersionConfig | null>(null);
+  const softUpdateDismissedRef = React.useRef(false);
   const navigationRef = React.useRef<any>(null);
 
   // Track if services have been initialized
@@ -447,6 +457,17 @@ function AppNavigator() {
       console.error('❌ Error initializing error tracking service:', error);
     });
   }, []); // Empty dependency array - only run once on mount
+
+  // Version check — runs once per launch, before any navigation interaction
+  React.useEffect(() => {
+    checkAppVersion().then(({ result, config }) => {
+      setVersionConfig(config);
+      setVersionCheckResult(result);
+    }).catch(() => {
+      // Network error — allow through, don't block the app
+      setVersionCheckResult('ok');
+    });
+  }, []);
 
   // Set user context and initialize user-dependent services
   React.useEffect(() => {
@@ -1137,6 +1158,26 @@ function AppNavigator() {
           </>
         )}
       </NavigationContainer>
+
+      {/* Force update — non-dismissable, sits above everything */}
+      {versionCheckResult === 'force' && versionConfig && (
+        <ForceUpdateModal
+          visible
+          message={versionConfig.force_update_message}
+        />
+      )}
+
+      {/* Soft update — dismissable once per session */}
+      {versionCheckResult === 'soft' && versionConfig && !softUpdateDismissedRef.current && (
+        <SoftUpdateModal
+          visible
+          message={versionConfig.soft_update_message}
+          onDismiss={() => {
+            softUpdateDismissedRef.current = true;
+            setVersionCheckResult('ok');
+          }}
+        />
+      )}
     </View>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, StatusBar, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -6,9 +6,11 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
 import BackButton from '../components/BackButton';
 import { SystemTypography as Typography } from '../constants/Typography';
 import { getAudioLogs, clearAudioLogs } from '../lib/audioDebugLog';
+import { fetchVersionConfig, AppVersionConfig } from '../services/versionCheckService';
 
 const features = [
   { icon: 'musical-notes-outline', title: 'Discover Music', description: 'Explore tracks from independent artists worldwide.' },
@@ -20,8 +22,16 @@ const features = [
 export default function AboutScreen() {
   const navigation = useNavigation();
   const { theme } = useTheme();
+  const { userProfile } = useAuth();
   const tapCountRef = useRef(0);
   const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [adminVersionConfig, setAdminVersionConfig] = useState<AppVersionConfig | null>(null);
+
+  useEffect(() => {
+    if (userProfile?.is_admin) {
+      fetchVersionConfig().then(setAdminVersionConfig).catch(() => {});
+    }
+  }, [userProfile?.is_admin]);
 
   const handleVersionTap = useCallback(async () => {
     tapCountRef.current += 1;
@@ -170,6 +180,43 @@ export default function AboutScreen() {
               ))}
             </View>
           </View>
+
+          {/* Admin — App Versions (only visible to is_admin users) */}
+          {userProfile?.is_admin && (
+            <View style={styles.section}>
+              <Text style={[styles.sectionLabel, { color: theme.colors.textSecondary }]}>APP VERSIONS (ADMIN)</Text>
+              <View style={[styles.adminCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                {adminVersionConfig ? (
+                  <>
+                    <View style={styles.adminRow}>
+                      <Text style={[styles.adminLabel, { color: theme.colors.textSecondary }]}>Min iOS</Text>
+                      <Text style={[styles.adminValue, { color: theme.colors.text }]}>{adminVersionConfig.min_supported_version_ios}</Text>
+                    </View>
+                    <View style={[styles.adminRow, styles.adminRowBorder, { borderColor: theme.colors.border }]}>
+                      <Text style={[styles.adminLabel, { color: theme.colors.textSecondary }]}>Min Android</Text>
+                      <Text style={[styles.adminValue, { color: theme.colors.text }]}>{adminVersionConfig.min_supported_version_android}</Text>
+                    </View>
+                    <View style={[styles.adminRow, styles.adminRowBorder, { borderColor: theme.colors.border }]}>
+                      <Text style={[styles.adminLabel, { color: theme.colors.textSecondary }]}>Latest iOS</Text>
+                      <Text style={[styles.adminValue, { color: theme.colors.text }]}>{adminVersionConfig.latest_version_ios}</Text>
+                    </View>
+                    <View style={[styles.adminRow, styles.adminRowBorder, { borderColor: theme.colors.border }]}>
+                      <Text style={[styles.adminLabel, { color: theme.colors.textSecondary }]}>Latest Android</Text>
+                      <Text style={[styles.adminValue, { color: theme.colors.text }]}>{adminVersionConfig.latest_version_android}</Text>
+                    </View>
+                    <View style={[styles.adminNote, { backgroundColor: 'rgba(124,58,237,0.08)', borderColor: 'rgba(124,58,237,0.25)' }]}>
+                      <Ionicons name="information-circle-outline" size={14} color="#7C3AED" style={{ marginTop: 1 }} />
+                      <Text style={[styles.adminNoteText, { color: theme.colors.textSecondary }]}>
+                        Update these values in Supabase app_version_config to trigger update prompts for users.
+                      </Text>
+                    </View>
+                  </>
+                ) : (
+                  <Text style={[styles.adminValue, { color: theme.colors.textSecondary, paddingVertical: 12 }]}>Loading…</Text>
+                )}
+              </View>
+            </View>
+          )}
 
           {/* Footer */}
           <View style={styles.footer}>
@@ -364,5 +411,47 @@ const styles = StyleSheet.create({
     ...Typography.label,
     fontSize: 12,
     textAlign: 'center',
+  },
+
+  // Admin version config
+  adminCard: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    paddingHorizontal: 16,
+  },
+  adminRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+  },
+  adminRowBorder: {
+    borderTopWidth: 1,
+  },
+  adminLabel: {
+    ...Typography.label,
+    fontSize: 13,
+  },
+  adminValue: {
+    ...Typography.body,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  adminNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 12,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  adminNoteText: {
+    flex: 1,
+    ...Typography.label,
+    fontSize: 12,
+    lineHeight: 17,
   },
 });
