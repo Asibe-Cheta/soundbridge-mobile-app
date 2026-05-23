@@ -287,7 +287,7 @@ export class FeedService {
       // NOTE: posts table doesn't have image_url/audio_url - those are in attachments table
       const { data: postsData, error: postsError } = await supabase
         .from('posts')
-        .select('id, user_id, content, post_type, visibility, event_id, created_at, updated_at, reposted_from_id')
+        .select('id, user_id, content, post_type, visibility, event_id, headline, gradient_preset, created_at, updated_at, reposted_from_id')
         .is('deleted_at', null) // CRITICAL: Filter soft-deleted posts
         .eq('visibility', 'public') // CRITICAL: Only public posts
         .order('created_at', { ascending: false })
@@ -482,6 +482,8 @@ export class FeedService {
           image_urls: (attachments.image_urls?.length ?? 0) > 1 ? attachments.image_urls : undefined,
           audio_url: attachments.audio_url || undefined,
           event_id: post.event_id || undefined,
+          headline: post.headline || undefined,
+          gradient_preset: post.gradient_preset ?? undefined,
           reactions_count: reactionsMap.get(post.id) || { support: 0, love: 0, fire: 0, congrats: 0 },
           comments_count: commentsCountMap.get(post.id) || 0,
           user_reaction: userReactionsMap.get(post.id) || null,
@@ -523,11 +525,32 @@ export class FeedService {
       );
 
       // Handle both new format (wrapped) and old format (direct)
+      let newPost: Post;
       if (response.success && response.data) {
-        return response.data;
+        newPost = response.data;
+      } else {
+        newPost = (response as any).post || response;
       }
-      // Fallback for old format
-      return (response as any).post || response;
+
+      // Patch headline/gradient_preset directly on Supabase — the backend API
+      // may not yet handle these fields, so we apply them as a follow-up update.
+      if (newPost?.id && (postData.headline !== undefined || postData.gradient_preset !== undefined)) {
+        try {
+          await supabase.from('posts').update({
+            ...(postData.headline !== undefined ? { headline: postData.headline } : {}),
+            ...(postData.gradient_preset !== undefined ? { gradient_preset: postData.gradient_preset } : {}),
+          }).eq('id', newPost.id);
+          newPost = {
+            ...newPost,
+            ...(postData.headline !== undefined ? { headline: postData.headline } : {}),
+            ...(postData.gradient_preset !== undefined ? { gradient_preset: postData.gradient_preset } : {}),
+          };
+        } catch (patchErr) {
+          console.warn('FeedService.createPost: headline patch failed:', patchErr);
+        }
+      }
+
+      return newPost;
     } catch (error) {
       console.error('FeedService.createPost:', error);
       throw error;
@@ -1272,7 +1295,7 @@ export class FeedService {
       // Step 1: Get posts
       const { data: postsData, error: postsError } = await supabase
         .from('posts')
-        .select('id, user_id, content, post_type, visibility, event_id, created_at, updated_at, reposted_from_id')
+        .select('id, user_id, content, post_type, visibility, event_id, headline, gradient_preset, created_at, updated_at, reposted_from_id')
         .eq('user_id', userId)
         .is('deleted_at', null)
         .order('created_at', { ascending: false })
@@ -1416,6 +1439,8 @@ export class FeedService {
             ? imageAttachments3.map((a: any) => a.file_url).filter(Boolean)
             : undefined,
           audio_url: audioAttachment?.file_url || null,
+          headline: post.headline || undefined,
+          gradient_preset: post.gradient_preset ?? undefined,
           reactions_count: reactionsMap.get(post.id) || { support: 0, love: 0, fire: 0, congrats: 0 },
           comments_count: commentsMap.get(post.id) || 0,
           created_at: post.created_at,

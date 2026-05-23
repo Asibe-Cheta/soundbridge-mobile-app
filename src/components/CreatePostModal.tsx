@@ -13,6 +13,7 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { MentionTextInput } from './MentionTextInput';
 import { MentionSuggestions } from './MentionSuggestions';
@@ -31,6 +32,10 @@ import { feedService } from '../services/api/feedService';
 import type { PostType, PostVisibility, Post } from '../types/feed.types';
 import { SystemTypography as Typography } from '../constants/Typography';
 import AudioTrimmerModal from './AudioTrimmerModal';
+import { HEADLINE_GRADIENT_PRESETS } from './HeadlineGradientPill';
+
+const PRICING_URL = 'https://www.soundbridge.live/pricing';
+const MAX_HEADLINE_CHARS = 80;
 
 interface CreatePostModalProps {
   visible: boolean;
@@ -48,12 +53,13 @@ interface CreatePostModalProps {
   editingPost?: Post | null;
 }
 
-const POST_TYPES: { value: PostType; label: string }[] = [
+const POST_TYPES: { value: PostType; label: string; isPremium?: boolean }[] = [
   { value: 'update', label: 'Update' },
   { value: 'opportunity', label: 'Opportunity' },
   { value: 'achievement', label: 'Achievement' },
   { value: 'collaboration', label: 'Collaboration' },
   { value: 'event', label: 'Event' },
+  { value: 'headline', label: '★ Headline', isPremium: true },
 ];
 
 const VISIBILITY_OPTIONS: { value: PostVisibility; label: string; icon: string }[] = [
@@ -89,6 +95,11 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
   const [pendingTrimUri, setPendingTrimUri] = useState<string | null>(null);
   const [pendingTrimFileName, setPendingTrimFileName] = useState('');
 
+  // Headline Post fields
+  const [headlineText, setHeadlineText] = useState('');
+  const [gradientPreset, setGradientPreset] = useState(1);
+  const [showHeadlineUpgrade, setShowHeadlineUpgrade] = useState(false);
+
   const isPremiumOrUnlimited =
     userProfile?.subscription_tier === 'premium' ||
     userProfile?.subscription_tier === 'unlimited';
@@ -116,7 +127,10 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
 
   const characterCount = content.length;
   const nearLimit = characterCount >= MAX_CHARACTERS * 0.8; // show counter at 80 %
-  const canPublish = content.trim().length >= 10 && characterCount <= MAX_CHARACTERS;
+  const isHeadlinePost = postType === 'headline';
+  const canPublish = isHeadlinePost
+    ? headlineText.trim().length > 0 && content.trim().length >= 10 && characterCount <= MAX_CHARACTERS
+    : content.trim().length >= 10 && characterCount <= MAX_CHARACTERS;
 
   // Populate form when editing
   useEffect(() => {
@@ -134,6 +148,8 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
       );
       setAudioUri(editingPost.audio_url || null);
       setAudioClipDuration(null);
+      setHeadlineText(editingPost.headline || '');
+      setGradientPreset(editingPost.gradient_preset ?? 1);
     } else if (!editingPost && visible) {
       setContent('');
       setPostType('update');
@@ -141,6 +157,8 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
       setImageUris([]);
       setAudioUri(null);
       setAudioClipDuration(null);
+      setHeadlineText('');
+      setGradientPreset(1);
     }
   }, [editingPost, visible]);
 
@@ -231,6 +249,7 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
           content: content.trim(),
           post_type: postType,
           visibility,
+          ...(isHeadlinePost ? { headline: headlineText.trim(), gradient_preset: gradientPreset } : {}),
         });
 
         if (imageUris.length > 0) {
@@ -277,6 +296,8 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
       setAudioClipDuration(null);
       setPostType('update');
       setVisibility('public');
+      setHeadlineText('');
+      setGradientPreset(1);
       onClose();
     } catch (err: any) {
       Alert.alert('Error', err.message || `Failed to ${editingPost ? 'update' : 'create'} drop. Please try again.`);
@@ -623,16 +644,30 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
                           backgroundColor:
                             postType === type.value ? theme.colors.primary : theme.colors.surface,
                           borderColor:
-                            postType === type.value ? theme.colors.primary : theme.colors.border,
+                            postType === type.value
+                              ? theme.colors.primary
+                              : type.isPremium
+                              ? 'rgba(236,72,153,0.4)'
+                              : theme.colors.border,
                         },
                       ]}
-                      onPress={() => setPostType(type.value)}
+                      onPress={() => {
+                        if (type.value === 'headline' && !isPremiumOrUnlimited) {
+                          setShowHeadlineUpgrade(true);
+                        } else {
+                          setPostType(type.value);
+                        }
+                      }}
                     >
                       <Text
                         style={[
                           styles.chipText,
                           {
-                            color: postType === type.value ? '#FFFFFF' : theme.colors.text,
+                            color: postType === type.value
+                              ? '#FFFFFF'
+                              : type.isPremium
+                              ? '#EC4899'
+                              : theme.colors.text,
                           },
                         ]}
                       >
@@ -642,6 +677,63 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
                   ))}
                 </ScrollView>
               </View>
+
+              {/* Headline Post fields — only shown for Premium/Unlimited users with headline type */}
+              {isHeadlinePost && isPremiumOrUnlimited && (
+                <View style={styles.headlineSection}>
+                  {/* Headline text input */}
+                  <Text style={[styles.fieldLabel, { color: theme.colors.text }]}>
+                    Your headline
+                  </Text>
+                  <View style={[styles.headlineInputContainer, { borderColor: headlineText.length > 0 ? theme.colors.primary : theme.colors.border, backgroundColor: theme.colors.card }]}>
+                    <TextInput
+                      style={[styles.headlineInput, { color: theme.colors.text }]}
+                      placeholder="Write something that stops the scroll..."
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={headlineText}
+                      onChangeText={t => setHeadlineText(t.slice(0, MAX_HEADLINE_CHARS))}
+                      maxLength={MAX_HEADLINE_CHARS}
+                      returnKeyType="next"
+                    />
+                    <Text style={[styles.headlineCharCount, { color: headlineText.length >= MAX_HEADLINE_CHARS * 0.9 ? (theme.colors.error ?? '#EF4444') : theme.colors.textSecondary }]}>
+                      {headlineText.length}/{MAX_HEADLINE_CHARS}
+                    </Text>
+                  </View>
+                  <Text style={[styles.headlineHelper, { color: theme.colors.textSecondary }]}>
+                    This is the first thing people see. Make it count.
+                  </Text>
+
+                  {/* Gradient preset selector */}
+                  <Text style={[styles.fieldLabel, { color: theme.colors.text, marginTop: 16 }]}>
+                    Border colour
+                  </Text>
+                  <View style={styles.gradientSwatchRow}>
+                    {HEADLINE_GRADIENT_PRESETS.map(preset => (
+                      <TouchableOpacity
+                        key={preset.id}
+                        style={[
+                          styles.gradientSwatch,
+                          gradientPreset === preset.id && styles.gradientSwatchActive,
+                        ]}
+                        onPress={() => setGradientPreset(preset.id)}
+                        activeOpacity={0.8}
+                      >
+                        <LinearGradient
+                          colors={preset.colors}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 0 }}
+                          style={styles.gradientSwatchInner}
+                        />
+                        {gradientPreset === preset.id && (
+                          <View style={styles.gradientSwatchCheck}>
+                            <Ionicons name="checkmark" size={12} color="#FFFFFF" />
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
 
               {/* Input Area */}
               <View style={styles.inputSection}>
@@ -678,7 +770,7 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
                       ref={textInputRef}
                       style={styles.textInput}
                       sharedTextStyle={{ color: theme.colors.text }}
-                      placeholder="Share your thoughts, opportunities, or achievements…"
+                      placeholder={isHeadlinePost ? 'Now tell them everything...' : 'Share your thoughts, opportunities, or achievements…'}
                       placeholderTextColor={theme.colors.textSecondary}
                       value={content}
                       onChangeText={handleContentChange}
@@ -971,6 +1063,60 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
         onCancel={handleTrimCancel}
       />
     ) : null}
+
+    {/* Headline Post upgrade prompt */}
+    <Modal
+      visible={showHeadlineUpgrade}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setShowHeadlineUpgrade(false)}
+    >
+      <TouchableWithoutFeedback onPress={() => setShowHeadlineUpgrade(false)}>
+        <View style={styles.upgradeOverlay}>
+          <TouchableWithoutFeedback>
+            <View style={[styles.upgradeSheet, { backgroundColor: theme.isDark ? '#1a1a2e' : '#fff', borderColor: theme.colors.border }]}>
+              <Text style={[styles.upgradeTitle, { color: theme.colors.text }]}>
+                Headline Posts
+              </Text>
+              <Text style={[styles.upgradeBody, { color: theme.colors.textSecondary }]}>
+                Headline Posts are available on Premium and Unlimited plans. Creators who use them are three times more likely to get reads, reactions and connections. Access yours today.
+              </Text>
+
+              <TouchableOpacity
+                style={styles.upgradeButton}
+                activeOpacity={0.85}
+                onPress={async () => {
+                  setShowHeadlineUpgrade(false);
+                  await Linking.openURL(PRICING_URL);
+                }}
+              >
+                <LinearGradient
+                  colors={['#EC4899', '#7C3AED']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.upgradeButtonGradient}
+                >
+                  <Text style={styles.upgradeButtonText}>Access Premium</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <Text style={[styles.upgradeTrialText, { color: theme.colors.textSecondary }]}>
+                Try Premium free for 7 days. Card required. Cancel anytime before day 7 and you will not be charged.
+              </Text>
+
+              <TouchableOpacity
+                style={styles.upgradeLaterButton}
+                onPress={() => setShowHeadlineUpgrade(false)}
+              >
+                <Text style={[styles.upgradeLaterText, { color: theme.colors.textSecondary }]}>
+                  Maybe Later
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableWithoutFeedback>
+        </View>
+      </TouchableWithoutFeedback>
+    </Modal>
   </>
   );
 }
@@ -1289,6 +1435,131 @@ const styles = StyleSheet.create({
 
   bottomSpacer: {
     height: 80,
+  },
+
+  // ── Headline Post fields ──────────────────────────────────
+  headlineSection: {
+    marginBottom: 20,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(236,72,153,0.25)',
+    backgroundColor: 'rgba(236,72,153,0.04)',
+  },
+  fieldLabel: {
+    ...Typography.button,
+    fontSize: 14,
+    marginBottom: 8,
+    fontWeight: '600',
+  },
+  headlineInputContainer: {
+    borderRadius: 12,
+    borderWidth: 1.5,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  headlineInput: {
+    ...Typography.body,
+    fontSize: 16,
+    fontWeight: '600',
+    minHeight: 36,
+  },
+  headlineCharCount: {
+    ...Typography.label,
+    fontSize: 11,
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  headlineHelper: {
+    ...Typography.label,
+    fontSize: 12,
+    marginTop: 6,
+    lineHeight: 17,
+  },
+  gradientSwatchRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  gradientSwatch: {
+    width: 48,
+    height: 26,
+    borderRadius: 13,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  gradientSwatchActive: {
+    borderColor: '#FFFFFF',
+  },
+  gradientSwatchInner: {
+    flex: 1,
+  },
+  gradientSwatchCheck: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  // ── Headline upgrade modal ────────────────────────────────
+  upgradeOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  upgradeSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    paddingHorizontal: 24,
+    paddingTop: 28,
+    paddingBottom: 48,
+  },
+  upgradeTitle: {
+    ...Typography.button,
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  upgradeBody: {
+    ...Typography.body,
+    fontSize: 15,
+    lineHeight: 22,
+    marginBottom: 28,
+  },
+  upgradeButton: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  upgradeButtonGradient: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  upgradeButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  upgradeTrialText: {
+    ...Typography.label,
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 17,
+    marginBottom: 20,
+    paddingHorizontal: 8,
+  },
+  upgradeLaterButton: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  upgradeLaterText: {
+    ...Typography.button,
+    fontSize: 15,
   },
 
   // ── Audio options modal ───────────────────────────────────

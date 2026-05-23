@@ -1,4 +1,4 @@
-export type PostType = 'update' | 'opportunity' | 'achievement' | 'collaboration' | 'event';
+export type PostType = 'update' | 'opportunity' | 'achievement' | 'collaboration' | 'event' | 'headline';
 export type PostVisibility = 'public' | 'connections';
 
 export interface PostAuthor {
@@ -36,6 +36,9 @@ export interface Post {
   user_repost_id?: string; // NEW: ID of user's repost post (for DELETE)
   reposted_from_id?: string; // UUID of original post if this is a repost
   reposted_from?: Post; // Original post data (if loaded)
+  // Headline Post fields (post_type === 'headline' only)
+  headline?: string;
+  gradient_preset?: number; // 1-5, maps to HEADLINE_GRADIENT_PRESETS
   created_at: string;
   updated_at: string;
 }
@@ -59,6 +62,9 @@ export interface CreatePostDto {
   // Note: image_url and audio_url are NOT accepted in post creation
   // Attachments are uploaded separately using /api/posts/upload-image or /api/posts/upload-audio
   event_id?: string;
+  // Headline Post fields — patched directly on Supabase after API creation
+  headline?: string;
+  gradient_preset?: number;
 }
 
 export interface RepostRequest {

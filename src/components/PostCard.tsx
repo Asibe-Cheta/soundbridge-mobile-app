@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable, Dimensions, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable, Dimensions, Linking, Animated, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import VerifiedAvatar from './VerifiedAvatar';
 import VerifiedBadge from './VerifiedBadge';
@@ -21,6 +21,7 @@ import CommentsModal from '../modals/CommentsModal';
 import ReactionsListModal from '../modals/ReactionsListModal';
 import { RepostModal } from './RepostModal';
 import { RepostedPostCard } from './RepostedPostCard';
+import HeadlineGradientPill from './HeadlineGradientPill';
 import { networkService } from '../services/api/networkService';
 import { useToast } from '../contexts/ToastContext';
 import { SystemTypography as Typography } from '../constants/Typography';
@@ -139,6 +140,22 @@ const PostCard = memo(function PostCard({
   const [isExpanded, setIsExpanded] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Headline Post expand/collapse animation
+  const [isHeadlineExpanded, setIsHeadlineExpanded] = useState(false);
+  const headlineExpandAnim = useRef(new Animated.Value(0)).current;
+
+  const toggleHeadlineExpand = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const expanding = !isHeadlineExpanded;
+    setIsHeadlineExpanded(expanding);
+    Animated.timing(headlineExpandAnim, {
+      toValue: expanding ? 1 : 0,
+      duration: 500,
+      easing: expanding ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [isHeadlineExpanded, headlineExpandAnim]);
 
   const handleReactionPress = (reactionType: 'support' | 'love' | 'fire' | 'congrats') => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -532,8 +549,131 @@ const PostCard = memo(function PostCard({
           </TouchableOpacity>
         </View>
 
-      {/* Content Section - Only show for non-reposts OR reposts with comment */}
-      {(!isRepost || (isRepost && post.content && post.content.trim().length > 0)) && (
+      {/* Headline Post — pill + animated scroll reveal */}
+      {post.post_type === 'headline' && (() => {
+        const cardWidth = Dimensions.get('window').width;
+        const pillWidth = cardWidth - 40;
+        const allImages: string[] = post.image_urls && post.image_urls.length > 0
+          ? post.image_urls
+          : post.image_url ? [post.image_url] : [];
+        const GRID_H = Math.round(cardWidth * 0.68);
+        const leftW = Math.round(cardWidth * 0.58);
+        const rightW = cardWidth - leftW - 2;
+
+        return (
+          <View style={styles.headlineSection}>
+            {/* Pill — always visible, tap to expand */}
+            <TouchableOpacity
+              style={styles.headlinePillWrapper}
+              onPress={toggleHeadlineExpand}
+              activeOpacity={0.92}
+            >
+              <HeadlineGradientPill
+                headline={post.headline || post.content}
+                gradientPreset={post.gradient_preset ?? 1}
+                pillWidth={pillWidth}
+                backgroundColor={theme.colors.card}
+              />
+            </TouchableOpacity>
+
+            {/* "Tap to read" hint — hidden once expanded */}
+            {!isHeadlineExpanded && (
+              <Text style={[styles.tapToRead, { color: theme.colors.textSecondary }]}>
+                Tap to read
+              </Text>
+            )}
+
+            {/* Animated scroll-reveal body */}
+            <Animated.View
+              style={{
+                maxHeight: headlineExpandAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 800],
+                }),
+                overflow: 'hidden',
+                opacity: headlineExpandAnim.interpolate({
+                  inputRange: [0, 0.15, 1],
+                  outputRange: [0, 0, 1],
+                }),
+              }}
+            >
+              {/* Body text */}
+              {post.content.trim().length > 0 && (
+                <View style={styles.headlineBodyContent}>
+                  <Text
+                    style={[styles.postContent, { color: theme.colors.text }]}
+                    selectable
+                    selectionColor="#8B5CF640"
+                  >
+                    {renderTextWithLinks(post.content, theme.colors.primary)}
+                  </Text>
+                </View>
+              )}
+
+              {/* Attached images inside expanded state */}
+              {allImages.length > 0 && (
+                <View style={[styles.mediaSection, { marginBottom: 14 }]}>
+                  {allImages.length === 1 && (
+                    <TouchableOpacity activeOpacity={0.9} onPress={() => { setGalleryIndex(0); setShowFullScreenImage(true); }}>
+                      <Image source={{ uri: allImages[0] }} style={{ width: cardWidth, height: Math.round(cardWidth * 0.56) }} resizeMode="cover" />
+                    </TouchableOpacity>
+                  )}
+                  {allImages.length === 2 && (
+                    <View style={{ flexDirection: 'row', gap: 2, height: Math.round(cardWidth * 0.52) }}>
+                      {allImages.map((uri, i) => (
+                        <TouchableOpacity key={i} activeOpacity={0.9} onPress={() => { setGalleryIndex(i); setShowFullScreenImage(true); }} style={{ flex: 1 }}>
+                          <Image source={{ uri }} style={{ flex: 1 }} resizeMode="cover" />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                  {allImages.length === 3 && (
+                    <View style={{ flexDirection: 'row', gap: 2, height: GRID_H }}>
+                      <TouchableOpacity activeOpacity={0.9} onPress={() => { setGalleryIndex(0); setShowFullScreenImage(true); }}>
+                        <Image source={{ uri: allImages[0] }} style={{ width: leftW, height: GRID_H }} resizeMode="cover" />
+                      </TouchableOpacity>
+                      <View style={{ flex: 1, gap: 2 }}>
+                        {allImages.slice(1).map((uri, i) => (
+                          <TouchableOpacity key={i} activeOpacity={0.9} onPress={() => { setGalleryIndex(i + 1); setShowFullScreenImage(true); }}>
+                            <Image source={{ uri }} style={{ width: rightW, height: Math.round((GRID_H - 2) / 2) }} resizeMode="cover" />
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+                  {allImages.length >= 4 && (
+                    <View style={{ flexDirection: 'row', gap: 2, height: GRID_H }}>
+                      <TouchableOpacity activeOpacity={0.9} onPress={() => { setGalleryIndex(0); setShowFullScreenImage(true); }}>
+                        <Image source={{ uri: allImages[0] }} style={{ width: leftW, height: GRID_H }} resizeMode="cover" />
+                      </TouchableOpacity>
+                      <View style={{ flex: 1, gap: 2 }}>
+                        {[allImages[1], allImages[2], allImages[3]].map((uri, i) => {
+                          const h = Math.round((GRID_H - 4) / 3);
+                          const isLast = i === 2;
+                          const remaining = allImages.length - 4;
+                          return (
+                            <TouchableOpacity key={i} activeOpacity={0.9} onPress={() => { setGalleryIndex(i + 1); setShowFullScreenImage(true); }} style={{ position: 'relative' }}>
+                              <Image source={{ uri }} style={{ width: rightW, height: h }} resizeMode="cover" />
+                              {isLast && remaining > 0 && (
+                                <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center' }}>
+                                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600' }}>+{remaining}</Text>
+                                </View>
+                              )}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  )}
+                </View>
+              )}
+            </Animated.View>
+          </View>
+        );
+      })()}
+
+      {/* Content Section - Only show for non-reposts, non-headline OR reposts with comment */}
+      {post.post_type !== 'headline' && (!isRepost || (isRepost && post.content && post.content.trim().length > 0)) && (
         <View style={styles.contentSection}>
           <Text
             style={[styles.postContent, { color: theme.colors.text }]}
@@ -575,8 +715,8 @@ const PostCard = memo(function PostCard({
         </View>
       )}
 
-      {/* Media Section (only if NOT a repost with original post data) */}
-      {!isRepost && (() => {
+      {/* Media Section (only for standard posts — headline posts render images in expand container) */}
+      {!isRepost && post.post_type !== 'headline' && (() => {
         const allImages: string[] = post.image_urls && post.image_urls.length > 0
           ? post.image_urls
           : post.image_url ? [post.image_url] : [];
@@ -1287,6 +1427,29 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '400',
+  },
+
+  // ── Headline Post ─────────────────────────────────────────
+  headlineSection: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 14,
+    alignItems: 'center',
+  },
+  headlinePillWrapper: {
+    alignSelf: 'center',
+  },
+  tapToRead: {
+    ...Typography.label,
+    fontSize: 12,
+    marginTop: 8,
+    letterSpacing: 0.2,
+  },
+  headlineBodyContent: {
+    paddingHorizontal: 4,
+    paddingTop: 16,
+    paddingBottom: 4,
+    width: '100%',
   },
 
 });
