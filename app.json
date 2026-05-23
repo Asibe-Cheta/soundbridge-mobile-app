@@ -2,7 +2,7 @@
   "expo": {
     "name": "SoundBridge",
     "slug": "soundbridge-mobile",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "orientation": "portrait",
     "icon": "./assets/images/logos/sb-app-icon.png",
     "userInterfaceStyle": "dark",
