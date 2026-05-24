@@ -1057,6 +1057,7 @@ function AppNavigator() {
             <Stack.Screen name="AddWithdrawalMethod" component={AddWithdrawalMethodScreen} />
             <Stack.Screen name="AllCreators" component={AllCreatorsScreen} />
             <Stack.Screen name="AllEvents" component={AllEventsScreen} />
+            <Stack.Screen name="SavedEvents" component={AllEventsScreen} />
             <Stack.Screen name="AllTracks" component={AllTracksScreen} />
             <Stack.Screen name="AllAlbums" component={AllAlbumsScreen} />
             <Stack.Screen name="AllPlaylists" component={AllPlaylistsScreen} />

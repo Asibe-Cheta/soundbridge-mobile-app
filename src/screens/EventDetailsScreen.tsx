@@ -24,6 +24,10 @@ import { apiFetch } from '../lib/apiClient';
 import { useStripe } from '@stripe/stripe-react-native';
 import EventTicketService, { EventTicket } from '../services/EventTicketService';
 import { deepLinkingService } from '../services/DeepLinkingService';
+import eventBookmarkService from '../services/EventBookmarkService';
+import eventAnalyticsService, { EventAnalytics } from '../services/EventAnalyticsService';
+import EventShareSheet from '../components/EventShareSheet';
+import EventAnalyticsCard from '../components/EventAnalyticsCard';
 
 interface Event {
   id: string;
@@ -47,6 +51,7 @@ interface Event {
   current_attendees?: number;
   image_url?: string;
   cover_image_url?: string;
+  creator_id?: string;
   organizer_id: string;
   created_at: string;
   organizer?: {
@@ -72,16 +77,27 @@ export default function EventDetailsScreen() {
   const [purchasingTicket, setPurchasingTicket] = useState(false);
   const [userTickets, setUserTickets] = useState<EventTicket[]>([]);
   const [deleting, setDeleting] = useState(false);
+  const [isBookmarked, setIsBookmarked] = useState(false);
+  const [bookmarkLoading, setBookmarkLoading] = useState(false);
+  const [showShareSheet, setShowShareSheet] = useState(false);
+  const [analytics, setAnalytics] = useState<EventAnalytics | null>(null);
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
-  // Check if current user is the organizer
-  const isOrganizer = user?.id === event?.organizer_id;
+  // creator_id is the authoritative ownership field; organizer_id is legacy fallback
+  const isOrganizer = user?.id === event?.creator_id || user?.id === event?.organizer_id;
 
   useEffect(() => {
     loadEventDetails();
     checkAttendanceStatus();
     loadUserTickets();
+    if (user?.id) checkBookmarkStatus();
+    trackPageView();
   }, [eventId]);
+
+  // Load analytics once we know who the organizer is
+  useEffect(() => {
+    if (isOrganizer && event?.id) loadAnalytics();
+  }, [isOrganizer, event?.id]);
 
   const loadEventDetails = async () => {
     if (initialEvent) return; // Skip if we already have event data
@@ -315,9 +331,43 @@ export default function EventDetailsScreen() {
     }
   };
 
-  const handleShare = async () => {
+  const checkBookmarkStatus = async () => {
+    if (!user?.id) return;
+    try {
+      const bookmarked = await eventBookmarkService.isBookmarked(eventId, user.id);
+      setIsBookmarked(bookmarked);
+    } catch (e) {
+      console.error('❌ checkBookmarkStatus:', e);
+    }
+  };
+
+  const handleToggleBookmark = async () => {
+    if (!user?.id || !event) return;
+    setBookmarkLoading(true);
+    try {
+      const newState = await eventBookmarkService.toggle(event.id, user.id);
+      setIsBookmarked(newState);
+    } catch (e) {
+      Alert.alert('Error', 'Could not update bookmark.');
+    } finally {
+      setBookmarkLoading(false);
+    }
+  };
+
+  const trackPageView = async () => {
+    if (!eventId) return;
+    await eventAnalyticsService.trackAction(eventId, 'view');
+  };
+
+  const loadAnalytics = async () => {
+    if (!event?.id) return;
+    const data = await eventAnalyticsService.getForEvent(event.id);
+    setAnalytics(data);
+  };
+
+  const handleShare = () => {
     if (!event) return;
-    await deepLinkingService.shareEvent(event.id, event.title, event.location);
+    setShowShareSheet(true);
   };
 
   const handleGetDirections = () => {
@@ -549,6 +599,17 @@ export default function EventDetailsScreen() {
                 )}
               </TouchableOpacity>
             )}
+            <TouchableOpacity style={styles.headerButton} onPress={handleToggleBookmark} disabled={bookmarkLoading}>
+              {bookmarkLoading ? (
+                <ActivityIndicator size="small" color={theme.colors.primary} />
+              ) : (
+                <Ionicons
+                  name={isBookmarked ? 'bookmark' : 'bookmark-outline'}
+                  size={24}
+                  color={isBookmarked ? theme.colors.primary : theme.colors.text}
+                />
+              )}
+            </TouchableOpacity>
             <TouchableOpacity style={styles.headerButton} onPress={handleShare}>
               <Ionicons name="share-outline" size={24} color={theme.colors.text} />
             </TouchableOpacity>
@@ -676,6 +737,14 @@ export default function EventDetailsScreen() {
             </View>
           )}
 
+          {/* Analytics — visible to the organizer only */}
+          {isOrganizer && (
+            <EventAnalyticsCard
+              analytics={analytics}
+              tier={user?.subscription_tier as any}
+            />
+          )}
+
           {/* Action Buttons */}
           <View style={styles.actionSection}>
             {userTickets.length > 0 ? (
@@ -743,6 +812,14 @@ export default function EventDetailsScreen() {
         </View>
       </ScrollView>
       </SafeAreaView>
+
+      {event && (
+        <EventShareSheet
+          visible={showShareSheet}
+          onClose={() => setShowShareSheet(false)}
+          event={event}
+        />
+      )}
     </View>
   );
 }

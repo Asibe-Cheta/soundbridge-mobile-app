@@ -1588,7 +1588,7 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.groupedRow}
+            style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}
             onPress={() => navigation.navigate('AllEvents' as never, { mode: 'booked', title: 'Booked Events', userId: profile?.id } as never)}
           >
             <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
@@ -1596,6 +1596,16 @@ export default function ProfileScreen() {
             </View>
             <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Booked Events</Text>
             <Text style={[styles.rowValue, { color: theme.colors.textSecondary }]}>{bookedEventsCount}</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.groupedRow}
+            onPress={() => navigation.navigate('SavedEvents' as never, { mode: 'saved', title: 'Saved Events' } as never)}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
+              <Ionicons name="bookmark" size={18} color="#F59E0B" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Saved Events</Text>
             <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
         </View>

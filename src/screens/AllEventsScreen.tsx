@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import BackButton from '../components/BackButton';
 import {
   View,
@@ -25,6 +25,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import EventCategoryPromptModal from '../components/EventCategoryPromptModal';
 import { config } from '../config/environment';
 import { apiFetch } from '../lib/apiClient';
+import eventBookmarkService from '../services/EventBookmarkService';
 
 interface Event {
   id: string;
@@ -61,7 +62,7 @@ export default function AllEventsScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
 
-  const params = route.params as { mode?: 'created' | 'booked'; title?: string; userId?: string } | undefined;
+  const params = route.params as { mode?: 'created' | 'booked' | 'saved'; title?: string; userId?: string } | undefined;
   const mode = params?.mode;
   const screenTitle = params?.title || 'All Events';
   const filterUserId = params?.userId;
@@ -77,6 +78,10 @@ export default function AllEventsScreen() {
   const [showPreferenceModal, setShowPreferenceModal] = useState(false);
   const [hasCheckedPreferences, setHasCheckedPreferences] = useState(false);
 
+  // Bookmark state: set of bookmarked event IDs for this screen
+  const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set());
+  const [bookmarkLoading, setBookmarkLoading] = useState<string | null>(null);
+
   const sortOptions = [
     { key: 'date', label: 'By Date' },
     { key: 'alphabetical', label: 'A-Z' },
@@ -87,11 +92,39 @@ export default function AllEventsScreen() {
     if (!mode) {
       checkUserPreferences();
     }
+    if (user?.id) loadBookmarkedIds();
   }, []);
 
   useEffect(() => {
     applyFilters();
   }, [events, searchQuery, sortBy]);
+
+  const loadBookmarkedIds = async () => {
+    if (!user?.id) return;
+    const ids = await eventBookmarkService.getBookmarkedEventIds(user.id);
+    setBookmarkedIds(new Set(ids));
+  };
+
+  const handleToggleBookmark = async (eventId: string) => {
+    if (!user?.id) return;
+    setBookmarkLoading(eventId);
+    try {
+      const newState = await eventBookmarkService.toggle(eventId, user.id);
+      setBookmarkedIds((prev) => {
+        const next = new Set(prev);
+        newState ? next.add(eventId) : next.delete(eventId);
+        return next;
+      });
+      // If we're in saved mode, remove the event from the list when unbookmarked
+      if (mode === 'saved' && !newState) {
+        setEvents((prev) => prev.filter((e) => e.id !== eventId));
+      }
+    } catch {
+      Alert.alert('Error', 'Could not update bookmark.');
+    } finally {
+      setBookmarkLoading(null);
+    }
+  };
 
   const loadEvents = async (refresh = false) => {
     try {
@@ -103,7 +136,21 @@ export default function AllEventsScreen() {
       let data: Event[] | null = null;
       let fetchError: any = null;
 
-      if (mode === 'created' && filterUserId) {
+      if (mode === 'saved' && user?.id) {
+        console.log('🔄 Loading saved events for user:', user.id);
+        const savedIds = await eventBookmarkService.getBookmarkedEventIds(user.id);
+        if (savedIds.length > 0) {
+          const result = await supabase
+            .from('events')
+            .select('*')
+            .in('id', savedIds)
+            .order('event_date', { ascending: true });
+          data = result.data;
+          fetchError = result.error;
+        } else {
+          data = [];
+        }
+      } else if (mode === 'created' && filterUserId) {
         console.log('🔄 Loading created events for user:', filterUserId);
         const result = await supabase
           .from('events')
@@ -413,6 +460,21 @@ export default function AllEventsScreen() {
               </Text>
             </View>
           )}
+          <TouchableOpacity
+            style={styles.bookmarkButton}
+            onPress={(e) => { e.stopPropagation(); handleToggleBookmark(event.id); }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            {bookmarkLoading === event.id ? (
+              <ActivityIndicator size="small" color={theme.colors.primary} />
+            ) : (
+              <Ionicons
+                name={bookmarkedIds.has(event.id) ? 'bookmark' : 'bookmark-outline'}
+                size={20}
+                color={bookmarkedIds.has(event.id) ? theme.colors.primary : theme.colors.textSecondary}
+              />
+            )}
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -560,7 +622,7 @@ export default function AllEventsScreen() {
           <View style={styles.emptyContainer}>
             <Ionicons name="calendar-outline" size={64} color={theme.colors.textSecondary} />
             <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
-              {searchQuery ? 'No events found' : mode === 'created' ? 'No events created yet' : mode === 'booked' ? 'No booked events' : 'No SoundBridge events yet'}
+              {searchQuery ? 'No events found' : mode === 'created' ? 'No events created yet' : mode === 'booked' ? 'No booked events' : mode === 'saved' ? 'No saved events' : 'No SoundBridge events yet'}
             </Text>
             {searchQuery ? (
               <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
@@ -573,6 +635,10 @@ export default function AllEventsScreen() {
             ) : mode === 'booked' ? (
               <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
                 You haven't booked any events yet
+              </Text>
+            ) : mode === 'saved' ? (
+              <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+                Tap the bookmark icon on any event to save it here
               </Text>
             ) : (
               <>
@@ -798,6 +864,10 @@ const styles = StyleSheet.create({
   },
   eventActions: {
     alignItems: 'flex-end',
+    gap: 8,
+  },
+  bookmarkButton: {
+    padding: 4,
   },
   priceTag: {
     paddingHorizontal: 8,
