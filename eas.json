@@ -45,6 +45,10 @@
     "production": {
       "ios": {
         "ascAppId": "6754335651"
+      },
+      "android": {
+        "serviceAccountKeyPath": "/Users/justicechetachukwuasibe/Downloads/soundbridge-467322-1e06d6384d7d.json",
+        "track": "production"
       }
     }
   }

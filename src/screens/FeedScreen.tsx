@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect, useScrollToTop } from '@react-navigation/native';
 import * as Notifications from 'expo-notifications';
 import { walkthroughable, useCopilot } from 'react-native-copilot';
+import proResourceAnalytics from '../services/ProResourceAnalyticsService';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import type { Post } from '../types/feed.types';
@@ -25,10 +26,15 @@ import { useFeed } from '../hooks/useFeed';
 import CreatePostPrompt from '../components/CreatePostPrompt';
 import LiveAudioBanner from '../components/LiveAudioBanner';
 import PostCard from '../components/PostCard';
+import EventPostCard from '../components/EventPostCard';
+import EventsStrip from '../components/EventsStrip';
+import EarlyAdopterConversionModal from '../components/EarlyAdopterConversionModal';
+import { useEarlyAdopterConversion } from '../hooks/useEarlyAdopterConversion';
 import CreatePostModal from '../components/CreatePostModal';
 import CommentsModal from '../modals/CommentsModal';
 import TipModal from '../components/TipModal';
 import { feedService } from '../services/api/feedService';
+import { supabase } from '../lib/supabase';
 import { deepLinkingService } from '../services/DeepLinkingService';
 import { socialService } from '../services/api/socialService';
 import { imageSaveService } from '../services/ImageSaveService';
@@ -37,6 +43,11 @@ import { useToast } from '../contexts/ToastContext';
 import { checkShouldShowTour } from '../services/tourService';
 import { SystemTypography as Typography } from '../constants/Typography';
 import { SkeletonFeed } from '../components/SkeletonLoader';
+import EventPromotionTrackingService from '../services/EventPromotionTrackingService';
+
+// Sentinel inserted between the new and older post buckets
+const CAUGHT_UP_MARKER = Object.freeze({ _type: 'caught_up_marker' as const });
+type FeedItem = Post | typeof CAUGHT_UP_MARKER;
 
 // Create walkthroughable components
 const WalkthroughableView = walkthroughable(View);
@@ -45,7 +56,7 @@ const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
 export default function FeedScreen() {
   const navigation = useNavigation();
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
   const { showToast } = useToast();
   const { start: startTour } = useCopilot();
   const {
@@ -67,6 +78,29 @@ export default function FeedScreen() {
   const [showTipModal, setShowTipModal] = useState(false);
   const [tipAuthorId, setTipAuthorId] = useState<string>('');
   const [tipAuthorName, setTipAuthorName] = useState<string>('');
+
+  // ── Feed seen/unseen tracking ────────────────────────────────────────────
+  const [lastCaughtUpAt, setLastCaughtUpAt] = useState<string | null>(null);
+  const [lastCaughtUpLoaded, setLastCaughtUpLoaded] = useState(false);
+  const [newPostsAvailable, setNewPostsAvailable] = useState(false);
+  const initialPostCountRef = useRef<number | null>(null);
+  const markerSeenRef = useRef(false);
+  const userIdRef = useRef<string | undefined>(undefined);
+  const viewabilityConfig = useRef({ viewAreaCoveragePercentThreshold: 60 });
+
+  // Early adopter conversion modal
+  const isExpiredEarlyAdopter =
+    userProfile?.early_adopter === true &&
+    userProfile?.subscription_tier === 'free' &&
+    !!userProfile?.subscription_period_end &&
+    new Date(userProfile.subscription_period_end) < new Date();
+  const {
+    shouldShow: showEarlyAdopterModal,
+    copyVariant: eaCopyVariant,
+    onRemindLater: onEaRemindLater,
+    onDismissPermanently: onEaDismissPermanently,
+    onConverted: onEaConverted,
+  } = useEarlyAdopterConversion(isExpiredEarlyAdopter, userProfile?.subscription_period_end);
 
   // Notification permission modal
   const [showNotifModal, setShowNotifModal] = useState(false);
@@ -144,6 +178,57 @@ export default function FeedScreen() {
       loadBookmarkStatus();
     }
   }, [posts.length, user?.id]); // Only reload when post count or user changes
+
+  // Keep a stable ref to user.id so viewability callback never has stale closure
+  useEffect(() => { userIdRef.current = user?.id; }, [user?.id]);
+
+  // Load the cursor timestamp once auth is ready
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from('profiles')
+      .select('last_feed_caught_up_at')
+      .eq('id', user.id)
+      .single()
+      .then(({ data }) => {
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        setLastCaughtUpAt(data?.last_feed_caught_up_at ?? sevenDaysAgo);
+        setLastCaughtUpLoaded(true);
+      });
+  }, [user?.id]);
+
+  // Detect new posts arriving mid-session (from real-time or background refresh)
+  useEffect(() => {
+    if (posts.length === 0) return;
+    if (initialPostCountRef.current === null) {
+      initialPostCountRef.current = posts.length;
+      return;
+    }
+    if (posts.length > initialPostCountRef.current) {
+      setNewPostsAvailable(true);
+    }
+  }, [posts.length]);
+
+  // Build the two-bucket feed data. New bucket first, then caught-up marker, then older bucket.
+  const flatListData = useMemo<FeedItem[]>(() => {
+    if (!lastCaughtUpLoaded || !lastCaughtUpAt) return posts;
+    const newBucket = posts.filter(p => (p as Post).created_at >= lastCaughtUpAt);
+    const olderBucket = posts.filter(p => (p as Post).created_at < lastCaughtUpAt);
+    return [...newBucket, CAUGHT_UP_MARKER, ...olderBucket];
+  }, [posts, lastCaughtUpAt, lastCaughtUpLoaded]);
+
+  // Called when the caught-up marker scrolls into view — update the cursor
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: any[] }) => {
+    const markerVisible = viewableItems.some(v => v.item?._type === 'caught_up_marker');
+    if (markerVisible && !markerSeenRef.current && userIdRef.current) {
+      markerSeenRef.current = true;
+      supabase
+        .from('profiles')
+        .update({ last_feed_caught_up_at: new Date().toISOString() })
+        .eq('id', userIdRef.current)
+        .then(() => {});
+    }
+  }).current;
 
   const handleCreatePost = () => {
     setIsCreateModalVisible(true);
@@ -331,36 +416,98 @@ export default function FeedScreen() {
           translucent
         />
 
+        {/* ── New posts pill ── */}
+        {newPostsAvailable && (
+          <TouchableOpacity
+            style={styles.newPostsPill}
+            activeOpacity={0.88}
+            onPress={() => {
+              flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+              setNewPostsAvailable(false);
+              initialPostCountRef.current = posts.length;
+            }}
+          >
+            <LinearGradient
+              colors={[theme.colors.primary, '#9333EA']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={styles.newPostsPillGrad}
+            >
+              <Ionicons name="arrow-up" size={13} color="#fff" />
+              <Text style={styles.newPostsPillText}>New posts</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+
             <FlatList
               ref={flatListRef}
-              data={posts}
-              renderItem={({ item, index }) => (
-                <PostCard
-                  post={item}
-                  onPress={() => handlePostPress(item.id)}
-                  onReactionPress={(reactionType) => handleReactionPress(item.id, reactionType)}
-                  onCommentPress={() => handleCommentPress(item.id)}
-                  onEdit={handleEditPost}
-                  onDelete={handleDeletePost}
-                  onShare={handleSharePost}
-                  onSave={handleSavePost}
-                  onUnsave={handleUnsavePost}
-                  onSaveImage={handleSaveImage}
-                  onAuthorPress={handleAuthorPress}
-                  onRepost={handleRepost}
-                  onTip={handleTip}
-                  onBlocked={async () => {
-                    // Refresh feed to remove blocked user's posts
-                    await refresh();
-                  }}
-                  onReported={async () => {
-                    // Optionally refresh feed or show success message
-                    console.log('Report submitted successfully');
-                  }}
-                  isSaved={savedPosts.has(item.id)}
-                />
-              )}
-              keyExtractor={(item, index) => `${item.id}-${index}`}
+              data={flatListData}
+              renderItem={({ item, index }) => {
+                // Caught-up marker sentinel
+                if ('_type' in item && item._type === 'caught_up_marker') {
+                  return (
+                    <View style={styles.caughtUpMarker}>
+                      <View style={[styles.caughtUpLine, { backgroundColor: theme.colors.border }]} />
+                      <View style={styles.caughtUpBadge}>
+                        <Ionicons name="checkmark-circle" size={15} color="#10b981" />
+                        <Text style={[styles.caughtUpTitle, { color: theme.colors.text }]}>
+                          You're all caught up
+                        </Text>
+                      </View>
+                      <View style={[styles.caughtUpLine, { backgroundColor: theme.colors.border }]} />
+                      <Text style={[styles.caughtUpSub, { color: theme.colors.textSecondary }]}>
+                        New posts from your community will appear here
+                      </Text>
+                    </View>
+                  );
+                }
+
+                const post = item as Post;
+                return (
+                <View>
+                  {post.post_type === 'event' && post.event_id ? (
+                    <EventPostCard
+                      post={post}
+                      onReactionPress={(reactionType) => handleReactionPress(post.id, reactionType)}
+                      onCommentPress={() => handleCommentPress(post.id)}
+                      onShare={handleSharePost}
+                      onSave={handleSavePost}
+                      onUnsave={handleUnsavePost}
+                      onAuthorPress={handleAuthorPress}
+                      onEventTap={eid => EventPromotionTrackingService.trackView(eid, 'feed_card')}
+                      isSaved={savedPosts.has(post.id)}
+                    />
+                  ) : (
+                    <PostCard
+                      post={post}
+                      onPress={() => handlePostPress(post.id)}
+                      onReactionPress={(reactionType) => handleReactionPress(post.id, reactionType)}
+                      onCommentPress={() => handleCommentPress(post.id)}
+                      onEdit={handleEditPost}
+                      onDelete={handleDeletePost}
+                      onShare={handleSharePost}
+                      onSave={handleSavePost}
+                      onUnsave={handleUnsavePost}
+                      onSaveImage={handleSaveImage}
+                      onAuthorPress={handleAuthorPress}
+                      onRepost={handleRepost}
+                      onTip={handleTip}
+                      onBlocked={async () => { await refresh(); }}
+                      onReported={async () => {}}
+                      isSaved={savedPosts.has(post.id)}
+                    />
+                  )}
+                  {/* Inject events strip after every 8th post */}
+                  {user && (index + 1) % 8 === 0 && (
+                    <EventsStrip userId={user.id} />
+                  )}
+                </View>
+                );
+              }}
+              keyExtractor={(item, index) =>
+                '_type' in item ? `caught_up_marker` : `${(item as Post).id}-${index}`
+              }
+              onViewableItemsChanged={onViewableItemsChanged}
+              viewabilityConfig={viewabilityConfig.current}
               style={styles.scrollView}
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
@@ -394,7 +541,10 @@ export default function FeedScreen() {
                   <TouchableOpacity
                     style={styles.saPartnerBanner}
                     activeOpacity={0.75}
-                    onPress={() => (navigation as any).navigate('ProResources')}
+                    onPress={() => {
+                      proResourceAnalytics.track('explore_courses_tap');
+                      (navigation as any).navigate('ProResources');
+                    }}
                   >
                     <LinearGradient
                       colors={['#1C1235', '#2A1650', '#1C1235']}
@@ -523,6 +673,18 @@ export default function FeedScreen() {
         }}
       />
 
+      {/* Early adopter conversion modal */}
+      <EarlyAdopterConversionModal
+        visible={showEarlyAdopterModal}
+        copyVariant={eaCopyVariant}
+        onContinuePremium={() => {
+          onEaConverted();
+          navigation.navigate('Upgrade' as never);
+        }}
+        onRemindLater={onEaRemindLater}
+        onContinueFree={onEaDismissPermanently}
+      />
+
       {/* Notification permission bottom sheet */}
       <Modal
         visible={showNotifModal}
@@ -648,6 +810,64 @@ const styles = StyleSheet.create({
   errorText: {
     ...Typography.label,
     textAlign: 'center',
+  },
+
+  // ── New posts pill ───────────────────────────────────────────────────────
+  newPostsPill: {
+    position: 'absolute',
+    top: 16,
+    alignSelf: 'center',
+    zIndex: 100,
+    borderRadius: 999,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  newPostsPillGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  newPostsPillText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+
+  // ── Caught-up marker ─────────────────────────────────────────────────────
+  caughtUpMarker: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 32,
+    gap: 8,
+  },
+  caughtUpLine: {
+    width: '100%',
+    height: StyleSheet.hairlineWidth,
+    borderRadius: 1,
+  },
+  caughtUpBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  caughtUpTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  caughtUpSub: {
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 17,
   },
 
   // ── Sound Academy Partner Banner ──────────────────────────

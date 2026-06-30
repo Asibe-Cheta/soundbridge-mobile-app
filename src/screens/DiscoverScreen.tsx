@@ -23,7 +23,7 @@ import { BlurView } from 'expo-blur';
 import { useAuth } from '../contexts/AuthContext';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useScrollToTop } from '@react-navigation/native';
 import { supabase, dbHelpers } from '../lib/supabase';
 import { config } from '../config/environment';
 import {
@@ -59,6 +59,8 @@ import {
 } from '../services/ServiceDiscoveryService';
 import ExternalEventCard, { ExternalEvent } from '../components/ExternalEventCard';
 import ClaimEventModal from '../modals/ClaimEventModal';
+import { useSearchHistory } from '../hooks/useSearchHistory';
+import SearchHistoryPanel from '../components/SearchHistoryPanel';
 
 const { width } = Dimensions.get('window');
 
@@ -406,6 +408,11 @@ function DiscoverScreen() {
     location: '',
   });
   const [searchModalVisible, setSearchModalVisible] = useState(false);
+  const { history: searchHistory, addToHistory: addSearchHistory, removeFromHistory: removeSearchHistory, clearHistory: clearSearchHistory } = useSearchHistory('discover');
+  const closeSearchModal = () => {
+    if (searchQuery.trim().length >= 2) addSearchHistory(searchQuery.trim());
+    setSearchModalVisible(false);
+  };
   
   // Content states
   const [trendingTracks, setTrendingTracks] = useState<AudioTrack[]>([]);
@@ -426,6 +433,8 @@ function DiscoverScreen() {
   const [servicePrefs, setServicePrefs] = useState<ServiceDiscoveryPreferences>(DEFAULT_SERVICE_PREFS);
 
   // Loading state management
+  const scrollRef = useRef<ScrollView>(null);
+  useScrollToTop(scrollRef);
   const loadingManager = useRef(new LoadingStateManager()).current;
   const cancellableQuery = useRef(new CancellableQuery()).current;
   const [isLoadingAny, setIsLoadingAny] = useState(true);
@@ -696,6 +705,7 @@ function DiscoverScreen() {
                       cover_art_url, artwork_url, duration, play_count,
                       likes_count, created_at, creator_id,
                       moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
+                      live_interest_enabled,
                       creator:profiles!creator_id(id, username, display_name, avatar_url)
                     `)
                     .eq('is_public', true)
@@ -754,6 +764,7 @@ function DiscoverScreen() {
                 cover_art_url, artwork_url, duration, play_count,
                 likes_count, created_at, creator_id,
                 moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
+                live_interest_enabled,
                 creator:profiles!creator_id(id, username, display_name, avatar_url)
               `)
               .eq('is_public', true)
@@ -779,6 +790,7 @@ function DiscoverScreen() {
                 cover_art_url, artwork_url, duration, play_count,
                 likes_count, created_at, creator_id,
                 moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
+                live_interest_enabled,
                 creator:profiles!creator_id(id, username, display_name, avatar_url)
               `)
               .eq('is_public', true)
@@ -804,6 +816,7 @@ function DiscoverScreen() {
                 cover_art_url, artwork_url, duration, play_count,
                 likes_count, created_at, creator_id,
                 moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
+                live_interest_enabled,
                 creator:profiles!creator_id(id, username, display_name, avatar_url)
               `)
               .eq('is_public', true)
@@ -928,6 +941,7 @@ function DiscoverScreen() {
                       cover_art_url, artwork_url, duration, play_count,
                       likes_count, created_at, creator_id,
                       moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
+                      live_interest_enabled,
                       creator:profiles!creator_id(id, username, display_name, avatar_url)
                     `)
                     .eq('is_public', true)
@@ -1120,6 +1134,7 @@ function DiscoverScreen() {
             plays_count: track.plays_count || 0,
             likes_count: track.likes_count || track.like_count || 0,
             created_at: track.created_at,
+            live_interest_enabled: track.live_interest_enabled ?? true,
             creator: {
               id: track.creator?.id || track.creator_id || 'unknown',
               username: track.creator?.username || 'unknown',
@@ -1517,13 +1532,12 @@ function DiscoverScreen() {
   const handleTrackPlay = async (track: AudioTrack) => {
     try {
       console.log('🎵 Playing track from Discover:', track.title);
-      await play(track);
-      
-      // Add other tracks from current view to queue
-      if (recentTracks.length > 0) {
-        const otherRecentTracks = recentTracks.filter(t => t.id !== track.id);
-        otherRecentTracks.forEach(t => addToQueue(t));
-      }
+      // Build queue before play so lock-screen Next/Previous get a multi-track RNTP queue.
+      const queueTracks =
+        recentTracks.length > 0
+          ? [track, ...recentTracks.filter(t => t.id !== track.id).slice(0, 14)]
+          : [track];
+      await play(track, queueTracks);
       
       // Mini player will now handle showing the currently playing track
       // Navigation to full player is handled by mini player expand button
@@ -1765,7 +1779,8 @@ function DiscoverScreen() {
         </View>
 
       {/* Content */}
-      <ScrollView 
+      <ScrollView
+        ref={scrollRef}
         style={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -3375,7 +3390,7 @@ function DiscoverScreen() {
                     </TouchableOpacity>
                   )}
                 </View>
-                <TouchableOpacity onPress={() => setSearchModalVisible(false)} style={{ marginLeft: 16 }}>
+                <TouchableOpacity onPress={() => { setSearchQuery(''); setSearchModalVisible(false); }} style={{ marginLeft: 16 }}>
                   <Ionicons name="close" size={28} color={theme.colors.text} />
                 </TouchableOpacity>
               </View>
@@ -3388,12 +3403,21 @@ function DiscoverScreen() {
                     <Text style={{ color: theme.colors.textSecondary, marginTop: 12 }}>Searching...</Text>
                   </View>
                 ) : searchQuery.length < 2 ? (
-                  <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-                    <Ionicons name="search" size={48} color={theme.colors.textSecondary} />
-                    <Text style={{ color: theme.colors.textSecondary, marginTop: 12, textAlign: 'center' }}>
-                      Type at least 2 characters to search
-                    </Text>
-                  </View>
+                  searchHistory.length > 0 ? (
+                    <SearchHistoryPanel
+                      history={searchHistory}
+                      onSelect={(term) => { setSearchQuery(term); addSearchHistory(term); }}
+                      onRemove={removeSearchHistory}
+                      onClearAll={clearSearchHistory}
+                    />
+                  ) : (
+                    <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                      <Ionicons name="search" size={48} color={theme.colors.textSecondary} />
+                      <Text style={{ color: theme.colors.textSecondary, marginTop: 12, textAlign: 'center' }}>
+                        Type at least 2 characters to search
+                      </Text>
+                    </View>
+                  )
                 ) : (searchResults.artists.length === 0 && searchResults.tracks.length === 0 && (searchResults.events?.length || 0) === 0) ? (
                   <View style={{ alignItems: 'center', paddingVertical: 40 }}>
                     <Ionicons name="search-outline" size={48} color={theme.colors.textSecondary} />
@@ -3411,7 +3435,7 @@ function DiscoverScreen() {
                             key={artist.id}
                             style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}
                             onPress={() => {
-                              setSearchModalVisible(false);
+                              closeSearchModal();
                               navigation.navigate('CreatorProfile' as never, { creatorId: artist.id } as never);
                             }}
                           >
@@ -3441,7 +3465,7 @@ function DiscoverScreen() {
                             key={track.id}
                             style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}
                             onPress={() => {
-                              setSearchModalVisible(false);
+                              closeSearchModal();
                               navigation.navigate('TrackDetails' as never, { trackId: track.id, track } as never);
                             }}
                           >
@@ -3471,7 +3495,7 @@ function DiscoverScreen() {
                             key={event.id}
                             style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}
                             onPress={() => {
-                              setSearchModalVisible(false);
+                              closeSearchModal();
                               navigation.navigate('EventDetails' as never, { eventId: event.id, event } as never);
                             }}
                           >
@@ -3496,7 +3520,7 @@ function DiscoverScreen() {
                     <TouchableOpacity
                       style={{ backgroundColor: theme.colors.primary, paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 8 }}
                       onPress={() => {
-                        setSearchModalVisible(false);
+                        closeSearchModal();
                         navigation.navigate('Search' as never, { initialQuery: searchQuery } as never);
                       }}
                     >

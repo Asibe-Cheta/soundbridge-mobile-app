@@ -1,8 +1,9 @@
 import React, { memo, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Linking, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import VerifiedAvatar from './VerifiedAvatar';
 import VerifiedBadge from './VerifiedBadge';
+import PremiumBadge from './PremiumBadge';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -61,6 +62,7 @@ export const RepostedPostCard = memo(function RepostedPostCard({
   const [isConnecting, setIsConnecting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showSeeMore, setShowSeeMore] = useState(false);
+  const [imageRatio, setImageRatio] = useState<number | null>(null);
 
   // Guard: if post or author is missing (API returned incomplete repost data), render nothing
   if (!post || !post.author) {
@@ -170,26 +172,15 @@ export const RepostedPostCard = memo(function RepostedPostCard({
           />
           <View style={styles.authorInfo}>
             <View style={styles.authorNameRow}>
+              {(post.author.subscription_tier === 'premium' || post.author.subscription_tier === 'unlimited') && (
+                <PremiumBadge tier={post.author.subscription_tier} size={13} />
+              )}
+
               <Text style={[styles.authorName, { color: theme.colors.text }]} numberOfLines={1}>
                 {post.author.display_name}
               </Text>
 
               {post.author.is_verified && <VerifiedBadge size={13} />}
-
-              {/* Pro Badge (Premium tier) */}
-              {post.author.subscription_tier === 'premium' && (
-                <View style={styles.proBadge}>
-                  <Ionicons name="diamond" size={9} color="#FFFFFF" />
-                </View>
-              )}
-
-              {/* Pro+ Badge (Unlimited tier) */}
-              {post.author.subscription_tier === 'unlimited' && (
-                <View style={styles.proPlusBadge}>
-                  <Ionicons name="diamond" size={9} color="#FFFFFF" />
-                  <Text style={styles.proPlusText}>+</Text>
-                </View>
-              )}
             </View>
 
             {/* Professional headline only */}
@@ -273,8 +264,15 @@ export const RepostedPostCard = memo(function RepostedPostCard({
       {post.image_url && (
         <Image
           source={{ uri: post.image_url }}
-          style={styles.mediaPreview}
+          style={[
+            styles.mediaPreview,
+            imageRatio ? { height: Math.round(Dimensions.get('window').width / imageRatio) } : undefined,
+          ]}
           resizeMode="cover"
+          onLoad={(e) => {
+            const { width, height } = e.nativeEvent.source;
+            if (width > 0 && height > 0) setImageRatio(width / height);
+          }}
         />
       )}
 
@@ -370,32 +368,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     fontWeight: '600',
-  },
-  proBadge: {
-    backgroundColor: '#DC2626',
-    borderRadius: 7,
-    width: 14,
-    height: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  proPlusBadge: {
-    backgroundColor: '#DC2626',
-    borderRadius: 8,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    height: 14,
-  },
-  proPlusText: {
-    color: '#FFFFFF',
-    ...Typography.label,
-    fontSize: 8,
-    lineHeight: 10,
-    fontWeight: '700',
-    marginTop: -1,
   },
   authorDetails: {
     ...Typography.label,

@@ -26,6 +26,7 @@ import EventTicketService, { EventTicket } from '../services/EventTicketService'
 import { deepLinkingService } from '../services/DeepLinkingService';
 import eventBookmarkService from '../services/EventBookmarkService';
 import eventAnalyticsService, { EventAnalytics } from '../services/EventAnalyticsService';
+import { userBehaviourService } from '../services/UserBehaviourService';
 import EventShareSheet from '../components/EventShareSheet';
 import EventAnalyticsCard from '../components/EventAnalyticsCard';
 
@@ -93,6 +94,14 @@ export default function EventDetailsScreen() {
     if (user?.id) checkBookmarkStatus();
     trackPageView();
   }, [eventId]);
+
+  // Record event view in user behaviour profile once event data is available
+  useEffect(() => {
+    if (event?.id && user?.id) {
+      const city = event.venue || event.location || null;
+      userBehaviourService.recordEventView(user.id, event.id, city);
+    }
+  }, [event?.id]);
 
   // Load analytics once we know who the organizer is
   useEffect(() => {

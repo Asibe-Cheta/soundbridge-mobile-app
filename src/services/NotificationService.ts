@@ -10,6 +10,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { locationUpdateService } from './LocationUpdateService';
 import { config } from '../config/environment';
+import { isBgIsolationEnabled } from '../config/bgAudioIsolationFlags';
+import { audioLog } from '../lib/audioDebugLog';
 
 // Configure notification behavior
 Notifications.setNotificationHandler({
@@ -130,6 +132,11 @@ export interface NotificationPreferences {
   preferredEventGenres: string[];
   locationState: string;
   locationCountry: string;
+
+  // Event notification timing (google_calendar_nudge migration)
+  preferredNotificationTimes: string[];
+  eventPlanningWindow: string;
+  activeEventMonths: number[];
 }
 
 export interface UserLocation {
@@ -164,6 +171,10 @@ class NotificationService {
    * Call this from App.tsx to enable direct navigation without URL scheme.
    */
   setNavigationCallback(callback: (data: NotificationData) => void): void {
+    if (isBgIsolationEnabled('disableNotificationHooks')) {
+      audioLog('BG_ISO_SKIP_NOTIFICATION_NAV_CB', {});
+      return;
+    }
     this.navigationCallback = callback;
     console.log('✅ Navigation callback registered for notification taps');
   }
@@ -171,6 +182,10 @@ class NotificationService {
   // ===== INITIALIZATION =====
 
   async initialize(): Promise<boolean> {
+    if (isBgIsolationEnabled('disableNotificationHooks')) {
+      audioLog('BG_ISO_SKIP_NOTIFICATION_INIT', {});
+      return false;
+    }
     // Prevent multiple simultaneous initializations
     if (this.isInitializing) {
       console.log('⏸️ Notification service initialization already in progress');
@@ -857,6 +872,11 @@ class NotificationService {
       preferredEventGenres: row.preferred_event_genres || row.preferred_event_categories || [],
       locationState: row.location_state || 'Unknown',
       locationCountry: row.location_country || 'Unknown',
+      preferredNotificationTimes: row.preferred_notification_times?.length
+        ? row.preferred_notification_times
+        : ['any_time'],
+      eventPlanningWindow: row.event_planning_window || 'any_time',
+      activeEventMonths: row.active_event_months || [],
     };
   }
 
@@ -887,6 +907,11 @@ class NotificationService {
     }
     if (prefs.locationState !== undefined) row.location_state = prefs.locationState;
     if (prefs.locationCountry !== undefined) row.location_country = prefs.locationCountry;
+    if (prefs.preferredNotificationTimes !== undefined) {
+      row.preferred_notification_times = prefs.preferredNotificationTimes;
+    }
+    if (prefs.eventPlanningWindow !== undefined) row.event_planning_window = prefs.eventPlanningWindow;
+    if (prefs.activeEventMonths !== undefined) row.active_event_months = prefs.activeEventMonths;
     row.updated_at = new Date().toISOString();
     return row;
   }
@@ -954,6 +979,9 @@ class NotificationService {
       preferredEventGenres: [],
       locationState: 'Unknown',
       locationCountry: 'Unknown',
+      preferredNotificationTimes: ['any_time'],
+      eventPlanningWindow: 'any_time',
+      activeEventMonths: [],
     };
   }
 
@@ -1270,6 +1298,7 @@ class NotificationService {
         'opportunity_interest','opportunity_agreement_received','urgent_gig','gig_accepted',
         'gig_confirmed','gig_starting_soon','gig_expired','gig_payment','gig_refund',
         'gig_rating_received','opportunity','dispute_raised','identity_verified','venue_match',
+        'community_update',
       ]);
       const safeType = ALLOWED_TYPES.has(notification.type) ? notification.type : 'system';
 

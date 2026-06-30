@@ -212,7 +212,9 @@ export default function AudioPlayerScreen({ navigation, route }: AudioPlayerScre
   // Live interest prompt trigger — after 60s OR one full play, once per user per track
   useEffect(() => {
     const trackId = currentTrack?.id;
-    const liveEnabled = currentTrack?.live_interest_enabled;
+    // Default to enabled if field is missing (handles cached/old track objects)
+    // Only suppress if explicitly set to false by the creator
+    const liveEnabled = currentTrack?.live_interest_enabled !== false;
     if (!trackId || !user || !isPlaying || !liveEnabled) return;
     if (liveInterestShownTracks.has(trackId)) return;
 

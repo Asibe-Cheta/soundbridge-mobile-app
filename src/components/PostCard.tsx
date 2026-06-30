@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, Pressable, Dimensions,
 import { Ionicons } from '@expo/vector-icons';
 import VerifiedAvatar from './VerifiedAvatar';
 import VerifiedBadge from './VerifiedBadge';
+import PremiumBadge from './PremiumBadge';
 import { ActivityIndicator } from 'react-native';
 import { walkthroughable } from 'react-native-copilot';
 import { useNavigation } from '@react-navigation/native';
@@ -21,7 +22,8 @@ import CommentsModal from '../modals/CommentsModal';
 import ReactionsListModal from '../modals/ReactionsListModal';
 import { RepostModal } from './RepostModal';
 import { RepostedPostCard } from './RepostedPostCard';
-import HeadlineGradientPill from './HeadlineGradientPill';
+import HeadlineGradientPill, { HEADLINE_GRADIENT_PRESETS } from './HeadlineGradientPill';
+import { LinearGradient } from 'expo-linear-gradient';
 import { networkService } from '../services/api/networkService';
 import { useToast } from '../contexts/ToastContext';
 import { SystemTypography as Typography } from '../constants/Typography';
@@ -139,6 +141,7 @@ const PostCard = memo(function PostCard({
   const [isConnecting, setIsConnecting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
+  const [imageRatios, setImageRatios] = useState<Record<string, number>>({});
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Headline Post expand/collapse animation
@@ -356,6 +359,7 @@ const PostCard = memo(function PostCard({
       collaboration: 'Collaboration',
       event: 'Event',
       update: 'Update',
+      photo: 'Portfolio',
     };
     return labels[type] || type;
   };
@@ -367,6 +371,7 @@ const PostCard = memo(function PostCard({
       collaboration: 'people',
       event: 'calendar',
       update: 'chatbubble',
+      photo: 'images',
     };
     return icons[type] || 'chatbubble';
   };
@@ -378,6 +383,7 @@ const PostCard = memo(function PostCard({
       collaboration: '#8B5CF6', // Purple
       event: '#3B82F6', // Blue
       update: '#6B7280', // Gray
+      photo: '#7C3AED', // Brand primary violet
     };
     return colors[type] || '#6B7280';
   };
@@ -410,6 +416,10 @@ const PostCard = memo(function PostCard({
           }}
         >
           <View style={styles.authorNameRow}>
+            {(post.author.subscription_tier === 'premium' || post.author.subscription_tier === 'unlimited') && (
+              <PremiumBadge tier={post.author.subscription_tier} size={14} />
+            )}
+
             <Text style={[styles.authorName, { color: theme.colors.text }]} numberOfLines={1}>
               {post.author.display_name}
             </Text>
@@ -421,21 +431,6 @@ const PostCard = memo(function PostCard({
             )}
 
             {post.author.is_verified && <VerifiedBadge size={14} />}
-
-            {/* Pro Badge (Premium tier) */}
-            {post.author.subscription_tier === 'premium' && (
-              <View style={styles.proBadge}>
-                <Ionicons name="diamond" size={10} color="#FFFFFF" />
-              </View>
-            )}
-
-            {/* Pro+ Badge (Unlimited tier) */}
-            {post.author.subscription_tier === 'unlimited' && (
-              <View style={styles.proPlusBadge}>
-                <Ionicons name="diamond" size={10} color="#FFFFFF" />
-                <Text style={styles.proPlusText}>+</Text>
-              </View>
-            )}
           </View>
 
           {/* Professional headline only */}
@@ -505,16 +500,14 @@ const PostCard = memo(function PostCard({
         )}
       </View>
 
-      {/* Post Card */}
-      <TouchableOpacity
+      {/* Post Card — View wrapper so text selection and action buttons receive touches */}
+      <View
         style={[
           styles.container,
           {
             backgroundColor: theme.colors.card,
           },
         ]}
-        onPress={() => onPress?.()}
-        activeOpacity={0.95}
       >
         {/* Card Header - Redrop Indicator + Save and More buttons */}
         <View style={styles.cardHeader}>
@@ -540,6 +533,7 @@ const PostCard = memo(function PostCard({
           {/* More Options Button */}
           <TouchableOpacity
             style={styles.moreButton}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setShowActionsModal(true);
@@ -552,13 +546,16 @@ const PostCard = memo(function PostCard({
       {/* Headline Post — pill + animated scroll reveal */}
       {post.post_type === 'headline' && (() => {
         const cardWidth = Dimensions.get('window').width;
-        const pillWidth = cardWidth - 40;
+        const pillWidth = cardWidth - 32;
         const allImages: string[] = post.image_urls && post.image_urls.length > 0
           ? post.image_urls
           : post.image_url ? [post.image_url] : [];
         const GRID_H = Math.round(cardWidth * 0.68);
         const leftW = Math.round(cardWidth * 0.58);
         const rightW = cardWidth - leftW - 2;
+        const gradientPreset = post.gradient_preset ?? 1;
+        const presetColors = (HEADLINE_GRADIENT_PRESETS.find(g => g.id === gradientPreset) ?? HEADLINE_GRADIENT_PRESETS[0]).colors;
+        const accentColor = presetColors[0];
 
         return (
           <View style={styles.headlineSection}>
@@ -566,40 +563,59 @@ const PostCard = memo(function PostCard({
             <TouchableOpacity
               style={styles.headlinePillWrapper}
               onPress={toggleHeadlineExpand}
-              activeOpacity={0.92}
+              activeOpacity={0.9}
             >
               <HeadlineGradientPill
                 headline={post.headline || post.content}
-                gradientPreset={post.gradient_preset ?? 1}
+                gradientPreset={gradientPreset}
                 pillWidth={pillWidth}
                 backgroundColor={theme.colors.card}
               />
             </TouchableOpacity>
 
-            {/* "Tap to read" hint — hidden once expanded */}
-            {!isHeadlineExpanded && (
-              <Text style={[styles.tapToRead, { color: theme.colors.textSecondary }]}>
-                Tap to read
+            {/* Expand / collapse row */}
+            <TouchableOpacity
+              style={styles.headlineExpandRow}
+              onPress={toggleHeadlineExpand}
+              activeOpacity={0.7}
+              hitSlop={{ top: 6, bottom: 6, left: 12, right: 12 }}
+            >
+              <Text style={[styles.headlineExpandLabel, { color: accentColor }]}>
+                {isHeadlineExpanded ? 'Show less' : 'Read more'}
               </Text>
-            )}
+              <Ionicons
+                name={isHeadlineExpanded ? 'chevron-up' : 'chevron-down'}
+                size={13}
+                color={accentColor}
+              />
+            </TouchableOpacity>
 
             {/* Animated scroll-reveal body */}
             <Animated.View
               style={{
                 maxHeight: headlineExpandAnim.interpolate({
                   inputRange: [0, 1],
-                  outputRange: [0, 800],
+                  outputRange: [0, 1200],
                 }),
                 overflow: 'hidden',
                 opacity: headlineExpandAnim.interpolate({
-                  inputRange: [0, 0.15, 1],
+                  inputRange: [0, 0.12, 1],
                   outputRange: [0, 0, 1],
                 }),
+                width: '100%',
               }}
             >
-              {/* Body text */}
+              {/* Gradient divider */}
+              <LinearGradient
+                colors={['transparent', accentColor + '55', 'transparent']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.headlineDivider}
+              />
+
+              {/* Body text with left accent bar */}
               {post.content.trim().length > 0 && (
-                <View style={styles.headlineBodyContent}>
+                <View style={[styles.headlineBodyContent, { borderLeftColor: accentColor + 'AA' }]}>
                   <Text
                     style={[styles.postContent, { color: theme.colors.text }]}
                     selectable
@@ -610,12 +626,27 @@ const PostCard = memo(function PostCard({
                 </View>
               )}
 
-              {/* Attached images inside expanded state */}
+              {/* Audio player — shown inside expanded section for headline posts */}
+              {post.audio_url && (
+                <View style={{ paddingHorizontal: 4, paddingBottom: 4 }}>
+                  <PostAudioPlayer audioUrl={post.audio_url} title="Teaser" />
+                </View>
+              )}
+
+              {/* Attached images */}
               {allImages.length > 0 && (
                 <View style={[styles.mediaSection, { marginBottom: 14 }]}>
                   {allImages.length === 1 && (
                     <TouchableOpacity activeOpacity={0.9} onPress={() => { setGalleryIndex(0); setShowFullScreenImage(true); }}>
-                      <Image source={{ uri: allImages[0] }} style={{ width: cardWidth, height: Math.round(cardWidth * 0.56) }} resizeMode="cover" />
+                      <Image
+                        source={{ uri: allImages[0] }}
+                        style={{ width: cardWidth, height: Math.round(cardWidth / (imageRatios[allImages[0]] || (16 / 9))) }}
+                        resizeMode="cover"
+                        onLoad={(e) => {
+                          const { width, height } = e.nativeEvent.source;
+                          if (width > 0 && height > 0) setImageRatios(prev => ({ ...prev, [allImages[0]]: width / height }));
+                        }}
+                      />
                     </TouchableOpacity>
                   )}
                   {allImages.length === 2 && (
@@ -737,13 +768,17 @@ const PostCard = memo(function PostCard({
 
         return (
           <View style={styles.mediaSection}>
-            {/* 1 image — wide 16:9 */}
+            {/* 1 image — natural aspect ratio (LinkedIn-style, no crop) */}
             {allImages.length === 1 && (
               <TouchableOpacity activeOpacity={0.9} onPress={() => openGallery(0)}>
                 <Image
                   source={{ uri: allImages[0] }}
-                  style={{ width: cardWidth, height: Math.round(cardWidth * 0.56) }}
+                  style={{ width: cardWidth, height: Math.round(cardWidth / (imageRatios[allImages[0]] || (16 / 9))) }}
                   resizeMode="cover"
+                  onLoad={(e) => {
+                    const { width, height } = e.nativeEvent.source;
+                    if (width > 0 && height > 0) setImageRatios(prev => ({ ...prev, [allImages[0]]: width / height }));
+                  }}
                 />
               </TouchableOpacity>
             )}
@@ -847,10 +882,10 @@ const PostCard = memo(function PostCard({
         );
       })()}
 
-      {post.audio_url && (
+      {post.audio_url && post.post_type !== 'headline' && (
         <PostAudioPlayer
           audioUrl={post.audio_url}
-          title="Audio Preview"
+          title="Teaser"
         />
       )}
 
@@ -1027,6 +1062,7 @@ const PostCard = memo(function PostCard({
           </View>
         )}
       </View>
+      </View>
 
       {/* Reactions List Modal */}
       <ReactionsListModal
@@ -1085,6 +1121,8 @@ const PostCard = memo(function PostCard({
           setShowActionsModal(false);
           setShowBlockModal(true);
         }}
+        onViewDetail={() => onPress?.()}
+        onRepost={() => setShowRepostModal(true)}
       />
 
       {/* Full Screen Image Gallery */}
@@ -1132,7 +1170,6 @@ const PostCard = memo(function PostCard({
           setShowReportModal(false);
         }}
       />
-    </TouchableOpacity>
     </View>
   );
 }, (prevProps, nextProps) => {
@@ -1237,32 +1274,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     fontWeight: '400',
-  },
-  proBadge: {
-    backgroundColor: '#DC2626',
-    borderRadius: 8,
-    width: 16,
-    height: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  proPlusBadge: {
-    backgroundColor: '#DC2626',
-    borderRadius: 10,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    height: 16,
-  },
-  proPlusText: {
-    color: '#FFFFFF',
-    ...Typography.label,
-    fontSize: 9,
-    lineHeight: 11,
-    fontWeight: '700',
-    marginTop: -1,
   },
   authorDetails: {
     ...Typography.label,
@@ -1431,25 +1442,38 @@ const styles = StyleSheet.create({
 
   // ── Headline Post ─────────────────────────────────────────
   headlineSection: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 14,
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 12,
     alignItems: 'center',
   },
   headlinePillWrapper: {
-    alignSelf: 'center',
+    alignSelf: 'stretch',
+    marginBottom: 0,
   },
-  tapToRead: {
-    ...Typography.label,
-    fontSize: 12,
+  headlineExpandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     marginTop: 8,
-    letterSpacing: 0.2,
+    paddingVertical: 2,
+  },
+  headlineExpandLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  headlineDivider: {
+    height: 1,
+    marginVertical: 12,
+    width: '100%',
   },
   headlineBodyContent: {
-    paddingHorizontal: 4,
-    paddingTop: 16,
-    paddingBottom: 4,
+    paddingLeft: 12,
+    paddingRight: 4,
+    paddingBottom: 8,
     width: '100%',
+    borderLeftWidth: 2.5,
   },
 
 });

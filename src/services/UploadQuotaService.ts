@@ -298,23 +298,27 @@ export async function getUploadQuota(
       setCachedQuota(userId, quota);
       return quota;
     } else {
-      // RevenueCat says free — but check for early adopter premium grant before downgrading
-      // Early adopters received 3 months free premium via manual DB grant (not RevenueCat)
+      // RevenueCat says free — but check for DB-granted premium before downgrading.
+      // Covers: early adopters (early_adopter = true) AND institutional grants (Sound Academy etc.)
       try {
         const { data: profile } = await supabase
           .from('profiles')
-          .select('subscription_tier, early_adopter, subscription_period_end')
+          .select('subscription_tier, early_adopter, subscription_period_end, subscription_status')
           .eq('id', userId)
           .single();
 
-        const isEarlyAdopterPremium =
-          profile?.early_adopter === true &&
-          (profile?.subscription_tier === 'premium' || profile?.subscription_tier === 'unlimited') &&
-          (!profile?.subscription_period_end || new Date(profile.subscription_period_end) > new Date());
+        const hasValidPeriod =
+          !profile?.subscription_period_end ||
+          new Date(profile.subscription_period_end) > new Date();
 
-        if (isEarlyAdopterPremium) {
+        const isDBGrantedPremium =
+          (profile?.subscription_tier === 'premium' || profile?.subscription_tier === 'unlimited') &&
+          profile?.subscription_status === 'active' &&
+          hasValidPeriod;
+
+        if (isDBGrantedPremium) {
           const grantedTier = profile.subscription_tier as StorageTier;
-          console.log(`🎁 Early adopter premium grant active — honouring ${grantedTier} tier (RevenueCat override skipped)`);
+          console.log(`🎁 DB-granted premium active (early_adopter=${profile?.early_adopter}) — honouring ${grantedTier} tier (RevenueCat override skipped)`);
           const storageQuota = await getStorageQuotaCached(userId, grantedTier, forceRefresh);
           const quota: UploadQuota = {
             tier: grantedTier,
@@ -351,24 +355,27 @@ export async function getUploadQuota(
     }
   }
 
-  // Before falling back, check if this is an early adopter with a DB-granted premium tier.
-  // This covers the case where RevenueCat was unavailable (returned null) so the RC branch
-  // above was never entered — the early adopter check there would have been skipped entirely.
+  // Before falling back, check for any DB-granted premium tier.
+  // Covers early adopters AND institutional grants when RevenueCat was unavailable.
   try {
     const { data: profile } = await supabase
       .from('profiles')
-      .select('subscription_tier, early_adopter, subscription_period_end')
+      .select('subscription_tier, early_adopter, subscription_period_end, subscription_status')
       .eq('id', userId)
       .single();
 
-    const isEarlyAdopterPremium =
-      profile?.early_adopter === true &&
-      (profile?.subscription_tier === 'premium' || profile?.subscription_tier === 'unlimited') &&
-      (!profile?.subscription_period_end || new Date(profile.subscription_period_end) > new Date());
+    const hasValidPeriod =
+      !profile?.subscription_period_end ||
+      new Date(profile.subscription_period_end) > new Date();
 
-    if (isEarlyAdopterPremium) {
+    const isDBGrantedPremium =
+      (profile?.subscription_tier === 'premium' || profile?.subscription_tier === 'unlimited') &&
+      profile?.subscription_status === 'active' &&
+      hasValidPeriod;
+
+    if (isDBGrantedPremium) {
       const grantedTier = profile.subscription_tier as StorageTier;
-      console.log(`🎁 Early adopter fallback — honouring ${grantedTier} tier (RC was unavailable)`);
+      console.log(`🎁 DB-granted premium fallback (early_adopter=${profile?.early_adopter}) — honouring ${grantedTier} tier (RC was unavailable)`);
       const storageQuota = await getStorageQuotaCached(userId, grantedTier, forceRefresh);
       const quota: UploadQuota = {
         tier: grantedTier,

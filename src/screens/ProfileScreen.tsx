@@ -17,8 +17,9 @@ import {
   Platform,
   Share,
   Clipboard,
+  Animated,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useScrollToTop } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -64,7 +65,17 @@ import QRCodeModal from '../components/QRCodeModal';
 import ShareDiagonalIcon from '../components/ShareDiagonalIcon';
 import ShareMyCardModal from '../components/ShareMyCardModal';
 import CreatorNudgeModal from '../components/CreatorNudgeModal';
+import PhotoPostEditorModal from '../components/PhotoPostEditorModal';
+import { useCreatorAgreement } from '../hooks/useCreatorAgreement';
+import CreatorAgreementModal from '../components/CreatorAgreementModal';
 import { useToast } from '../contexts/ToastContext';
+import GoogleCalendarConnectCard from '../components/GoogleCalendarConnectCard';
+import GoogleCalendarPrivacyModal from '../components/GoogleCalendarPrivacyModal';
+import FanPageShareModal from '../components/FanPageShareModal';
+import {
+  calendarIntegrationService,
+  type CalendarConnectionStatus,
+} from '../services/CalendarIntegrationService';
 
 const { width } = Dimensions.get('window');
 
@@ -123,6 +134,7 @@ export default function ProfileScreen() {
   const { user, userProfile, signOut, updatePassword, refreshUser, updateUserProfile, session, loading: authLoading } = useAuth();
   const { autoPlay, toggleAutoPlay } = useAudioPlayer();
   const { theme } = useTheme();
+  const { requestAgreement, agreementVisible, agreementSubmitting, onAgreed, onDismiss } = useCreatorAgreement();
   const { showToast } = useToast();
   const navigation = useNavigation();
   const { start: startTour } = useCopilot();
@@ -140,13 +152,17 @@ export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState<'overview' | 'settings' | 'earnings'>('overview');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(false); // Start as false for instant cache display
+  const scrollRef = useRef<ScrollView>(null);
+  useScrollToTop(scrollRef);
   const initialCacheLoadRef = useRef(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [showVenuePrefsModal, setShowVenuePrefsModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
   const [showShareCardModal, setShowShareCardModal] = useState(false);
   const [showNudgeModal, setShowNudgeModal] = useState(false);
+  const [showFanPageModal, setShowFanPageModal] = useState(false);
   const [nudgeDismissedThisSession, setNudgeDismissedThisSession] = useState(false);
+  const [showPhotoEditor, setShowPhotoEditor] = useState(false);
   const [followerAvatars, setFollowerAvatars] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [editingProfile, setEditingProfile] = useState<Partial<UserProfile>>({});
@@ -158,10 +174,15 @@ export default function ProfileScreen() {
   const [biometricType, setBiometricType] = useState('');
   const [showBiometricPasswordPrompt, setShowBiometricPasswordPrompt] = useState(false);
   const [externalLinks, setExternalLinks] = useState<ExternalLink[]>([]);
+  const [calendarStatus, setCalendarStatus] = useState<CalendarConnectionStatus>({ connected: false, provider: 'google' });
+  const [calendarStatusLoading, setCalendarStatusLoading] = useState(false);
+  const [calendarBusy, setCalendarBusy] = useState(false);
+  const [showCalendarPrivacy, setShowCalendarPrivacy] = useState(false);
 
   // Loading state management
   const loadingManager = useRef(new LoadingStateManager()).current;
   const cancellableQuery = useRef(new CancellableQuery()).current;
+  const fanIconScale = useRef(new Animated.Value(1)).current;
 
   // Subscribe to loading state changes
   useEffect(() => {
@@ -172,12 +193,40 @@ export default function ProfileScreen() {
   }, []);
 
   useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(fanIconScale, { toValue: 1.22, duration: 850, useNativeDriver: true }),
+        Animated.timing(fanIconScale, { toValue: 1.0, duration: 850, useNativeDriver: true }),
+      ]),
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [fanIconScale]);
+
+  const loadCalendarStatus = useCallback(async () => {
+    if (!session) return;
+    setCalendarStatusLoading(true);
+    try {
+      const status = await calendarIntegrationService.getStatus(session);
+      setCalendarStatus(status);
+      if (status.needs_reconnect) {
+        showToast('Google Calendar needs to be reconnected in Connected Apps.', 'info', 5000);
+      }
+    } catch (_) {
+      setCalendarStatus({ connected: false, provider: 'google' });
+    } finally {
+      setCalendarStatusLoading(false);
+    }
+  }, [session, showToast]);
+
+  useEffect(() => {
     // Start loading data as soon as user is available
     // Don't wait for authLoading to finish
     if (user?.id) {
       loadProfileData();
       loadExternalLinks();
       checkSpProfileExists();
+      loadCalendarStatus();
     }
     checkBiometricAvailability();
 
@@ -186,6 +235,72 @@ export default function ProfileScreen() {
       loadingManager.reset();
     };
   }, [user?.id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (session && activeTab === 'settings') {
+        loadCalendarStatus();
+      }
+    }, [session, activeTab, loadCalendarStatus]),
+  );
+
+  const handleCalendarConnectPress = () => {
+    setShowCalendarPrivacy(true);
+  };
+
+  const handleCalendarPrivacyContinue = async () => {
+    if (!session) return;
+    setCalendarBusy(true);
+    try {
+      const result = await calendarIntegrationService.connect(session);
+      setShowCalendarPrivacy(false);
+      if (result.success) {
+        await loadCalendarStatus();
+        showToast(
+          'Google Calendar connected. SoundBridge will now find events that fit around your schedule.',
+          'success',
+          5000,
+        );
+      } else if (result.error && !result.error.toLowerCase().includes('cancel')) {
+        Alert.alert('Connection failed', result.error);
+      }
+    } finally {
+      setCalendarBusy(false);
+    }
+  };
+
+  const handleCalendarDisconnect = () => {
+    if (!session) return;
+    Alert.alert(
+      'Disconnect Google Calendar?',
+      'Your calendar data will be removed from SoundBridge.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: async () => {
+            setCalendarBusy(true);
+            try {
+              const result = await calendarIntegrationService.disconnect(session);
+              if (result.success) {
+                setCalendarStatus({ connected: false, provider: 'google' });
+                showToast(
+                  'Google Calendar disconnected. Your calendar data has been removed.',
+                  'success',
+                  5000,
+                );
+              } else {
+                Alert.alert('Disconnect failed', result.error ?? 'Please try again.');
+              }
+            } finally {
+              setCalendarBusy(false);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   // Show nudge when creator navigates to their own profile, once per session
   useFocusEffect(
@@ -1812,6 +1927,32 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {/* Fan Page Link */}
+      {profile?.role === 'creator' && profile?.username ? (
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Your Fan Page Link</Text>
+          <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+            <View style={styles.groupedRow}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+                <Ionicons name="share-social-outline" size={18} color={theme.colors.primary} />
+              </View>
+              <Text style={[styles.rowValue, { color: theme.colors.text, flex: 1, fontSize: 13 }]} numberOfLines={1} ellipsizeMode="tail">
+                soundbridge.live/{profile.username}/home
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  Clipboard.setString(`https://soundbridge.live/${profile.username}/home`);
+                  showToast('Link copied to clipboard', 'success', 2500);
+                }}
+                hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+              >
+                <Ionicons name="copy-outline" size={18} color={theme.colors.primary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
       {/* Portfolio Links */}
       {session && user?.id && (
         <View style={styles.section}>
@@ -1891,6 +2032,23 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {/* Connected Apps */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Connected Apps</Text>
+        <GoogleCalendarConnectCard
+          status={calendarStatus}
+          loading={calendarStatusLoading}
+          busy={calendarBusy}
+          lastSyncedLabel={
+            calendarStatus.last_synced_at
+              ? getRelativeTime(calendarStatus.last_synced_at)
+              : null
+          }
+          onConnect={handleCalendarConnectPress}
+          onDisconnect={handleCalendarDisconnect}
+        />
+      </View>
+
       {/* Creator Tools */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Creator Tools</Text>
@@ -1925,6 +2083,13 @@ export default function ProfileScreen() {
               <Ionicons name="people-outline" size={18} color="#6366F1" />
             </View>
             <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Collaboration Requests</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('MyCommunity' as never)}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
+              <Ionicons name="people" size={18} color="#10B981" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>My Community</Text>
             <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
           {(userProfile?.creator_types?.includes('service_provider') || hasSpProfile) ? (
@@ -2043,20 +2208,6 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* TEST BUTTON - Temporary */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Testing</Text>
-        <View style={[styles.groupedCard, { backgroundColor: 'rgba(124,58,237,0.08)' }]}>
-          <TouchableOpacity style={styles.groupedRow} onPress={() => (navigation as any).navigate('OnboardingTest')}>
-            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(124,58,237,0.18)' }]}>
-              <Ionicons name="flask" size={18} color="#7C3AED" />
-            </View>
-            <Text style={[styles.rowLabel, { color: '#7C3AED' }]}>Test Onboarding Flow</Text>
-            <Ionicons name="chevron-forward" size={15} color="#7C3AED" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
       {/* Support & About */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Support & About</Text>
@@ -2098,6 +2249,20 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {userProfile?.is_internal_team && (
+        <View style={[styles.section, { marginTop: 8 }]}>
+          <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+            <TouchableOpacity style={styles.groupedRow} onPress={() => (navigation as any).navigate('OutreachTracker')}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(120,120,128,0.12)' }]}>
+                <Ionicons name="people-outline" size={18} color={theme.colors.textSecondary} />
+              </View>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Outreach Tracker</Text>
+              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {/* Sign Out */}
       <TouchableOpacity style={[styles.signOutButton, { backgroundColor: theme.colors.error + '20', borderColor: theme.colors.error }]} onPress={handleSignOut}>
@@ -2144,6 +2309,9 @@ export default function ProfileScreen() {
                 </>
               ) : (
                 <>
+                  <TouchableOpacity style={styles.headerButton} onPress={async () => { const ok = await requestAgreement(); if (ok) setShowPhotoEditor(true); }} accessibilityLabel="Add portfolio content">
+                    <Ionicons name="add-circle-outline" size={24} color={theme.colors.text} />
+                  </TouchableOpacity>
                   <TouchableOpacity style={styles.headerButton} onPress={handleEditProfile}>
                     <Ionicons name="pencil-outline" size={24} color={theme.colors.text} />
                   </TouchableOpacity>
@@ -2171,6 +2339,7 @@ export default function ProfileScreen() {
 
       {/* Scrollable Content - Profile Banner, Tabs, and Content all scroll together */}
       <ScrollView
+        ref={scrollRef}
         style={styles.scrollContainer}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -2232,9 +2401,9 @@ export default function ProfileScreen() {
             {/* Profile Content Overlay */}
             <View style={styles.profileContentOverlay}>
               {/* Avatar Edit Button */}
-              <TouchableOpacity 
-                style={styles.avatarEditButtonOverlay} 
-                onPress={handleChangeAvatar} 
+              <TouchableOpacity
+                style={styles.avatarEditButtonOverlay}
+                onPress={handleChangeAvatar}
                 disabled={avatarUploading}
               >
                 {avatarUploading ? (
@@ -2243,6 +2412,18 @@ export default function ProfileScreen() {
                   <Ionicons name="camera" size={20} color="#FFFFFF" />
                 )}
               </TouchableOpacity>
+
+              {/* Fan Page Icon — creators only */}
+              {profile?.role === 'creator' && profile?.username ? (
+                <TouchableOpacity
+                  style={styles.fanPageIconBtn}
+                  onPress={() => setShowFanPageModal(true)}
+                >
+                  <Animated.View style={{ transform: [{ scale: fanIconScale }] }}>
+                    <Ionicons name="people" size={17} color="rgba(255,255,255,0.92)" />
+                  </Animated.View>
+                </TouchableOpacity>
+              ) : null}
               
               {/* User Info Overlay */}
               <View style={styles.profileInfoOverlay}>
@@ -2434,6 +2615,21 @@ export default function ProfileScreen() {
         />
       )}
 
+      {profile?.username && (
+        <FanPageShareModal
+          visible={showFanPageModal}
+          username={profile.username}
+          onClose={() => setShowFanPageModal(false)}
+        />
+      )}
+
+      <GoogleCalendarPrivacyModal
+        visible={showCalendarPrivacy}
+        onContinue={handleCalendarPrivacyContinue}
+        onCancel={() => !calendarBusy && setShowCalendarPrivacy(false)}
+        loading={calendarBusy}
+      />
+
       {profile?.role === 'creator' && (
         <>
           <CreatorNudgeModal
@@ -2445,6 +2641,17 @@ export default function ProfileScreen() {
               setShowNudgeModal(false);
               setNudgeDismissedThisSession(true);
             }}
+          />
+          <CreatorAgreementModal
+            visible={agreementVisible}
+            onAgreed={onAgreed}
+            onDismiss={onDismiss}
+            submitting={agreementSubmitting}
+          />
+          <PhotoPostEditorModal
+            visible={showPhotoEditor}
+            onClose={() => setShowPhotoEditor(false)}
+            onPosted={() => setShowPhotoEditor(false)}
           />
           <ShareMyCardModal
             visible={showShareCardModal}
@@ -2608,6 +2815,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  fanPageIconBtn: {
+    position: 'absolute',
+    top: 62,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   profileInfoOverlay: {
     alignItems: 'flex-start',

@@ -50,7 +50,7 @@ const BUILTIN_BANKS: Record<string, { name: string; code: string }[]> = {
     { name: 'Bank of Scotland', code: 'BOFSGB21' },
     { name: 'Royal Bank of Scotland', code: 'RBSSGB2L' },
     { name: 'Revolut', code: 'REVOGB21' },
-    { name: 'Wise (TransferWise)', code: 'TRWIGB22' },
+    { name: 'Monzo', code: 'MONZGB2L' },
     { name: 'Chase UK', code: 'CHASDEFX' },
     { name: 'Clydesdale Bank', code: 'CLYDGB21' },
     { name: 'Standard Chartered UK', code: 'SCBLGB2L' },
@@ -606,7 +606,7 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         field_validation: { bank_code: '^\\d{3}$' },
       },
 
-      // ✅ WISE-SUPPORTED AFRICAN COUNTRIES (Payouts via Wise API)
+      // ✅ FINCRA-SUPPORTED AFRICAN COUNTRIES (Payouts via Fincra API)
       NG: {
         country_code: 'NG', country_name: 'Nigeria', currency: 'NGN', banking_system: 'NIBSS',
         required_fields: {
@@ -652,7 +652,7 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         field_validation: { branch_code: '^\\d{6}$' },
       },
 
-      // ✅ WISE-SUPPORTED COUNTRIES - Asia
+      // ✅ STRIPE-SUPPORTED COUNTRIES - Asia
       IN: {
         country_code: 'IN', country_name: 'India', currency: 'INR', banking_system: 'NEFT/RTGS',
         required_fields: {
@@ -775,7 +775,7 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         field_validation: {},
       },
 
-      // ✅ WISE-SUPPORTED COUNTRIES - Latin America
+      // ✅ STRIPE-SUPPORTED COUNTRIES - Latin America
       BR: {
         country_code: 'BR', country_name: 'Brazil', currency: 'BRL', banking_system: 'PIX',
         required_fields: {
@@ -848,7 +848,7 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         field_validation: {},
       },
 
-      // ✅ WISE-SUPPORTED COUNTRIES - Middle East & Africa
+      // ✅ STRIPE-SUPPORTED COUNTRIES - Middle East & Africa
       EG: {
         country_code: 'EG', country_name: 'Egypt', currency: 'EGP', banking_system: 'Egyptian Banks',
         required_fields: {
@@ -890,7 +890,7 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         field_validation: {},
       },
 
-      // ✅ WISE-SUPPORTED COUNTRIES - Europe & Caucasus
+      // ✅ STRIPE-SUPPORTED COUNTRIES - Europe & Caucasus
       TR: {
         country_code: 'TR', country_name: 'Turkey', currency: 'TRY', banking_system: 'Turkish Banks',
         required_fields: {
@@ -923,11 +923,10 @@ const CountryAwareBankForm: React.FC<CountryAwareBankFormProps> = ({
         field_validation: {},
       },
 
-      // ⚠️ NOTE: Dual payment provider system (Stripe Connect + Wise API)
-      // Stripe Connect: US, UK, EU, Canada, Australia, Singapore, Japan, Hong Kong, NZ, etc.
-      // Wise API: All countries added above (50 currencies, 160+ destinations worldwide)
-      // Backend automatically determines provider based on creator location
-      // See PAYOUT_SYSTEM_DECISIONS.md and CREATOR_PAYOUT_AUTOMATION_IMPLEMENTATION.md
+      // ⚠️ NOTE: Dual payment provider system (Stripe + Fincra)
+      // Stripe: US, UK, EU, Canada, Australia, Singapore, Japan, Hong Kong, NZ, etc.
+      // Fincra: African countries (NGN, GHS, KES) — direct local bank payouts
+      // Backend automatically determines provider based on creator's bank currency
     };
 
     return fallbackData[countryCode] || fallbackData.GB;

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   TextInput,
@@ -16,14 +16,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSearch } from '../hooks/useSearch';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import BackButton from '../components/BackButton';
 import VerifiedBadge from '../components/VerifiedBadge';
 import { formatServiceCategories } from '../utils/serviceCategoryLabels';
+import { useSearchHistory } from '../hooks/useSearchHistory';
+import SearchHistoryPanel from '../components/SearchHistoryPanel';
 
 type SearchTab = 'all' | 'posts' | 'people' | 'opportunities';
-
-const RECENT_SEARCHES_KEY = '@soundbridge_recent_searches';
 
 export default function SearchScreen() {
   const { theme } = useTheme();
@@ -31,9 +30,10 @@ export default function SearchScreen() {
   const route = useRoute();
   const { searchQuery, setSearchQuery, searchResults, isSearching, searchError } = useSearch();
   const [activeTab, setActiveTab] = useState<SearchTab>('all');
-  const [recentSearches, setRecentSearches] = useState<string[]>([]);
-  
-  // Get initial query from route params if provided
+  const { history, addToHistory, removeFromHistory, clearHistory } = useSearchHistory('search');
+  const blurRef = useRef<ReturnType<typeof setTimeout>>();
+  const [searchFocused, setSearchFocused] = useState(true);
+
   useEffect(() => {
     const params = route.params as any;
     if (params?.initialQuery) {
@@ -41,37 +41,14 @@ export default function SearchScreen() {
     }
   }, []);
 
-  // Load recent searches on mount
-  useEffect(() => {
-    loadRecentSearches();
-  }, []);
-
-  const loadRecentSearches = async () => {
-    try {
-      const stored = await AsyncStorage.getItem(RECENT_SEARCHES_KEY);
-      if (stored) {
-        setRecentSearches(JSON.parse(stored));
-      }
-    } catch (error) {
-      console.error('Error loading recent searches:', error);
-    }
+  const handleSearchFocus = () => {
+    clearTimeout(blurRef.current);
+    setSearchFocused(true);
   };
-
-  const saveSearch = async (query: string) => {
-    try {
-      const updated = [query, ...recentSearches.filter((s) => s !== query)].slice(0, 10);
-      setRecentSearches(updated);
-      await AsyncStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
-    } catch (error) {
-      console.error('Error saving search:', error);
-    }
+  const handleSearchBlur = () => {
+    blurRef.current = setTimeout(() => setSearchFocused(false), 200);
+    if (searchQuery.trim().length >= 2) addToHistory(searchQuery.trim());
   };
-
-  useEffect(() => {
-    if (searchQuery.trim().length >= 2) {
-      saveSearch(searchQuery.trim());
-    }
-  }, [searchQuery]);
 
   const handleResultPress = (type: 'track' | 'artist' | 'event' | 'service' | 'venue' | 'post' | 'opportunity', item: any) => {
     if (type === 'track') {
@@ -126,11 +103,9 @@ export default function SearchScreen() {
               onChangeText={setSearchQuery}
               autoFocus
               returnKeyType="search"
-              onSubmitEditing={() => {
-                if (searchQuery.length >= 2) {
-                  saveSearch(searchQuery);
-                }
-              }}
+              onFocus={handleSearchFocus}
+              onBlur={handleSearchBlur}
+              onSubmitEditing={() => { if (searchQuery.trim().length >= 2) addToHistory(searchQuery.trim()); }}
               allowFontScaling={false}
             />
             {searchQuery.length > 0 && (
@@ -185,40 +160,22 @@ export default function SearchScreen() {
 
         {/* Search Results */}
         {searchQuery.length < 2 ? (
-          // Recent searches
-          <ScrollView style={styles.resultsContainer}>
-            <View style={styles.recentSearches}>
-              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Recent Searches</Text>
-              {recentSearches.length === 0 ? (
-                <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>
-                  No recent searches
-                </Text>
-              ) : (
-                recentSearches.map((search, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    style={[
-                      styles.recentSearchItem,
-                      { backgroundColor: theme.colors.card, borderColor: theme.colors.border },
-                    ]}
-                    onPress={() => setSearchQuery(search)}
-                  >
-                    <Ionicons name="time-outline" size={18} color={theme.colors.textSecondary} />
-                    <Text style={[styles.recentSearchText, { color: theme.colors.text }]}>{search}</Text>
-                    <TouchableOpacity
-                      onPress={() => {
-                        const updated = recentSearches.filter((s) => s !== search);
-                        setRecentSearches(updated);
-                        AsyncStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
-                      }}
-                    >
-                      <Ionicons name="close" size={18} color={theme.colors.textSecondary} />
-                    </TouchableOpacity>
-                  </TouchableOpacity>
-                ))
-              )}
+          searchFocused && history.length > 0 ? (
+            <SearchHistoryPanel
+              history={history}
+              onSelect={(term) => { setSearchQuery(term); addToHistory(term); }}
+              onRemove={removeFromHistory}
+              onClearAll={clearHistory}
+            />
+          ) : (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="search-outline" size={64} color={theme.colors.textSecondary} />
+              <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>Search SoundBridge</Text>
+              <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+                Find drops, people, events and opportunities
+              </Text>
             </View>
-          </ScrollView>
+          )
         ) : isSearching ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={theme.colors.primary} />

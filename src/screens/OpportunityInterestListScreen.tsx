@@ -6,6 +6,7 @@ import {
   FlatList,
   TouchableOpacity,
   Alert,
+  Modal,
   StatusBar,
   ActivityIndicator,
   RefreshControl,
@@ -54,6 +55,8 @@ export default function OpportunityInterestListScreen() {
   // Project Agreement Modal
   const [agreementModalVisible, setAgreementModalVisible] = useState(false);
   const [selectedInterest, setSelectedInterest] = useState<OpportunityInterest | null>(null);
+  const [showEventNudge, setShowEventNudge] = useState(false);
+  const [paidCreatorName, setPaidCreatorName] = useState('');
 
   const loadInterests = useCallback(async () => {
     try {
@@ -212,6 +215,8 @@ export default function OpportunityInterestListScreen() {
           text: 'View Project',
           onPress: () => {
             navigation.navigate('OpportunityProject' as never, { projectId: project.id } as never);
+            setPaidCreatorName(creatorName);
+            setShowEventNudge(true);
           },
         },
       ],
@@ -403,6 +408,54 @@ export default function OpportunityInterestListScreen() {
         }}
         onSubmit={handleSubmitAgreement}
       />
+
+      {/* Event promotion nudge — fires after service marketplace payment */}
+      <Modal
+        visible={showEventNudge}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setShowEventNudge(false)}
+      >
+        <View style={styles.nudgeOverlay}>
+          <View style={[styles.nudgeSheet, { backgroundColor: theme.colors.card }]}>
+            <View style={styles.nudgeHandle} />
+
+            <View style={styles.nudgeIconRow}>
+              <View style={[styles.nudgeIconCircle, { backgroundColor: 'rgba(99,102,241,0.15)' }]}>
+                <Ionicons name="calendar-outline" size={26} color="#818CF8" />
+              </View>
+            </View>
+
+            <Text style={[styles.nudgeTitle, { color: theme.colors.text }]}>
+              {paidCreatorName ? `Just worked with ${paidCreatorName}?` : 'Have something new to share?'}
+            </Text>
+            <Text style={[styles.nudgeBody, { color: theme.colors.textSecondary }]}>
+              Promoting an event is free and goes straight to people in your city who are already looking for exactly this kind of work.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.nudgeEventBtn}
+              activeOpacity={0.85}
+              onPress={() => {
+                setShowEventNudge(false);
+                (navigation as any).navigate('CreateEvent');
+              }}
+            >
+              <Ionicons name="add-circle-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.nudgeEventBtnText}>Promote an Event</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.nudgeDismissBtn}
+              activeOpacity={0.7}
+              onPress={() => setShowEventNudge(false)}
+            >
+              <Text style={[styles.nudgeDismissText, { color: theme.colors.textSecondary }]}>Not now</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -477,4 +530,17 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   viewProjectText: { fontSize: 13, fontWeight: '600' },
+
+  // Event promotion nudge modal
+  nudgeOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  nudgeSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 24, paddingBottom: 40 },
+  nudgeHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(128,128,128,0.3)', alignSelf: 'center', marginTop: 12, marginBottom: 20 },
+  nudgeIconRow: { alignItems: 'center', marginBottom: 16 },
+  nudgeIconCircle: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
+  nudgeTitle: { fontSize: 19, fontWeight: '700', marginBottom: 10, textAlign: 'center' },
+  nudgeBody: { fontSize: 14, lineHeight: 22, marginBottom: 24, textAlign: 'center' },
+  nudgeEventBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#6366F1', borderRadius: 14, paddingVertical: 16, marginBottom: 12 },
+  nudgeEventBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  nudgeDismissBtn: { alignItems: 'center', paddingVertical: 12 },
+  nudgeDismissText: { fontSize: 14 },
 });

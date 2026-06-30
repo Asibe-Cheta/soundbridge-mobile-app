@@ -84,6 +84,7 @@ export default function SongDetailScreen() {
           created_at,
           genre,
           creator_id,
+          live_interest_enabled,
           creator:profiles!creator_id(
             id,
             username,
@@ -120,6 +121,7 @@ export default function SongDetailScreen() {
             likes_count,
             created_at,
             genre,
+            live_interest_enabled,
             creator:profiles!creator_id(
               id,
               username,
@@ -160,6 +162,7 @@ export default function SongDetailScreen() {
             likes_count,
             created_at,
             genre,
+            live_interest_enabled,
             creator:profiles!creator_id(
               id,
               username,

@@ -31,6 +31,8 @@ const NUDGE = {
   GENERAL_SERVICE_DISCOVERY:   'general_service_discovery',
   // AI career advisor (links to ComingSoon until advisor is live)
   AI_TRACK_RELEASE_ADVISOR:    'ai_track_release_advisor',
+  // Post-activity AI advisor nudge — fires once qualifying engagement is reached
+  AI_ADVISOR_POST_ACTIVITY:    'ai_advisor_post_activity',
 } as const;
 
 type NudgeId = typeof NUDGE[keyof typeof NUDGE];
@@ -157,6 +159,12 @@ const NUDGES: NudgeDef[] = [
     title: 'Need help releasing your next track?',
     body: 'We can help you plan your release strategy, grow your audience, and maximise your plays — all in one place.',
     screen: 'ComingSoon',
+  },
+  {
+    id: NUDGE.AI_ADVISOR_POST_ACTIVITY,
+    title: 'Curious how this is actually performing?',
+    body: 'Your AI Career Adviser has real insight now. See what the data actually means for your music.',
+    screen: 'AICareerAdvisor',
   },
 
   // ─── Service provider ─────────────────────────────────────────────────────
@@ -449,6 +457,56 @@ class NudgeService {
         }
 
         // ─── AI career advisor ─────────────────────────────────────────────
+
+        case NUDGE.AI_ADVISOR_POST_ACTIVITY: {
+          // Conditions: at least 3 days since first upload, AND (tip received OR
+          // repeat listen OR 20+ total plays). Expires if no qualifying activity
+          // within 14 days of first upload.
+          const { data: firstTrack } = await supabase
+            .from('audio_tracks')
+            .select('id, created_at, play_count')
+            .eq('creator_id', userId)
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          if (!firstTrack?.created_at) return false;
+
+          const firstUploadAt = new Date(firstTrack.created_at).getTime();
+          const now = Date.now();
+          const daysSinceUpload = (now - firstUploadAt) / 86_400_000;
+
+          // Must be at least 3 days old
+          if (daysSinceUpload < 3) return false;
+          // Expires after 14 days of no qualifying activity
+          if (daysSinceUpload > 14) return false;
+
+          // Check qualifying activity: 20+ total plays
+          const { data: allTracks } = await supabase
+            .from('audio_tracks')
+            .select('play_count')
+            .eq('creator_id', userId);
+          const totalPlays = (allTracks ?? []).reduce(
+            (sum: number, t: { play_count: number }) => sum + (t.play_count || 0), 0
+          );
+          if (totalPlays >= 20) return true;
+
+          // Check: tip received
+          const { count: tipCount } = await supabase
+            .from('tips')
+            .select('id', { count: 'exact', head: true })
+            .eq('creator_id', userId);
+          if ((tipCount ?? 0) > 0) return true;
+
+          // Check: repeat listen (play_logs where same user played twice)
+          const { count: repeatCount } = await supabase
+            .from('play_logs')
+            .select('id', { count: 'exact', head: true })
+            .eq('creator_id', userId)
+            .eq('is_repeat', true);
+          if ((repeatCount ?? 0) > 0) return true;
+
+          return false;
+        }
 
         case NUDGE.AI_TRACK_RELEASE_ADVISOR: {
           // Has at least one uploaded track AND account is 5+ days old

@@ -17,6 +17,7 @@ import {
   RefreshControl,
   StatusBar,
   Modal,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -75,7 +76,7 @@ export default function TrackDetailsScreen() {
   const route = useRoute();
   const { theme } = useTheme();
   const { user } = useAuth();
-  const { play, currentTrack, isPlaying, pause, resume, updateCurrentTrack, incrementPlayCount } = useAudioPlayer();
+  const { play, currentTrack, isPlaying, pause, resume, updateCurrentTrack } = useAudioPlayer();
 
   const { trackId, track: initialTrack } = route.params as { trackId: string; track?: Track };
 
@@ -150,6 +151,7 @@ export default function TrackDetailsScreen() {
           isrc_code,
           isrc_source,
           is_cover,
+          live_interest_enabled,
           creator:profiles!creator_id (
             id,
             username,
@@ -734,6 +736,28 @@ export default function TrackDetailsScreen() {
             </View>
           )}
 
+          {/* MBG Sonics distribution nudge (owner only) */}
+          {user && track.creator_id === user.id && (
+            <TouchableOpacity
+              style={[styles.distributionNudge, { backgroundColor: 'rgba(22,163,74,0.10)', borderColor: 'rgba(22,163,74,0.30)' }]}
+              onPress={() => (navigation as any).navigate('MBGSonicsDistribution', { preSelectedTrackId: track.id })}
+              activeOpacity={0.85}
+            >
+              <View style={styles.distributionNudgeLeft}>
+                <Text style={[styles.distributionNudgeTitle, { color: theme.colors.text }]}>
+                  Get this track on Spotify and major platforms.
+                </Text>
+                <Text style={[styles.distributionNudgeSub, { color: theme.colors.textSecondary }]}>
+                  Distribute through MBG Sonics, our official partner.
+                </Text>
+              </View>
+              <View style={[styles.distributionNudgeBtn, { backgroundColor: 'rgba(22,163,74,0.85)' }]}>
+                <Text style={styles.distributionNudgeBtnText}>Distribute</Text>
+                <Ionicons name="arrow-forward" size={13} color="#fff" />
+              </View>
+            </TouchableOpacity>
+          )}
+
           {/* Moderation Information (Owner Only) */}
           {user && track.creator_id === user.id && track.moderation_status && (
             <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
@@ -910,6 +934,43 @@ export default function TrackDetailsScreen() {
                   {track.is_paid ? 'Edit Pricing' : 'Set a Price'}
                 </Text>
               </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Live Interest Setting — Creator Only, music tracks */}
+          {user && track.creator_id === user.id && !track.is_paid && (
+            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <View style={{ flex: 1, marginRight: 12 }}>
+                  <View style={[styles.moderationHeader, { marginBottom: 4 }]}>
+                    <Ionicons name="radio-outline" size={18} color={theme.colors.primary} />
+                    <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }]}>Live Interest</Text>
+                  </View>
+                  <Text style={[styles.moderationInfoText, { color: theme.colors.textSecondary, marginBottom: 0 }]}>
+                    {track.live_interest_enabled
+                      ? 'Listeners are asked if they\'d like to hear this live. Turn off if this track isn\'t for live performance.'
+                      : 'Live interest data is off for this track. Turn on to let SoundBridge collect audience demand.'}
+                  </Text>
+                </View>
+                <Switch
+                  value={!!track.live_interest_enabled}
+                  onValueChange={async (value) => {
+                    try {
+                      const { error } = await supabase
+                        .from('audio_tracks')
+                        .update({ live_interest_enabled: value })
+                        .eq('id', track.id)
+                        .eq('creator_id', user.id);
+                      if (error) throw error;
+                      await loadTrackDetails();
+                    } catch {
+                      Alert.alert('Error', 'Failed to update live interest setting.');
+                    }
+                  }}
+                  trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+                  thumbColor={track.live_interest_enabled ? theme.colors.primary : theme.colors.textSecondary}
+                />
+              </View>
             </View>
           )}
         </View>
@@ -1359,4 +1420,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  distributionNudge: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderRadius: 16, borderWidth: 1, padding: 16,
+    marginHorizontal: 16, marginTop: 16,
+  },
+  distributionNudgeLeft: { flex: 1, gap: 3 },
+  distributionNudgeTitle: { fontSize: 14, fontWeight: '700' },
+  distributionNudgeSub: { fontSize: 12, lineHeight: 18 },
+  distributionNudgeBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20,
+  },
+  distributionNudgeBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
 });

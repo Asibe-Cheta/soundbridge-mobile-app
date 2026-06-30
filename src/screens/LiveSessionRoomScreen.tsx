@@ -752,12 +752,11 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
         
-        {/* Header */}
-        <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+        {/* Header — editorial, transparent */}
+        <View style={styles.header}>
           <TouchableOpacity onPress={handleLeave} style={styles.headerButton}>
-            <Ionicons name="chevron-down" size={28} color={theme.colors.text} />
+            <Ionicons name="chevron-down" size={26} color={theme.isDark ? 'rgba(255,255,255,0.75)' : theme.colors.text} />
           </TouchableOpacity>
-          
           <View style={styles.headerCenter}>
             <Text style={[styles.headerTitle, { color: theme.colors.text }]} numberOfLines={1}>
               {session?.title || 'Live Session'}
@@ -769,13 +768,9 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
               </Text>
             </View>
           </View>
-          
           {myRole === 'host' && (
-            <TouchableOpacity 
-              style={styles.headerButton}
-              onPress={() => setShowHostMenu(true)}
-            >
-              <Ionicons name="ellipsis-vertical" size={24} color={theme.colors.text} />
+            <TouchableOpacity style={styles.headerButton} onPress={() => setShowHostMenu(true)}>
+              <Ionicons name="ellipsis-vertical" size={22} color={theme.isDark ? 'rgba(255,255,255,0.75)' : theme.colors.text} />
             </TouchableOpacity>
           )}
           {myRole !== 'host' && <View style={styles.headerButton} />}
@@ -932,7 +927,7 @@ export default function LiveSessionRoomScreen({ navigation, route }: LiveSession
             </ScrollView>
 
             {/* Comment Input */}
-            <View style={[styles.inputContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <View style={styles.inputContainer}>
               <TextInput
                 style={[styles.input, { color: theme.colors.text }]}
                 placeholder="Say something..."
@@ -1106,34 +1101,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
   },
-  headerButton: {
-    padding: 4,
-  },
-  headerCenter: {
-    flex: 1,
-    alignItems: 'center',
-    marginHorizontal: 16,
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  liveIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  liveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#DC2626',
-  },
-  liveText: {
-    fontSize: 12,
-  },
+  headerButton: { padding: 4 },
+  headerCenter: { flex: 1, alignItems: 'center', marginHorizontal: 16 },
+  headerTitle: { fontSize: 16, fontWeight: '300', letterSpacing: -0.3, marginBottom: 4 },
+  liveIndicator: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  liveDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#DC2626' },
+  liveText: { fontSize: 12 },
   content: {
     flex: 1,
   },
@@ -1142,15 +1117,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sectionTitle: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 11,
+    fontWeight: '600',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 1.5,
     marginBottom: 8,
   },
   creatorName: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 28,
+    fontWeight: '300',
+    letterSpacing: -0.5,
   },
   participantsSection: {
     padding: 16,
@@ -1222,6 +1198,7 @@ const styles = StyleSheet.create({
   },
   bottomControls: {
     borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
     paddingVertical: 12,
     paddingHorizontal: 16,
   },
@@ -1240,6 +1217,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     borderRadius: 24,
     borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     paddingHorizontal: 16,
     paddingVertical: 8,
     gap: 8,

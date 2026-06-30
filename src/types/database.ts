@@ -36,11 +36,11 @@ export interface Database {
           // Subscription fields
           subscription_tier: 'free' | 'premium' | 'unlimited' | null
           subscription_status: string | null
-          subscription_period_start: string | null
+          subscription_period: string | null
           subscription_period_end: string | null
-          subscription_amount: number | null
-          subscription_currency: string | null
-          subscription_updated_at: string | null
+          subscription_start_date: string | null
+          subscription_renewal_date: string | null
+          subscription_cancel_date: string | null
           // Early adopter programme
           early_adopter: boolean | null
           // Branding fields
@@ -66,6 +66,7 @@ export interface Database {
           card_generations_this_month: number | null
           card_generations_lifetime: number | null
           card_generation_month: string | null
+          preferred_moods: string[] | null
           created_at: string
           updated_at: string | null
         }
@@ -93,16 +94,18 @@ export interface Database {
           last_active?: string | null
           subscription_tier?: 'free' | 'premium' | 'unlimited' | null
           subscription_status?: string | null
-          subscription_period_start?: string | null
+          subscription_period?: string | null
           subscription_period_end?: string | null
-          subscription_amount?: number | null
-          subscription_currency?: string | null
+          subscription_start_date?: string | null
+          subscription_renewal_date?: string | null
+          subscription_cancel_date?: string | null
           early_adopter?: boolean | null
           professional_headline?: string | null
           card_photo_url?: string | null
           card_generations_this_month?: number | null
           card_generations_lifetime?: number | null
           card_generation_month?: string | null
+          preferred_moods?: string[] | null
           created_at?: string
           updated_at?: string | null
         }
@@ -130,11 +133,11 @@ export interface Database {
           last_active?: string | null
           subscription_tier?: 'free' | 'premium' | 'unlimited' | null
           subscription_status?: string | null
-          subscription_period_start?: string | null
+          subscription_period?: string | null
           subscription_period_end?: string | null
-          subscription_amount?: number | null
-          subscription_currency?: string | null
-          subscription_updated_at?: string | null
+          subscription_start_date?: string | null
+          subscription_renewal_date?: string | null
+          subscription_cancel_date?: string | null
           early_adopter?: boolean | null
           custom_logo_url?: string | null
           custom_logo_width?: number | null
@@ -158,6 +161,7 @@ export interface Database {
           card_generations_this_month?: number | null
           card_generations_lifetime?: number | null
           card_generation_month?: string | null
+          preferred_moods?: string[] | null
           created_at?: string
           updated_at?: string | null
         }
@@ -197,6 +201,7 @@ export interface Database {
           file_hash: string | null
           appeal_text: string | null
           live_interest_enabled: boolean
+          mood_tags: string[] | null
           created_at: string
           updated_at: string | null
           deleted_at: string | null
@@ -224,6 +229,7 @@ export interface Database {
           lyrics_language?: string | null
           has_lyrics?: boolean | null
           live_interest_enabled?: boolean
+          mood_tags?: string[] | null
           created_at?: string
           updated_at?: string | null
           deleted_at?: string | null
@@ -251,9 +257,253 @@ export interface Database {
           lyrics_language?: string | null
           has_lyrics?: boolean | null
           live_interest_enabled?: boolean
+          mood_tags?: string[] | null
           created_at?: string
           updated_at?: string | null
           deleted_at?: string | null
+        }
+      }
+      track_quality_signals: {
+        Row: {
+          id: string
+          track_id: string
+          creator_id: string
+          total_plays: number
+          unique_listeners: number
+          repeat_listens: number
+          tip_count: number
+          tip_total_amount: number
+          tip_rate: number
+          live_interest_yes_count: number
+          live_interest_rate: number
+          share_count: number
+          bookmark_count: number
+          quality_score: number
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          track_id: string
+          creator_id: string
+          total_plays?: number
+          unique_listeners?: number
+          repeat_listens?: number
+          tip_count?: number
+          tip_total_amount?: number
+          tip_rate?: number
+          live_interest_yes_count?: number
+          live_interest_rate?: number
+          share_count?: number
+          bookmark_count?: number
+          quality_score?: number
+          updated_at?: string
+        }
+        Update: {
+          total_plays?: number
+          unique_listeners?: number
+          repeat_listens?: number
+          tip_count?: number
+          tip_total_amount?: number
+          tip_rate?: number
+          live_interest_yes_count?: number
+          live_interest_rate?: number
+          share_count?: number
+          bookmark_count?: number
+          quality_score?: number
+          updated_at?: string
+        }
+      }
+      play_sessions: {
+        Row: {
+          id: string
+          track_id: string
+          user_id: string | null
+          played_at: string
+          play_duration_seconds: number
+          completed: boolean
+          is_valid?: boolean
+          is_suspicious?: boolean
+          is_rejected?: boolean
+          fraud_reason?: string | null
+          ip_address?: string | null
+        }
+        Insert: {
+          id?: string
+          track_id: string
+          user_id?: string | null
+          played_at?: string
+          play_duration_seconds?: number
+          completed?: boolean
+          is_valid?: boolean
+          is_suspicious?: boolean
+          is_rejected?: boolean
+          fraud_reason?: string | null
+          ip_address?: string | null
+        }
+        Update: {
+          play_duration_seconds?: number
+          completed?: boolean
+          is_valid?: boolean
+          is_suspicious?: boolean
+          is_rejected?: boolean
+          fraud_reason?: string | null
+          ip_address?: string | null
+        }
+      }
+      poll_campaigns: {
+        Row: {
+          id: string
+          creator_id: string
+          message_body: string
+          date_options: string[]
+          location_options: string[]
+          combined_options: any
+          total_recipients: number
+          total_responses: number
+          sent_at: string
+          expires_at: string
+          status: 'active' | 'expired' | 'completed'
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          creator_id: string
+          message_body: string
+          date_options: string[]
+          location_options: string[]
+          combined_options?: any
+          total_recipients?: number
+          total_responses?: number
+          sent_at?: string
+          expires_at: string
+          status?: 'active' | 'expired' | 'completed'
+          created_at?: string
+        }
+        Update: {
+          message_body?: string
+          total_responses?: number
+          status?: 'active' | 'expired' | 'completed'
+        }
+      }
+      poll_responses: {
+        Row: {
+          id: string
+          campaign_id: string
+          user_id: string
+          selected_option: string
+          selected_date: string
+          selected_location: string
+          responded_at: string
+        }
+        Insert: {
+          id?: string
+          campaign_id: string
+          user_id: string
+          selected_option: string
+          selected_date: string
+          selected_location: string
+          responded_at?: string
+        }
+        Update: {
+          selected_option?: string
+          selected_date?: string
+          selected_location?: string
+        }
+      }
+      live_interest_push_sent: {
+        Row: {
+          id: string
+          user_id: string
+          track_id: string
+          sent_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          track_id: string
+          sent_at?: string
+        }
+        Update: {}
+      }
+      live_interest_responses: {
+        Row: {
+          id: string
+          track_id: string
+          user_id: string
+          responded_yes: boolean
+          availability_preference: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          track_id: string
+          user_id: string
+          responded_yes?: boolean
+          availability_preference?: string | null
+          created_at?: string
+        }
+        Update: {
+          responded_yes?: boolean
+          availability_preference?: string | null
+        }
+      }
+      track_quality_monthly_snapshots: {
+        Row: {
+          id: string
+          track_id: string
+          creator_id: string
+          month_start: string
+          quality_score: number
+          repeat_listen_rate: number
+          tip_rate: number
+          total_plays: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          track_id: string
+          creator_id: string
+          month_start: string
+          quality_score?: number
+          repeat_listen_rate?: number
+          tip_rate?: number
+          total_plays?: number
+          created_at?: string
+        }
+        Update: {
+          quality_score?: number
+          repeat_listen_rate?: number
+          tip_rate?: number
+          total_plays?: number
+        }
+      }
+      listener_genre_affinity: {
+        Row: {
+          id: string
+          user_id: string
+          creator_id: string
+          affinity_score: number
+          tips_sent: number
+          repeat_listens: number
+          live_interest_expressed: boolean
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          creator_id: string
+          affinity_score?: number
+          tips_sent?: number
+          repeat_listens?: number
+          live_interest_expressed?: boolean
+          updated_at?: string
+        }
+        Update: {
+          affinity_score?: number
+          tips_sent?: number
+          repeat_listens?: number
+          live_interest_expressed?: boolean
+          updated_at?: string
         }
       }
       events: {

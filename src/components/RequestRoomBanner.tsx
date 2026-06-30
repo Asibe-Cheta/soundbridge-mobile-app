@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable, Animated, Easing } from 'react-native';
+import React, { useRef, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, Pressable, Animated, Easing, AppState } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -214,19 +214,44 @@ export function useWaveformAnims() {
     BAR_CONFIGS.map(c => new Animated.Value(c.lowH + (c.highH - c.lowH) * 0.5))
   ).current;
 
+  const createLoops = useCallback(
+    () =>
+      BAR_CONFIGS.map((c, i) =>
+        Animated.loop(
+          Animated.sequence([
+            Animated.delay(c.delay),
+            Animated.timing(barAnims[i], { toValue: c.highH, duration: c.duration, useNativeDriver: false }),
+            Animated.timing(barAnims[i], { toValue: c.lowH, duration: c.duration, useNativeDriver: false }),
+          ]),
+        ),
+      ),
+    [barAnims],
+  );
+
   useEffect(() => {
-    const loops = BAR_CONFIGS.map((c, i) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(c.delay),
-          Animated.timing(barAnims[i], { toValue: c.highH, duration: c.duration, useNativeDriver: false }),
-          Animated.timing(barAnims[i], { toValue: c.lowH, duration: c.duration, useNativeDriver: false }),
-        ])
-      )
-    );
-    loops.forEach(l => l.start());
-    return () => loops.forEach(l => l.stop());
-  }, []);
+    let loops: Animated.CompositeAnimation[] = [];
+    const stop = () => {
+      loops.forEach((l) => l.stop());
+      loops = [];
+    };
+    const start = () => {
+      stop();
+      loops = createLoops();
+      loops.forEach((l) => l.start());
+    };
+
+    if (AppState.currentState === 'active') start();
+
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') start();
+      else if (next === 'background' || next === 'inactive') stop();
+    });
+
+    return () => {
+      sub.remove();
+      stop();
+    };
+  }, [createLoops]);
 
   return barAnims;
 }

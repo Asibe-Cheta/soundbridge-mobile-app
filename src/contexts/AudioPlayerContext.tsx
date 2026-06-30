@@ -1,9 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
-import { Platform, Alert, AppState } from 'react-native';
+import { Platform, Alert, AppState, DeviceEventEmitter } from 'react-native';
 import { audioLog } from '../lib/audioDebugLog';
+import { SB_STOP_FEED_TEASERS } from '../lib/audioEvents';
+import { isExpoAvBypassedForBgTest } from '../config/audioBgIsolationTest';
 import { supabase } from '../lib/supabase';
 import { backgroundAudioService, BackgroundAudioTrack } from '../services/BackgroundAudioService';
 import { contentPurchaseService } from '../services/ContentPurchaseService';
+import { playSessionService } from '../services/PlaySessionService';
 import { useScreenCaptureProtection } from '../hooks/useScreenCaptureProtection';
 // import { realAudioProcessor } from '../services/RealAudioProcessor';
 
@@ -48,14 +51,15 @@ interface AudioPlayerContextType {
   position: number;
   isLoading: boolean;
   error: string | null;
-  play: (track: AudioTrack) => Promise<void>;
+  play: (track: AudioTrack, withQueue?: AudioTrack[]) => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   stop: () => Promise<void>;
   seekTo: (position: number) => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
   updateCurrentTrack: (updates: Partial<AudioTrack>) => void;
-  incrementPlayCount: (trackId: string) => Promise<void>;
+  /** Starts play-session tracking — play_count is updated server-side after valid listen. */
+  beginPlaySession: (trackId: string) => Promise<void>;
   volume: number;
   isShuffled: boolean;
   repeatMode: 'off' | 'all' | 'one';
@@ -108,8 +112,8 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   const [error, setError] = useState<string | null>(null);
   
   const playerRef = useRef<any>(null);
-  const positionUpdateRef = useRef<NodeJS.Timeout | null>(null);
   const statusUnsubscribeRef = useRef<(() => void) | null>(null);
+  const playPositionRef = useRef<number>(0);
 
   // Screen capture protection — pause audio when screen recording starts.
   // iOS: audio pause is disabled here. The IsScreenCapturedIos native module fires
@@ -127,7 +131,6 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       }
       setIsPlaying(false);
       setIsPaused(true);
-      stopPositionTracking();
     }
   };
   const { isCaptured } = useScreenCaptureProtection(handleCaptureChange);
@@ -141,48 +144,86 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   const queueRef = useRef(queue);
   const handleTrackFinishedRef = useRef<() => Promise<void>>(async () => {});
 
+  type ServiceStatus = { position: number; duration: number; isPlaying: boolean };
+
+  const restoreTrackFromService = (
+    svc: ReturnType<typeof backgroundAudioService.getCurrentTrack>,
+  ) => {
+    if (!svc) return null;
+    return {
+      id: svc.id,
+      title: svc.title,
+      file_url: svc.url,
+      audio_url: svc.url,
+      cover_image_url: svc.artwork,
+      duration: svc.duration,
+      created_at: new Date().toISOString(),
+      creator: { id: svc.creatorId || '', username: svc.artist, display_name: svc.artist },
+    };
+  };
+
+  /** Service status → React UI. Position ref always updated; setState only in foreground. */
+  const applyServiceStatusToUi = (s: ServiceStatus, options?: { restoreTrack?: boolean }) => {
+    playPositionRef.current = s.position;
+    if (AppState.currentState !== 'active') return;
+
+    setIsPlaying(s.isPlaying);
+    setPosition(s.position);
+    if (s.duration > 0) setDuration(s.duration);
+
+    if (!options?.restoreTrack) return;
+    setCurrentTrack(prev => {
+      const svcTrack = backgroundAudioService.getCurrentTrack();
+      if (!svcTrack) return prev;
+      const restored = restoreTrackFromService(svcTrack);
+      if (!prev) return restored;
+      if (!prev.cover_image_url && svcTrack.artwork) {
+        return { ...prev, cover_image_url: svcTrack.artwork };
+      }
+      return prev;
+    });
+  };
+
+  const syncUiFromService = () => {
+    applyServiceStatusToUi({
+      position: backgroundAudioService.getPosition(),
+      duration: backgroundAudioService.getDuration(),
+      isPlaying: backgroundAudioService.getIsPlaying(),
+    });
+  };
+
   // On mount: subscribe unconditionally so we receive status updates from
   // _resumeAfterJsRestart even if it completes AFTER this effect runs (race condition).
   // When a playing update arrives with no current track set, restore the MiniPlayer.
   useEffect(() => {
-    const restoreTrack = (svc: ReturnType<typeof backgroundAudioService.getCurrentTrack>) => {
-      if (!svc) return null;
-      return {
-        id: svc.id,
-        title: svc.title,
-        file_url: svc.url,
-        audio_url: svc.url,
-        cover_image_url: svc.artwork,
-        duration: svc.duration,
-        created_at: new Date().toISOString(),
-        creator: { id: svc.creatorId || '', username: svc.artist, display_name: svc.artist },
-      };
-    };
-
     const unsub = backgroundAudioService.onStatusUpdate((s) => {
-      setIsPlaying(s.isPlaying);
-      setPosition(s.position);
-      if (s.duration > 0) setDuration(s.duration);
-      // If audio resumed in background but we have no track in UI, restore it now.
-      if (s.isPlaying) {
-        setCurrentTrack(prev => {
-          if (prev) return prev;
-          return restoreTrack(backgroundAudioService.getCurrentTrack());
-        });
-      }
+      applyServiceStatusToUi(s, { restoreTrack: true });
     });
     statusUnsubscribeRef.current = unsub;
 
-    // Also check immediately in case _resumeAfterJsRestart already completed.
     const svc = backgroundAudioService.getCurrentTrack();
-    if (svc && backgroundAudioService.getIsPlaying()) {
-      setCurrentTrack(restoreTrack(svc));
-      setIsPlaying(true);
-      setPosition(backgroundAudioService.getPosition());
-      setDuration(backgroundAudioService.getDuration());
+    const isActuallyPlaying = backgroundAudioService.getIsPlaying();
+    if (svc && isActuallyPlaying) {
+      setCurrentTrack(restoreTrackFromService(svc));
+      applyServiceStatusToUi({
+        position: backgroundAudioService.getPosition(),
+        duration: backgroundAudioService.getDuration(),
+        isPlaying: true,
+      });
     }
 
     return () => unsub();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // One-shot UI sync when returning to foreground (no background position polling).
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active' && backgroundAudioService.getCurrentTrack()) {
+        syncUiFromService();
+      }
+    });
+    return () => sub.remove();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -192,9 +233,6 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       if (playerRef.current) {
         playerRef.current.pause();
         playerRef.current.remove();
-      }
-      if (positionUpdateRef.current) {
-        clearInterval(positionUpdateRef.current);
       }
       if (statusUnsubscribeRef.current) {
         statusUnsubscribeRef.current();
@@ -209,41 +247,16 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   useEffect(() => { autoPlayRef.current = autoPlay; }, [autoPlay]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
 
-  // Position tracking - polls backgroundAudioService for updates
-  const startPositionTracking = () => {
-    if (positionUpdateRef.current) {
-      clearInterval(positionUpdateRef.current);
-    }
-    
-    positionUpdateRef.current = setInterval(() => {
-      if (!backgroundAudioService.getCurrentTrack()) return;
-      try {
-        const currentPosition = backgroundAudioService.getPosition();
-        const currentDuration = backgroundAudioService.getDuration();
-        const serviceIsPlaying = backgroundAudioService.getIsPlaying();
-
-        if (currentDuration > 0) setDuration(currentDuration);
-        if (currentPosition >= 0) setPosition(currentPosition);
-        setIsPlaying(serviceIsPlaying);
-      } catch (err) {
-        console.error('Failed to get position from background service:', err);
-      }
-    }, 500); // Poll every 500ms for smoother updates
-  };
-
-  const stopPositionTracking = () => {
-    if (positionUpdateRef.current) {
-      clearInterval(positionUpdateRef.current);
-      positionUpdateRef.current = null;
-    }
-  };
-
   // Audio status handler (for expo-audio)
   const onPlaybackStatusUpdate = (status: any) => {
     if (playerRef.current && playerRef.current.isLoaded) {
-      setDuration(Math.floor(playerRef.current.duration || 0)); // Already in seconds
-      setPosition(Math.floor(playerRef.current.currentTime || 0)); // Already in seconds
-      
+      const nextDuration = Math.floor(playerRef.current.duration || 0);
+      const nextPosition = Math.floor(playerRef.current.currentTime || 0);
+      playPositionRef.current = nextPosition;
+      if (AppState.currentState === 'active') {
+        setDuration(nextDuration);
+        setPosition(nextPosition);
+      }
       // Check if track finished
       if (playerRef.current.currentTime >= playerRef.current.duration && playerRef.current.duration > 0) {
         // Track finished, handle based on repeat mode and auto-play settings
@@ -258,7 +271,6 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
           // Stop playback if auto-play is disabled or no tracks in queue
           setIsPlaying(false);
           setIsPaused(false);
-          stopPositionTracking();
         }
       }
     } else if (status?.error) {
@@ -269,7 +281,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     }
   };
 
-  const play = async (track: AudioTrack) => {
+  const play = async (track: AudioTrack, withQueue?: AudioTrack[]) => {
     try {
       // Block playback while screen recording is active
       if (isCapturedRef.current) return;
@@ -298,7 +310,15 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       setError(null);
       
       console.log('🛑 Stopping any currently playing track before starting new one...');
-      
+
+      // Tear down feed expo-av teasers (mounted Feed tab) before taking the iOS audio session.
+      if (!isExpoAvBypassedForBgTest()) {
+        DeviceEventEmitter.emit(SB_STOP_FEED_TEASERS);
+      }
+
+      // Flush play session for the track we're leaving before starting a new one
+      await flushPlaySession();
+
       // IMPORTANT: Stop ALL audio sources before starting new track
       // 1. Stop background audio service first (this is the main player)
       try {
@@ -320,10 +340,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
         }
       }
       
-      // 3. Stop position tracking
-      stopPositionTracking();
-      
-      // 4. Clear any existing status subscriptions
+      // 3. Clear any existing status subscriptions
       if (statusUnsubscribeRef.current) {
         statusUnsubscribeRef.current();
         statusUnsubscribeRef.current = null;
@@ -380,7 +397,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
         setIsLoading(false);
         
         // Increment play count in database
-        incrementPlayCount(track.id);
+        beginPlaySession(track.id);
         return;
       }
 
@@ -407,12 +424,11 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
             ? { id: creatorId, username: flatArtistName, display_name: flatArtistName }
             : { id: '', username: flatArtistName, display_name: flatArtistName },
       };
-      setCurrentTrack(normalizedTrack);
-      setIsPlaying(true);
+      // Don't set currentTrack until native playback confirms — avoids mini player flicker on failure.
+      setIsPlaying(false);
       setIsPaused(false);
       setPosition(0);
       setDuration(track.duration || 0);
-      setIsLoading(false);
 
       // Use background audio service for background playback
       const backgroundTrack: BackgroundAudioTrack = {
@@ -420,6 +436,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
         title: track.title,
         artist: track.creator?.display_name || track.creator?.username || 'Unknown Artist',
         url: audioUrl,
+        streamUrl: audioUrl,
         artwork: track.cover_image_url,
         duration: track.duration,
         creatorId,
@@ -431,14 +448,12 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
         statusUnsubscribeRef.current = null;
       }
 
-      // Subscribe to status updates from background audio service
+      // Subscribe to status updates from background audio service (no duplicate 500ms poll).
       const unsubscribe = backgroundAudioService.onStatusUpdate((status) => {
-        setPosition(status.position);
-        if (status.duration > 0) {
-          setDuration(status.duration);
+        applyServiceStatusToUi(status);
+        if (status.duration > 0 && AppState.currentState === 'active') {
           setIsLoading(false);
         }
-        setIsPlaying(status.isPlaying);
       });
 
       backgroundAudioService.setOnTrackFinished(() => {
@@ -473,16 +488,20 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
         backgroundAudioService.clearRemoteTrackChangedCallback();
       };
 
-      // Start polling as fallback for position/duration
-      startPositionTracking();
-
-      // Increment play count immediately (optimistic)
-      incrementPlayCount(track.id);
+      // Start server-validated play session (count updates after valid listen)
+      beginPlaySession(track.id);
 
       // Build native queue from JS queue so lock-screen skip buttons work end-to-end.
-      // Only tracks with a valid URL are loaded; tracks without URLs are skipped.
-      const jsQueue = queueRef.current;
-      const bgQueueTracks: BackgroundAudioTrack[] | undefined = jsQueue.length > 0
+      // IMPORTANT: only pass the queue if the new track is already IN it — otherwise
+      // the native player falls back to index 0 of the stale queue and plays the wrong song.
+      let jsQueue = queueRef.current;
+      if (withQueue && withQueue.length > 0) {
+        jsQueue = withQueue;
+        setQueue(withQueue);
+        queueRef.current = withQueue;
+      }
+      const trackInQueue = jsQueue.some(t => t.id === track.id);
+      const bgQueueTracks: BackgroundAudioTrack[] | undefined = (jsQueue.length > 0 && trackInQueue)
         ? jsQueue
             .map(t => ({
               id: t.id,
@@ -499,15 +518,27 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
         ? bgQueueTracks.findIndex(t => t.id === track.id)
         : 0;
 
-      // Kick off native audio in the background — don't await so that a hanging
-      // TrackPlayer call (e.g. post-SIGABRT) never blocks the UI update above.
-      backgroundAudioService.playTrack(
-        backgroundTrack,
-        bgQueueTracks,
-        nativeQueueIndex >= 0 ? nativeQueueIndex : 0
-      ).catch((err) => {
+      // Kick off native audio — must complete so TrackPlayer queue is loaded before backgrounding.
+      try {
+        await backgroundAudioService.playTrack(
+          backgroundTrack,
+          bgQueueTracks,
+          nativeQueueIndex >= 0 ? nativeQueueIndex : 0,
+        );
+      } catch (err) {
         console.warn('Background audio service failed:', err);
-      });
+        setError('Playback failed to start. Try again.');
+        setIsPlaying(false);
+        setCurrentTrack(null);
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(false);
+
+      setCurrentTrack(normalizedTrack);
+      setIsPlaying(true);
+      setIsPaused(false);
 
       console.log('🎵 Successfully started playing with background audio service');
       return;
@@ -532,7 +563,6 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       
       setIsPlaying(false);
       setIsPaused(true);
-      stopPositionTracking();
       console.log('🎵 Paused playback');
     } catch (err) {
       console.error('Failed to pause:', err);
@@ -554,7 +584,6 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       
       setIsPlaying(true);
       setIsPaused(false);
-      startPositionTracking();
       console.log('🎵 Resumed playback');
     } catch (err) {
       console.error('Failed to resume:', err);
@@ -564,6 +593,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
 
   const stop = async () => {
     try {
+      await flushPlaySession();
       // Use background audio service
       await backgroundAudioService.stop('userStop');
       
@@ -573,7 +603,6 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
         setIsPlaying(false);
         setIsPaused(false);
         setPosition(0);
-        stopPositionTracking();
         console.log('🎵 Stopped playback');
       }
     } catch (err) {
@@ -629,6 +658,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   };
 
   const handleTrackFinished = async () => {
+    await flushPlaySession();
     // Read from refs so we always use the latest state, not stale closure values
     const mode = repeatModeRef.current;
     const track = currentTrackRef.current;
@@ -645,7 +675,6 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
       // Stop playback
       setIsPlaying(false);
       setIsPaused(false);
-      stopPositionTracking();
     }
   };
 
@@ -654,48 +683,149 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     handleTrackFinishedRef.current = handleTrackFinished;
   });
 
-  const incrementPlayCount = async (trackId: string) => {
+  // Tracks the wall-clock time when a valid play session started (after 30s threshold passes)
+  const playSessionStartRef = useRef<{ trackId: string; startedAt: number; userId: string | null } | null>(null);
+
+  const recordPlaySession = async (
+    trackId: string,
+    userId: string,
+    durationListened: number,
+    trackTotalDuration: number,
+  ) => {
     try {
-      console.log('📊 Incrementing play count for track:', trackId);
-      
-      // Get current play count from database
-      const { data: trackData, error: fetchError } = await supabase
-        .from('audio_tracks')
-        .select('play_count')
-        .eq('id', trackId)
-        .single();
-      
-      if (fetchError) {
-        console.error('Error fetching current play count:', fetchError);
-        return;
+      const result = await playSessionService.recordPlaySession(
+        trackId,
+        userId,
+        durationListened,
+        trackTotalDuration,
+      );
+
+      if (!result.recorded) return;
+
+      if (result.isValid && !result.isRejected && result.playCount != null) {
+        if (currentTrack?.id === trackId) {
+          updateCurrentTrack({ plays_count: result.playCount });
+        }
       }
-      
-      const currentPlayCount = trackData?.play_count || 0;
-      const newPlayCount = currentPlayCount + 1;
-      
-      // Update play count in database
-      const { error: updateError } = await supabase
-        .from('audio_tracks')
-        .update({ 
-          play_count: newPlayCount 
-        })
-        .eq('id', trackId);
-      
-      if (updateError) {
-        console.error('Error updating play count:', updateError);
-        return;
+
+      console.log(
+        `✅ Play session recorded (valid=${result.isValid}, rejected=${result.isRejected}, suspicious=${result.isSuspicious})`,
+      );
+
+      if (result.isValid && !result.isRejected) {
+        await maybeSendLiveInterestPush(trackId, userId);
       }
-      
-      // Update current track if it's the same track
-      if (currentTrack && currentTrack.id === trackId) {
-        updateCurrentTrack({ plays_count: newPlayCount });
-      }
-      
-      console.log('✅ Play count updated:', newPlayCount);
-      
-    } catch (error) {
-      console.error('❌ Error incrementing play count:', error);
+    } catch (err) {
+      console.warn('⚠️ recordPlaySession error:', err);
     }
+  };
+
+  const countValidUserPlays = async (trackId: string, userId: string): Promise<number> => {
+    const withFraudCols = await supabase
+      .from('play_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('track_id', trackId)
+      .eq('user_id', userId)
+      .eq('is_valid', true)
+      .eq('is_rejected', false);
+
+    if (!withFraudCols.error) return withFraudCols.count ?? 0;
+
+    const legacy = await supabase
+      .from('play_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('track_id', trackId)
+      .eq('user_id', userId);
+
+    return legacy.count ?? 0;
+  };
+
+  const maybeSendLiveInterestPush = async (trackId: string, userId: string) => {
+    try {
+      // Check if track has live_interest_enabled and user hasn't been sent push yet
+      const [{ data: track }, { data: alreadySent }] = await Promise.all([
+        supabase
+          .from('audio_tracks')
+          .select('title, live_interest_enabled, creator_id')
+          .eq('id', trackId)
+          .single(),
+        supabase
+          .from('live_interest_push_sent')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('track_id', trackId)
+          .maybeSingle(),
+      ]);
+
+      if (!track?.live_interest_enabled) return;
+      if (alreadySent) return; // already sent, never send twice
+      if (track.creator_id === userId) return; // don't prompt the creator about their own track
+
+      // Count how many valid play sessions this user has for this track
+      const validPlayCount = await countValidUserPlays(trackId, userId);
+      if (validPlayCount < 2) return; // only fire on 2nd+ valid listen
+
+      // Get creator name for push title
+      const { data: creator } = await supabase
+        .from('profiles')
+        .select('display_name, username')
+        .eq('id', track.creator_id)
+        .single();
+
+      const artistName = creator?.display_name || creator?.username || 'The artist';
+
+      // Mark as sent BEFORE dispatching so we never double-send even if push fails
+      await supabase.from('live_interest_push_sent').insert({
+        user_id: userId,
+        track_id: trackId,
+      });
+
+      // Insert into notifications table — NotificationService picks this up and dispatches push
+      await supabase.from('notifications').insert({
+        user_id: userId,
+        type: 'live_interest',
+        title: artistName,
+        body: `You have listened to ${track.title} twice. Would you like to hear it live?`,
+        data: JSON.stringify({
+          screen: 'AudioPlayer',
+          trackId,
+          showLiveInterest: true,
+        }),
+      });
+
+      console.log(`🎤 Live interest push queued for track ${track.title}`);
+    } catch (err) {
+      // non-critical — never surface
+    }
+  };
+
+  const beginPlaySession = async (trackId: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      playSessionStartRef.current = {
+        trackId,
+        startedAt: Date.now(),
+        userId: user.id,
+      };
+      playPositionRef.current = 0;
+    } catch (error) {
+      console.warn('⚠️ beginPlaySession error:', error);
+    }
+  };
+
+  // Flush the current play session when track stops or changes
+  const flushPlaySession = async () => {
+    const session = playSessionStartRef.current;
+    if (!session || !session.userId) return;
+    playSessionStartRef.current = null;
+
+    const durationListened = backgroundAudioService.getPosition() || playPositionRef.current;
+    const trackDuration = currentTrack?.duration ?? 0;
+    if (durationListened <= 0) return;
+
+    await recordPlaySession(session.trackId, session.userId, durationListened, trackDuration);
   };
 
 
@@ -721,7 +851,6 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
         // Reached the end of the queue with repeat off — stop instead of wrapping
         setIsPlaying(false);
         setIsPaused(false);
-        stopPositionTracking();
         return;
       }
       nextIndex = nextIndexRaw % queue.length;
@@ -808,7 +937,7 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
     seekTo,
     setVolume,
     updateCurrentTrack,
-    incrementPlayCount,
+    beginPlaySession,
     volume,
     isShuffled,
     repeatMode,

@@ -1,0 +1,302 @@
+# App Version Check & Forced Upgrade System
+
+## Before Writing Any Code
+1. Find how the app version is currently 
+  stored and accessed in the codebase
+2. Find the existing Supabase database 
+  structure and how app-wide settings 
+  or config values are stored
+3. Find the existing modal system in 
+  the mobile app
+4. Find how the app currently handles 
+  deep links to App Store and Play Store
+5. Find the existing app launch flow 
+  to understand where to inject the 
+  version check
+6. Report findings before making 
+  any changes
+
+---
+
+## Overview
+Build a version check system that runs 
+every time a user opens the app. It 
+compares the user's installed app version 
+against the minimum supported version 
+stored in Supabase. If their version is 
+too old, a modal appears that cannot be 
+dismissed until they update.
+
+This must work on both iOS and Android.
+
+---
+
+## Part 1 - Supabase Configuration Table
+
+Create a new table in Supabase to store 
+version control settings:
+
+app_version_config (
+id: integer primary key default 1
+min_supported_version_ios: text
+min_supported_version_android: text
+latest_version_ios: text
+latest_version_android: text
+force_update_message: text
+soft_update_message: text
+updated_at: timestamptz
+)
+
+This table has exactly one row. 
+Justice updates these values from 
+the Supabase dashboard whenever 
+a new version is released.
+
+Seed the table with initial values:
+- min_supported_version_ios: current 
+  minimum iOS version string
+- min_supported_version_android: current 
+  minimum Android version string
+- force_update_message: "A new version 
+  of SoundBridge is available with 
+  features you do not want to miss. 
+  Please update to continue."
+- soft_update_message: "A new version 
+  of SoundBridge is available. Update 
+  now to access the latest features."
+
+---
+
+## Part 2 - Version Check Logic
+
+Run this check on every app launch, 
+before the main app content loads.
+
+### Step 1 - Get current app version
+Use expo-application to get the 
+installed app version:
+- expo-application.nativeApplicationVersion 
+  returns the version string e.g. "1.2.3"
+- expo-application.nativeBuildVersion 
+  returns the build number
+
+Check if expo-application is already 
+installed before adding it.
+
+### Step 2 - Get platform
+Use Platform.OS to determine whether 
+the user is on iOS or Android.
+
+### Step 3 - Fetch config from Supabase
+Fetch the single row from 
+app_version_config. Cache this result 
+for the session so it does not make 
+a network call on every screen 
+navigation — only on app launch.
+
+### Step 4 - Compare versions
+Compare the installed version against 
+the minimum supported version for 
+the user's platform using semantic 
+version comparison.
+
+Use a simple version comparison 
+function that handles major.minor.patch 
+format correctly. Do not use string 
+comparison as "1.10.0" would incorrectly 
+rank lower than "1.9.0".
+
+### Step 5 - Determine action
+If installed version is below 
+min_supported_version for their platform:
+Show FORCED update modal
+
+If installed version is below 
+latest_version but above or equal to 
+min_supported_version for their platform:
+Show SOFT update modal (dismissable)
+
+If installed version is equal to or 
+above latest_version:
+No modal. Proceed normally.
+
+---
+
+## Part 3 - Forced Update Modal
+
+This modal cannot be dismissed. 
+The user must update to continue.
+
+### Design
+Match existing modal style in the app.
+
+Content:
+- SoundBridge logo at the top
+- Headline: "Update Required"
+- Body: display force_update_message 
+  from Supabase
+- Single button: "Update Now"
+
+### Button behaviour
+Tapping "Update Now":
+- On iOS: open the SoundBridge App Store 
+  listing using Linking.openURL with the 
+  App Store URL
+- On Android: open the SoundBridge 
+  Google Play listing using 
+  Linking.openURL with the Play Store URL
+
+Store the App Store and Play Store URLs 
+as constants in the codebase.
+
+After tapping Update Now the modal 
+remains visible. When the user returns 
+to the app from the store without 
+updating, the modal is still there. 
+It only disappears when the version 
+check passes.
+
+### Blocking behaviour
+The forced update modal sits above 
+all navigation. No back button. 
+No dismiss gesture. The app is 
+completely non-functional until 
+the user updates.
+
+---
+
+## Part 4 - Soft Update Modal
+
+This modal is dismissable. The user 
+can choose to update later.
+
+### Design
+Match existing modal style in the app.
+
+Content:
+- Headline: "New Version Available"
+- Body: display soft_update_message 
+  from Supabase
+- Primary button: "Update Now"
+- Secondary text link: "Maybe Later"
+
+### Button behaviour
+"Update Now": same App Store / Play Store 
+redirect as forced update
+
+"Maybe Later": dismisses the modal and 
+lets the user continue using the app
+
+### Frequency
+Show the soft update modal maximum once 
+per session. If the user dismisses it, 
+do not show it again until the next 
+time they open the app.
+
+Store the dismissal in component state 
+only — not in AsyncStorage. It should 
+reappear on the next app launch.
+
+---
+
+## Part 5 - Feature Availability Flags
+
+In addition to the version check, 
+add feature availability flags to 
+the app_version_config table:
+
+min_version_creator_card_ios: text
+min_version_creator_card_android: text
+min_version_ai_adviser_ios: text
+min_version_ai_adviser_android: text
+min_version_audio_trimmer_ios: text
+min_version_audio_trimmer_android: text
+min_version_request_room_ios: text
+min_version_request_room_android: text
+
+When a user navigates to a feature 
+screen and their version is below 
+the minimum for that feature, show 
+a prompt instead of the feature:
+
+"This feature is available in a newer 
+version of SoundBridge. Update your 
+app to access it."
+
+Button: "Update Now" — opens App Store 
+or Play Store.
+
+This ensures users on old versions 
+see a clear explanation rather than 
+a broken or missing screen.
+
+---
+
+## Part 6 - Admin Visibility
+
+In the existing admin dashboard add 
+a simple App Versions section showing:
+
+- Current minimum supported versions 
+  for iOS and Android
+- Current latest versions
+- A note: "Update these values in 
+  Supabase app_version_config to 
+  trigger update prompts for users"
+
+This is read-only in the dashboard. 
+Justice updates the values directly 
+in Supabase.
+
+---
+
+## General Rules
+- Version check runs on every app launch
+- Forced update modal cannot be 
+  dismissed under any circumstances
+- Soft update modal dismissable once 
+  per session
+- Platform detected automatically — 
+  iOS and Android handled separately
+- All config values fetched from 
+  Supabase — nothing hardcoded
+- Cache config for the session to 
+  avoid repeated network calls
+- Do not add new dependencies without 
+  checking existing libraries first
+- Test on both iOS and Android
+
+---
+
+## Acceptance Criteria
+- [ ] app_version_config table created 
+      in Supabase with initial values
+- [ ] Version check runs on every 
+      app launch
+- [ ] Installed version correctly 
+      detected on iOS and Android
+- [ ] Platform correctly detected
+- [ ] Config fetched from Supabase 
+      and cached for session
+- [ ] Semantic version comparison 
+      works correctly
+- [ ] Forced update modal appears 
+      when version below minimum
+- [ ] Forced update modal cannot 
+      be dismissed
+- [ ] Update Now button opens correct 
+      store on iOS and Android
+- [ ] Soft update modal appears when 
+      version below latest
+- [ ] Soft update modal dismissable
+- [ ] Soft update modal shows once 
+      per session only
+- [ ] Feature flags work correctly 
+      for all listed features
+- [ ] Feature unavailable prompt 
+      shows with Update Now button
+- [ ] Admin dashboard shows current 
+      version config
+- [ ] No existing app functionality 
+      broken
+- [ ] Tested on iOS and Android

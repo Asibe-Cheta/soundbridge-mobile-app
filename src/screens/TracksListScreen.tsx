@@ -76,6 +76,7 @@ export default function TracksListScreen() {
           play_count, likes_count, created_at, creator_id,
           is_paid, price, currency,
           moderation_status, moderation_confidence,
+          live_interest_enabled,
           creator:profiles!creator_id(id, username, display_name, avatar_url)
         `)
         .eq('creator_id', userId)
@@ -414,6 +415,18 @@ export default function TracksListScreen() {
               {formatDate(item.created_at)}
             </Text>
           </View>
+          {isOwnProfile && (
+            <TouchableOpacity
+              style={styles.distNudge}
+              onPress={() => (navigation as any).navigate('MBGSonicsDistribution', { preSelectedTrackId: item.id })}
+            >
+              <Ionicons name="globe-outline" size={10} color="#16A34A" />
+              <Text style={styles.distNudgeText}>
+                Get this track on Spotify and major platforms. Distribute through MBG Sonics.
+              </Text>
+              <Text style={styles.distNudgeAction}>Distribute This Track →</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Right-side actions */}
@@ -780,5 +793,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     letterSpacing: -0.2,
+  },
+  distNudge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 6,
+  },
+  distNudgeText: {
+    fontSize: 11,
+    color: '#16A34A',
+    flex: 1,
+    lineHeight: 15,
+  },
+  distNudgeAction: {
+    fontSize: 11,
+    color: '#16A34A',
+    fontWeight: '600',
   },
 });

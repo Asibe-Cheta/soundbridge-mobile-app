@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import BackButton from '../components/BackButton';
+import { useSearchHistory } from '../hooks/useSearchHistory';
+import SearchHistoryPanel from '../components/SearchHistoryPanel';
 import {
   View,
   Text,
@@ -77,6 +79,15 @@ export default function AllEventsScreen() {
   const [sortBy, setSortBy] = useState<SortOption>('date');
   const [showPreferenceModal, setShowPreferenceModal] = useState(false);
   const [hasCheckedPreferences, setHasCheckedPreferences] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const blurRef = useRef<ReturnType<typeof setTimeout>>();
+  const { history, addToHistory, removeFromHistory, clearHistory } = useSearchHistory('events');
+
+  const handleSearchFocus = () => { clearTimeout(blurRef.current); setSearchFocused(true); };
+  const handleSearchBlur = () => {
+    blurRef.current = setTimeout(() => setSearchFocused(false), 200);
+    if (searchQuery.trim().length >= 2) addToHistory(searchQuery.trim());
+  };
 
   // Bookmark state: set of bookmarked event IDs for this screen
   const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set());
@@ -567,6 +578,9 @@ export default function AllEventsScreen() {
             placeholderTextColor={theme.colors.textSecondary}
             value={searchQuery}
             onChangeText={setSearchQuery}
+            onFocus={handleSearchFocus}
+            onBlur={handleSearchBlur}
+            onSubmitEditing={() => { if (searchQuery.trim().length >= 2) addToHistory(searchQuery.trim()); }}
           />
         </View>
       </View>
@@ -599,6 +613,7 @@ export default function AllEventsScreen() {
       </View>
 
       {/* Content */}
+      <View style={{ flex: 1 }}>
       <FlatList
         data={filteredEvents}
         renderItem={({ item }) => renderEventCard(item)}
@@ -681,6 +696,17 @@ export default function AllEventsScreen() {
           </View>
         }
       />
+      {searchFocused && !searchQuery && history.length > 0 && (
+        <View style={[StyleSheet.absoluteFill, { zIndex: 10, backgroundColor: theme.colors.background }]}>
+          <SearchHistoryPanel
+            history={history}
+            onSelect={(term) => { clearTimeout(blurRef.current); setSearchQuery(term); addToHistory(term); setSearchFocused(false); }}
+            onRemove={removeFromHistory}
+            onClearAll={clearHistory}
+          />
+        </View>
+      )}
+      </View>
       </SafeAreaView>
 
       {/* Event Category Preference Modal */}

@@ -80,6 +80,8 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'unread' | 'moderation'>('all');
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadNotifications();
@@ -227,7 +229,59 @@ export default function NotificationsScreen() {
     }
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const enterSelectMode = (id: string) => {
+    setIsSelectMode(true);
+    setSelectedIds(new Set([id]));
+  };
+
+  const exitSelectMode = () => {
+    setIsSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const selectAll = () => {
+    setSelectedIds(new Set(filteredNotifications.map(n => n.id)));
+  };
+
+  const deleteSelected = async () => {
+    if (selectedIds.size === 0) return;
+    Alert.alert(
+      'Delete Notifications',
+      `Delete ${selectedIds.size} notification${selectedIds.size > 1 ? 's' : ''}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const ids = [...selectedIds];
+            const { error } = await supabase
+              .from('notifications')
+              .delete()
+              .in('id', ids);
+            if (!error) {
+              setNotifications(prev => prev.filter(n => !selectedIds.has(n.id)));
+            }
+            exitSelectMode();
+          },
+        },
+      ]
+    );
+  };
+
   const handleNotificationPress = async (notification: Notification) => {
+    if (isSelectMode) {
+      toggleSelect(notification.id);
+      return;
+    }
     if (!notification.read) {
       await markAsRead(notification.id);
     }
@@ -544,62 +598,85 @@ export default function NotificationsScreen() {
 
   const unreadCount = notifications.filter((notif) => !notif.read).length;
 
-  const renderNotification = ({ item }: { item: Notification }) => (
-    <TouchableOpacity
-      style={[
-        styles.notificationCard,
-        {
-          backgroundColor: item.read ? theme.colors.surface : theme.colors.surface + 'EE',
-          borderColor: item.read ? theme.colors.border : theme.colors.primary + '40',
-          borderLeftColor: item.read ? theme.colors.border : getNotificationColor(item.type),
-        },
-      ]}
-      onPress={() => handleNotificationPress(item)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.notificationContent}>
-        <View
-          style={[
-            styles.iconContainer,
-            { backgroundColor: getNotificationColor(item.type) + '20' },
-          ]}
-        >
-          <Ionicons
-            name={getNotificationIcon(item.type) as any}
-            size={20}
-            color={getNotificationColor(item.type)}
-          />
-        </View>
+  const renderNotification = ({ item }: { item: Notification }) => {
+    const isSelected = selectedIds.has(item.id);
+    return (
+      <TouchableOpacity
+        style={[
+          styles.notificationCard,
+          {
+            backgroundColor: isSelected
+              ? theme.colors.primary + '18'
+              : item.read ? theme.colors.surface : theme.colors.surface + 'EE',
+            borderColor: isSelected
+              ? theme.colors.primary + '60'
+              : item.read ? theme.colors.border : theme.colors.primary + '40',
+            borderLeftColor: isSelected
+              ? theme.colors.primary
+              : item.read ? theme.colors.border : getNotificationColor(item.type),
+          },
+        ]}
+        onPress={() => handleNotificationPress(item)}
+        onLongPress={() => enterSelectMode(item.id)}
+        delayLongPress={300}
+        activeOpacity={0.7}
+      >
+        <View style={styles.notificationContent}>
+          {isSelectMode ? (
+            <View style={[styles.iconContainer, { backgroundColor: isSelected ? theme.colors.primary + '30' : theme.colors.border + '40', justifyContent: 'center', alignItems: 'center' }]}>
+              <Ionicons
+                name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                size={22}
+                color={isSelected ? theme.colors.primary : theme.colors.textSecondary}
+              />
+            </View>
+          ) : (
+            <View
+              style={[
+                styles.iconContainer,
+                { backgroundColor: getNotificationColor(item.type) + '20' },
+              ]}
+            >
+              <Ionicons
+                name={getNotificationIcon(item.type) as any}
+                size={20}
+                color={getNotificationColor(item.type)}
+              />
+            </View>
+          )}
 
-        <View style={styles.textContainer}>
-          <View style={styles.headerRow}>
-            <Text style={[styles.title, { color: theme.colors.text }]} numberOfLines={1}>
-              {item.title}
+          <View style={styles.textContainer}>
+            <View style={styles.headerRow}>
+              <Text style={[styles.title, { color: theme.colors.text }]} numberOfLines={1}>
+                {item.title}
+              </Text>
+              {!item.read && !isSelectMode && <View style={[styles.unreadDot, { backgroundColor: theme.colors.primary }]} />}
+            </View>
+            <Text style={[styles.body, { color: theme.colors.textSecondary }]} numberOfLines={2}>
+              {item.body}
             </Text>
-            {!item.read && <View style={[styles.unreadDot, { backgroundColor: theme.colors.primary }]} />}
+            <Text style={[styles.timestamp, { color: theme.colors.textSecondary }]}>
+              {formatTimeAgo(item.created_at)}
+            </Text>
           </View>
-          <Text style={[styles.body, { color: theme.colors.textSecondary }]} numberOfLines={2}>
-            {item.body}
-          </Text>
-          <Text style={[styles.timestamp, { color: theme.colors.textSecondary }]}>
-            {formatTimeAgo(item.created_at)}
-          </Text>
-        </View>
 
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => {
-            Alert.alert('Delete Notification', 'Are you sure?', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Delete', style: 'destructive', onPress: () => deleteNotification(item.id) },
-            ]);
-          }}
-        >
-          <Ionicons name="close-circle" size={20} color={theme.colors.textSecondary} />
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
+          {!isSelectMode && (
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => {
+                Alert.alert('Delete Notification', 'Are you sure?', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Delete', style: 'destructive', onPress: () => deleteNotification(item.id) },
+                ]);
+              }}
+            >
+              <Ionicons name="close-circle" size={20} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   if (loading) {
     return (
@@ -654,12 +731,33 @@ export default function NotificationsScreen() {
 
         {/* Header */}
         <View style={styles.header}>
-          <BackButton onPress={() => navigation.goBack()} accessibilityLabel="Go back" />
-          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Notifications</Text>
-          {unreadCount > 0 && (
-            <TouchableOpacity style={styles.markAllButton} onPress={markAllAsRead}>
-              <Text style={[styles.markAllText, { color: theme.colors.primary }]}>Mark all read</Text>
+          {isSelectMode ? (
+            <TouchableOpacity style={styles.markAllButton} onPress={exitSelectMode}>
+              <Text style={[styles.markAllText, { color: theme.colors.textSecondary }]}>Cancel</Text>
             </TouchableOpacity>
+          ) : (
+            <BackButton onPress={() => navigation.goBack()} accessibilityLabel="Go back" />
+          )}
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
+            {isSelectMode ? `${selectedIds.size} selected` : 'Notifications'}
+          </Text>
+          {isSelectMode ? (
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity style={styles.markAllButton} onPress={selectAll}>
+                <Text style={[styles.markAllText, { color: theme.colors.primary }]}>All</Text>
+              </TouchableOpacity>
+              {selectedIds.size > 0 && (
+                <TouchableOpacity style={styles.markAllButton} onPress={deleteSelected}>
+                  <Text style={[styles.markAllText, { color: '#EF4444' }]}>Delete ({selectedIds.size})</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            unreadCount > 0 && (
+              <TouchableOpacity style={styles.markAllButton} onPress={markAllAsRead}>
+                <Text style={[styles.markAllText, { color: theme.colors.primary }]}>Mark all read</Text>
+              </TouchableOpacity>
+            )
           )}
         </View>
 

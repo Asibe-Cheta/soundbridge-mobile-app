@@ -11,8 +11,11 @@ module.exports = {
     // Excluded from auto-linking until a maintained replacement is wired up.
     'ffmpeg-kit-react-native': {
       platforms: {
-        android: null,
+        // Both platforms excluded — ffmpeg-kit-ios-audio 6.0 XCFramework binary
+        // was deleted from GitHub releases (HTTP 404). Android Maven artifact
+        // status unknown. Excluded until a maintained replacement is available.
         ios: null,
+        android: null,
       },
     },
   },

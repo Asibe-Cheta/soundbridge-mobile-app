@@ -267,6 +267,27 @@ export default function VenuePreferencesModal({ visible, userId, onClose, onSave
                 </View>
               </View>
 
+              {/* Opportunity scouting */}
+              <View style={[styles.card, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                <View style={styles.toggleRow}>
+                  <View style={styles.toggleLabel}>
+                    <Ionicons name="search-outline" size={20} color={theme.colors.primary} />
+                    <View style={styles.toggleTextWrap}>
+                      <Text style={[styles.label, { color: theme.colors.text }]}>Notify me about performance opportunities</Text>
+                      <Text style={[styles.sublabel, { color: theme.colors.textSecondary }]}>
+                        We will occasionally search for open mic nights and venue opportunities matching your genre and location, and let you know.
+                      </Text>
+                    </View>
+                  </View>
+                  <Switch
+                    value={prefs.opportunity_scouting_enabled ?? false}
+                    onValueChange={(v) => setPrefs((p) => ({ ...p, opportunity_scouting_enabled: v }))}
+                    trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
+                    thumbColor="#FFFFFF"
+                  />
+                </View>
+              </View>
+
               {/* Save button */}
               <TouchableOpacity
                 style={[styles.saveBtn, { backgroundColor: theme.colors.primary }]}

@@ -1,4 +1,4 @@
-export type PostType = 'update' | 'opportunity' | 'achievement' | 'collaboration' | 'event' | 'headline';
+export type PostType = 'update' | 'opportunity' | 'achievement' | 'collaboration' | 'event' | 'headline' | 'photo';
 export type PostVisibility = 'public' | 'connections';
 
 export interface PostAuthor {
@@ -53,6 +53,7 @@ export interface Comment {
   user_liked: boolean;
   replies_count: number;
   created_at: string;
+  parent_comment_id?: string | null;
 }
 
 export interface CreatePostDto {

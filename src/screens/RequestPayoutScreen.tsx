@@ -22,11 +22,11 @@ import type { PayoutEligibility } from '../services/PayoutService';
 import { revenueService } from '../services/revenueService';
 import { SystemTypography as Typography } from '../constants/Typography';
 
-// Currencies routed through Wise (international transfer fees apply)
-const WISE_CURRENCIES = new Set(['NGN', 'GHS', 'KES', 'ZAR', 'TZS', 'UGX']);
+// Currencies routed through Fincra (African payout rail)
+const FINCRA_CURRENCIES = new Set(['NGN', 'GHS', 'KES', 'ZAR', 'TZS', 'UGX']);
 
-// Wise-currency-to-country display helper
-const WISE_COUNTRY_NAMES: Record<string, string> = {
+// Fincra currency-to-country display helper
+const FINCRA_COUNTRY_NAMES: Record<string, string> = {
   NGN: 'Nigeria', GHS: 'Ghana', KES: 'Kenya',
   ZAR: 'South Africa', TZS: 'Tanzania', UGX: 'Uganda',
 };
@@ -67,17 +67,7 @@ export default function RequestPayoutScreen() {
     }
   };
 
-  const isWisePayout = bankCurrency ? WISE_CURRENCIES.has(bankCurrency) : false;
-
-  const getWiseFeeEstimate = (usdAmount: number): string => {
-    // Wise charges a fixed fee + variable percentage for most African currencies.
-    // Based on observed transfer: $7.31 fee on $40.44 (via Wise Business API).
-    // We show a conservative estimate; exact fee is confirmed at transfer time.
-    if (usdAmount <= 0) return '';
-    const estimated = Math.max(5, usdAmount * 0.17).toFixed(2);
-    const net = Math.max(0, usdAmount - parseFloat(estimated)).toFixed(2);
-    return `~$${estimated} USD fee · You'll receive approx $${net} USD equivalent in ${bankCurrency}`;
-  };
+  const isFincraPayment = bankCurrency ? FINCRA_CURRENCIES.has(bankCurrency) : false;
 
   const handleRequestPayout = () => {
     if (!session || !eligibility) return;
@@ -105,18 +95,14 @@ export default function RequestPayoutScreen() {
       return;
     }
 
-    // Build confirmation message — include fee warning for Wise currencies
+    // Build confirmation message
     let confirmMessage = `Request payout of ${eligibility.currency} ${payoutAmount.toFixed(2)}?`;
-    if (isWisePayout && bankCurrency) {
-      const country = WISE_COUNTRY_NAMES[bankCurrency] ?? bankCurrency;
-      const estimatedFee = Math.max(5, payoutAmount * 0.17).toFixed(2);
-      const estimatedNet = Math.max(0, payoutAmount - parseFloat(estimatedFee)).toFixed(2);
+    if (isFincraPayment && bankCurrency) {
+      const country = FINCRA_COUNTRY_NAMES[bankCurrency] ?? bankCurrency;
       confirmMessage =
-        `You're requesting USD ${payoutAmount.toFixed(2)}.\n\n` +
-        `International transfer to ${country} (via Wise):\n` +
-        `• Transfer fee: approx $${estimatedFee} USD\n` +
-        `• You'll receive: approx $${estimatedNet} USD equivalent in ${bankCurrency}\n\n` +
-        `Exact fee confirmed at transfer time. Processing takes 2-3 business days.`;
+        `You're requesting ${eligibility.currency} ${payoutAmount.toFixed(2)}.\n\n` +
+        `Payment to ${country} will be processed via Fincra to your local bank account.\n\n` +
+        `Processing takes 1–2 business days.`;
     } else {
       confirmMessage += '\n\nProcessing takes 2-3 business days.';
     }
@@ -275,24 +261,16 @@ export default function RequestPayoutScreen() {
                 </View>
               </View>
 
-              {/* Wise fee warning — shown for African/international currencies */}
-              {isWisePayout && bankCurrency && (
-                <View style={[styles.feeWarningBox, { backgroundColor: '#FEF3C7', borderColor: '#F59E0B40' }]}>
-                  <Ionicons name="information-circle" size={20} color="#D97706" />
+              {/* Fincra payout info — shown for African currencies */}
+              {isFincraPayment && bankCurrency && (
+                <View style={[styles.feeWarningBox, { backgroundColor: '#ECFDF5', borderColor: '#10B98140' }]}>
+                  <Ionicons name="information-circle" size={20} color="#10B981" />
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.feeWarningTitle, { color: '#92400E' }]}>
-                      International Transfer Fee
+                    <Text style={[styles.feeWarningTitle, { color: '#065F46' }]}>
+                      African Bank Transfer via Fincra
                     </Text>
-                    <Text style={[styles.feeWarningText, { color: '#78350F' }]}>
-                      Payments to {WISE_COUNTRY_NAMES[bankCurrency] ?? bankCurrency} go through Wise and include a transfer fee (~$5–12 USD depending on amount). The exact fee will be shown before your transfer is processed.
-                    </Text>
-                    {parseFloat(amount) > 0 && (
-                      <Text style={[styles.feeEstimate, { color: '#D97706' }]}>
-                        {getWiseFeeEstimate(parseFloat(amount))}
-                      </Text>
-                    )}
-                    <Text style={[styles.feeWarningTip, { color: '#92400E' }]}>
-                      💡 Tip: If you have a UK, EU, or US bank account, add it in Payment Methods to receive funds with lower fees — then transfer locally via an app like Lemfi.
+                    <Text style={[styles.feeWarningText, { color: '#064E3B' }]}>
+                      Payments to {FINCRA_COUNTRY_NAMES[bankCurrency] ?? bankCurrency} are processed via Fincra directly to your local bank account. Transfers typically arrive within 1–2 business days.
                     </Text>
                   </View>
                 </View>

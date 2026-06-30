@@ -6,6 +6,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
   TextInput,
   Alert,
   ActivityIndicator,
@@ -32,6 +33,7 @@ import CountrySelector from '../components/CountrySelector';
 import { supabase } from '../lib/supabase';
 import { config } from '../config/environment';
 import { deepLinkingService } from '../services/DeepLinkingService';
+import { communityEntryService } from '../services/CommunityEntryService';
 import * as ImagePicker from 'expo-image-picker';
 
 const { width, height } = Dimensions.get('window');
@@ -115,7 +117,7 @@ interface EventType {
 }
 
 export default function OnboardingScreen() {
-  const { user, userProfile, updateUserProfile, completeOnboarding, refreshUser } = useAuth();
+  const { user, userProfile, updateUserProfile, completeOnboarding, refreshUser, setPendingCommunityWelcome } = useAuth();
   const { theme } = useTheme();
   const navigation = useNavigation();
   const { sendRequest } = useNetwork();
@@ -798,6 +800,8 @@ export default function OnboardingScreen() {
         }
       }
 
+      const communityAttribution = await communityEntryService.getAttribution();
+
       // Complete profile first
       await fetch(`${config.apiUrl}/api/user/complete-profile`, {
         method: 'POST',
@@ -814,6 +818,7 @@ export default function OnboardingScreen() {
           genres: selectedGenres.length > 0 ? selectedGenres : undefined,
           onboarding_user_type: userType,
           ...(uploadedAvatarUrl && { avatar_url: uploadedAvatarUrl }),
+          ...communityEntryService.attributionFieldsForProfile(communityAttribution),
         }),
       });
 
@@ -838,40 +843,12 @@ export default function OnboardingScreen() {
         console.warn('⚠️ First post publish failed (non-critical):', postError);
       }
 
-      // Complete onboarding
-      await fetch(`${config.apiUrl}/api/user/complete-onboarding`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ userId: user?.id }),
-      });
-
-      await refreshUser();
-
-      (navigation as any).reset({
-        index: 0,
-        routes: [{ name: 'MainTabs' }],
-      });
-
-      // If user arrived via artist fan landing page, navigate to that artist after onboarding
-      const deferredUsername = await deepLinkingService.consumeDeferredArtistLink();
-      if (deferredUsername) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('username', deferredUsername)
-          .single();
-        if (profile?.id) {
-          setTimeout(() => {
-            (navigation as any).navigate('CreatorProfile', {
-              creatorId: profile.id,
-              fromFanLanding: true,
-            });
-          }, 600);
-        }
-      }
+      const onboardingResult = await communityEntryService.completeOnboarding(user?.id ?? '');
+      await communityEntryService.prepareWelcomeGateAfterOnboarding(
+        refreshUser,
+        onboardingResult,
+        setPendingCommunityWelcome,
+      );
     } catch (error) {
       console.error('❌ Error publishing first post:', error);
       Alert.alert('Error', 'Something went wrong. Please try again.');
@@ -1645,6 +1622,8 @@ export default function OnboardingScreen() {
               return;
             }
 
+            const communityAttribution = await communityEntryService.getAttribution();
+
             // Complete profile
             const profileResponse = await fetch(`${config.apiUrl}/api/user/complete-profile`, {
               method: 'POST',
@@ -1660,6 +1639,7 @@ export default function OnboardingScreen() {
                 location: location,
                 genres: selectedGenres.length > 0 ? selectedGenres : undefined,
                 onboarding_user_type: userType,
+                ...communityEntryService.attributionFieldsForProfile(communityAttribution),
               }),
             });
 
@@ -1670,32 +1650,19 @@ export default function OnboardingScreen() {
               return;
             }
 
-            // Complete onboarding
-            const onboardingResponse = await fetch(`${config.apiUrl}/api/user/complete-onboarding`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session.access_token}`,
-              },
-              body: JSON.stringify({
-                userId: user?.id,
-              }),
-            });
+            const onboardingResult = await communityEntryService.completeOnboarding(user?.id ?? '');
 
-            if (!onboardingResponse.ok) {
-              const errorData = await onboardingResponse.json().catch(() => ({}));
-              Alert.alert('Error', errorData.error || 'Failed to complete onboarding.');
+            if (!onboardingResult.success) {
+              Alert.alert('Error', 'Failed to complete onboarding.');
               setLoading(false);
               return;
             }
 
-            await refreshUser();
-            
-            // Navigate to main app
-            (navigation as any).reset({
-              index: 0,
-              routes: [{ name: 'MainTabs' }],
-            });
+            await communityEntryService.prepareWelcomeGateAfterOnboarding(
+              refreshUser,
+              onboardingResult,
+              setPendingCommunityWelcome,
+            );
           } catch (error) {
             console.error('❌ Error completing onboarding:', error);
             Alert.alert('Error', 'Something went wrong. Please try again.');
@@ -1957,16 +1924,36 @@ export default function OnboardingScreen() {
   };
 
   // Render Welcome Screen
+  const goFromWelcome = () => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: -50,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setCurrentStep('userType');
+    });
+  };
+
   const renderWelcome = () => (
     <View style={styles.stepContainer}>
-      {/* Background Image */}
+      {/* Background Image — must not steal touches on Android */}
       <ImageBackground
         source={require('../../assets/images/logos/bg03.png')}
         style={StyleSheet.absoluteFill}
         resizeMode="cover"
+        pointerEvents="none"
       >
-        {/* Dark Overlay for Text Readability */}
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.4)' }]} />
+        <View
+          style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.4)' }]}
+          pointerEvents="none"
+        />
       </ImageBackground>
 
       {/* Main Content Wrapper */}
@@ -1977,12 +1964,13 @@ export default function OnboardingScreen() {
             styles.newLogoContainer,
             {
               opacity: fadeAnim,
-              transform: [{ translateX: slideAnim }, { scale: scaleAnim }]
-            }
+              transform: [{ translateX: slideAnim }, { scale: scaleAnim }],
+            },
           ]}
+          pointerEvents="none"
         >
-          <Image 
-            source={require('../../assets/images/logos/logo-trans-lockup.png')} 
+          <Image
+            source={require('../../assets/images/logos/logo-trans-lockup.png')}
             style={styles.newWelcomeLogo}
             resizeMode="contain"
           />
@@ -2010,54 +1998,28 @@ export default function OnboardingScreen() {
           </Text>
         </Animated.View>
 
-        {/* CTA Section */}
+        {/* CTA — opacity only (translateX on Android breaks Pressable hit targets) */}
         <Animated.View
           style={[
             styles.newCtaSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateX: slideAnim }]
-            }
+            { opacity: fadeAnim },
           ]}
         >
-          {/* Get Started Button */}
-          <TouchableOpacity
+          <Pressable
             style={styles.newGetStartedButton}
-            onPress={() => {
-              console.log('🎯 Get Started button pressed - animating exit');
-              // Animate slide-left and fade-out
-              Animated.parallel([
-                Animated.timing(fadeAnim, {
-                  toValue: 0,
-                  duration: 400,
-                  useNativeDriver: true,
-                }),
-                Animated.timing(slideAnim, {
-                  toValue: -50, // Slide left
-                  duration: 400,
-                  useNativeDriver: true,
-                }),
-              ]).start(() => {
-                // After animation completes, navigate to next screen
-                console.log('✅ Exit animation complete - navigating to userType');
-                setCurrentStep('userType');
-              });
-            }}
-            activeOpacity={0.7}
+            onPress={goFromWelcome}
+            android_ripple={{ color: 'rgba(255, 255, 255, 0.15)' }}
+            accessibilityRole="button"
+            accessibilityLabel="Get started"
           >
             <Text style={styles.newGetStartedText}>Get Started</Text>
-            
-            {/* Arrow Circle Button */}
-            <View style={styles.newArrowButtonContainer}>
-              {/* Glow effect */}
-              <View style={styles.newArrowGlow} />
-              
-              {/* Button Body */}
-              <View style={styles.newArrowButton}>
+            <View style={styles.newArrowButtonContainer} pointerEvents="none">
+              <View style={styles.newArrowGlow} pointerEvents="none" />
+              <View style={styles.newArrowButton} pointerEvents="none">
                 <Ionicons name="arrow-forward" size={28} color="#FFFFFF" />
               </View>
             </View>
-          </TouchableOpacity>
+          </Pressable>
 
           {/* Footer */}
           <View style={styles.newFooter} pointerEvents="none">
@@ -7494,10 +7456,11 @@ const styles = StyleSheet.create({
     marginBottom: -10,
     width: '100%',
     marginTop: 60,
+    maxHeight: 120,
   },
   newWelcomeLogo: {
-    width: 800,
-    height: 240,
+    width: Math.min(width * 0.82, 320),
+    height: Math.min(width * 0.25, 96),
   },
   newTextContent: {
     justifyContent: 'flex-start',
@@ -7522,12 +7485,16 @@ const styles = StyleSheet.create({
   newCtaSection: {
     gap: 24,
     marginTop: 0,
+    zIndex: 20,
+    elevation: 20,
   },
   newGetStartedButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 12,
+    minHeight: 72,
+    zIndex: 2,
   },
   newGetStartedText: {
     fontSize: 20,
@@ -7537,10 +7504,15 @@ const styles = StyleSheet.create({
   },
   newArrowButtonContainer: {
     position: 'relative',
+    width: 64,
+    height: 64,
   },
   newArrowGlow: {
     position: 'absolute',
-    inset: 0,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: '#FF6B6B',
     borderRadius: 9999,
     opacity: 0.4,

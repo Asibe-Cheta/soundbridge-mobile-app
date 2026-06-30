@@ -9,6 +9,7 @@ import {
   TextInput,
   ScrollView,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Image,
   Alert,
@@ -25,6 +26,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as DocumentPicker from 'expo-document-picker';
+import { Audio } from 'expo-av';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -51,10 +53,12 @@ interface CreatePostModalProps {
     mentions?: Mention[];
   }) => void;
   editingPost?: Post | null;
+  initialPostType?: PostType;
 }
 
 const POST_TYPES: { value: PostType; label: string; isPremium?: boolean }[] = [
   { value: 'update', label: 'Update' },
+  { value: 'photo', label: '📷 Photo' },
   { value: 'opportunity', label: 'Opportunity' },
   { value: 'achievement', label: 'Achievement' },
   { value: 'collaboration', label: 'Collaboration' },
@@ -72,13 +76,13 @@ const MAX_CHARACTERS = 3000;
 // LinkedIn allows up to 20 images per post
 const MAX_IMAGES = 20;
 
-export default function CreatePostModal({ visible, onClose, onSubmit, editingPost }: CreatePostModalProps) {
+export default function CreatePostModal({ visible, onClose, onSubmit, editingPost, initialPostType }: CreatePostModalProps) {
   const { theme } = useTheme();
   const { userProfile } = useAuth();
   const navigation = useNavigation();
 
   const [content, setContent] = useState('');
-  const [postType, setPostType] = useState<PostType>('update');
+  const [postType, setPostType] = useState<PostType>(initialPostType || 'update');
   const [visibility, setVisibility] = useState<PostVisibility>('public');
   const [imageUris, setImageUris] = useState<string[]>([]);
   const [audioUri, setAudioUri] = useState<string | null>(null);
@@ -106,6 +110,7 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
 
   // ── @mention refs ─────────────────────────────────────────
   const textInputRef = useRef<TextInput>(null);
+  const isPickingAudioRef = useRef(false);
   // Set to true when Enter is intercepted for mention selection; cleared in handleContentChange
   const enterInterceptedRef = useRef(false);
   // Holds the pre-computed content to apply when an intercepted Enter fires onChangeText
@@ -152,7 +157,7 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
       setGradientPreset(editingPost.gradient_preset ?? 1);
     } else if (!editingPost && visible) {
       setContent('');
-      setPostType('update');
+      setPostType(initialPostType || 'update');
       setVisibility('public');
       setImageUris([]);
       setAudioUri(null);
@@ -294,7 +299,7 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
       setImageUris([]);
       setAudioUri(null);
       setAudioClipDuration(null);
-      setPostType('update');
+      setPostType(initialPostType || 'update');
       setVisibility('public');
       setHeadlineText('');
       setGradientPreset(1);
@@ -369,18 +374,21 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
   };
 
   const handleAudioPress = () => {
+    Keyboard.dismiss();
     if (audioUri) {
       Alert.alert('Replace Audio', 'This will replace the current audio attachment.', [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Replace', onPress: () => setShowAudioOptions(true) },
+        { text: 'Replace', onPress: () => { Keyboard.dismiss(); setShowAudioOptions(true); } },
       ]);
     } else {
-      setShowAudioOptions(true);
+      setTimeout(() => setShowAudioOptions(true), 100);
     }
   };
 
   // Direct upload (existing behaviour — no trimmer)
   const handleUploadClip = async () => {
+    if (isPickingAudioRef.current) return;
+    isPickingAudioRef.current = true;
     setShowAudioOptions(false);
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -389,15 +397,46 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
       });
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
-        if (asset.size && asset.size > 10 * 1024 * 1024) {
-          Alert.alert('File Too Large', 'Audio files must be under 10 MB');
+        if (asset.size && asset.size > 20 * 1024 * 1024) {
+          Alert.alert('File Too Large', 'Audio files must be under 20 MB');
+          return;
+        }
+        // Enforce 60-second teaser limit
+        let durationCheckPassed = false;
+        try {
+          const { sound, status } = await Audio.Sound.createAsync(
+            { uri: asset.uri }, {}, null, false
+          );
+          const durationMs = (status as any).durationMillis ?? 0;
+          await sound.unloadAsync();
+          if (durationMs > 60_000) {
+            Alert.alert(
+              'Teaser Too Long',
+              'Teasers must be 60 seconds or less. Use "Trim from track" to select the clip you want.',
+              [{ text: 'OK' }]
+            );
+            return;
+          }
+          durationCheckPassed = true;
+        } catch {
+          // Duration could not be read — reject to be safe rather than silently passing
+        }
+        if (!durationCheckPassed) {
+          Alert.alert(
+            'Unsupported File',
+            'Could not verify the audio length. Please use "Trim from track" to pick a teaser clip.',
+            [{ text: 'OK' }]
+          );
           return;
         }
         setAudioUri(asset.uri);
         setAudioClipDuration(null);
       }
-    } catch {
+    } catch (e) {
+      console.error('❌ handleUploadClip error:', e);
       Alert.alert('Error', 'Failed to pick audio file. Please try again.');
+    } finally {
+      isPickingAudioRef.current = false;
     }
   };
 
@@ -421,6 +460,8 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
       );
       return;
     }
+    if (isPickingAudioRef.current) return;
+    isPickingAudioRef.current = true;
     setShowAudioOptions(false);
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -430,10 +471,13 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
       if (!result.canceled && result.assets[0]) {
         setPendingTrimUri(result.assets[0].uri);
         setPendingTrimFileName(result.assets[0].name || 'Audio file');
-        setShowTrimmer(true);
+        setTimeout(() => setShowTrimmer(true), 50);
       }
-    } catch {
+    } catch (e) {
+      console.error('❌ handleTrimOption error:', e);
       Alert.alert('Error', 'Failed to pick audio file. Please try again.');
+    } finally {
+      isPickingAudioRef.current = false;
     }
   };
 
@@ -984,13 +1028,19 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
         </LinearGradient>
       </SafeAreaView>
 
-      {/* Audio options bottom sheet */}
-      <Modal
-        visible={showAudioOptions}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowAudioOptions(false)}
-      >
+      {/* Audio trimmer — absolute overlay inside this Modal; avoids iOS pageSheet/fullScreen stacking conflict */}
+      {showTrimmer && pendingTrimUri && (
+        <AudioTrimmerModal
+          asOverlay
+          visible={showTrimmer}
+          audioUri={pendingTrimUri}
+          fileName={pendingTrimFileName}
+          onConfirm={handleTrimConfirm}
+          onCancel={handleTrimCancel}
+        />
+      )}
+
+      {showAudioOptions && (
         <TouchableWithoutFeedback onPress={() => setShowAudioOptions(false)}>
           <View style={styles.audioOptionsOverlay}>
             <TouchableWithoutFeedback>
@@ -1008,7 +1058,7 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
                   <View style={styles.audioOptionInfo}>
                     <Text style={[styles.audioOptionLabel, { color: theme.colors.text }]}>Upload a clip</Text>
                     <Text style={[styles.audioOptionDesc, { color: theme.colors.textSecondary }]}>
-                      Choose a pre-trimmed audio file (max 10 MB)
+                      Choose a pre-trimmed audio file (max 20 MB)
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -1050,19 +1100,8 @@ export default function CreatePostModal({ visible, onClose, onSubmit, editingPos
             </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
-      </Modal>
+      )}
     </Modal>
-
-    {/* Audio trimmer — rendered outside the main Modal so it can present full screen */}
-    {showTrimmer && pendingTrimUri ? (
-      <AudioTrimmerModal
-        visible={showTrimmer}
-        audioUri={pendingTrimUri}
-        fileName={pendingTrimFileName}
-        onConfirm={handleTrimConfirm}
-        onCancel={handleTrimCancel}
-      />
-    ) : null}
 
     {/* Headline Post upgrade prompt */}
     <Modal
@@ -1564,9 +1603,14 @@ const styles = StyleSheet.create({
 
   // ── Audio options modal ───────────────────────────────────
   audioOptionsOverlay: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
+    zIndex: 999,
   },
   audioOptionsSheet: {
     borderTopLeftRadius: 20,

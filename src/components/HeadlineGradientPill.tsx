@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, View, Text, StyleSheet } from 'react-native';
+import { Animated, Easing, View, Text, StyleSheet, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 export const HEADLINE_GRADIENT_PRESETS = [
   { id: 1, label: 'Rose',   colors: ['#EC4899', '#EF4444'] as [string, string] },
@@ -10,10 +12,9 @@ export const HEADLINE_GRADIENT_PRESETS = [
   { id: 5, label: 'Silver', colors: ['#9CA3AF', '#E5E7EB'] as [string, string] },
 ] as const;
 
-const PILL_HEIGHT = 58;
-const BORDER_WIDTH = 2.5;
-// One full rotation every 3 seconds — slow and elegant per spec
-const ROTATION_DURATION_MS = 3000;
+const PILL_HEIGHT = 52;
+const BORDER_WIDTH = 1.5;
+const ROTATION_DURATION_MS = 5000;
 
 interface HeadlineGradientPillProps {
   headline: string;
@@ -52,9 +53,7 @@ export default function HeadlineGradientPill({
       })
     );
     animRef.current.start();
-    return () => {
-      animRef.current?.stop();
-    };
+    return () => { animRef.current?.stop(); };
   }, [animate]);
 
   const rotate = rotateAnim.interpolate({
@@ -62,7 +61,6 @@ export default function HeadlineGradientPill({
     outputRange: ['0deg', '360deg'],
   });
 
-  // Square must cover the full pill diagonal at any rotation angle
   const squareSize = Math.ceil(Math.sqrt(pillWidth * pillWidth + PILL_HEIGHT * PILL_HEIGHT)) + 8;
   const innerWidth = pillWidth - BORDER_WIDTH * 2;
   const innerHeight = PILL_HEIGHT - BORDER_WIDTH * 2;
@@ -74,15 +72,11 @@ export default function HeadlineGradientPill({
         { width: pillWidth, height: PILL_HEIGHT, borderRadius: PILL_HEIGHT / 2 },
       ]}
     >
-      {/* Rotating gradient fills the background behind the pill */}
+      {/* Rotating gradient — only visible as the animated border */}
       <Animated.View
         style={[
           styles.rotatingWrapper,
-          {
-            width: squareSize,
-            height: squareSize,
-            transform: [{ rotate }],
-          },
+          { width: squareSize, height: squareSize, transform: [{ rotate }] },
         ]}
       >
         <LinearGradient
@@ -93,7 +87,7 @@ export default function HeadlineGradientPill({
         />
       </Animated.View>
 
-      {/* Inner pill — solid card background creates the animated border illusion */}
+      {/* Inner glass surface */}
       <View
         style={[
           styles.innerPill,
@@ -101,13 +95,37 @@ export default function HeadlineGradientPill({
             width: innerWidth,
             height: innerHeight,
             borderRadius: innerHeight / 2,
-            backgroundColor,
+            overflow: 'hidden',
           },
         ]}
       >
+        {/* Glassmorphic base */}
+        {Platform.OS === 'ios' ? (
+          <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFillObject} />
+        ) : (
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(12,8,24,0.72)' }]} />
+        )}
+
+        {/* Subtle gradient tint overlay */}
+        <LinearGradient
+          colors={[preset.colors[0] + '28', preset.colors[1] + '18']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+
+        {/* Glass highlight sheen at top */}
+        <LinearGradient
+          colors={['rgba(255,255,255,0.14)', 'transparent']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={[StyleSheet.absoluteFillObject, { borderRadius: innerHeight / 2 }]}
+        />
+
+        {/* Headline text */}
         <Text
           style={[styles.headlineText, { fontSize }]}
-          numberOfLines={2}
+          numberOfLines={1}
           adjustsFontSizeToFit
           minimumFontScale={0.8}
         >
@@ -135,10 +153,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   headlineText: {
+    ...Typography.body,
     color: '#FFFFFF',
     fontWeight: '700',
     textAlign: 'center',
     letterSpacing: -0.3,
-    lineHeight: 22,
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
   },
 });

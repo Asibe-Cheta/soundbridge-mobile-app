@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import { BlurView } from 'expo-blur';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { SystemTypography as Typography } from '../constants/Typography';
+import proResourceAnalytics from '../services/ProResourceAnalyticsService';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -136,17 +137,22 @@ const SA_MODULE_IMAGES: Record<string, any> = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-type TabId = 'sound-academy' | 'talk2dan' | 'herts';
+type TabId = 'sound-academy' | 'talk2dan' | 'herts' | 'mbg-sonics';
 const TABS: { id: TabId; label: string }[] = [
   { id: 'sound-academy', label: 'Sound Academy' },
   { id: 'talk2dan',      label: 'Talk 2 Dan' },
   { id: 'herts',         label: 'Herts Uni' },
+  { id: 'mbg-sonics',    label: 'MBG Sonics' },
 ];
 
 export default function ProResourcesScreen() {
   const navigation = useNavigation<any>();
   const { theme } = useTheme();
   const [activeTab, setActiveTab] = useState<TabId>('sound-academy');
+
+  useEffect(() => {
+    proResourceAnalytics.track('screen_view');
+  }, []);
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: theme.colors.background }]} edges={['top']}>
@@ -190,6 +196,7 @@ export default function ProResourcesScreen() {
         {activeTab === 'sound-academy' && <SoundAcademyTab navigation={navigation} theme={theme} />}
         {activeTab === 'talk2dan'      && <Talk2DanTab theme={theme} />}
         {activeTab === 'herts'         && <HertsTab theme={theme} />}
+        {activeTab === 'mbg-sonics'    && <MBGSonicsTab navigation={navigation} theme={theme} />}
         <View style={{ height: 48 }} />
       </ScrollView>
     </SafeAreaView>
@@ -228,7 +235,10 @@ function SoundAcademyTab({ navigation, theme }: any) {
         renderItem={({ item: mod, index }) => (
           <TouchableOpacity
             style={[styles.htmlCard, index === 0 && { marginLeft: 24 }]}
-            onPress={() => navigation.navigate('CourseDetail', { module: mod })}
+            onPress={() => {
+              proResourceAnalytics.track('resource_tap', `sa_module_${mod.moduleNumber}`);
+              navigation.navigate('CourseDetail', { module: mod });
+            }}
             activeOpacity={0.88}
           >
             <Image source={SA_MODULE_IMAGES[mod.id]} style={{ position: 'absolute', top: 0, left: 0, width: 280, height: 380 }} resizeMode="cover" />
@@ -272,7 +282,10 @@ function SoundAcademyTab({ navigation, theme }: any) {
       {/* CTA */}
       <TouchableOpacity
         style={styles.saCtaWrap}
-        onPress={() => Linking.openURL('https://calendly.com/soundacademyen/meet-with-sound-academy?back=1&month=2026-05')}
+        onPress={() => {
+          proResourceAnalytics.track('resource_tap', 'sa_booking');
+          Linking.openURL('https://calendly.com/soundacademyen/meet-with-sound-academy?back=1&month=2026-05');
+        }}
         activeOpacity={0.85}
       >
         <LinearGradient
@@ -328,7 +341,10 @@ function Talk2DanTab({ theme }: any) {
         renderItem={({ item: svc, index }) => (
           <TouchableOpacity
             style={[styles.htmlCard, index === 0 && { marginLeft: 24 }]}
-            onPress={() => Linking.openURL(svc.ctaUrl)}
+            onPress={() => {
+              proResourceAnalytics.track('resource_tap', `t2d_${svc.id}`);
+              Linking.openURL(svc.ctaUrl);
+            }}
             activeOpacity={0.88}
           >
             <LinearGradient colors={svc.gradientColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />
@@ -356,7 +372,10 @@ function Talk2DanTab({ theme }: any) {
       {/* CTA */}
       <TouchableOpacity
         style={[styles.ctaBtn, { backgroundColor: '#059669', marginTop: 28 }]}
-        onPress={() => Linking.openURL('https://talk2dan.co.uk')}
+        onPress={() => {
+          proResourceAnalytics.track('resource_tap', 't2d_website');
+          Linking.openURL('https://talk2dan.co.uk');
+        }}
         activeOpacity={0.8}
       >
         <Ionicons name="chatbubble-ellipses-outline" size={18} color="#fff" />
@@ -411,11 +430,107 @@ function HertsTab({ theme }: any) {
 
       <TouchableOpacity
         style={[styles.ctaBtn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: theme.colors.primary, marginTop: 28 }]}
-        onPress={() => Linking.openURL('https://www.herts.ac.uk')}
+        onPress={() => {
+          proResourceAnalytics.track('resource_tap', 'herts_website');
+          Linking.openURL('https://www.herts.ac.uk');
+        }}
         activeOpacity={0.8}
       >
         <Ionicons name="open-outline" size={18} color={theme.colors.primary} />
         <Text style={[styles.ctaBtnText, { color: theme.colors.primary }]}>Visit herts.ac.uk</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ─── MBG Sonics ───────────────────────────────────────────────────────────────
+
+function MBGSonicsTab({ navigation, theme }: any) {
+  return (
+    <View>
+      {/* Partner badge row */}
+      <View style={styles.partnerRow}>
+        <Image source={require('../../assets/mbg.JPG')} style={styles.partnerLogoSm} resizeMode="cover" />
+        <View style={[styles.partnerBadge, { backgroundColor: 'rgba(22,163,74,0.12)', borderColor: 'rgba(22,163,74,0.3)' }]}>
+          <View style={[styles.partnerDot, { backgroundColor: '#4ADE80' }]} />
+          <Text style={[styles.partnerBadgeText, { color: '#86EFAC' }]}>DISTRIBUTION PARTNER · UK</Text>
+        </View>
+      </View>
+
+      {/* Description */}
+      <View style={styles.sectionHeader}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Music Distribution</Text>
+      </View>
+      <Text style={[styles.bioText, { color: theme.colors.textSecondary, marginBottom: 24 }]}>
+        Distribute your music to Spotify, Apple Music, Tidal and major streaming platforms worldwide through our official distribution partner MBG Sonics.
+      </Text>
+
+      {/* Distribution card */}
+      <FlatList
+        horizontal
+        data={[{ id: 'mbg-dist' }]}
+        keyExtractor={(i) => i.id}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.cardListContent}
+        scrollEnabled={false}
+        renderItem={() => (
+          <TouchableOpacity
+            style={[styles.htmlCard, { marginLeft: 24 }]}
+            onPress={() => {
+              proResourceAnalytics.track('resource_tap', 'mbg_sonics_distribute');
+              navigation.navigate('MBGSonicsDistribution');
+            }}
+            activeOpacity={0.88}
+          >
+            {/* Logo image fills the card */}
+            <Image
+              source={require('../../assets/mbg.JPG')}
+              style={{ position: 'absolute', top: 0, left: 0, width: 280, height: 380 }}
+              resizeMode="cover"
+            />
+            {/* Blue → pink → red tint overlay */}
+            <LinearGradient
+              colors={['rgba(29,78,216,0.62)', 'rgba(219,39,119,0.58)', 'rgba(220,38,38,0.62)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            {/* Bottom fade for text legibility */}
+            <LinearGradient
+              colors={['transparent', 'rgba(0,0,0,0.45)', 'rgba(0,0,0,0.92)']}
+              style={styles.htmlCardGradient}
+            />
+
+            <View style={styles.htmlBadge}>
+              <Text style={styles.htmlBadgeText}>MUSIC DISTRIBUTION</Text>
+            </View>
+
+            <View style={styles.htmlCardContent}>
+              <Text style={styles.htmlCardTitle} numberOfLines={2}>Get on Spotify{'\n'}& 150+ Platforms</Text>
+              <Text style={styles.htmlCardArtist} numberOfLines={2}>
+                Distribute through MBG Sonics, our official partner
+              </Text>
+              <View style={styles.htmlCardMeta}>
+                <Text style={[styles.htmlCardMetaText, { color: 'rgba(255,255,255,0.55)' }]}>
+                  Distribute My Music →
+                </Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+        )}
+      />
+
+      {/* CTA */}
+      <TouchableOpacity
+        style={[styles.ctaBtn, { backgroundColor: '#DC2626', marginTop: 28 }]}
+        onPress={() => {
+          proResourceAnalytics.track('resource_tap', 'mbg_sonics_cta');
+          navigation.navigate('MBGSonicsDistribution');
+        }}
+        activeOpacity={0.8}
+      >
+        <Ionicons name="musical-notes-outline" size={18} color="#fff" />
+        <Text style={styles.ctaBtnText}>Distribute My Music</Text>
       </TouchableOpacity>
     </View>
   );

@@ -20,6 +20,35 @@ import { useTheme } from '../contexts/ThemeContext';
 import { notificationService, NotificationPreferences } from '../services/NotificationService';
 import { SystemTypography as Typography } from '../constants/Typography';
 
+export const NOTIFICATION_TIME_OPTIONS = [
+  { value: 'morning', label: 'Morning', sublabel: 'Before 12PM' },
+  { value: 'afternoon', label: 'Afternoon', sublabel: '12PM – 5PM' },
+  { value: 'evening', label: 'Evening', sublabel: '5PM – 9PM' },
+  { value: 'any_time', label: 'Any time', sublabel: '' },
+] as const;
+
+export const EVENT_PLANNING_OPTIONS = [
+  { value: 'last_minute', label: 'Last minute', sublabel: 'Within 1 week' },
+  { value: 'few_weeks', label: 'A few weeks ahead', sublabel: '' },
+  { value: 'one_to_three_months', label: '1 to 3 months ahead', sublabel: '' },
+  { value: 'any_time', label: 'Any time', sublabel: '' },
+] as const;
+
+const MONTH_OPTIONS = [
+  { value: 1, label: 'Jan' },
+  { value: 2, label: 'Feb' },
+  { value: 3, label: 'Mar' },
+  { value: 4, label: 'Apr' },
+  { value: 5, label: 'May' },
+  { value: 6, label: 'Jun' },
+  { value: 7, label: 'Jul' },
+  { value: 8, label: 'Aug' },
+  { value: 9, label: 'Sep' },
+  { value: 10, label: 'Oct' },
+  { value: 11, label: 'Nov' },
+  { value: 12, label: 'Dec' },
+];
+
 // Event genres from database
 const EVENT_GENRES = [
   'Music Concert',
@@ -56,7 +85,10 @@ export default function NotificationPreferencesScreen() {
   const [startHour, setStartHour] = useState(8);
   const [endHour, setEndHour] = useState(22);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
-  
+  const [preferredTimes, setPreferredTimes] = useState<string[]>(['any_time']);
+  const [planningWindow, setPlanningWindow] = useState('any_time');
+  const [activeMonths, setActiveMonths] = useState<number[]>([]);
+
   // Type toggles
   const [eventNotifs, setEventNotifs] = useState(true);
   const [messageNotifs, setMessageNotifs] = useState(true);
@@ -84,6 +116,13 @@ export default function NotificationPreferencesScreen() {
         setStartHour(prefs.notificationStartHour);
         setEndHour(prefs.notificationEndHour);
         setSelectedGenres(prefs.preferredEventGenres || []);
+        setPreferredTimes(
+          prefs.preferredNotificationTimes?.length
+            ? prefs.preferredNotificationTimes
+            : ['any_time'],
+        );
+        setPlanningWindow(prefs.eventPlanningWindow || 'any_time');
+        setActiveMonths(prefs.activeEventMonths || []);
         setEventNotifs(prefs.eventNotificationsEnabled);
         setMessageNotifs(prefs.messageNotificationsEnabled);
         setTipNotifs(prefs.tipNotificationsEnabled);
@@ -126,6 +165,9 @@ export default function NotificationPreferencesScreen() {
         notificationStartHour: startHour,
         notificationEndHour: endHour,
         preferredEventGenres: selectedGenres,
+        preferredNotificationTimes: preferredTimes.length ? preferredTimes : ['any_time'],
+        eventPlanningWindow: planningWindow,
+        activeEventMonths: activeMonths,
         eventNotificationsEnabled: eventNotifs,
         messageNotificationsEnabled: messageNotifs,
         tipNotificationsEnabled: tipNotifs,
@@ -159,6 +201,28 @@ export default function NotificationPreferencesScreen() {
       setSelectedGenres(selectedGenres.filter(g => g !== genre));
     } else {
       setSelectedGenres([...selectedGenres, genre]);
+    }
+  };
+
+  const togglePreferredTime = (value: string) => {
+    if (value === 'any_time') {
+      setPreferredTimes(['any_time']);
+      return;
+    }
+    const withoutAny = preferredTimes.filter(t => t !== 'any_time');
+    if (withoutAny.includes(value)) {
+      const next = withoutAny.filter(t => t !== value);
+      setPreferredTimes(next.length ? next : ['any_time']);
+    } else {
+      setPreferredTimes([...withoutAny, value]);
+    }
+  };
+
+  const toggleActiveMonth = (month: number) => {
+    if (activeMonths.includes(month)) {
+      setActiveMonths(activeMonths.filter(m => m !== month));
+    } else {
+      setActiveMonths([...activeMonths, month].sort((a, b) => a - b));
     }
   };
 
@@ -399,6 +463,114 @@ export default function NotificationPreferencesScreen() {
             </View>
           )}
         </View>
+
+        {/* Preferred notification time */}
+        {masterEnabled && eventNotifs && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              When would you like to hear about events?
+            </Text>
+            <View style={[styles.expandedContent, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+              <View style={styles.genreGrid}>
+                {NOTIFICATION_TIME_OPTIONS.map(option => {
+                  const isSelected = preferredTimes.includes(option.value);
+                  return (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={[
+                        styles.genreChip,
+                        { borderColor: theme.colors.border },
+                        isSelected && { backgroundColor: '#4ECDC4', borderColor: '#4ECDC4' },
+                      ]}
+                      onPress={() => togglePreferredTime(option.value)}
+                    >
+                      <Text style={[styles.genreText, { color: isSelected ? '#fff' : theme.colors.text }]}>
+                        {option.label}
+                        {option.sublabel ? `\n${option.sublabel}` : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <Text style={[styles.helpText, { color: theme.colors.textSecondary, marginTop: 10 }]}>
+                Event notifications are delivered during your preferred times, not immediately when events are created.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Event planning window */}
+        {masterEnabled && eventNotifs && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              How far ahead do you plan for events?
+            </Text>
+            <View style={[styles.expandedContent, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+              <View style={styles.genreGrid}>
+                {EVENT_PLANNING_OPTIONS.map(option => {
+                  const isSelected = planningWindow === option.value;
+                  return (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={[
+                        styles.genreChip,
+                        { borderColor: theme.colors.border },
+                        isSelected && { backgroundColor: '#4ECDC4', borderColor: '#4ECDC4' },
+                      ]}
+                      onPress={() => setPlanningWindow(option.value)}
+                    >
+                      <Text style={[styles.genreText, { color: isSelected ? '#fff' : theme.colors.text }]}>
+                        {option.label}
+                        {option.sublabel ? `\n${option.sublabel}` : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Active months (optional) */}
+        {masterEnabled && eventNotifs && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              Which months are you most likely to attend events?
+            </Text>
+            <Text style={[styles.helpText, { color: theme.colors.textSecondary, marginBottom: 12 }]}>
+              Optional — skip if you attend events year round
+            </Text>
+            <View style={[styles.expandedContent, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+              <View style={styles.genreGrid}>
+                {MONTH_OPTIONS.map(month => {
+                  const isSelected = activeMonths.includes(month.value);
+                  return (
+                    <TouchableOpacity
+                      key={month.value}
+                      style={[
+                        styles.monthChip,
+                        { borderColor: theme.colors.border },
+                        isSelected && { backgroundColor: '#4ECDC4', borderColor: '#4ECDC4' },
+                      ]}
+                      onPress={() => toggleActiveMonth(month.value)}
+                    >
+                      <Text style={[styles.monthChipText, { color: isSelected ? '#fff' : theme.colors.text }]}>
+                        {month.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {activeMonths.length > 0 && (
+                <TouchableOpacity style={styles.clearButton} onPress={() => setActiveMonths([])}>
+                  <Text style={[styles.clearButtonText, { color: theme.colors.primary }]}>
+                    Clear — year round
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
 
         {/* Notification Type Toggles */}
         <View style={styles.section}>
@@ -824,6 +996,20 @@ const styles = StyleSheet.create({
     ...Typography.label,
     fontSize: 14,
     lineHeight: 20,
+    fontWeight: '500',
+  },
+  monthChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    minWidth: 52,
+    alignItems: 'center',
+  },
+  monthChipText: {
+    ...Typography.label,
+    fontSize: 13,
+    lineHeight: 18,
     fontWeight: '500',
   },
   clearButton: {

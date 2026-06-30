@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import VerifiedAvatar from '../components/VerifiedAvatar';
 import {
   View,
@@ -23,6 +23,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import { dbHelpers, supabase } from '../lib/supabase';
 import { useOnlinePresence } from '../hooks/useOnlinePresence';
 import BackButton from '../components/BackButton';
+import { useSearchHistory } from '../hooks/useSearchHistory';
+import SearchHistoryPanel from '../components/SearchHistoryPanel';
 
 const { width } = Dimensions.get('window');
 
@@ -77,6 +79,16 @@ export default function MessagesScreen({ navigation }: any) {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const blurRef = useRef<ReturnType<typeof setTimeout>>();
+  const { history, addToHistory, removeFromHistory, clearHistory } = useSearchHistory('messages');
+
+  const handleSearchFocus = () => { clearTimeout(blurRef.current); setSearchFocused(true); };
+  const handleSearchBlur = () => {
+    blurRef.current = setTimeout(() => setSearchFocused(false), 200);
+    if (searchQuery.trim().length >= 2) addToHistory(searchQuery.trim());
+  };
 
   const loadConversations = useCallback(async () => {
     setLoading(true);
@@ -331,6 +343,16 @@ export default function MessagesScreen({ navigation }: any) {
     </View>
   );
 
+  const filteredConversations = chatSearchQuery.trim()
+    ? conversations.filter((c) => {
+        const q = chatSearchQuery.toLowerCase();
+        return (
+          c.otherUser.display_name?.toLowerCase().includes(q) ||
+          c.otherUser.username?.toLowerCase().includes(q)
+        );
+      })
+    : conversations;
+
   return (
     <View style={styles.container}>
       {/* Main Background Gradient - Uses theme colors */}
@@ -394,7 +416,7 @@ export default function MessagesScreen({ navigation }: any) {
       <View style={styles.content}>
         {activeTab === 'conversations' ? (
           <FlatList
-            data={conversations}
+            data={filteredConversations}
             keyExtractor={(item) => item.id}
             renderItem={renderConversationItem}
             contentContainerStyle={styles.conversationsList}
@@ -407,7 +429,39 @@ export default function MessagesScreen({ navigation }: any) {
                 colors={['#DC2626']}
               />
             }
-            ListEmptyComponent={loading ? null : renderEmptyState}
+            ListHeaderComponent={
+              conversations.length > 0 ? (
+                <View style={[styles.chatSearchWrap, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                  <Ionicons name="search" size={16} color={theme.colors.textSecondary} />
+                  <TextInput
+                    style={[styles.chatSearchInput, { color: theme.colors.text }]}
+                    placeholder="Search conversations..."
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={chatSearchQuery}
+                    onChangeText={setChatSearchQuery}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    returnKeyType="search"
+                  />
+                  {chatSearchQuery.length > 0 && (
+                    <TouchableOpacity onPress={() => setChatSearchQuery('')}>
+                      <Ionicons name="close-circle" size={16} color={theme.colors.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ) : null
+            }
+            ListEmptyComponent={
+              loading ? null : chatSearchQuery.trim() ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="search-outline" size={48} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateTitle, { color: theme.colors.text }]}>No results</Text>
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
+                    No conversations match "{chatSearchQuery}"
+                  </Text>
+                </View>
+              ) : renderEmptyState()
+            }
           />
         ) : (
           <View style={styles.searchContainer}>
@@ -421,6 +475,9 @@ export default function MessagesScreen({ navigation }: any) {
                 onChangeText={handleSearch}
                 autoCapitalize="none"
                 autoCorrect={false}
+                onFocus={handleSearchFocus}
+                onBlur={handleSearchBlur}
+                onSubmitEditing={() => { if (searchQuery.trim().length >= 2) addToHistory(searchQuery.trim()); }}
               />
               {searchQuery.length > 0 && (
                 <TouchableOpacity
@@ -434,32 +491,41 @@ export default function MessagesScreen({ navigation }: any) {
               )}
             </View>
 
-            <FlatList
-              data={searchResults}
-              keyExtractor={(item) => item.id}
-              renderItem={renderSearchResult}
-              contentContainerStyle={styles.searchResultsList}
-              showsVerticalScrollIndicator={false}
-              ListEmptyComponent={
-                searchQuery.length > 0 ? (
-                  <View style={styles.noResultsState}>
-                    <Ionicons name="search-outline" size={48} color={theme.colors.textSecondary} />
-                    <Text style={[styles.noResultsText, { color: theme.colors.text }]}>No users found</Text>
-                    <Text style={[styles.noResultsSubtext, { color: theme.colors.textSecondary }]}>
-                      Try searching with a different name
-                    </Text>
-                  </View>
-                ) : (
-                  <View style={styles.searchPromptState}>
-                    <Ionicons name="people-outline" size={48} color={theme.colors.textSecondary} />
-                    <Text style={[styles.searchPromptText, { color: theme.colors.text }]}>Search for creators</Text>
-                    <Text style={[styles.searchPromptSubtext, { color: theme.colors.textSecondary }]}>
-                      Find and connect with other music creators
-                    </Text>
-                  </View>
-                )
-              }
-            />
+            {searchFocused && !searchQuery && history.length > 0 ? (
+              <SearchHistoryPanel
+                history={history}
+                onSelect={(term) => { clearTimeout(blurRef.current); setSearchFocused(false); handleSearch(term); addToHistory(term); }}
+                onRemove={removeFromHistory}
+                onClearAll={clearHistory}
+              />
+            ) : (
+              <FlatList
+                data={searchResults}
+                keyExtractor={(item) => item.id}
+                renderItem={renderSearchResult}
+                contentContainerStyle={styles.searchResultsList}
+                showsVerticalScrollIndicator={false}
+                ListEmptyComponent={
+                  searchQuery.length > 0 ? (
+                    <View style={styles.noResultsState}>
+                      <Ionicons name="search-outline" size={48} color={theme.colors.textSecondary} />
+                      <Text style={[styles.noResultsText, { color: theme.colors.text }]}>No users found</Text>
+                      <Text style={[styles.noResultsSubtext, { color: theme.colors.textSecondary }]}>
+                        Try searching with a different name
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.searchPromptState}>
+                      <Ionicons name="people-outline" size={48} color={theme.colors.textSecondary} />
+                      <Text style={[styles.searchPromptText, { color: theme.colors.text }]}>Search for creators</Text>
+                      <Text style={[styles.searchPromptSubtext, { color: theme.colors.textSecondary }]}>
+                        Find and connect with other music creators
+                      </Text>
+                    </View>
+                  )
+                }
+              />
+            )}
           </View>
         )}
       </View>
@@ -529,6 +595,22 @@ const styles = StyleSheet.create({
   },
   conversationsList: {
     paddingVertical: 8,
+  },
+  chatSearchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 8,
+  },
+  chatSearchInput: {
+    flex: 1,
+    fontSize: 14,
   },
   conversationItem: {
     flexDirection: 'row',

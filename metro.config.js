@@ -11,6 +11,10 @@ config.cacheStores = [
   new FileStore({ root: path.join(__dirname, '.metro-cache') }),
 ];
 
+// Metro's default assetExts only contains lowercase 'jpg'; files with uppercase
+// '.JPG' extension are never indexed unless we add the uppercase variant too.
+config.resolver.assetExts = [...config.resolver.assetExts, 'JPG'];
+
 // Watchman sync times out on this machine; Node crawler is slower but reliable.
 config.resolver.useWatchman = false;
 config.resolver.blockList = [/node_modules\/.* [0-9].*/];

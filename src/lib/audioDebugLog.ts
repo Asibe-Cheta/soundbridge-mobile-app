@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { clearOtaLogs, getOtaLogs } from './otaDebugLog';
 
 const KEY = 'sb_audio_debug_v1';
 const HS_KEY = 'sb_hs_debug_v1';
-const MAX = 100;
+const MAX = 150;
 
 function ts() {
   const d = new Date();
@@ -29,16 +30,17 @@ export function audioLog(tag: string, detail?: string | number | Record<string, 
   })();
 }
 
-// Merge main log + headless service log, sort by timestamp prefix, return last N lines
+// Merge audio + OTA + headless service logs, sort by timestamp prefix
 export async function getAudioLogs(): Promise<string[]> {
   try {
-    const [rawMain, rawHs] = await Promise.all([
+    const [rawMain, rawHs, ota] = await Promise.all([
       AsyncStorage.getItem(KEY),
       AsyncStorage.getItem(HS_KEY),
+      getOtaLogs(),
     ]);
     const main: string[] = rawMain ? JSON.parse(rawMain) : [];
     const hs: string[] = rawHs ? JSON.parse(rawHs) : [];
-    const merged = [...main, ...hs].sort((a, b) => a.localeCompare(b));
+    const merged = [...main, ...hs, ...ota].sort((a, b) => a.localeCompare(b));
     return merged;
   } catch {
     return [];
@@ -50,6 +52,7 @@ export async function clearAudioLogs(): Promise<void> {
     await Promise.all([
       AsyncStorage.removeItem(KEY),
       AsyncStorage.removeItem(HS_KEY),
+      clearOtaLogs(),
     ]);
   } catch {}
 }

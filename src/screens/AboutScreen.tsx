@@ -4,13 +4,22 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { CommonActions, useNavigation } from '@react-navigation/native';
+import {
+  loadBgIsolationFlags,
+  getBgIsolationFlags,
+  setBgIsolationFlag,
+  clearAllBgIsolationFlags,
+  type BgIsolationFlag,
+} from '../config/bgAudioIsolationFlags';
+import * as Application from 'expo-application';
+import { fetchVersionConfig, AppVersionConfig } from '../services/versionCheckService';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import BackButton from '../components/BackButton';
 import { SystemTypography as Typography } from '../constants/Typography';
 import { getAudioLogs, clearAudioLogs } from '../lib/audioDebugLog';
-import { fetchVersionConfig, AppVersionConfig } from '../services/versionCheckService';
+import { formatOtaDebugReport, showOtaDebugAlert } from '../services/otaDiagnosticsService';
 
 const features = [
   { icon: 'musical-notes-outline', title: 'Discover Music', description: 'Explore tracks from independent artists worldwide.' },
@@ -33,6 +42,58 @@ export default function AboutScreen() {
     }
   }, [userProfile?.is_admin]);
 
+  const showBgIsolateMenu = useCallback(async () => {
+    await loadBgIsolationFlags();
+    const flags = getBgIsolationFlags();
+    const active =
+      (flags.disableTokenRefresh && 'Token refresh OFF') ||
+      (flags.disableRealtime && 'Realtime OFF') ||
+      (flags.disableNotificationHooks && 'Notifications OFF') ||
+      (flags.disableAuthListener && 'Auth listener OFF') ||
+      'All normal (no isolation)';
+
+    const toggle = async (flag: BgIsolationFlag, label: string) => {
+      const enabling = !flags[flag];
+      await setBgIsolationFlag(flag, enabling);
+      Alert.alert(
+        'BG Isolation Updated',
+        `${label} ${enabling ? 'DISABLED for next session' : 'restored'}.\n\nForce-quit and reopen the app before testing.`,
+      );
+    };
+
+    Alert.alert(
+      'BG Audio Isolation',
+      `Current: ${active}\n\nEnable ONE flag at a time. Force-quit app after changing, then run 90s background test.`,
+      [
+        {
+          text: flags.disableTokenRefresh ? '✓ Token Refresh OFF' : 'Disable Token Refresh',
+          onPress: () => toggle('disableTokenRefresh', 'Token refresh'),
+        },
+        {
+          text: flags.disableRealtime ? '✓ Realtime OFF' : 'Disable Realtime',
+          onPress: () => toggle('disableRealtime', 'Realtime'),
+        },
+        {
+          text: flags.disableNotificationHooks ? '✓ Notifications OFF' : 'Disable Notifications',
+          onPress: () => toggle('disableNotificationHooks', 'Notification hooks'),
+        },
+        {
+          text: flags.disableAuthListener ? '✓ Auth Listener OFF' : 'Disable Auth Listener',
+          onPress: () => toggle('disableAuthListener', 'Auth listener + AppState session handling'),
+        },
+        {
+          text: 'Clear All Flags',
+          style: 'destructive',
+          onPress: async () => {
+            await clearAllBgIsolationFlags();
+            Alert.alert('Flags cleared', 'Force-quit and reopen the app.');
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  }, []);
+
   const handleVersionTap = useCallback(async () => {
     tapCountRef.current += 1;
     if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
@@ -40,22 +101,37 @@ export default function AboutScreen() {
 
     if (tapCountRef.current >= 5) {
       tapCountRef.current = 0;
-      const logs = await getAudioLogs();
-      if (logs.length === 0) {
-        Alert.alert('Audio Debug Log', 'No entries yet — play a track first.');
-        return;
-      }
-      const last30 = logs.slice(-30).join('\n');
-      Alert.alert(
-        'Audio Debug Log',
-        last30,
-        [
-          { text: 'Clear', style: 'destructive', onPress: () => clearAudioLogs() },
-          { text: 'OK' },
-        ],
-      );
+      const [report, audioLogs] = await Promise.all([
+        formatOtaDebugReport(),
+        getAudioLogs(),
+      ]);
+      const audioRecent = audioLogs.filter((l) => !l.includes('[OTA:')).slice(-10);
+      const body = [
+        report,
+        audioRecent.length ? `\n--- Audio (${audioRecent.length} recent) ---\n${audioRecent.join('\n')}` : '',
+      ].filter(Boolean).join('\n');
+      showOtaDebugAlert(body || 'No diagnostic data.', [
+        { text: 'Clear', style: 'destructive', onPress: () => clearAudioLogs() },
+        { text: 'BG Isolate', onPress: () => showBgIsolateMenu() },
+        {
+          text: 'Session D',
+          onPress: () => {
+            navigation.dispatch(
+              CommonActions.reset({
+                index: 0,
+                routes: [{ name: 'SessionDBlank' as never }],
+              }),
+            );
+          },
+        },
+        { text: 'BG Test', onPress: () => navigation.navigate('MinimalAudioTest' as never) },
+        { text: 'OK' },
+      ]);
     }
-  }, []);
+  }, [navigation, showBgIsolateMenu]);
+
+  const nativeVersion = Application.nativeApplicationVersion ?? '?';
+  const nativeBuild = Application.nativeBuildVersion ?? '?';
 
   return (
     <View style={styles.container}>
@@ -89,7 +165,9 @@ export default function AboutScreen() {
             </View>
             <Text style={[styles.wordmark, { color: theme.colors.text }]}>SoundBridge</Text>
             <TouchableOpacity style={styles.versionBadge} onPress={handleVersionTap} activeOpacity={1}>
-              <Text style={[styles.versionText, { color: theme.colors.textSecondary }]}>Version 1.0.0</Text>
+              <Text style={[styles.versionText, { color: theme.colors.textSecondary }]}>
+                {`Version ${nativeVersion} (${nativeBuild}) · OTA probe`}
+              </Text>
             </TouchableOpacity>
             <Text style={[styles.tagline, { color: theme.colors.textSecondary }]}>
               The social platform for music creators and listeners.

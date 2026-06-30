@@ -35,6 +35,8 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { GooglePlacesAutocomplete, GooglePlaceData, GooglePlaceDetail } from 'react-native-google-places-autocomplete';
 import BecomeCreatorModal from '../components/BecomeCreatorModal';
 import UpgradeForPaidEventsModal from '../components/UpgradeForPaidEventsModal';
+import { useCreatorAgreement } from '../hooks/useCreatorAgreement';
+import CreatorAgreementModal from '../components/CreatorAgreementModal';
 import { SubscriptionStatusService } from '../services/SubscriptionStatusService';
 
 // Country-specific address field configurations
@@ -247,6 +249,7 @@ export default function CreateEventScreen() {
   const navigation = useNavigation();
   const { theme } = useTheme();
   const { user, userProfile, updateUserProfile, refreshUser, session } = useAuth();
+  const { requestAgreement, agreementVisible, agreementSubmitting, onAgreed, onDismiss } = useCreatorAgreement();
 
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -257,6 +260,9 @@ export default function CreateEventScreen() {
   // Modals for paid event gating
   const [showBecomeCreatorModal, setShowBecomeCreatorModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
+  // Event responsibility disclaimer — must be ticked before publishing
+  const [eventDisclaimerAccepted, setEventDisclaimerAccepted] = useState(false);
   const [becomeCreatorLoading, setBecomeCreatorLoading] = useState(false);
 
   // User role and subscription state
@@ -392,38 +398,28 @@ export default function CreateEventScreen() {
   const handleBecomeCreator = async (): Promise<boolean> => {
     setBecomeCreatorLoading(true);
     try {
-      // Update user role to 'creator'
-      const result = await updateUserProfile({ role: 'creator' as any });
+      // Role upgrade handled by POST /api/user/become-creator in BecomeCreatorModal.
+      await refreshUser();
+      setUserRole('creator');
 
-      if (result.success) {
-        // Update local state
-        setUserRole('creator');
-
-        // Refresh user data
-        await refreshUser();
-
-        Alert.alert(
-          'Welcome, Creator!',
-          'Your account has been upgraded to a creator account. To host paid events, you\'ll need a subscription.',
-          [
-            {
-              text: 'View Plans',
-              onPress: () => {
-                setShowBecomeCreatorModal(false);
-                navigation.navigate('Upgrade' as never);
-              },
+      Alert.alert(
+        'Welcome, Creator!',
+        'Your account has been upgraded to a creator account. To host paid events, you\'ll need a subscription.',
+        [
+          {
+            text: 'View Plans',
+            onPress: () => {
+              setShowBecomeCreatorModal(false);
+              navigation.navigate('Upgrade' as never);
             },
-            {
-              text: 'Later',
-              style: 'cancel',
-            },
-          ]
-        );
-        return true;
-      } else {
-        Alert.alert('Error', 'Failed to upgrade to creator account. Please try again.');
-        return false;
-      }
+          },
+          {
+            text: 'Later',
+            style: 'cancel',
+          },
+        ]
+      );
+      return true;
     } catch (error) {
       console.error('Error becoming creator:', error);
       Alert.alert('Error', 'Something went wrong. Please try again.');
@@ -687,6 +683,15 @@ export default function CreateEventScreen() {
   const handleSubmit = async () => {
     if (!validateForm()) return;
 
+    // Creator agreement gate — first creative action only
+    const agreed = await requestAgreement();
+    if (!agreed) return;
+
+    if (!eventDisclaimerAccepted) {
+      Alert.alert('Confirmation Required', 'Please confirm that you accept responsibility for this event before publishing.');
+      return;
+    }
+
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -778,6 +783,14 @@ export default function CreateEventScreen() {
         const errorMessage = result.error || result.message || 'Failed to create event';
         console.error('❌ API error response:', result);
         throw new Error(errorMessage);
+      }
+
+      // Store disclaimer acceptance per event (best-effort — columns added by web app migration)
+      if (result.event?.id) {
+        supabase.from('events').update({
+          creator_event_disclaimer_accepted: true,
+          creator_event_disclaimer_accepted_at: new Date().toISOString(),
+        }).eq('id', result.event.id).then(() => {}).catch(() => {});
       }
 
       // Queue push notifications to nearby genre-matched users (fire-and-forget)
@@ -1483,6 +1496,26 @@ export default function CreateEventScreen() {
               />
             </View>
           </View>
+          {/* ── Event Responsibility Disclaimer ── */}
+          <TouchableOpacity
+            style={styles.disclaimerRow}
+            onPress={() => setEventDisclaimerAccepted(v => !v)}
+            activeOpacity={0.7}
+          >
+            <View style={[
+              styles.disclaimerCheckbox,
+              { borderColor: eventDisclaimerAccepted ? theme.colors.primary : theme.colors.border },
+              eventDisclaimerAccepted && { backgroundColor: theme.colors.primary },
+            ]}>
+              {eventDisclaimerAccepted && (
+                <Ionicons name="checkmark" size={13} color="#fff" />
+              )}
+            </View>
+            <Text style={[styles.disclaimerText, { color: theme.colors.textSecondary }]}>
+              By publishing this event I confirm I am solely responsible for its organisation, safety and delivery. SoundBridge promotes events on my behalf but bears no liability for any aspect of the event itself.
+            </Text>
+          </TouchableOpacity>
+
         </ScrollView>
 
         {/* Country Picker Modal */}
@@ -1564,6 +1597,14 @@ export default function CreateEventScreen() {
           loading={becomeCreatorLoading}
         />
 
+        {/* Creator Agreement — shown once before first creative action */}
+        <CreatorAgreementModal
+          visible={agreementVisible}
+          onAgreed={onAgreed}
+          onDismiss={onDismiss}
+          submitting={agreementSubmitting}
+        />
+
         {/* Upgrade Modal */}
         <UpgradeForPaidEventsModal
           visible={showUpgradeModal}
@@ -1575,6 +1616,33 @@ export default function CreateEventScreen() {
 }
 
 const styles = StyleSheet.create({
+  disclaimerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 24,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  disclaimerCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 5,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+    flexShrink: 0,
+  },
+  disclaimerText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+  },
   container: {
     flex: 1,
   },

@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '../../lib/supabase';
 import { apiFetch } from '../../lib/apiClient';
 import { Post, CreatePostDto, Comment } from '../../types/feed.types';
@@ -75,6 +76,8 @@ export class FeedService {
         { data: allReactionRows },
         { data: commentCountRows },
         { data: authorRows },
+        { data: attachmentRows },
+        { data: postMetaRows },
       ] = await Promise.all([
         postIds.length > 0
           ? supabase
@@ -101,6 +104,20 @@ export class FeedService {
               .select('id, is_verified, subscription_tier')
               .in('id', authorIds)
           : Promise.resolve({ data: [] }),
+        // Fetch attachments from Supabase — the web API feed endpoint may omit them
+        postIds.length > 0
+          ? supabase
+              .from('post_attachments')
+              .select('post_id, attachment_type, file_url')
+              .in('post_id', postIds)
+          : Promise.resolve({ data: [] }),
+        // Fetch headline/gradient_preset from Supabase — web API does not return these fields
+        postIds.length > 0
+          ? supabase
+              .from('posts')
+              .select('id, headline, gradient_preset')
+              .in('id', postIds)
+          : Promise.resolve({ data: [] }),
       ]);
 
       if (userReactionError) {
@@ -109,6 +126,25 @@ export class FeedService {
 
       const authorVerifiedMap = new Map<string, { is_verified: boolean; subscription_tier: string | null }>();
       (authorRows ?? []).forEach((a: any) => authorVerifiedMap.set(a.id, { is_verified: !!a.is_verified, subscription_tier: a.subscription_tier }));
+
+      // Supabase-authoritative headline/gradient_preset map (web API omits these)
+      const postMetaMap = new Map<string, { headline?: string; gradient_preset?: number }>();
+      (postMetaRows ?? []).forEach((row: any) => {
+        postMetaMap.set(row.id, { headline: row.headline ?? undefined, gradient_preset: row.gradient_preset ?? undefined });
+      });
+
+      // Build a Supabase-authoritative attachment map keyed by post_id
+      const attachmentMap = new Map<string, { audio_url?: string; image_url?: string; image_urls?: string[] }>();
+      (attachmentRows ?? []).forEach((row: any) => {
+        const entry = attachmentMap.get(row.post_id) || { image_urls: [] };
+        if (row.attachment_type === 'audio' && row.file_url) {
+          entry.audio_url = row.file_url;
+        } else if (row.attachment_type === 'image' && row.file_url) {
+          entry.image_urls = [...(entry.image_urls || []), row.file_url];
+          if (!entry.image_url) entry.image_url = row.file_url;
+        }
+        attachmentMap.set(row.post_id, entry);
+      });
 
       const userReactionMap = new Map<string, string>();
       (userReactionRows ?? []).forEach((r: any) => userReactionMap.set(r.post_id, r.reaction_type));
@@ -137,7 +173,8 @@ export class FeedService {
           console.log(`🖼️ Feed post ${apiPost.id} - attachments:`, JSON.stringify(apiPost.attachments?.slice(0,3)), '| image_urls:', apiPost.image_urls);
         }
 
-        // Extract image(s) and audio from attachments array
+        // Extract image(s) and audio — Supabase is authoritative; fall back to API response
+        const sbAttachments = attachmentMap.get(apiPost.id);
         const imageAttachments = apiPost.attachments?.filter((a: any) =>
           a.attachment_type === 'image' || a.type === 'image'
         ) || [];
@@ -166,12 +203,16 @@ export class FeedService {
           content: apiPost.content || '',
           post_type: apiPost.post_type || 'update',
           visibility: apiPost.visibility || 'public',
-          image_url: imageAttachment?.file_url || imageAttachment?.url,
-          image_urls: imageAttachments.length > 1
-            ? imageAttachments.map((a: any) => a.file_url || a.url).filter(Boolean)
-            : (apiPost.image_urls?.length > 0 ? apiPost.image_urls : undefined),
-          audio_url: audioAttachment?.file_url || audioAttachment?.url,
+          image_url: sbAttachments?.image_url || imageAttachment?.file_url || imageAttachment?.url,
+          image_urls: (sbAttachments?.image_urls?.length ?? 0) > 1
+            ? sbAttachments!.image_urls
+            : imageAttachments.length > 1
+              ? imageAttachments.map((a: any) => a.file_url || a.url).filter(Boolean)
+              : (apiPost.image_urls?.length > 0 ? apiPost.image_urls : undefined),
+          audio_url: sbAttachments?.audio_url || audioAttachment?.file_url || audioAttachment?.url,
           event_id: apiPost.event_id,
+          headline: postMetaMap.get(apiPost.id)?.headline || apiPost.headline || undefined,
+          gradient_preset: postMetaMap.get(apiPost.id)?.gradient_preset ?? apiPost.gradient_preset ?? undefined,
           reactions_count: reactionsCount,
           comments_count: commentCountMap.get(apiPost.id) ?? apiPost.comment_count ?? apiPost.comments_count ?? 0,
           user_reaction: userReaction,
@@ -514,6 +555,111 @@ export class FeedService {
         throw new Error('Not authenticated');
       }
 
+      // ── Headline posts: insert directly to Supabase ──────────────────────────
+      // The web API validates post_type against a hard-coded list that doesn't
+      // include 'headline', and the database may have a matching CHECK constraint.
+      // Bypassing the API gives us full control over all headline-specific fields.
+      if (postData.post_type === 'headline') {
+        const { data: inserted, error: insertErr } = await supabase
+          .from('posts')
+          .insert({
+            user_id: session.user.id,
+            content: postData.content,
+            post_type: 'headline',
+            visibility: postData.visibility,
+            headline: postData.headline ?? null,
+            gradient_preset: postData.gradient_preset ?? 1,
+            event_id: postData.event_id ?? null,
+          })
+          .select('id, user_id, content, post_type, visibility, event_id, headline, gradient_preset, created_at, updated_at')
+          .single();
+
+        if (insertErr) throw insertErr;
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id, username, display_name, avatar_url, role, bio, professional_headline, subscription_tier, is_verified')
+          .eq('id', session.user.id)
+          .single();
+
+        const headlinePost: Post = {
+          id: inserted.id,
+          content: inserted.content,
+          post_type: 'headline',
+          visibility: inserted.visibility as any,
+          headline: inserted.headline ?? undefined,
+          gradient_preset: inserted.gradient_preset ?? 1,
+          created_at: inserted.created_at,
+          updated_at: inserted.updated_at || inserted.created_at,
+          author: {
+            id: session.user.id,
+            username: profile?.username || '',
+            display_name: profile?.display_name || '',
+            avatar_url: profile?.avatar_url ?? undefined,
+            role: profile?.role ?? undefined,
+            bio: profile?.bio ?? undefined,
+            headline: profile?.professional_headline ?? undefined,
+            is_verified: profile?.is_verified ?? false,
+            subscription_tier: profile?.subscription_tier ?? 'free',
+          },
+          reactions_count: { support: 0, love: 0, fire: 0, congrats: 0 },
+          comments_count: 0,
+          shares_count: 0,
+          user_reaction: null,
+          user_reposted: false,
+        };
+
+        return headlinePost;
+      }
+
+      // ── Photo posts: insert directly to Supabase (API may not accept 'photo' type) ──
+      if (postData.post_type === 'photo') {
+        const { data: inserted, error: insertErr } = await supabase
+          .from('posts')
+          .insert({
+            user_id: session.user.id,
+            content: postData.content,
+            post_type: 'photo',
+            visibility: postData.visibility,
+          })
+          .select('id, user_id, content, post_type, visibility, created_at, updated_at')
+          .single();
+
+        if (insertErr) throw insertErr;
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id, username, display_name, avatar_url, role, bio, professional_headline, subscription_tier, is_verified')
+          .eq('id', session.user.id)
+          .single();
+
+        return {
+          id: inserted.id,
+          content: inserted.content,
+          post_type: 'photo',
+          visibility: inserted.visibility as any,
+          created_at: inserted.created_at,
+          updated_at: inserted.updated_at || inserted.created_at,
+          author: {
+            id: session.user.id,
+            username: profile?.username || '',
+            display_name: profile?.display_name || '',
+            avatar_url: profile?.avatar_url ?? undefined,
+            role: profile?.role ?? undefined,
+            bio: profile?.bio ?? undefined,
+            headline: profile?.professional_headline ?? undefined,
+            is_verified: profile?.is_verified ?? false,
+            subscription_tier: profile?.subscription_tier ?? 'free',
+          },
+          reactions_count: { support: 0, love: 0, fire: 0, congrats: 0 },
+          comments_count: 0,
+          shares_count: 0,
+          user_reaction: null,
+          user_reposted: false,
+        } as Post;
+      }
+
+      // ── All other post types: go through the web API ─────────────────────────
       // Response format: { success: true, data: { id, user_id, content, ... } }
       const response = await apiFetch<{ success: boolean; data: Post }>(
         '/api/posts',
@@ -532,21 +678,16 @@ export class FeedService {
         newPost = (response as any).post || response;
       }
 
-      // Patch headline/gradient_preset directly on Supabase — the backend API
-      // may not yet handle these fields, so we apply them as a follow-up update.
+      // Patch gradient_preset / headline for non-headline types if supplied
       if (newPost?.id && (postData.headline !== undefined || postData.gradient_preset !== undefined)) {
         try {
-          await supabase.from('posts').update({
-            ...(postData.headline !== undefined ? { headline: postData.headline } : {}),
-            ...(postData.gradient_preset !== undefined ? { gradient_preset: postData.gradient_preset } : {}),
-          }).eq('id', newPost.id);
-          newPost = {
-            ...newPost,
-            ...(postData.headline !== undefined ? { headline: postData.headline } : {}),
-            ...(postData.gradient_preset !== undefined ? { gradient_preset: postData.gradient_preset } : {}),
-          };
+          const patch: Record<string, unknown> = {};
+          if (postData.headline !== undefined) patch.headline = postData.headline;
+          if (postData.gradient_preset !== undefined) patch.gradient_preset = postData.gradient_preset;
+          await supabase.from('posts').update(patch).eq('id', newPost.id);
+          newPost = { ...newPost, ...patch } as Post;
         } catch (patchErr) {
-          console.warn('FeedService.createPost: headline patch failed:', patchErr);
+          console.warn('FeedService.createPost: patch failed:', patchErr);
         }
       }
 
@@ -665,9 +806,10 @@ export class FeedService {
   }
 
   /**
-   * Upload audio for post (max 60s, 10MB)
-   * @param uri - File URI to upload
-   * @param postId - Optional post ID to associate the audio with
+   * Upload audio for post directly to Supabase Storage.
+   * Bypasses the Next.js API route (which has a ~6MB body limit) by streaming
+   * the file straight to the storage REST endpoint, then writes the attachment
+   * record to Supabase. Safe for full-length tracks and untrimmed fallback audio.
    */
   async uploadAudio(uri: string, postId?: string): Promise<string> {
     try {
@@ -675,97 +817,74 @@ export class FeedService {
         throw new Error('No file provided');
       }
 
+      // If uri is already a remote URL (server-side trim already uploaded it),
+      // skip the storage upload and just write the attachment record.
+      if (uri.startsWith('https://')) {
+        if (postId) {
+          const { error: attachErr } = await supabase
+            .from('post_attachments')
+            .insert({ post_id: postId, attachment_type: 'audio', file_url: uri });
+          if (attachErr) {
+            console.warn('FeedService.uploadAudio: attachment record failed:', attachErr);
+          }
+        }
+        return uri;
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         throw new Error('Not authenticated');
       }
 
-      const formData = new FormData();
       const filename = uri.split('/').pop() || 'audio.mp3';
-      const match = /\.(\w+)$/.exec(filename);
-      const type = match ? `audio/${match[1]}` : 'audio/mpeg';
+      const ext = (/\.(\w+)$/.exec(filename) || [])[1] || 'mp3';
+      const mimeType = `audio/${ext === 'mp3' ? 'mpeg' : ext}`;
+      const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const storagePath = `post-clips/${session.user.id}/${Date.now()}_${sanitized}`;
+      const bucket = 'audio-tracks'; // 100MB limit; post-attachments is image-sized
 
-      // React Native FormData format for file uploads
-      // ⚠️ CRITICAL: Field name must be 'file', not 'audio'
-      formData.append('file', {
-        uri: Platform.OS === 'ios' ? uri.replace('file://', '') : uri,
-        name: filename,
-        type: type,
-      } as any);
-
-      // Add post_id if provided (creates attachment record automatically)
-      if (postId) {
-        formData.append('post_id', postId);
-      }
-
-      const API_BASE_URL = config.apiUrl.replace(/\/api\/?$/, '');
-      const response = await fetch(`${API_BASE_URL}/api/posts/upload-audio`, {
-        method: 'POST',
+      const uploadUrl = `${config.supabaseUrl}/storage/v1/object/${bucket}/${storagePath}`;
+      const uploadResp = await FileSystem.uploadAsync(uploadUrl, uri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        mimeType,
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          // Don't set Content-Type - let fetch set it with boundary for FormData
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: config.supabaseAnonKey,
+          'Content-Type': mimeType,
+          'x-upsert': 'false',
+          'cache-control': '3600',
         },
-        body: formData,
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        let error;
+      if (uploadResp.status < 200 || uploadResp.status >= 300) {
+        let errMsg = 'Failed to upload audio';
         try {
-          error = JSON.parse(errorText);
-        } catch {
-          error = { error: errorText || 'Failed to upload audio' };
-        }
-        throw new Error(error.error || error.message || 'Failed to upload audio');
+          const body = JSON.parse(uploadResp.body);
+          errMsg = body.message || body.error || errMsg;
+        } catch (_) {}
+        throw new Error(errMsg);
       }
 
-      const data = await response.json();
-      
-      // Log response for debugging
-      console.log('UploadAudio response:', JSON.stringify(data, null, 2));
-      
-      // Response format: { success: true, data: { file_url: "...", ... } }
-      if (data.success && data.data) {
-        const fileUrl = data.data.file_url || data.data.url;
-        if (fileUrl) {
-          console.log('✅ Audio uploaded successfully, URL:', fileUrl);
-          return fileUrl;
+      const { data: { publicUrl } } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(storagePath);
+
+      console.log('✅ Audio uploaded directly to Supabase Storage:', publicUrl);
+
+      if (postId) {
+        const { error: attachErr } = await supabase
+          .from('post_attachments')
+          .insert({ post_id: postId, attachment_type: 'audio', file_url: publicUrl });
+        if (attachErr) {
+          console.warn('FeedService.uploadAudio: attachment record failed:', attachErr);
         }
       }
-      
-      // Fallback for various response formats
-      const fileUrl = data.url || data.audio_url || data.audioUrl || data.data?.file_url || data.data?.url;
-      if (fileUrl) {
-        console.log('✅ Audio uploaded successfully (fallback format), URL:', fileUrl);
-        return fileUrl;
-      }
-      
-      // If success is true but no URL found, the upload likely succeeded
-      // The attachment is linked via post_id, so we can return a success indicator
-      if (data.success === true) {
-        console.log('✅ Audio upload succeeded (attachment linked via post_id)');
-        // Return a success indicator - the attachment is already linked to the post
-        return 'uploaded';
-      }
-      
-      // If success is false or missing, extract error message
-      const errorMessage = data.error || data.message || data.details || 'Failed to upload audio';
-      console.error('❌ Audio upload failed:', errorMessage);
-      throw new Error(errorMessage);
+
+      return publicUrl;
     } catch (error: any) {
       console.error('FeedService.uploadAudio:', error);
-      
-      // Don't re-throw if it's already a proper Error with message
-      if (error.message === 'No file provided') {
-        throw error;
-      }
-      
-      // If error has a message, use it; otherwise create a generic one
-      if (error.message && error.message !== 'Failed to upload audio') {
-        throw error;
-      }
-      
-      throw new Error(error.message || 'Failed to upload audio');
+      throw error;
     }
   }
 
@@ -1470,6 +1589,96 @@ export class FeedService {
       };
     } catch (error: any) {
       console.error('❌ FeedService.getUserPosts:', error);
+      throw error;
+    }
+  }
+
+  async getPhotoPostsByUser(userId: string, page: number = 1, limit: number = 30): Promise<{
+    posts: Post[];
+    hasMore: boolean;
+  }> {
+    try {
+      const offset = (page - 1) * limit;
+
+      const { data: postsData, error: postsError } = await supabase
+        .from('posts')
+        .select('id, user_id, content, post_type, visibility, created_at, updated_at')
+        .eq('user_id', userId)
+        .eq('post_type', 'photo')
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (postsError) throw postsError;
+      if (!postsData || postsData.length === 0) return { posts: [], hasMore: false };
+
+      const { data: authorData } = await supabase
+        .from('profiles')
+        .select('id, username, display_name, avatar_url, role, bio, professional_headline, subscription_tier, is_verified')
+        .eq('id', userId)
+        .single();
+
+      const postIds = postsData.map((p: any) => p.id);
+
+      const [attachmentsResult, reactionsResult, commentsResult] = await Promise.all([
+        supabase.from('post_attachments').select('post_id, file_url, attachment_type').in('post_id', postIds),
+        supabase.from('post_reactions').select('post_id, reaction_type').in('post_id', postIds),
+        supabase.from('post_comments').select('post_id').in('post_id', postIds),
+      ]);
+
+      const attachmentsMap = new Map<string, any[]>();
+      attachmentsResult.data?.forEach((att: any) => {
+        if (!attachmentsMap.has(att.post_id)) attachmentsMap.set(att.post_id, []);
+        attachmentsMap.get(att.post_id)!.push(att);
+      });
+
+      const reactionsMap = new Map<string, any>();
+      reactionsResult.data?.forEach((reaction: any) => {
+        if (!reactionsMap.has(reaction.post_id)) {
+          reactionsMap.set(reaction.post_id, { support: 0, love: 0, fire: 0, congrats: 0 });
+        }
+        const counts = reactionsMap.get(reaction.post_id);
+        counts[reaction.reaction_type] = (counts[reaction.reaction_type] || 0) + 1;
+      });
+
+      const commentsMap = new Map<string, number>();
+      commentsResult.data?.forEach((comment: any) => {
+        commentsMap.set(comment.post_id, (commentsMap.get(comment.post_id) || 0) + 1);
+      });
+
+      const posts: Post[] = postsData.map((post: any) => {
+        const attachments = attachmentsMap.get(post.id) || [];
+        const imageAttachments = attachments.filter((a: any) => a.attachment_type === 'image');
+        return {
+          id: post.id,
+          author: authorData ? {
+            id: authorData.id,
+            display_name: authorData.display_name,
+            username: authorData.username,
+            avatar_url: authorData.avatar_url,
+            role: authorData.role,
+            headline: authorData.professional_headline,
+            bio: authorData.bio,
+            subscription_tier: authorData.subscription_tier,
+            is_verified: authorData.is_verified,
+          } : { id: userId, display_name: 'Unknown', username: 'unknown' },
+          content: post.content,
+          post_type: 'photo' as const,
+          visibility: post.visibility,
+          image_url: imageAttachments[0]?.file_url || undefined,
+          image_urls: imageAttachments.length > 1
+            ? imageAttachments.map((a: any) => a.file_url).filter(Boolean)
+            : undefined,
+          reactions_count: reactionsMap.get(post.id) || { support: 0, love: 0, fire: 0, congrats: 0 },
+          comments_count: commentsMap.get(post.id) || 0,
+          created_at: post.created_at,
+          updated_at: post.updated_at || post.created_at,
+        };
+      });
+
+      return { posts, hasMore: postsData.length === limit };
+    } catch (error: any) {
+      console.error('❌ FeedService.getPhotoPostsByUser:', error);
       throw error;
     }
   }

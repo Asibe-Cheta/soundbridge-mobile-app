@@ -8,6 +8,7 @@ import {
   RefreshControl,
   TouchableOpacity,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,8 +29,21 @@ import { walkthroughable } from 'react-native-copilot';
 import { useServiceProviderPrompt } from '../hooks/useServiceProviderPrompt';
 import ServiceProviderPromptModal from '../components/ServiceProviderPromptModal';
 import { SystemTypography as Typography } from '../constants/Typography';
+import { supabase } from '../lib/supabase';
+import { communityService } from '../services/CommunityService';
 
-type NetworkTab = 'connections' | 'invitations' | 'opportunities';
+type NetworkTab = 'connections' | 'invitations' | 'opportunities' | 'communities';
+
+interface CommunityItem {
+  creatorId: string;
+  username: string;
+  displayName: string;
+  avatarUrl?: string;
+  genre?: string;
+  memberCount: number;
+  hasTipped: boolean;   // retained for structural compatibility
+  followCreatedAt?: string;
+}
 
 // Create walkthroughable components for tour
 const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
@@ -55,6 +69,9 @@ export default function NetworkScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [opportunities, setOpportunities] = useState<OpportunityPost[]>([]);
   const [opportunitiesLoading, setOpportunitiesLoading] = useState(false);
+  const [communities, setCommunities] = useState<CommunityItem[]>([]);
+  const [communitiesLoading, setCommunitiesLoading] = useState(false);
+  const [communitiesLoaded, setCommunitiesLoaded] = useState(false);
 
   // Service Provider Prompt Modal
   const {
@@ -74,6 +91,9 @@ export default function NetworkScreen() {
   useEffect(() => {
     if (activeTab === 'opportunities' && opportunities.length === 0 && !opportunitiesLoading) {
       loadOpportunities();
+    }
+    if (activeTab === 'communities' && !communitiesLoaded && !communitiesLoading) {
+      loadCommunities();
     }
   }, [activeTab]);
 
@@ -109,11 +129,66 @@ export default function NetworkScreen() {
     }
   };
 
+  const loadCommunities = async () => {
+    if (!user?.id) return;
+    setCommunitiesLoading(true);
+    try {
+      // Fetch all communities the user has deliberately joined
+      const memberships = await communityService.getMyMemberships();
+
+      if (memberships.length === 0) {
+        setCommunities([]);
+        setCommunitiesLoaded(true);
+        return;
+      }
+
+      // Batch-fetch member counts for each joined community
+      const creatorIds = memberships.map((m) => m.creator_id);
+      const { data: countRows } = await supabase
+        .from('community_memberships')
+        .select('creator_id')
+        .in('creator_id', creatorIds);
+
+      const countMap: Record<string, number> = {};
+      (countRows || []).forEach((r) => {
+        countMap[r.creator_id] = (countMap[r.creator_id] || 0) + 1;
+      });
+
+      const items: CommunityItem[] = memberships
+        .map((m) => {
+          if (!m.creator) return null;
+          return {
+            creatorId: m.creator_id,
+            username: m.creator.username,
+            displayName: m.creator.display_name,
+            avatarUrl: m.creator.avatar_url,
+            genre: m.creator.genre,
+            memberCount: countMap[m.creator_id] || 0,
+            hasTipped: false,
+            followCreatedAt: m.joined_at,
+          } as CommunityItem;
+        })
+        .filter(Boolean) as CommunityItem[];
+
+      // Already sorted by most recently joined (getMyMemberships orders by joined_at DESC)
+      setCommunities(items);
+      setCommunitiesLoaded(true);
+    } catch (error) {
+      console.error('Failed to load communities:', error);
+    } finally {
+      setCommunitiesLoading(false);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await refresh();
     if (activeTab === 'opportunities') {
       await loadOpportunities();
+    }
+    if (activeTab === 'communities') {
+      setCommunitiesLoaded(false);
+      await loadCommunities();
     }
     setRefreshing(false);
   };
@@ -157,6 +232,10 @@ export default function NetworkScreen() {
 
   const handleConnectionPress = (userId: string) => {
     navigation.navigate('CreatorProfile' as never, { creatorId: userId } as never);
+  };
+
+  const handleCommunityPress = (creatorId: string) => {
+    navigation.navigate('CommunityScreen' as never, { creatorId } as never);
   };
 
   const handleMessage = (userId: string) => {
@@ -298,6 +377,32 @@ export default function NetworkScreen() {
                 Opportunities
               </Text>
             </WalkthroughableTouchable>
+
+            <TouchableOpacity
+              style={[
+                styles.tabButton,
+                activeTab === 'communities' && {
+                  backgroundColor: theme.colors.primary,
+                },
+                activeTab !== 'communities' && {
+                  borderColor: theme.colors.border,
+                },
+              ]}
+              onPress={() => handleTabChange('communities')}
+            >
+              <Text
+                style={[
+                  styles.tabText,
+                  {
+                    color:
+                      activeTab === 'communities' ? '#FFFFFF' : theme.colors.text,
+                  },
+                ]}
+                numberOfLines={1}
+              >
+                Communities
+              </Text>
+            </TouchableOpacity>
           </View>
           </View>
           {activeTab === 'opportunities' && (
@@ -473,6 +578,75 @@ export default function NetworkScreen() {
               )}
             </WalkthroughableView>
           )}
+          {/* Tab 4: Communities */}
+          {activeTab === 'communities' && (
+            <View style={styles.section}>
+              {communitiesLoading ? (
+                <ActivityIndicator size="large" color={theme.colors.primary} style={{ marginTop: 40 }} />
+              ) : communities.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="people-circle-outline" size={64} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
+                    No communities yet
+                  </Text>
+                  <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+                    You have not joined any communities yet.{'\n\n'}Visit a creator's profile and tap Join Community to become part of their world.
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.postFirstBtn, { borderColor: theme.colors.primary }]}
+                    onPress={() => navigation.navigate('Discover' as never)}
+                  >
+                    <Text style={[styles.postFirstBtnText, { color: theme.colors.primary }]}>
+                      Discover Creators
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                communities.map((item) => (
+                  <TouchableOpacity
+                    key={item.creatorId}
+                    style={[
+                      styles.communityCard,
+                      {
+                        backgroundColor: theme.colors.surface,
+                        borderColor: theme.colors.borderCard,
+                      },
+                    ]}
+                    onPress={() => handleCommunityPress(item.creatorId)}
+                    activeOpacity={0.75}
+                  >
+                    {item.avatarUrl ? (
+                      <Image source={{ uri: item.avatarUrl }} style={styles.communityAvatar} />
+                    ) : (
+                      <View
+                        style={[
+                          styles.communityAvatar,
+                          styles.communityAvatarPlaceholder,
+                          { backgroundColor: theme.colors.card },
+                        ]}
+                      >
+                        <Ionicons name="person" size={22} color={theme.colors.textSecondary} />
+                      </View>
+                    )}
+                    <View style={styles.communityInfo}>
+                      <Text style={[styles.communityName, { color: theme.colors.text }]} numberOfLines={1}>
+                        {item.displayName}
+                      </Text>
+                      {item.genre && (
+                        <Text style={[styles.communityGenre, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                          {item.genre}
+                        </Text>
+                      )}
+                      <Text style={[styles.communityMemberCount, { color: theme.colors.textMuted }]}>
+                        {item.memberCount.toLocaleString()} {item.memberCount === 1 ? 'member' : 'members'}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
+                  </TouchableOpacity>
+                ))
+              )}
+            </View>
+          )}
         </ScrollView>
       </SafeAreaView>
 
@@ -645,5 +819,37 @@ const styles = StyleSheet.create({
   postFirstBtnText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  communityCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: 10,
+    padding: 12,
+    gap: 12,
+  },
+  communityAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+  },
+  communityAvatarPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  communityInfo: {
+    flex: 1,
+    gap: 3,
+  },
+  communityName: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  communityGenre: {
+    fontSize: 13,
+  },
+  communityMemberCount: {
+    fontSize: 12,
   },
 });

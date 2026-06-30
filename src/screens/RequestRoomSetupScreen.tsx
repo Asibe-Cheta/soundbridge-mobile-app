@@ -115,22 +115,14 @@ export default function RequestRoomSetupScreen() {
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <StatusBar barStyle={theme.isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
-        {/* Header */}
-        <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+        {/* Header — editorial two-tone wordmark */}
+        <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
-            <Ionicons name="close" size={28} color={theme.colors.text} />
+            <Ionicons name="close" size={22} color="rgba(255,255,255,0.75)" />
           </TouchableOpacity>
-          <View style={styles.headerCenter}>
-            <LinearGradient
-              colors={[PURPLE_DARK, PURPLE]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.headerIcon}
-            >
-              <Ionicons name="mic" size={16} color="#FFFFFF" />
-            </LinearGradient>
-            <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Request Room</Text>
-          </View>
+          <Text style={styles.headerTitle}>
+            Request<Text style={styles.headerTitleDim}> Room</Text>
+          </Text>
           <View style={styles.headerSide} />
         </View>
 
@@ -175,54 +167,43 @@ export default function RequestRoomSetupScreen() {
 
             {/* Session Name */}
             <View style={styles.section}>
-              <Text style={[styles.label, { color: theme.colors.text }]}>
-                Session Name{' '}
-                <Text style={[styles.optional, { color: theme.colors.textSecondary }]}>
-                  (optional)
+              <View style={styles.fieldLabelRow}>
+                <View style={styles.fieldLabelAccent} />
+                <Text style={styles.label}>
+                  Session Name{' '}
+                  <Text style={styles.optional}>(optional)</Text>
                 </Text>
-              </Text>
+              </View>
               <TextInput
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: theme.colors.card,
-                    color: theme.colors.text,
-                    borderColor: theme.colors.border,
-                  },
-                ]}
+                style={styles.input}
                 placeholder="e.g. Saturday Night at Lounge 44"
-                placeholderTextColor={theme.colors.textSecondary}
+                placeholderTextColor="rgba(255,255,255,0.22)"
                 value={sessionName}
                 onChangeText={setSessionName}
                 maxLength={100}
+                selectionColor="#DC2626"
               />
             </View>
 
             {/* Minimum Tip */}
             <View style={styles.section}>
-              <Text style={[styles.label, { color: theme.colors.text }]}>
-                Minimum Tip <Text style={styles.required}>*</Text>
-              </Text>
-              <View
-                style={[
-                  styles.tipInputRow,
-                  {
-                    backgroundColor: theme.colors.card,
-                    borderColor: theme.colors.border,
-                  },
-                ]}
-              >
-                <Text style={[styles.currencySymbol, { color: theme.colors.text }]}>$</Text>
+              <View style={styles.fieldLabelRow}>
+                <View style={styles.fieldLabelAccent} />
+                <Text style={styles.label}>Minimum Tip <Text style={styles.required}>*</Text></Text>
+              </View>
+              <View style={styles.tipInputRow}>
+                <Text style={styles.currencySymbol}>$</Text>
                 <TextInput
-                  style={[styles.tipInput, { color: theme.colors.text }]}
+                  style={styles.tipInput}
                   value={minimumTip}
                   onChangeText={setMinimumTip}
                   keyboardType="decimal-pad"
                   placeholder="2.00"
-                  placeholderTextColor={theme.colors.textSecondary}
+                  placeholderTextColor="rgba(255,255,255,0.22)"
+                  selectionColor="#DC2626"
                 />
               </View>
-              <Text style={[styles.helperText, { color: theme.colors.textSecondary }]}>
+              <Text style={styles.helperText}>
                 Audience cannot submit a request below this amount
               </Text>
             </View>
@@ -234,19 +215,11 @@ export default function RequestRoomSetupScreen() {
                   key={amount}
                   style={[
                     styles.preset,
-                    {
-                      backgroundColor: minimumTip === amount ? PURPLE + '33' : theme.colors.card,
-                      borderColor: minimumTip === amount ? PURPLE : theme.colors.border,
-                    },
+                    minimumTip === amount && { backgroundColor: PURPLE + '33', borderColor: PURPLE },
                   ]}
                   onPress={() => setMinimumTip(amount)}
                 >
-                  <Text
-                    style={[
-                      styles.presetText,
-                      { color: minimumTip === amount ? PURPLE : theme.colors.text },
-                    ]}
-                  >
+                  <Text style={[styles.presetText, minimumTip === amount && { color: '#C4B5FD' }]}>
                     ${amount}
                   </Text>
                 </TouchableOpacity>
@@ -254,9 +227,9 @@ export default function RequestRoomSetupScreen() {
             </View>
 
             {/* Info box */}
-            <View style={[styles.infoBox, { backgroundColor: theme.colors.surface }]}>
+            <View style={styles.infoBox}>
               <Ionicons name="information-circle" size={20} color={PURPLE} />
-              <Text style={[styles.infoText, { color: theme.colors.textSecondary }]}>
+              <Text style={styles.infoText}>
                 You'll get a shareable link and QR code. Tips go directly to your wallet after Stripe fees and the standard platform commission.
               </Text>
             </View>
@@ -301,205 +274,103 @@ export default function RequestRoomSetupScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  mainGradient: {
-    position: 'absolute',
-    width: '100%',
-    height: '100%',
-  },
+  mainGradient: { position: 'absolute', width: '100%', height: '100%' },
   safeArea: { flex: 1 },
+
+  // Header — transparent, editorial two-tone
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    paddingVertical: 14,
   },
-  headerSide: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  headerIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  headerSide: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    fontFamily: Typography.body.fontFamily,
+    fontSize: 26,
+    fontWeight: '300',
+    color: '#fff',
+    letterSpacing: -0.6,
   },
+  headerTitleDim: { color: 'rgba(255,255,255,0.5)', fontWeight: '300' },
+
   scrollView: { flex: 1 },
   heroSection: {},
-  heroGradient: {
-    overflow: 'hidden',
-    paddingTop: 20,
-    paddingHorizontal: 20,
-  },
-  heroRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
+  heroGradient: { overflow: 'hidden', paddingTop: 20, paddingHorizontal: 20 },
+  heroRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
   livePulseWrapper: { width: 28, height: 28, justifyContent: 'center', alignItems: 'center' },
-  glowRing: {
-    position: 'absolute',
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: 'rgba(239,68,68,0.5)',
-  },
-  liveDotOuter: {
-    position: 'absolute',
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: 'rgba(239,68,68,0.35)',
-  },
-  liveDotInner: {
-    position: 'absolute',
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#EF4444',
-  },
-  heroGlass: {
-    borderRadius: 14,
-    overflow: 'hidden',
-    marginBottom: 16,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
+  glowRing: { position: 'absolute', width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: 'rgba(239,68,68,0.5)' },
+  liveDotOuter: { position: 'absolute', width: 14, height: 14, borderRadius: 7, backgroundColor: 'rgba(239,68,68,0.35)' },
+  liveDotInner: { position: 'absolute', width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#EF4444' },
+  heroGlass: { borderRadius: 14, overflow: 'hidden', marginBottom: 16, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.2)' },
   blurFill: { overflow: 'hidden' },
-  heroGlassOverlay: {
-    backgroundColor: 'rgba(153,27,27,0.15)',
-    padding: 14,
-    gap: 8,
-  },
-  heroTitle: {
-    ...Typography.headerMedium,
-    fontSize: 18,
-    color: '#FFFFFF',
-  },
-  heroSubtitle: {
-    ...Typography.body,
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.85)',
-    lineHeight: 19,
-  },
-  section: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 4,
-  },
-  label: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 10,
-    fontFamily: Typography.body.fontFamily,
-  },
-  optional: {
-    fontSize: 13,
-    fontWeight: '400',
-  },
+  heroGlassOverlay: { backgroundColor: 'rgba(153,27,27,0.15)', padding: 14, gap: 8 },
+  heroTitle: { ...Typography.headerMedium, fontSize: 18, color: '#FFFFFF' },
+  heroSubtitle: { ...Typography.body, fontSize: 13, color: 'rgba(255,255,255,0.85)', lineHeight: 19 },
+
+  // Form sections
+  section: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 4 },
+  fieldLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  fieldLabelAccent: { width: 3, height: 16, borderRadius: 2, backgroundColor: '#DC2626' },
+  label: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.65)', letterSpacing: 0.4 },
+  optional: { fontSize: 12, fontWeight: '400', color: 'rgba(255,255,255,0.35)' },
   required: { color: '#EF4444' },
+
+  // Inputs — glass card style
   input: {
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 15,
-    fontFamily: Typography.body.fontFamily,
+    color: '#fff',
   },
   tipInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 12,
-    borderWidth: 2,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  currencySymbol: {
-    fontSize: 24,
-    fontWeight: '600',
-    marginRight: 6,
-    fontFamily: Typography.body.fontFamily,
-  },
-  tipInput: {
-    flex: 1,
-    fontSize: 24,
-    fontWeight: '600',
-    fontFamily: Typography.body.fontFamily,
-  },
-  helperText: {
-    fontSize: 12,
-    marginTop: 8,
-    fontFamily: Typography.body.fontFamily,
-  },
-  presets: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    gap: 10,
-    marginTop: 16,
-    marginBottom: 20,
-  },
+  currencySymbol: { fontSize: 24, fontWeight: '300', color: 'rgba(255,255,255,0.5)', marginRight: 6 },
+  tipInput: { flex: 1, fontSize: 28, fontWeight: '300', color: '#fff' },
+  helperText: { fontSize: 12, marginTop: 8, color: 'rgba(255,255,255,0.35)', lineHeight: 17 },
+
+  // Preset chips
+  presets: { flexDirection: 'row', paddingHorizontal: 20, gap: 10, marginTop: 16, marginBottom: 20 },
   preset: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 2,
+    paddingVertical: 13,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     alignItems: 'center',
   },
-  presetText: {
-    fontSize: 16,
-    fontWeight: '600',
-    fontFamily: Typography.body.fontFamily,
-  },
+  presetText: { fontSize: 16, fontWeight: '500', color: 'rgba(255,255,255,0.55)' },
+
+  // Info box
   infoBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     marginHorizontal: 20,
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 14,
     gap: 12,
+    backgroundColor: 'rgba(124,58,237,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.25)',
   },
-  infoText: {
-    flex: 1,
-    fontSize: 13,
-    lineHeight: 20,
-    fontFamily: Typography.body.fontFamily,
-  },
-  footer: {
-    borderTopWidth: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
-  startButton: {
-    borderRadius: 24,
-    overflow: 'hidden',
-  },
-  startButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    gap: 10,
-  },
-  startButtonText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '700',
-    fontFamily: Typography.body.fontFamily,
-  },
+  infoText: { flex: 1, fontSize: 13, lineHeight: 20, color: 'rgba(255,255,255,0.55)' },
+
+  // Footer
+  footer: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)', paddingHorizontal: 20, paddingVertical: 16 },
+  startButton: { borderRadius: 999, overflow: 'hidden' },
+  startButtonGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 17, gap: 10 },
+  startButtonText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700', letterSpacing: 0.2 },
 });

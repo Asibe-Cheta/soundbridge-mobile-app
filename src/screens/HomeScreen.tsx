@@ -419,6 +419,7 @@ export default function HomeScreen() {
                 id, title, description, file_url, cover_art_url, artwork_url,
                 duration, play_count, likes_count, created_at, creator_id,
                 moderation_status, moderation_flagged, flag_reasons, moderation_confidence,
+                live_interest_enabled,
                 creator:profiles!creator_id(id, username, display_name, avatar_url)
               `)
               .eq('is_public', true)

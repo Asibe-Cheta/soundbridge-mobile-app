@@ -15,8 +15,9 @@
     "lint": "eslint . --ext .ts,.tsx",
     "test": "jest",
     "postinstall": "patch-package || true",
-    "ota": "EAS_SKIP_AUTO_FINGERPRINT=1 eas update --channel production --non-interactive",
-    "ota:preview": "EAS_SKIP_AUTO_FINGERPRINT=1 eas update --channel preview --non-interactive"
+    "ota": "bash scripts/publish-production-ota.sh",
+    "ota:preview": "EAS_SKIP_AUTO_FINGERPRINT=1 eas update --channel preview --non-interactive",
+    "ota:republish": "bash scripts/republish-production-ota.sh"
   },
   "dependencies": {
     "@expo-google-fonts/barlow-condensed": "^0.4.1",

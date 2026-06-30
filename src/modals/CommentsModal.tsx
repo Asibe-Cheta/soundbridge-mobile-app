@@ -392,7 +392,7 @@ export default function CommentsModal({
           /* ── Comments list ── */
           <FlatList
             style={styles.list}
-            data={comments.filter((item) => item && item.id)}
+            data={comments.filter((item) => item && item.id && !item.parent_comment_id)}
             keyExtractor={(item, i) => item?.id || `comment-${i}`}
             renderItem={({ item }) => {
               if (!item?.id) return null;
@@ -426,6 +426,13 @@ export default function CommentsModal({
                     Loading comments...
                   </Text>
                 </View>
+              ) : error ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="cloud-offline-outline" size={40} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>
+                    Couldn't load comments. Pull down to retry.
+                  </Text>
+                </View>
               ) : (
                 <View style={styles.emptyState}>
                   <Ionicons name="chatbubble-outline" size={40} color={theme.colors.textSecondary} />
@@ -436,7 +443,7 @@ export default function CommentsModal({
               )
             }
             ListFooterComponent={
-              hasMore ? (
+              hasMore && comments.length > 0 ? (
                 <TouchableOpacity style={styles.loadMoreBtn} onPress={loadMore} disabled={loading}>
                   <Text style={[styles.loadMoreText, { color: theme.colors.primary }]}>
                     {loading ? 'Loading...' : 'Load more comments'}

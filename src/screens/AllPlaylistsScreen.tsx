@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import BackButton from '../components/BackButton';
+import { useSearchHistory } from '../hooks/useSearchHistory';
+import SearchHistoryPanel from '../components/SearchHistoryPanel';
 
 interface Playlist {
   id: string;
@@ -59,6 +61,15 @@ export default function AllPlaylistsScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('recent');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const blurRef = useRef<ReturnType<typeof setTimeout>>();
+  const { history, addToHistory, removeFromHistory, clearHistory } = useSearchHistory('playlists');
+
+  const handleSearchFocus = () => { clearTimeout(blurRef.current); setSearchFocused(true); };
+  const handleSearchBlur = () => {
+    blurRef.current = setTimeout(() => setSearchFocused(false), 200);
+    if (searchQuery.trim().length >= 2) addToHistory(searchQuery.trim());
+  };
 
   const sortOptions = [
     { key: 'recent', label: 'Most Recent' },
@@ -276,6 +287,9 @@ export default function AllPlaylistsScreen() {
               placeholderTextColor={theme.colors.textSecondary}
               value={searchQuery}
               onChangeText={setSearchQuery}
+              onFocus={handleSearchFocus}
+              onBlur={handleSearchBlur}
+              onSubmitEditing={() => { if (searchQuery.trim().length >= 2) addToHistory(searchQuery.trim()); }}
             />
           </View>
         </View>
@@ -306,27 +320,39 @@ export default function AllPlaylistsScreen() {
           </View>
         </View>
 
-        <FlatList
-          data={filteredPlaylists}
-          renderItem={({ item }) => renderPlaylistCard(item)}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContainer}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="list-outline" size={64} color={theme.colors.textSecondary} />
-              <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
-                No playlists found
-              </Text>
-              <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
-                {searchQuery ? 'Try adjusting your search' : 'Check back later for new playlists'}
-              </Text>
+        <View style={{ flex: 1 }}>
+          <FlatList
+            data={filteredPlaylists}
+            renderItem={({ item }) => renderPlaylistCard(item)}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContainer}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            }
+            showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="list-outline" size={64} color={theme.colors.textSecondary} />
+                <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
+                  No playlists found
+                </Text>
+                <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+                  {searchQuery ? 'Try adjusting your search' : 'Check back later for new playlists'}
+                </Text>
+              </View>
+            }
+          />
+          {searchFocused && !searchQuery && history.length > 0 && (
+            <View style={[StyleSheet.absoluteFill, { zIndex: 10, backgroundColor: theme.colors.background }]}>
+              <SearchHistoryPanel
+                history={history}
+                onSelect={(term) => { clearTimeout(blurRef.current); setSearchQuery(term); addToHistory(term); setSearchFocused(false); }}
+                onRemove={removeFromHistory}
+                onClearAll={clearHistory}
+              />
             </View>
-          }
-        />
+          )}
+        </View>
       </SafeAreaView>
     </View>
   );

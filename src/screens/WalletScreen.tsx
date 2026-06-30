@@ -440,7 +440,7 @@ export default function WalletScreen() {
           </Text>
           <View style={styles.infoFeatures}>
             <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Gig payments land in your wallet on completion</Text>
-            <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Withdraw to your local bank via Wise (1–3 business days)</Text>
+            <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Withdraw to your local bank via Fincra (1–2 business days)</Text>
             <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Supports 40+ currencies across Africa, Asia & Latin America</Text>
             <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Real-time transaction tracking</Text>
             <Text style={[styles.featureItem, { color: theme.colors.textSecondary }]}>• Minimum withdrawal: $25</Text>

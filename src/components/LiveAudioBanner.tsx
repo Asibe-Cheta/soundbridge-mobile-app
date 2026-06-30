@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Animated, Easing, AppState } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -169,7 +169,6 @@ export default function LiveAudioBanner({ onPress }: LiveAudioBannerProps) {
   const slideAnim = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
-    // Waveform bars
     const barLoops = BAR_CONFIGS.map((c, i) =>
       Animated.loop(
         Animated.sequence([
@@ -186,43 +185,45 @@ export default function LiveAudioBanner({ onPress }: LiveAudioBannerProps) {
           }),
         ])
       )
-    )
-    barLoops.forEach(l => l.start())
+    );
 
-    // Pulse scale
     const pulse = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1.4, duration: 900, useNativeDriver: true }),
         Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
       ])
-    )
-    pulse.start()
+    );
 
-    // Glow opacity
     const glow = Animated.loop(
       Animated.sequence([
         Animated.timing(glowAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
         Animated.timing(glowAnim, { toValue: 0, duration: 900, useNativeDriver: true }),
       ])
-    )
-    glow.start()
+    );
 
-    // Mic neon glow — 0 → 0.85 → 0, clear visible pulse
     const micGlow = Animated.loop(
       Animated.sequence([
         Animated.timing(micGlowAnim, { toValue: 0.85, duration: 1500, useNativeDriver: true }),
         Animated.timing(micGlowAnim, { toValue: 0, duration: 1500, useNativeDriver: true }),
       ])
-    )
-    micGlow.start()
+    );
+
+    const decorativeLoops = [...barLoops, pulse, glow, micGlow];
+    const start = () => decorativeLoops.forEach((l) => l.start());
+    const stop = () => decorativeLoops.forEach((l) => l.stop());
+
+    if (AppState.currentState === 'active') start();
+
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') start();
+      else if (next === 'background' || next === 'inactive') stop();
+    });
 
     return () => {
-      barLoops.forEach(l => l.stop())
-      pulse.stop()
-      glow.stop()
-      micGlow.stop()
-    }
-  }, [])
+      sub.remove();
+      stop();
+    };
+  }, []);
 
   const handlePressIn = () => {
     Animated.spring(scaleAnim, {

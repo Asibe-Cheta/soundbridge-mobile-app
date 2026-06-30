@@ -2,7 +2,7 @@
   "expo": {
     "name": "SoundBridge",
     "slug": "soundbridge-mobile",
-    "version": "1.7.0",
+    "version": "1.9.3",
     "orientation": "portrait",
     "icon": "./assets/images/logos/sb-app-icon.png",
     "userInterfaceStyle": "dark",
@@ -26,7 +26,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.soundbridge.mobile",
-      "buildNumber": "87",
+      "buildNumber": "88",
       "infoPlist": {
         "UIBackgroundModes": [
           "audio"
@@ -49,7 +49,7 @@
         "backgroundImage": "./assets/images/logos/logo-background.png"
       },
       "package": "com.soundbridge.mobile",
-      "versionCode": 43,
+      "versionCode": 44,
       "permissions": [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
@@ -145,7 +145,8 @@
       "expo-apple-authentication",
       "expo-asset",
       "expo-audio",
-      "./plugins/withTrackPlayerFix"
+      "./plugins/withTrackPlayerFix",
+      "./plugins/withFFmpegKit"
     ]
   }
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,8 @@ import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { supabase } from '../lib/supabase';
 import BackButton from '../components/BackButton';
 import { Typography } from '../constants/Typography';
+import { useSearchHistory } from '../hooks/useSearchHistory';
+import SearchHistoryPanel from '../components/SearchHistoryPanel';
 
 interface AudioTrack {
   id: string;
@@ -65,6 +67,15 @@ export default function AllTracksScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('recent');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const blurRef = useRef<ReturnType<typeof setTimeout>>();
+  const { history, addToHistory, removeFromHistory, clearHistory } = useSearchHistory('tracks');
+
+  const handleSearchFocus = () => { clearTimeout(blurRef.current); setSearchFocused(true); };
+  const handleSearchBlur = () => {
+    blurRef.current = setTimeout(() => setSearchFocused(false), 200);
+    if (searchQuery.trim().length >= 2) addToHistory(searchQuery.trim());
+  };
 
   const sortOptions = [
     { key: 'recent', label: 'Most Recent' },
@@ -102,6 +113,7 @@ export default function AllTracksScreen() {
           likes_count,
           genre,
           created_at,
+          live_interest_enabled,
           creator:profiles!creator_id (
             id,
             username,
@@ -382,6 +394,9 @@ export default function AllTracksScreen() {
               placeholderTextColor={theme.colors.textSecondary}
               value={searchQuery}
               onChangeText={setSearchQuery}
+              onFocus={handleSearchFocus}
+              onBlur={handleSearchBlur}
+              onSubmitEditing={() => { if (searchQuery.trim().length >= 2) addToHistory(searchQuery.trim()); }}
             />
           </View>
         </View>
@@ -414,27 +429,39 @@ export default function AllTracksScreen() {
         </View>
 
         {/* Content */}
-        <FlatList
-          data={filteredTracks}
-          renderItem={({ item }) => renderTrackCard(item)}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContainer}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="musical-notes-outline" size={64} color={theme.colors.textSecondary} />
-              <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
-                No tracks found
-              </Text>
-              <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
-                {searchQuery ? 'Try adjusting your search' : 'Check back later for new music'}
-              </Text>
+        <View style={{ flex: 1 }}>
+          <FlatList
+            data={filteredTracks}
+            renderItem={({ item }) => renderTrackCard(item)}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContainer}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            }
+            showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="musical-notes-outline" size={64} color={theme.colors.textSecondary} />
+                <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
+                  No tracks found
+                </Text>
+                <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+                  {searchQuery ? 'Try adjusting your search' : 'Check back later for new music'}
+                </Text>
+              </View>
+            }
+          />
+          {searchFocused && !searchQuery && history.length > 0 && (
+            <View style={[StyleSheet.absoluteFill, { zIndex: 10, backgroundColor: theme.colors.background }]}>
+              <SearchHistoryPanel
+                history={history}
+                onSelect={(term) => { clearTimeout(blurRef.current); setSearchQuery(term); addToHistory(term); setSearchFocused(false); }}
+                onRemove={removeFromHistory}
+                onClearAll={clearHistory}
+              />
             </View>
-          }
-        />
+          )}
+        </View>
       </SafeAreaView>
     </View>
   );

@@ -17,24 +17,27 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import PasswordStrengthIndicator from '../components/PasswordStrengthIndicator';
 import * as BiometricAuth from '../services/biometricAuth';
 import { loginWithTwoFactorCheck } from '../services/twoFactorAuthConfig';
+import { referralService } from '../services/ReferralService';
+import { communityEntryService } from '../services/CommunityEntryService';
 
 const { width, height } = Dimensions.get('window');
 
 export default function AuthScreen() {
   console.log('🔐 AuthScreen RENDERING');
+  const route = useRoute<any>();
   const navigation = useNavigation();
   const { setIsChecking2FA } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(route.params?.startInSignUp === true);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [focusedInput, setFocusedInput] = useState<string | null>(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -441,13 +444,27 @@ export default function AuthScreen() {
     }
 
     setIsLoading(true);
-    
+
     try {
-      const result = await signUp(email, password);
-      
+      // Persist fan-page / partner attribution in signup metadata (backend fallback)
+      const referralCode = await referralService.getStoredReferralCode();
+      const communityAttr = await communityEntryService.getAttribution();
+      const metadata: Record<string, string> = {};
+      if (referralCode) metadata.referred_by_code = referralCode;
+      if (communityAttr.communityCreatorUsername) {
+        metadata.community_creator_username = communityAttr.communityCreatorUsername;
+      }
+      if (communityAttr.communityCreatorId) {
+        metadata.community_creator_id = communityAttr.communityCreatorId;
+      }
+      const signupMetadata = Object.keys(metadata).length > 0 ? metadata : undefined;
+
+      const result = await signUp(email, password, signupMetadata);
+
       if (!result.success) {
         Alert.alert('Sign Up Failed', result.error?.message || 'An error occurred during sign up');
       } else {
+        // Referral code kept in storage until onboarding completes (complete-onboarding API)
         // Check if email verification is needed
         if (result.needsEmailVerification) {
           setNeedsEmailVerification(true);

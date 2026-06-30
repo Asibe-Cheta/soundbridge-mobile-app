@@ -9,6 +9,11 @@ import { fetchCreatorTypes } from '../services/creatorExpansionService';
 import RevenueCatService from '../services/RevenueCatService';
 import { config } from '../config/environment';
 import { notificationService } from '../services/NotificationService';
+import { referralService } from '../services/ReferralService';
+import { userBehaviourService } from '../services/UserBehaviourService';
+import { recordAuthEvent } from '../lib/audioAuthTrace';
+import { loadBgIsolationFlags, isBgIsolationEnabled } from '../config/bgAudioIsolationFlags';
+import { audioLog } from '../lib/audioDebugLog';
 
 // CRITICAL: Complete the auth session after OAuth redirect
 WebBrowser.maybeCompleteAuthSession();
@@ -27,6 +32,7 @@ interface UserProfile {
   creator_types?: CreatorType[];
   primary_creator_type?: CreatorType | null;
   is_admin?: boolean;
+  is_internal_team?: boolean;
   nudge_event_30day_dismissed?: boolean;
   nudge_event_never_dismissed?: boolean;
   nudge_first_track_dismissed?: boolean;
@@ -40,6 +46,15 @@ interface UserProfile {
   fan_link_share_method?: 'link' | 'card' | null;
   app_launch_count?: number;
   teaser_last_shown_at_launch?: number;
+  calendar_nudge_shown_count?: number;
+  calendar_nudge_last_shown_at?: string | null;
+  subscription_tier?: 'free' | 'premium' | 'unlimited' | null;
+  subscription_status?: string | null;
+  subscription_period_end?: string | null;
+  subscription_renewal_date?: string | null;
+  early_adopter?: boolean | null;
+  community_entry_creator_id?: string | null;
+  community_entry_shown_at?: string | null;
 }
 
 interface AuthContextType {
@@ -65,6 +80,9 @@ interface AuthContextType {
   checkOnboardingStatus: () => Promise<{ needsOnboarding: boolean; profile?: any; onboarding?: any }>;
   pendingPasswordReset: boolean;
   clearPendingPasswordReset: () => void;
+  /** Set synchronously after onboarding when community welcome is pending */
+  pendingCommunityWelcomeId: string | null;
+  setPendingCommunityWelcome: (creatorId: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -82,6 +100,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [isChecking2FA, setIsChecking2FA] = useState(false); // Web team's recommended flag name
   const [pendingPasswordReset, setPendingPasswordReset] = useState(false);
+  const [pendingCommunityWelcomeId, setPendingCommunityWelcomeId] = useState<string | null>(null);
   
   // ✅ CRITICAL: Use ref to store current value so onAuthStateChange handler can access latest value
   const isChecking2FARef = React.useRef(false);
@@ -99,30 +118,105 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
-    
-    // Get initial session
-    const getInitialSession = async () => {
+    let authSubscription: { unsubscribe: () => void } | null = null;
+
+    const bootstrapAuth = async () => {
+      await loadBgIsolationFlags();
+
+      // Get initial session — always runs so user stays visibly logged in during isolation tests
       try {
         console.log('Getting initial session...');
         const { data: { session }, error } = await supabase.auth.getSession();
         console.log('Initial session result:', { session: !!session, error });
-        
+
         if (session && !error) {
+          recordAuthEvent('INITIAL_SESSION', session.user.id);
           setSession(session);
           setUser(session.user);
-          // Set loading to false IMMEDIATELY so screens can start loading
           setLoading(false);
-          // Load profile in background (non-blocking)
           loadUserProfile(session.user.id, session);
         }
       } catch (err) {
         console.error('Error getting initial session:', err);
         setError('Failed to get initial session');
       } finally {
-        // Always set loading to false immediately - don't block navigation
         console.log('Setting loading to false');
         setLoading(false);
       }
+
+      if (isBgIsolationEnabled('disableAuthListener')) {
+        supabase.auth.stopAutoRefresh();
+        audioLog('BG_ISO_AUTH_LISTENER_DISABLED', {
+          note: 'onAuthStateChange not registered; AppState auth handling frozen',
+        });
+        return;
+      }
+
+      // Listen for auth state changes
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(
+        async (event, session) => {
+          recordAuthEvent(event, session?.user?.id ?? null);
+          console.log('🔔 Auth state changed:', event, session?.user?.email);
+          console.log('🔔 isChecking2FA ref value:', isChecking2FARef.current);
+
+          // Handle sign out events (Claude's solution)
+          if (event === 'SIGNED_OUT' || !session) {
+            // Don't clear user if we're in the middle of 2FA verification
+            // This prevents the navigation loop (Claude's solution)
+            if (!isChecking2FARef.current) {
+              console.log('🚪 User signed out');
+              setSession(null);
+              setUser(null);
+              setUserProfile(null);
+              setNeedsOnboarding(false);
+              setIsChecking2FA(false);
+            } else {
+              console.log('⏸️ SIGNED_OUT during 2FA check - keeping user state');
+            }
+            setLoading(false);
+            return;
+          }
+
+          // Handle password recovery deep link
+          if (event === 'PASSWORD_RECOVERY' && session) {
+            console.log('🔐 Password recovery session active');
+            setSession(session);
+            setUser(session.user);
+            setPendingPasswordReset(true);
+            setLoading(false);
+            return;
+          }
+
+          // Handle sign in (Claude's solution)
+          if (event === 'SIGNED_IN' && session) {
+            console.log('✅ User signed in:', session.user.email);
+            setSession(session);
+            setUser(session.user);
+            // Set loading to false IMMEDIATELY so screens can start loading
+            setLoading(false);
+            // Load profile in background (non-blocking)
+            loadUserProfile(session.user.id, session);
+            return;
+          }
+
+          // Token refresh (Claude's solution)
+          if (event === 'TOKEN_REFRESHED' && session) {
+            console.log('🔄 Token refreshed');
+            setSession(session);
+            if (session.user) {
+              setUser(session.user);
+            }
+            return;
+          }
+
+          // Fallback (Claude's solution)
+          setSession(session);
+          if (session?.user) {
+            setUser(session.user);
+          }
+        }
+      );
+      authSubscription = subscription;
     };
 
     // Set a timeout to ensure loading doesn't stay true forever (failsafe only)
@@ -131,77 +225,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setLoading(false);
     }, 500); // 500ms failsafe - should never be needed
 
-    getInitialSession();
-
-    // Listen for auth state changes
-    const { data: { subscription }} = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('🔔 Auth state changed:', event, session?.user?.email);
-        console.log('🔔 isChecking2FA ref value:', isChecking2FARef.current);
-        
-        // Handle sign out events (Claude's solution)
-        if (event === 'SIGNED_OUT' || !session) {
-          // Don't clear user if we're in the middle of 2FA verification
-          // This prevents the navigation loop (Claude's solution)
-          if (!isChecking2FARef.current) {
-            console.log('🚪 User signed out');
-            setSession(null);
-            setUser(null);
-            setUserProfile(null);
-            setNeedsOnboarding(false);
-            setIsChecking2FA(false);
-          } else {
-            console.log('⏸️ SIGNED_OUT during 2FA check - keeping user state');
-          }
-          setLoading(false);
-          return;
-        }
-        
-        // Handle password recovery deep link
-        if (event === 'PASSWORD_RECOVERY' && session) {
-          console.log('🔐 Password recovery session active');
-          setSession(session);
-          setUser(session.user);
-          setPendingPasswordReset(true);
-          setLoading(false);
-          return;
-        }
-
-        // Handle sign in (Claude's solution)
-        if (event === 'SIGNED_IN' && session) {
-          console.log('✅ User signed in:', session.user.email);
-          setSession(session);
-          setUser(session.user);
-          // Set loading to false IMMEDIATELY so screens can start loading
-          setLoading(false);
-          // Load profile in background (non-blocking)
-          loadUserProfile(session.user.id, session);
-          return;
-        }
-        
-        // Token refresh (Claude's solution)
-        if (event === 'TOKEN_REFRESHED' && session) {
-          console.log('🔄 Token refreshed');
-          setSession(session);
-          if (session.user) {
-            setUser(session.user);
-          }
-          return;
-        }
-        
-        // Fallback (Claude's solution)
-        setSession(session);
-        if (session?.user) {
-          setUser(session.user);
-        }
-      }
-    );
+    bootstrapAuth();
 
         // Handle deep linking for auth callbacks
         const handleDeepLink = async (url: string) => {
           console.log('Deep link received:', url);
 
-          const isAuthCallback = url.includes('soundbridge://auth/callback') ||
+          // Match all URL shapes that represent an auth callback:
+          // 1. Custom scheme deep link (if Supabase allows it)
+          // 2. Universal links — iOS opens the app when user taps the email link on device
+          //    (/auth/callback is the web default; /auth/mobile-callback is the mobile-specific page)
+          // 3. Expo Go in development
+          const isAuthCallback =
+            url.includes('soundbridge://auth/callback') ||
+            url.includes('soundbridge.live/auth/callback') ||
+            url.includes('soundbridge.live/auth/mobile-callback') ||
             (url.includes('exp://') && url.includes('/auth/callback'));
 
           if (!isAuthCallback) return;
@@ -221,9 +259,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
           const params = new URLSearchParams(paramString);
           const access_token = params.get('access_token');
           const refresh_token = params.get('refresh_token');
-          const type = params.get('type'); // 'signup' | 'recovery' | 'magiclink'
+          const token_hash = params.get('token_hash');
+          const type = params.get('type') as 'signup' | 'recovery' | 'magiclink' | null;
+
+          console.log('🔗 Deep link params — type:', type, 'has access_token:', !!access_token, 'has token_hash:', !!token_hash);
 
           if (access_token && refresh_token) {
+            // Implicit flow: tokens sent directly in hash fragment
             console.log('🔑 Auth tokens found in deep link, type:', type);
             try {
               const { error } = await supabase.auth.setSession({ access_token, refresh_token });
@@ -231,7 +273,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 console.error('❌ Error setting session from deep link:', error.message);
               } else {
                 console.log('✅ Session set from deep link');
-                // Mark as pending password reset so App.tsx can navigate
                 if (type === 'recovery') {
                   setPendingPasswordReset(true);
                 }
@@ -239,12 +280,55 @@ export function AuthProvider({ children }: AuthProviderProps) {
             } catch (err) {
               console.error('❌ Unexpected error setting session from deep link:', err);
             }
+          } else if (token_hash && type) {
+            // PKCE / OTP flow: web callback redirects with token_hash + type
+            console.log('🔑 token_hash found in deep link, type:', type);
+            try {
+              const { error: otpError } = await supabase.auth.verifyOtp({ token_hash, type });
+              if (otpError) {
+                console.error('❌ verifyOtp error:', otpError.message);
+                // On Mac, the web /auth/mobile-callback page may have already consumed the
+                // token to show "Email Verified!" before redirecting to soundbridge://.
+                // In that case verifyOtp fails with "already used" but the email IS confirmed —
+                // check if Supabase already has a usable session and use it.
+                const { data: { session: existingSession } } = await supabase.auth.getSession();
+                if (existingSession) {
+                  console.log('✅ Session already exists after verifyOtp failure — using it');
+                  setSession(existingSession);
+                  setUser(existingSession.user);
+                  if (type === 'recovery') {
+                    setPendingPasswordReset(true);
+                  }
+                } else {
+                  // Token was consumed by the web but no session is available client-side.
+                  // Email IS verified — the user just needs to sign in with their password.
+                  console.log('ℹ️ Token consumed on web; email is verified, prompting sign-in');
+                }
+              } else {
+                console.log('✅ verifyOtp succeeded');
+                const { data: { session: newSession }, error: sessionError } = await supabase.auth.getSession();
+                if (sessionError) {
+                  console.error('❌ getSession after verifyOtp error:', sessionError.message);
+                } else if (newSession) {
+                  console.log('✅ Session obtained after verifyOtp, user:', newSession.user.email);
+                  if (type === 'recovery') {
+                    setPendingPasswordReset(true);
+                  }
+                } else {
+                  console.warn('⚠️ verifyOtp succeeded but no session returned');
+                }
+              }
+            } catch (err) {
+              console.error('❌ Unexpected error in verifyOtp:', err);
+            }
           } else {
             // Legacy ?verified=true fallback
             const verified = params.get('verified');
             if (verified === 'true') {
               console.log('Email verification completed via deep link');
               setLoading(false);
+            } else {
+              console.warn('⚠️ Auth callback URL had no recognisable token params:', paramString);
             }
           }
         };
@@ -264,16 +348,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Listen for app state changes to restore subscription on app resume
     // This ensures subscription is maintained if user updates the app while it's closed
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
-      if (nextAppState === 'active' && userRef.current && RevenueCatService.isReady()) {
-        // App came to foreground - restore subscription status
-        console.log('🔄 App resumed - checking subscription status...');
-        RevenueCatService.restoreSubscriptionStatus().then(result => {
-          if (result.tier !== 'free') {
-            console.log(`✅ Subscription status verified: ${result.tier}`);
-          }
-        }).catch(error => {
-          console.warn('⚠️ Failed to restore subscription on app resume (non-critical):', error);
-        });
+      if (nextAppState === 'active' && userRef.current) {
+        // Record app open for behaviour profile (most_active_day / most_active_hour)
+        userBehaviourService.recordAppOpen(userRef.current.id);
+
+        if (RevenueCatService.isReady()) {
+          // App came to foreground - restore subscription status
+          console.log('🔄 App resumed - checking subscription status...');
+          RevenueCatService.restoreSubscriptionStatus().then(result => {
+            if (result.tier !== 'free') {
+              console.log(`✅ Subscription status verified: ${result.tier}`);
+            }
+          }).catch(error => {
+            console.warn('⚠️ Failed to restore subscription on app resume (non-critical):', error);
+          });
+        }
       }
     };
 
@@ -283,7 +372,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
-      subscription.unsubscribe();
+      authSubscription?.unsubscribe();
       linkingListener?.remove();
       appStateSubscription?.remove();
     };
@@ -419,7 +508,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         password: normalizedPassword,
         options: {
           data: metadata,
-          emailRedirectTo: 'soundbridge://auth/callback',
+          // Use the web mobile-callback URL so iOS universal link opens the app.
+          // soundbridge:// scheme is not in Supabase's allowed list so it falls back
+          // to the web SITE_URL anyway; pointing directly to mobile-callback is reliable.
+          emailRedirectTo: 'https://www.soundbridge.live/auth/mobile-callback',
         },
       });
       
@@ -490,6 +582,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       setUser(null);
       setSession(null);
+      setPendingCommunityWelcomeId(null);
       setLoading(false);
 
       return { success: true };
@@ -544,10 +637,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // Extract tokens from URL
           const { url } = result;
           const params = new URLSearchParams(url.split('#')[1] || url.split('?')[1]);
-          
+
           const access_token = params.get('access_token');
           const refresh_token = params.get('refresh_token');
-          
+
           if (access_token && refresh_token) {
             console.log('🔑 Tokens extracted, setting session...');
             // Set session in Supabase client
@@ -565,6 +658,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
             }
 
             console.log('✅ Google OAuth successful');
+            setLoading(false);
+            return { success: true };
+          }
+        }
+
+        // On Android, Chrome Custom Tab closes via the intent filter (Linking) rather than
+        // returning the callback URL to openAuthSessionAsync — so result.type is 'cancel'
+        // even when auth succeeded. The Linking listener (handleDeepLink) runs concurrently
+        // and sets the session. Wait briefly then check if it landed.
+        if (Platform.OS === 'android') {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const { data: { session: androidSession } } = await supabase.auth.getSession();
+          if (androidSession) {
+            console.log('✅ Google OAuth successful via Android Linking path');
             setLoading(false);
             return { success: true };
           }
@@ -631,7 +738,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       console.log('📧 Requesting password reset for:', email);
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: 'soundbridge://auth/callback',
+        redirectTo: 'https://www.soundbridge.live/auth/mobile-callback',
       });
       
       if (error) {
@@ -688,6 +795,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const { data, error } = await supabase.auth.resend({
         type: 'signup',
         email: email,
+        options: {
+          emailRedirectTo: 'https://www.soundbridge.live/auth/mobile-callback',
+        },
       });
       
       if (error) {
@@ -731,6 +841,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
           creator_types: [],
           primary_creator_type: null,
         });
+
+        if (data.community_entry_shown_at) {
+          setPendingCommunityWelcomeId(null);
+        }
+
+        // Grant Sound Academy institutional access if not yet upgraded.
+        // This fires on every profile load until the tier is set, making it
+        // self-healing for users who signed up before email verification completed.
+        const isSoundAcademy = activeSession?.user?.user_metadata?.source === 'sound_academy';
+        const notYetPremium = !data.subscription_tier || data.subscription_tier === 'free';
+        if (isSoundAcademy && notYetPremium) {
+          console.log('🎓 Sound Academy user on free tier — granting institutional access');
+          referralService.grantInstitutionalAccess(userId, 'sound_academy').then(() => {
+            supabase.from('profiles').select('subscription_tier, subscription_status, subscription_period_end').eq('id', userId).single().then(({ data: updated }) => {
+              if (updated) {
+                setUserProfile(prev => prev ? { ...prev, ...updated } : null);
+                console.log('✅ Profile upgraded to:', updated.subscription_tier);
+              }
+            });
+          }).catch(err => console.warn('⚠️ grant_institutional_access error:', err));
+        }
 
         // Load creator types in background (non-blocking)
         (async () => {
@@ -921,6 +1052,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     checkOnboardingStatus,
     pendingPasswordReset,
     clearPendingPasswordReset,
+    pendingCommunityWelcomeId,
+    setPendingCommunityWelcome: setPendingCommunityWelcomeId,
   };
 
   return (

@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '../lib/supabase';
 import { config } from '../config/environment';
+import { getApiBaseUrl } from '../lib/apiClient';
 
 interface UploadFile {
   uri: string;
@@ -19,21 +20,25 @@ interface UploadResult {
   };
 }
 
-// ✅ CORRECT bucket names as per web team response
+// Storage layout:
+//   Audio tracks  → Cloudflare R2  (new uploads via presign endpoint)
+//   Images        → Supabase Storage (unchanged)
+//   Post audio    → Supabase Storage post-attachments (unchanged)
+//
+// Legacy audio URLs on Supabase Storage (audio-tracks bucket) remain valid for
+// playback; the distribution backend handles R2 vs Supabase detection server-side.
 const BUCKETS = {
-  AUDIO: 'audio-tracks',        // ✅ Changed from 'audio-files'
-  COVER_ART: 'cover-art',       // ✅ Changed from 'artwork'
-  PROFILE_IMAGES: 'profile-images', // ✅ Changed from 'avatars'
+  COVER_ART: 'cover-art',
+  PROFILE_IMAGES: 'profile-images',
   EVENT_IMAGES: 'event-images',
   POST_ATTACHMENTS: 'post-attachments',
 } as const;
 
-// File size limits (as per web team response)
-const MAX_AUDIO_SIZE = 100 * 1024 * 1024; // 100MB
-const MAX_MIXTAPE_SIZE = 200 * 1024 * 1024; // 200MB for DJ mixes
-const MAX_IMAGE_SIZE = 5 * 1024 * 1024;   // 5MB (changed from 10MB)
+// File size limits
+const MAX_AUDIO_SIZE = 100 * 1024 * 1024;    // 100 MB
+const MAX_MIXTAPE_SIZE = 200 * 1024 * 1024;  // 200 MB — requires mixtape flag on presign
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024;      // 5 MB
 
-// Supported file types (as per web team response)
 const ALLOWED_AUDIO_TYPES = [
   'audio/mpeg',
   'audio/mp3',
@@ -58,7 +63,12 @@ const ALLOWED_IMAGE_TYPES = [
 ];
 
 /**
- * Upload audio file to Supabase Storage
+ * Upload audio file to Cloudflare R2 via a presigned PUT URL.
+ *
+ * Flow:
+ *   1. POST /api/upload/audio-file/presign  → get uploadUrl + public url
+ *   2. PUT uploadUrl with raw file bytes (Content-Type header only)
+ *   3. Return presign.url — this is the public R2 URL to store in audio_tracks.file_url
  */
 export async function uploadAudioFile(
   userId: string,
@@ -67,21 +77,14 @@ export async function uploadAudioFile(
 ): Promise<UploadResult> {
   try {
     if (!audioFile || !audioFile.uri) {
-      return {
-        success: false,
-        error: { message: 'No audio file provided' },
-      };
+      return { success: false, error: { message: 'No audio file provided' } };
     }
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      return {
-        success: false,
-        error: { message: 'Not authenticated' },
-      };
+      return { success: false, error: { message: 'Not authenticated' } };
     }
 
-    // Validate file type
     if (!ALLOWED_AUDIO_TYPES.includes(audioFile.type)) {
       return {
         success: false,
@@ -89,16 +92,11 @@ export async function uploadAudioFile(
       };
     }
 
-    // Get file info to check size (React Native doesn't support response.blob())
     const fileInfo = await FileSystem.getInfoAsync(audioFile.uri);
     if (!fileInfo.exists) {
-      return {
-        success: false,
-        error: { message: 'File does not exist' },
-      };
+      return { success: false, error: { message: 'File does not exist' } };
     }
 
-    // Validate file size
     const sizeLimit = options?.isMixtape ? MAX_MIXTAPE_SIZE : MAX_AUDIO_SIZE;
     if (fileInfo.size && fileInfo.size > sizeLimit) {
       return {
@@ -107,53 +105,77 @@ export async function uploadAudioFile(
       };
     }
 
-    // Generate unique filename - ✅ Use underscore format: ${userId}/${timestamp}_${filename}
-    const sanitizedFileName = audioFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const fileName = `${userId}/${Date.now()}_${sanitizedFileName}`;
+    // Step 1 — Request a presigned PUT URL from the backend
+    const presignBody: Record<string, unknown> = {
+      fileName: audioFile.name,
+      // fileSize must be a positive integer (server rejects non-integers)
+      fileSize: fileInfo.size ? Math.floor(fileInfo.size) : 0,
+      contentType: audioFile.type,
+    };
+    if (options?.isMixtape) {
+      presignBody.is_mixtape = true;
+    }
 
-    // Stream file directly to Supabase Storage using FileSystem.uploadAsync.
-    // Avoids loading the entire file into memory (critical for large mixtapes — a 66MB
-    // file would otherwise require ~200MB RAM for base64 + decode + Uint8Array, and the
-    // JS decode loop alone can exceed the OS network timeout before upload even starts).
-    const storageUploadUrl = `${config.supabaseUrl}/storage/v1/object/${BUCKETS.AUDIO}/${fileName}`;
-    const uploadResponse = await FileSystem.uploadAsync(storageUploadUrl, audioFile.uri, {
-      httpMethod: 'POST',
+    const presignRes = await fetch(`${getApiBaseUrl()}/api/upload/audio-file/presign`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(presignBody),
+    });
+
+    if (!presignRes.ok) {
+      let errMsg = 'Failed to get upload URL';
+      try {
+        const body = await presignRes.json();
+        errMsg = body.error || errMsg;
+      } catch (_) {}
+      // 429 = rate limit (5 presign requests per minute per user)
+      if (presignRes.status === 429) {
+        errMsg = 'Upload limit reached. Please wait a moment and try again.';
+      }
+      console.error('Presign failed:', presignRes.status, errMsg);
+      return { success: false, error: { message: errMsg } };
+    }
+
+    const presignData = await presignRes.json();
+    const { uploadUrl, url: publicUrl, contentType: signedContentType } = presignData;
+
+    if (!uploadUrl || !publicUrl) {
+      return { success: false, error: { message: 'Upload service returned an invalid response. Please try again.' } };
+    }
+
+    // Step 2 — Stream file bytes directly to R2 via the presigned PUT URL.
+    // Only Content-Type is allowed — extra headers (Authorization, x-amz-*) will
+    // break the SigV4 query-string signature on the presigned URL.
+    const putResponse = await FileSystem.uploadAsync(uploadUrl, audioFile.uri, {
+      httpMethod: 'PUT',
       uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
       mimeType: audioFile.type,
       headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        apikey: config.supabaseAnonKey,
-        'Content-Type': audioFile.type,
-        'x-upsert': 'false',
-        'cache-control': '3600',
+        'Content-Type': signedContentType || audioFile.type,
       },
     });
 
-    if (uploadResponse.status < 200 || uploadResponse.status >= 300) {
+    if (putResponse.status < 200 || putResponse.status >= 300) {
       let errMsg = 'Failed to upload audio file';
       try {
-        const body = JSON.parse(uploadResponse.body);
+        const body = JSON.parse(putResponse.body);
         errMsg = body.message || body.error || errMsg;
       } catch (_) {}
-      console.error('Error uploading audio file:', uploadResponse.status, uploadResponse.body);
-      return {
-        success: false,
-        error: { message: errMsg },
-      };
+      console.error('R2 PUT failed:', putResponse.status, putResponse.body);
+      return { success: false, error: { message: errMsg } };
     }
 
-    // Get public URL
-    const { data: { publicUrl } } = supabase.storage
-      .from(BUCKETS.AUDIO)
-      .getPublicUrl(fileName);
+    console.log('✅ Audio uploaded to R2:', publicUrl);
 
-    console.log('✅ Audio file uploaded successfully:', publicUrl);
-
+    // publicUrl is the final R2 public URL — store this as audio_tracks.file_url
     return {
       success: true,
       data: {
         url: publicUrl,
-        path: fileName,
+        path: presignData.objectKey || '',
       },
     };
   } catch (error: any) {
@@ -166,7 +188,8 @@ export async function uploadAudioFile(
 }
 
 /**
- * Upload image file to Supabase Storage
+ * Upload image file to Supabase Storage.
+ * Images remain on Supabase — only audio moved to R2.
  */
 export async function uploadImage(
   userId: string,
@@ -175,38 +198,23 @@ export async function uploadImage(
 ): Promise<UploadResult> {
   try {
     if (!imageFile || !imageFile.uri) {
-      return {
-        success: false,
-        error: { message: 'No image file provided' },
-      };
+      return { success: false, error: { message: 'No image file provided' } };
     }
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      return {
-        success: false,
-        error: { message: 'Not authenticated' },
-      };
+      return { success: false, error: { message: 'Not authenticated' } };
     }
 
-    // Validate file type
     if (!ALLOWED_IMAGE_TYPES.includes(imageFile.type)) {
-      return {
-        success: false,
-        error: { message: 'Invalid image file type. Supported: JPG, PNG, WEBP, AVIF' },
-      };
+      return { success: false, error: { message: 'Invalid image file type. Supported: JPG, PNG, WEBP, AVIF' } };
     }
 
-    // Get file info to check size (React Native doesn't support response.blob())
     const fileInfo = await FileSystem.getInfoAsync(imageFile.uri);
     if (!fileInfo.exists) {
-      return {
-        success: false,
-        error: { message: 'File does not exist' },
-      };
+      return { success: false, error: { message: 'File does not exist' } };
     }
 
-    // Validate file size - ✅ 5MB limit (changed from 10MB)
     if (fileInfo.size && fileInfo.size > MAX_IMAGE_SIZE) {
       return {
         success: false,
@@ -214,28 +222,26 @@ export async function uploadImage(
       };
     }
 
-    // Determine bucket based on folder
     let bucket: string;
     if (folder === 'cover-art' || folder === 'artwork' || folder === 'album-covers') {
-      bucket = BUCKETS.COVER_ART; // ✅ 'cover-art'
+      bucket = BUCKETS.COVER_ART;
     } else if (folder === 'profile' || folder === 'avatar') {
-      bucket = BUCKETS.PROFILE_IMAGES; // ✅ 'profile-images'
+      bucket = BUCKETS.PROFILE_IMAGES;
     } else if (folder === 'event') {
       bucket = BUCKETS.EVENT_IMAGES;
     } else if (folder === 'post-attachments' || folder === 'dispute') {
       bucket = BUCKETS.POST_ATTACHMENTS;
     } else {
-      bucket = BUCKETS.COVER_ART; // Default to cover-art
+      bucket = BUCKETS.COVER_ART;
     }
 
-    // Generate unique filename - ✅ Use underscore format: ${userId}/${timestamp}_${filename}
     const sanitizedFileName = imageFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const fileName = folder === 'album-covers'
       ? `${userId}/album-covers/${Date.now()}_${sanitizedFileName}`
       : `${userId}/${Date.now()}_${sanitizedFileName}`;
 
-    // Stream directly to Supabase Storage (avoids base64 + decode overhead)
     const storageUploadUrl = `${config.supabaseUrl}/storage/v1/object/${bucket}/${fileName}`;
+
     const uploadResponse = await FileSystem.uploadAsync(storageUploadUrl, imageFile.uri, {
       httpMethod: 'POST',
       uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
@@ -256,25 +262,16 @@ export async function uploadImage(
         errMsg = body.message || body.error || errMsg;
       } catch (_) {}
       console.error('Error uploading image:', uploadResponse.status, uploadResponse.body);
-      return {
-        success: false,
-        error: { message: errMsg },
-      };
+      return { success: false, error: { message: errMsg } };
     }
 
-    // Get public URL
-    const { data: { publicUrl } } = supabase.storage
-      .from(bucket)
-      .getPublicUrl(fileName);
+    const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(fileName);
 
-    console.log('✅ Image uploaded successfully:', publicUrl);
+    console.log('✅ Image uploaded to Supabase Storage:', publicUrl);
 
     return {
       success: true,
-      data: {
-        url: publicUrl,
-        path: fileName,
-      },
+      data: { url: publicUrl, path: fileName },
     };
   } catch (error: any) {
     console.error('Error uploading image:', error);
@@ -286,7 +283,7 @@ export async function uploadImage(
 }
 
 /**
- * Create audio track record in database with copyright attestation
+ * Create audio track record in database with copyright attestation.
  */
 export async function createAudioTrack(
   userId: string,
@@ -296,7 +293,7 @@ export async function createAudioTrack(
     file_url: string;
     cover_art_url?: string | null;
     duration?: number;
-    file_size?: number; // File size in bytes for storage tracking
+    file_size?: number;
     tags?: string | null;
     is_public?: boolean;
     genre?: string | null;
@@ -313,7 +310,6 @@ export async function createAudioTrack(
     is_paid?: boolean;
     price?: number | null;
     currency?: string | null;
-    // Copyright attestation fields
     copyright_attested?: boolean;
     attestation_timestamp?: string;
     attestation_user_agent?: string;
@@ -329,10 +325,7 @@ export async function createAudioTrack(
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      return {
-        success: false,
-        error: { message: 'Not authenticated' },
-      };
+      return { success: false, error: { message: 'Not authenticated' } };
     }
 
     const basePayload = {
@@ -341,9 +334,9 @@ export async function createAudioTrack(
       description: trackData.description || null,
       file_url: trackData.file_url,
       cover_art_url: trackData.cover_art_url || null,
-      artwork_url: trackData.cover_art_url || null, // Also set artwork_url for compatibility
+      artwork_url: trackData.cover_art_url || null,
       duration: trackData.duration || null,
-      file_size: trackData.file_size || 0, // Store file size for storage quota tracking
+      file_size: trackData.file_size || 0,
       tags: trackData.tags ? trackData.tags.split(',').map(t => t.trim()) : null,
       is_public: trackData.is_public ?? true,
       visibility: trackData.visibility || 'public',
@@ -351,15 +344,11 @@ export async function createAudioTrack(
       lyrics: trackData.lyrics || null,
       lyrics_language: trackData.lyrics_language || null,
       has_lyrics: trackData.has_lyrics || false,
-      // Content type — determines which Discover tab this appears under
       content_type: trackData.content_type || 'music',
-      // Mixtape flag
       is_mixtape: trackData.is_mixtape || false,
-      // Paid content fields
       is_paid: trackData.is_paid || false,
       price: trackData.price ?? null,
       currency: trackData.currency ?? null,
-      // Copyright attestation fields
       copyright_attested: trackData.copyright_attested || false,
       attestation_timestamp: trackData.attestation_timestamp || null,
       attestation_user_agent: trackData.attestation_user_agent || null,
@@ -408,13 +397,11 @@ export async function createAudioTrack(
           console.warn('⚠️ ACRCloud columns not available, retrying without extended fields');
           insertResult = await attemptInsert(basePayload);
         }
-        // If content_type column doesn't exist yet, strip it and retry
         if (insertResult.error && (insertResult.error?.message || '').includes('content_type')) {
           console.warn('⚠️ content_type column not available, retrying without it');
           const { content_type: _ct, ...payloadWithoutContentType } = basePayload as any;
           insertResult = await attemptInsert(payloadWithoutContentType);
         }
-        // If visibility column doesn't exist yet, strip it and retry
         if (insertResult.error && (insertResult.error?.message || '').includes('visibility')) {
           console.warn('⚠️ visibility column not available, retrying without it');
           const { visibility: _v, content_type: _ct2, ...payloadWithoutNew } = basePayload as any;
@@ -427,15 +414,11 @@ export async function createAudioTrack(
 
     if (error) {
       console.error('Error creating audio track:', error);
-      return {
-        success: false,
-        error: { message: error.message || 'Failed to create track record' },
-      };
+      return { success: false, error: { message: error.message || 'Failed to create track record' } };
     }
 
     console.log('✅ Audio track created successfully:', data.id);
 
-    // Auto-assign a PPL ISRC (GB-KTZ) for original music tracks with no user-provided ISRC
     if (
       trackData.content_type === 'music' &&
       !trackData.is_cover &&
@@ -450,13 +433,12 @@ export async function createAudioTrack(
       }
     }
 
-    // If copyright was attested, record in audit trail
     if (trackData.copyright_attested && trackData.attestation_device_info) {
       try {
         await supabase.rpc('record_upload_attestation', {
           p_track_id: data.id,
           p_user_id: userId,
-          p_ip_address: null, // Backend will capture this
+          p_ip_address: null,
           p_user_agent: trackData.attestation_user_agent || null,
           p_device_platform: trackData.attestation_device_info.platform || 'unknown',
           p_device_os: trackData.attestation_device_info.os || 'unknown',
@@ -467,7 +449,6 @@ export async function createAudioTrack(
         console.log('✅ Copyright attestation recorded in audit trail');
       } catch (attestationError) {
         console.warn('⚠️ Failed to record attestation in audit trail:', attestationError);
-        // Don't fail the upload if attestation recording fails
       }
     }
 
@@ -483,8 +464,7 @@ export async function createAudioTrack(
     console.error('Error creating audio track:', error);
     return {
       success: false,
-      error: { message: error.message || 'Failed to create track record' },
+      error: { message: error.message || 'Failed to create audio track' },
     };
   }
 }
-

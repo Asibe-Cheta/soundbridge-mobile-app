@@ -28,7 +28,7 @@ import { SystemTypography as Typography } from '../constants/Typography';
 
 export default function BillingScreen() {
   const navigation = useNavigation();
-  const { user, session } = useAuth();
+  const { user, session, userProfile } = useAuth();
   const { theme } = useTheme();
   
   const [loading, setLoading] = useState(true);
@@ -117,7 +117,25 @@ export default function BillingScreen() {
         }
       }
 
-      // If RevenueCat didn't provide paid tier status, use backend data
+      // If RevenueCat didn't provide paid tier — check Supabase profile for institutional access
+      if (!finalSubscription) {
+        const profileTier = userProfile?.subscription_tier;
+        if (profileTier === 'premium' || profileTier === 'unlimited') {
+          console.log(`✅ Supabase profile shows ${profileTier} (institutional) — honouring over RevenueCat free`);
+          finalSubscription = {
+            tier: profileTier,
+            status: 'active',
+            current_period_start: new Date().toISOString(),
+            current_period_end: userProfile?.subscription_period_end || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+            cancel_at_period_end: false,
+            amount: 0,
+            currency: 'GBP',
+            billing_cycle: 'monthly',
+          };
+        }
+      }
+
+      // If still no paid tier, use backend data
       if (!finalSubscription && subscriptionData.status === 'fulfilled' && subscriptionData.value) {
         finalSubscription = subscriptionData.value;
         console.log('✅ Using subscription data from backend');

@@ -1,6 +1,6 @@
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View, TouchableOpacity, Text, TextInput, Image } from 'react-native';
+import { View, TouchableOpacity, Text, TextInput, Image, AppState } from 'react-native';
 import { useFonts, Inter_400Regular, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue';
 import { BarlowCondensed_400Regular, BarlowCondensed_400Regular_Italic } from '@expo-google-fonts/barlow-condensed';
@@ -28,10 +28,11 @@ const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
 import SplashScreen from './src/screens/SplashScreen';
 import AuthScreen from './src/screens/AuthScreen';
 import CardRecoveryScreen from './src/screens/CardRecoveryScreen';
+import SoundAcademySignupScreen from './src/screens/SoundAcademySignupScreen';
 import HomeScreen from './src/screens/HomeScreen';
-import FeedScreen from './src/screens/FeedScreen';
+import TestFeedScreen from './src/screens/TestFeedScreen';
 import DiscoverScreen from './src/screens/DiscoverScreen';
-import UploadScreen from './src/screens/UploadScreen';
+import TestUploadScreen from './src/screens/TestUploadScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
 import NetworkScreen from './src/screens/NetworkScreen';
 import ChatScreen from './src/screens/ChatScreen';
@@ -57,6 +58,8 @@ import NotificationsScreen from './src/screens/NotificationsScreen';
 import ThemeSettingsScreen from './src/screens/ThemeSettingsScreen';
 import HelpSupportScreen from './src/screens/HelpSupportScreen';
 import AboutScreen from './src/screens/AboutScreen';
+import MinimalAudioTestScreen from './src/screens/MinimalAudioTestScreen';
+import SessionDBlankScreen from './src/screens/SessionDBlankScreen';
 import TermsOfServiceScreen from './src/screens/TermsOfServiceScreen';
 import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
 import PaymentMethodsScreen from './src/screens/PaymentMethodsScreen';
@@ -142,11 +145,16 @@ import { ToastProvider } from './src/contexts/ToastContext';
 // Import components
 import CreatorTeaserModal from './src/components/CreatorTeaserModal';
 import ShareMyCardModal from './src/components/ShareMyCardModal';
+import EarlyAdopterConversionModal from './src/components/EarlyAdopterConversionModal';
+import { useEarlyAdopterConversion } from './src/hooks/useEarlyAdopterConversion';
+import { isExpiredEarlyAdopter } from './src/utils/earlyAdopterUtils';
 import MiniPlayer from './src/components/MiniPlayer';
 import SoundBridgeErrorBoundary from './src/components/SoundBridgeErrorBoundary';
 import ScreenCaptureBanner from './src/components/ScreenCaptureBanner';
 import { useAudioPlayer } from './src/contexts/AudioPlayerContext';
 import CreateEventScreen from './src/screens/CreateEventScreen';
+import EventPollSetupScreen from './src/screens/EventPollSetupScreen';
+import PollResultsScreen from './src/screens/PollResultsScreen';
 import CreatePlaylistScreen from './src/screens/CreatePlaylistScreen';
 import CreateOpportunityScreen from './src/screens/CreateOpportunityScreen';
 import MyOpportunitiesScreen from './src/screens/MyOpportunitiesScreen';
@@ -160,28 +168,42 @@ import CreateUrgentGigScreen from './src/screens/CreateUrgentGigScreen';
 import UrgentGigResponsesScreen from './src/screens/UrgentGigResponsesScreen';
 import UrgentGigConfirmationScreen from './src/screens/UrgentGigConfirmationScreen';
 import ProviderGigDetailScreen from './src/screens/ProviderGigDetailScreen';
-
-// TrackPlayer is iOS-only — its TurboModule has a method-signature mismatch on Android
-// that throws at JNI level before JS try/catch can intercept it, crashing the app.
-// expo-av handles Android audio (BackgroundAudioService USE_EXPO_AV = true on Android).
-import { Platform as _Platform } from 'react-native';
-if (_Platform.OS === 'ios') {
-  try {
-    const TrackPlayer = require('react-native-track-player').default;
-    if (TrackPlayer && typeof TrackPlayer.registerPlaybackService === 'function') {
-      TrackPlayer.registerPlaybackService(() => require('./src/services/trackPlayerService'));
-    }
-  } catch (e) {
-    // Native module not available (e.g. Expo Go) — fail silently
-  }
-}
+import CommunityWelcomeScreen from './src/screens/CommunityWelcomeScreen';
+import CommunityScreen from './src/screens/CommunityScreen';
+import MyCommunityScreen from './src/screens/MyCommunityScreen';
+import MBGSonicsDistributionScreen from './src/screens/MBGSonicsDistributionScreen';
+import AdminDistributionScreen from './src/screens/AdminDistributionScreen';
+import AdminCuratedOpportunitiesScreen from './src/screens/AdminCuratedOpportunitiesScreen';
+import OutreachTrackerScreen from './src/screens/OutreachTrackerScreen';
+import OutreachContactDetailScreen from './src/screens/OutreachContactDetailScreen';
+import DemoWalletScreen from './src/screens/DemoWalletScreen';
+import DemoAICareerAdvisorScreen from './src/screens/DemoAICareerAdvisorScreen';
+import PostSignupSetupScreen from './src/screens/PostSignupSetupScreen';
+import { postSignupSetupState } from './src/services/PostSignupSetupState';
 
 import { notificationService } from './src/services/NotificationService';
+import EventPromotionTrackingService from './src/services/EventPromotionTrackingService';
 import { nudgeService } from './src/services/NudgeService';
 import BroadcastBanner from './src/components/BroadcastBanner';
 import { metaEventsService } from './src/services/MetaEventsService';
 import { locationUpdateService } from './src/services/LocationUpdateService';
+import { communityEntryService } from './src/services/CommunityEntryService';
+import { deepLinkingService } from './src/services/DeepLinkingService';
+import { calendarNudgeService } from './src/services/CalendarNudgeService';
+import { EventMatchIntelligenceProvider, useEventMatchIntelligence } from './src/contexts/EventMatchIntelligenceContext';
+import EventMatchPulseIndicator from './src/components/EventMatchPulseIndicator';
+import EventsPickedForYouScreen from './src/screens/EventsPickedForYouScreen';
+import { useFocusEffect } from '@react-navigation/native';
 import { offlineQueueService } from './src/services/offline/offlineQueueService';
+import { backgroundAudioService } from './src/services/BackgroundAudioService';
+import { audioLog } from './src/lib/audioDebugLog';
+import { runEmbeddedOtaDiagnosticsOnLaunch } from './src/services/otaDiagnosticsService';
+import { markJsBundleEval } from './src/lib/jsBundleTrace';
+import { logAppMountEffectTrace } from './src/lib/initTrace';
+import { loadBgIsolationFlags, isBgIsolationEnabled } from './src/config/bgAudioIsolationFlags';
+import { loadAudioAuthTrace } from './src/lib/audioAuthTrace';
+
+markJsBundleEval('App.tsx:module');
 import { analyticsService } from './src/services/analytics/analyticsService';
 import { errorTrackingService } from './src/services/monitoring/errorTrackingService';
 import { performanceMonitoringService } from './src/services/monitoring/performanceMonitoringService';
@@ -209,15 +231,30 @@ TextInput.defaultProps.style = [
 
 // Main Tab Navigator
 function MainTabs() {
+  return (
+    <EventMatchIntelligenceProvider>
+      <MainTabsInner />
+    </EventMatchIntelligenceProvider>
+  );
+}
+
+function MainTabsInner() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const navigation = useNavigation();
   const { unreadCount } = useUnreadMessages();
   const { userProfile } = useAuth();
-  
+  const { hasUnseenIndicator, refresh: refreshEventMatches } = useEventMatchIntelligence();
+
   // Track current tab to hide header on Discover screen
   const [currentTab, setCurrentTab] = React.useState('Feed');
-  
+
+  useFocusEffect(
+    React.useCallback(() => {
+      refreshEventMatches();
+    }, [refreshEventMatches]),
+  );
+
   return (
     <>
       {/* CUSTOM HEADER - Hidden on Discover screen */}
@@ -241,7 +278,13 @@ function MainTabs() {
             name="profile_hub"
             text="Your profile is your professional hub. Tap to access: Digital wallet setup (get paid!), Earnings & analytics, Create events & sell tickets, Privacy settings, and grow your network. Build your professional presence here."
           >
-            <TouchableOpacity onPress={() => navigation.navigate('Profile' as never)}>
+            <TouchableOpacity onPress={() => {
+              if (userProfile?.id) {
+                navigation.navigate('CreatorProfile' as never, { creatorId: userProfile.id } as never);
+              } else {
+                navigation.navigate('Profile' as never);
+              }
+            }}>
               <View style={{
                 width: 36,
                 height: 36,
@@ -282,6 +325,12 @@ function MainTabs() {
             >
               <Ionicons name="school-outline" size={24} color={theme.colors.text} />
             </TouchableOpacity>
+            {currentTab === 'Feed' ? (
+              <EventMatchPulseIndicator
+                visible={hasUnseenIndicator}
+                onPress={() => navigation.navigate('EventsPickedForYou' as never)}
+              />
+            ) : null}
             <NotificationBellButton size={24} color={theme.colors.text} />
             <TouchableOpacity
               onPress={() => navigation.navigate('Messages' as never)}
@@ -354,9 +403,9 @@ function MainTabs() {
           headerShown: false,
         })}
       >
-        <Tab.Screen 
-          name="Feed" 
-          component={FeedScreen}
+        <Tab.Screen
+          name="Feed"
+          component={TestFeedScreen}
           options={{ tabBarLabel: 'Feed' }}
         />
         <Tab.Screen 
@@ -366,7 +415,7 @@ function MainTabs() {
         />
         <Tab.Screen 
           name="Upload" 
-          component={UploadScreen}
+          component={TestUploadScreen}
           options={{
             tabBarIcon: ({ focused, color, size }) => (
               <View style={{
@@ -409,30 +458,165 @@ function MainTabs() {
 // Main App Navigator
 function AppNavigator() {
   console.log('🧭 AppNavigator RENDERING');
-  const { user, userProfile, updateUserProfile, loading, needsOnboarding, pendingPasswordReset, clearPendingPasswordReset } = useAuth();
+  const {
+    user,
+    userProfile,
+    updateUserProfile,
+    refreshUser,
+    loading,
+    needsOnboarding,
+    pendingPasswordReset,
+    clearPendingPasswordReset,
+    pendingCommunityWelcomeId,
+    setPendingCommunityWelcome,
+  } = useAuth();
+
+  const [welcomePendingCreatorId, setWelcomePendingCreatorId] = React.useState<string | null>(null);
+  const [needsPostSignupSetup, setNeedsPostSignupSetup] = React.useState(false);
+
+  // Check if the post-signup setup screen has been seen for this user
+  React.useEffect(() => {
+    if (!user?.id || needsOnboarding) {
+      setNeedsPostSignupSetup(false);
+      return;
+    }
+    postSignupSetupState.hasSeen(user.id).then(seen => {
+      setNeedsPostSignupSetup(!seen);
+    });
+    // Subscribe so the screen can flip us back to false immediately
+    const unsub = postSignupSetupState.onSeen(() => setNeedsPostSignupSetup(false));
+    return unsub;
+  }, [user?.id, needsOnboarding]);
+
+  // Community welcome — shown once after fan page entry (not partner referral)
+  const welcomeCreatorId =
+    userProfile?.community_entry_creator_id ??
+    pendingCommunityWelcomeId ??
+    welcomePendingCreatorId;
+
+  const needsCommunityWelcome =
+    !needsOnboarding &&
+    !needsPostSignupSetup &&
+    !!welcomeCreatorId &&
+    !userProfile?.community_entry_shown_at;
+
+  // Load pending welcome + resume gate (community-welcome-status API)
+  React.useEffect(() => {
+    if (!user || needsOnboarding || needsPostSignupSetup || userProfile?.community_entry_shown_at) {
+      setWelcomePendingCreatorId(null);
+      setPendingCommunityWelcome(null);
+      return;
+    }
+
+    (async () => {
+      const pendingId = await communityEntryService.getWelcomePendingCreatorId();
+      if (pendingId) {
+        setWelcomePendingCreatorId(pendingId);
+        setPendingCommunityWelcome(pendingId);
+      }
+
+      if (!userProfile?.community_entry_creator_id) {
+        const status = await communityEntryService.getWelcomeStatus();
+        if (status.needsWelcome) {
+          const resolved = await communityEntryService.resolveWelcomeAfterOnboarding(refreshUser);
+          if (resolved.creatorId) {
+            setWelcomePendingCreatorId(resolved.creatorId);
+            setPendingCommunityWelcome(resolved.creatorId);
+            await communityEntryService.markWelcomePending(resolved.creatorId);
+          }
+        }
+      }
+    })();
+  }, [user?.id, needsOnboarding, needsPostSignupSetup, userProfile?.community_entry_shown_at, userProfile?.community_entry_creator_id]);
+
+  // After welcome follow — open creator profile once MainTabs stack is active
+  React.useEffect(() => {
+    if (needsOnboarding || needsPostSignupSetup || needsCommunityWelcome || !navigationRef.current) return;
+
+    (async () => {
+      const pending = await communityEntryService.consumePendingWelcomeNavigation();
+      if (!pending?.creatorId) return;
+      navigationRef.current?.navigate(
+        'CreatorProfile' as never,
+        { creatorId: pending.creatorId, welcomeFollow: pending.welcomeFollow } as never,
+      );
+    })();
+  }, [needsOnboarding, needsCommunityWelcome, userProfile?.community_entry_shown_at]);
+
   const [showCreatorTeaser, setShowCreatorTeaser] = React.useState(false);
   const [showCreatorCard, setShowCreatorCard] = React.useState(false);
   const launchCountedRef = React.useRef(false);
+  const calendarNudgeOpenRecordedRef = React.useRef(false);
   const { theme } = useTheme();
+
+  // Calendar nudge — count app opens for all users (once per cold start)
+  React.useEffect(() => {
+    if (!user?.id || calendarNudgeOpenRecordedRef.current) return;
+    calendarNudgeOpenRecordedRef.current = true;
+    calendarNudgeService.recordAppOpen(user.id).catch(() => {});
+  }, [user?.id]);
+
+  // Early adopter conversion modal
+  const earlyAdopterExpired = isExpiredEarlyAdopter(userProfile);
+  const {
+    shouldShow: showEarlyAdopterModal,
+    copyVariant: earlyAdopterCopyVariant,
+    onRemindLater: onEarlyAdopterRemindLater,
+    onDismissPermanently: onEarlyAdopterDismiss,
+    onConverted: onEarlyAdopterConverted,
+  } = useEarlyAdopterConversion(
+    earlyAdopterExpired,
+    userProfile?.subscription_period_end,
+    user?.id,
+  );
 
   // Version check state
   const [versionCheckResult, setVersionCheckResult] = React.useState<VersionCheckResult | null>(null);
   const [versionConfig, setVersionConfig] = React.useState<AppVersionConfig | null>(null);
   const softUpdateDismissedRef = React.useRef(false);
   const navigationRef = React.useRef<any>(null);
+  const [activeRouteName, setActiveRouteName] = React.useState<string | null>(null);
+
+  const syncActiveRoute = React.useCallback(() => {
+    const name = navigationRef.current?.getCurrentRoute()?.name ?? null;
+    setActiveRouteName(name);
+  }, []);
 
   // Track if services have been initialized
   const servicesInitializedRef = React.useRef(false);
 
+  // Load bg-audio investigation state before services init
+  React.useEffect(() => {
+    Promise.all([loadBgIsolationFlags(), loadAudioAuthTrace()]).then(() => {
+      if (
+        isBgIsolationEnabled('disableTokenRefresh') ||
+        isBgIsolationEnabled('disableAuthListener')
+      ) {
+        supabase.auth.stopAutoRefresh();
+      }
+    });
+  }, []);
+
   // Initialize services (only once on mount)
   React.useEffect(() => {
+    const willSkip = servicesInitializedRef.current;
+    logAppMountEffectTrace(willSkip);
+
     // Prevent multiple initializations
-    if (servicesInitializedRef.current) {
+    if (willSkip) {
       return;
     }
 
     console.log('🔧 Initializing services...');
     servicesInitializedRef.current = true;
+    audioLog('APP_MOUNT_INIT_EFFECT', { appState: AppState.currentState });
+
+    // iOS TrackPlayer + audio session — must run before any expo-av teaser sets a conflicting mode.
+    backgroundAudioService.initialize('App.tsx:mountEffect').then(() => {
+      console.log('✅ Background audio service ready');
+    }).catch(error => {
+      console.error('❌ Error initializing background audio service:', error);
+    });
     
     // Initialize offline queue service (works without user)
     offlineQueueService.initialize().then(() => {
@@ -458,6 +642,12 @@ function AppNavigator() {
     });
   }, []); // Empty dependency array - only run once on mount
 
+  // Fan page / artist / join deep links — persists community_entry attribution
+  React.useEffect(() => {
+    const cleanup = deepLinkingService.initialize(navigationRef);
+    return cleanup;
+  }, []);
+
   // Version check — runs once per launch, before any navigation interaction
   React.useEffect(() => {
     checkAppVersion().then(({ result, config }) => {
@@ -480,13 +670,15 @@ function AppNavigator() {
       });
 
       // Initialize notification service (only once per user)
-      notificationService.initialize().then(success => {
-        if (success) {
-          console.log('✅ Notification service ready');
-          // Evaluate fan-acquisition nudges after notifications are ready
-          nudgeService.evaluateAndFire(user.id);
-        }
-      });
+      if (!isBgIsolationEnabled('disableNotificationHooks')) {
+        notificationService.initialize().then(success => {
+          if (success) {
+            console.log('✅ Notification service ready');
+            // Evaluate fan-acquisition nudges after notifications are ready
+            nudgeService.evaluateAndFire(user.id);
+          }
+        });
+      }
 
       // Initialize location update service for event notifications
       locationUpdateService.initialize().then(() => {
@@ -654,35 +846,6 @@ function AppNavigator() {
     }
   };
 
-  // Initialize deep linking
-  React.useEffect(() => {
-    const handleDeepLink = async (event: { url: string }) => {
-      const { path, queryParams } = Linking.parse(event.url);
-      console.log('🔗 Deep link received:', path, queryParams);
-      
-      if (path && navigationRef.current) {
-        handleDeepLinkNavigation(path, queryParams);
-      }
-    };
-
-    // Listen for URL events
-    const subscription = Linking.addEventListener('url', handleDeepLink);
-
-    // Check for initial URL
-    Linking.getInitialURL().then(url => {
-      if (url) {
-        const { path, queryParams } = Linking.parse(url);
-        if (path && navigationRef.current) {
-          handleDeepLinkNavigation(path, queryParams);
-        }
-      }
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, [user]);
-
   // Navigate to ChangePassword when a password reset deep link is followed
   React.useEffect(() => {
     if (pendingPasswordReset && user && !needsOnboarding && navigationRef.current) {
@@ -694,23 +857,20 @@ function AppNavigator() {
   // Handle navigation ready
   const onNavigationReady = React.useCallback(() => {
     console.log('✅ Navigation ready');
+    syncActiveRoute();
+    deepLinkingService.setNavigationReady();
+
     // Check for pending deep links from notifications
     notificationService.getPendingDeepLink().then(data => {
       if (data && navigationRef.current) {
-        // If a deepLink URL is provided, use that
         if (data.deepLink) {
-          const { path, queryParams } = Linking.parse(data.deepLink);
-          if (path) {
-            handleDeepLinkNavigation(path, queryParams);
-            return;
-          }
+          deepLinkingService.handleUrl(data.deepLink);
+          return;
         }
-
-        // Otherwise, navigate based on notification type and data
         handleNotificationNavigation(data);
       }
     });
-  }, []);
+  }, [syncActiveRoute]);
 
   // Handle navigation from notification data (when no deepLink URL is provided)
   const handleNotificationNavigation = (data: any) => {
@@ -737,6 +897,7 @@ function AppNavigator() {
 
         if (resolvedEventId) {
           console.log('🔔 Navigating to EventDetails with eventId:', resolvedEventId);
+          EventPromotionTrackingService.trackView(resolvedEventId, 'notification');
           navigationRef.current.navigate('EventDetails' as never, { eventId: resolvedEventId } as never);
         } else {
           console.error('❌ No eventId found in notification data');
@@ -952,7 +1113,7 @@ function AppNavigator() {
   // Register navigation callback for notification taps
   // This must be after handleNotificationNavigation is defined
   React.useEffect(() => {
-    if (user) {
+    if (user && !isBgIsolationEnabled('disableNotificationHooks')) {
       notificationService.setNavigationCallback((data) => {
         console.log('🔔 Navigation callback triggered with data:', data);
         if (navigationRef.current) {
@@ -968,8 +1129,9 @@ function AppNavigator() {
     <View style={{ flex: 1, backgroundColor: '#1A1A1A' }}>
 
       <NavigationContainer
-        ref={navigationRef} 
+        ref={navigationRef}
         onReady={onNavigationReady}
+        onStateChange={syncActiveRoute}
         theme={{
           dark: theme.isDark,
           colors: {
@@ -992,6 +1154,7 @@ function AppNavigator() {
         {!user ? (
           <>
             <Stack.Screen name="Auth" component={AuthScreen} />
+            <Stack.Screen name="SoundAcademySignup" component={SoundAcademySignupScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CardRecovery" component={CardRecoveryScreen} options={{ headerShown: false }} />
             <Stack.Screen 
               name="TwoFactorVerification" 
@@ -1005,6 +1168,21 @@ function AppNavigator() {
         ) : needsOnboarding ? (
           // Show onboarding for users who haven't completed it
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+        ) : needsPostSignupSetup ? (
+          // Show the setup checklist once immediately after first onboarding
+          <Stack.Screen
+            name="PostSignupSetup"
+            component={PostSignupSetupScreen}
+            options={{ gestureEnabled: false, animation: 'fade' }}
+          />
+        ) : needsCommunityWelcome ? (
+          // Community entry welcome — shown once for users who arrived via fan page or referral
+          <Stack.Screen
+            name="CommunityWelcome"
+            component={CommunityWelcomeScreen}
+            initialParams={{ creatorId: welcomeCreatorId }}
+            options={{ gestureEnabled: false, animation: 'fade' }}
+          />
         ) : (
           <>
             <Stack.Screen name="MainTabs" component={MainTabs} />
@@ -1040,6 +1218,16 @@ function AppNavigator() {
             <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
             <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
             <Stack.Screen name="About" component={AboutScreen} />
+            <Stack.Screen
+              name="MinimalAudioTest"
+              component={MinimalAudioTestScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="SessionDBlank"
+              component={SessionDBlankScreen}
+              options={{ headerShown: false, gestureEnabled: false }}
+            />
             <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
             <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
             <Stack.Screen name="ShareProfile" component={ShareProfileScreen} />
@@ -1068,9 +1256,12 @@ function AppNavigator() {
             <Stack.Screen name="MyVenues" component={MyVenuesScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} />
             <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
+            <Stack.Screen name="EventsPickedForYou" component={EventsPickedForYouScreen} />
             <Stack.Screen name="TicketConfirmation" component={TicketConfirmationScreen} options={{ headerShown: false, gestureEnabled: false }} />
             <Stack.Screen name="TicketWallet" component={TicketWalletScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CreateEvent" component={CreateEventScreen} />
+            <Stack.Screen name="EventPollSetup" component={EventPollSetupScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="PollResults" component={PollResultsScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CreatePlaylist" component={CreatePlaylistScreen} />
             <Stack.Screen name="TrackDetails" component={TrackDetailsScreen} />
             <Stack.Screen name="AppealForm" component={AppealFormScreen} options={{ headerShown: false }} />
@@ -1120,12 +1311,21 @@ function AppNavigator() {
             <Stack.Screen name="ServicePreferences" component={ServicePreferencesScreen} options={{ headerShown: false }} />
             <Stack.Screen name="ProResources" component={ProResourcesScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CourseDetail" component={CourseDetailScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="CommunityScreen" component={CommunityScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="MyCommunity" component={MyCommunityScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="DemoWallet" component={DemoWalletScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="DemoAICareerAdvisor" component={DemoAICareerAdvisorScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="MBGSonicsDistribution" component={MBGSonicsDistributionScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="AdminDistribution" component={AdminDistributionScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="AdminCuratedOpportunities" component={AdminCuratedOpportunitiesScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="OutreachTracker" component={OutreachTrackerScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="OutreachContactDetail" component={OutreachContactDetailScreen} options={{ headerShown: false }} />
             {/* Allow access to onboarding even after completion for testing */}
             <Stack.Screen name="OnboardingTest" component={OnboardingScreen} />
           </>
         )}
         </Stack.Navigator>
-        {user && !needsOnboarding && <MiniPlayer />}
+        {user && !needsOnboarding && activeRouteName !== 'SessionDBlank' && <MiniPlayer />}
 
         {/* Creator teaser — fires every 4th app launch until card is shared */}
         {userProfile && userProfile.role === 'creator' && !userProfile.fan_link_shared && (
@@ -1158,6 +1358,18 @@ function AppNavigator() {
             />
           </>
         )}
+
+        {/* Early adopter conversion modal — shown on foreground after grant expires */}
+        <EarlyAdopterConversionModal
+          visible={showEarlyAdopterModal}
+          copyVariant={earlyAdopterCopyVariant}
+          onContinuePremium={() => {
+            onEarlyAdopterConverted();
+            navigationRef.current?.navigate('Upgrade' as never);
+          }}
+          onRemindLater={onEarlyAdopterRemindLater}
+          onContinueFree={onEarlyAdopterDismiss}
+        />
       </NavigationContainer>
 
       {/* Force update — non-dismissable, sits above everything */}
@@ -1231,6 +1443,9 @@ export default function App() {
   // Do NOT fetch updates from JS: fetchUpdateAsync() downloads ~8MB in background,
   // and when it completes RCTFileReaderModule.readAsText crashes (null dispatch queue
   // on iOS 26) — killing the process and interrupting background audio.
+  // Diagnostics use embedded-native probe (see otaDiagnosticsService) — safe without fetchUpdateAsync.
+
+  React.useEffect(() => runEmbeddedOtaDiagnosticsOnLaunch(), []);
 
   // Catch async errors that slip past the error boundary (event handlers, promises)
   React.useEffect(() => {

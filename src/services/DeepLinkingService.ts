@@ -6,14 +6,14 @@ import { NavigationContainerRef } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { notificationService, NotificationData } from './NotificationService';
 import { supabase } from '../lib/supabase';
+import { referralService } from './ReferralService';
+import { communityEntryService } from './CommunityEntryService';
 
 export interface DeepLinkData {
   screen: string;
   params?: Record<string, any>;
   tab?: string;
 }
-
-const DEFERRED_ARTIST_LINK_KEY = 'deferredArtistLink';
 
 class DeepLinkingService {
   private navigationRef: NavigationContainerRef<any> | null = null;
@@ -22,8 +22,17 @@ class DeepLinkingService {
 
   // ===== INITIALIZATION =====
 
-  initialize(navigationRef: NavigationContainerRef<any>) {
-    this.navigationRef = navigationRef;
+  /** Process any incoming URL (public entry point for App.tsx / notifications). */
+  async handleUrl(url: string): Promise<void> {
+    await this.processUrl(url);
+  }
+
+  initialize(
+    navigationRef:
+      | NavigationContainerRef<any>
+      | { current: NavigationContainerRef<any> | null },
+  ) {
+    this.navigationRef = navigationRef as NavigationContainerRef<any>;
     console.log('🔗 Deep linking service initialized');
 
     // Handle initial URL (app opened from link)
@@ -48,6 +57,13 @@ class DeepLinkingService {
 
     // Check for pending notification deep links
     this.checkPendingNotificationDeepLink();
+    this.processPendingNavigation();
+  }
+
+  private resolveNavigationRef(): NavigationContainerRef<any> | null {
+    if (!this.navigationRef) return null;
+    const ref = this.navigationRef as NavigationContainerRef<any> & { current?: NavigationContainerRef<any> | null };
+    return ref.current ?? ref;
   }
 
   // ===== URL HANDLING =====
@@ -102,6 +118,13 @@ class DeepLinkingService {
     }
   }
 
+  private static readonly KNOWN_WEB_SECTIONS = new Set([
+    'collaboration', 'profile', 'track', 'album', 'playlist', 'event', 'post',
+    'opportunity', 'messages', 'wallet', 'live', 'creator', 'artist', 'join',
+    'auth', 'login', 'signup', 'welcome', 'legal', 'api', 'discover', 'feed',
+    'upload', 'settings', 'admin', 'onboarding', 'upgrade', 'billing',
+  ]);
+
   private async parseUrl(url: string): Promise<DeepLinkData | null> {
     try {
       // Handle different URL schemes
@@ -110,9 +133,14 @@ class DeepLinkingService {
       
       const urlObj = new URL(url);
       const pathSegments = urlObj.pathname.split('/').filter(Boolean);
-      
+
+      // soundbridge://artist/[username] — host is "artist", path is "/username"
+      if (urlObj.protocol === 'soundbridge:' && urlObj.hostname === 'artist' && pathSegments[0]) {
+        return this.handleArtistFanLanding(pathSegments[0]);
+      }
+
       if (pathSegments.length === 0) {
-        return { screen: 'Home' };
+        return { screen: 'Feed' };
       }
 
       const [section, ...rest] = pathSegments;
@@ -130,24 +158,12 @@ class DeepLinkingService {
             return { screen: 'CreatorProfile', params: { creatorId: data.id } };
           }
         } catch (_) {}
-        return { screen: 'Home' };
+        return { screen: 'Feed' };
       }
 
       // Handle soundbridge.live/[username]/home universal links from fan landing page
       if (pathSegments.length === 2 && rest[0] === 'home') {
-        const username = section;
-        await this.saveDeferredArtistLink(username);
-        try {
-          const { data } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('username', username)
-            .single();
-          if (data?.id) {
-            return { screen: 'CreatorProfile', params: { creatorId: data.id, fromFanLanding: true } };
-          }
-        } catch (_) {}
-        return { screen: 'Home' };
+        return this.handleArtistFanLanding(section);
       }
 
       switch (section) {
@@ -190,9 +206,15 @@ class DeepLinkingService {
         case 'artist':
           return await this.parseArtistUrl(rest);
 
+        case 'join':
+          return await this.parseJoinUrl(rest, urlObj.searchParams);
+
+        case 'signup':
+          return await this.parseSignupUrl(urlObj.searchParams);
+
         default:
           console.log('⚠️ Unknown deep link section:', section);
-          return { screen: 'Home' };
+          return { screen: 'Feed' };
       }
     } catch (error) {
       console.error('❌ Error parsing URL:', error);
@@ -380,42 +402,80 @@ class DeepLinkingService {
 
   private async parseArtistUrl(pathSegments: string[]): Promise<DeepLinkData> {
     const [username] = pathSegments;
-    if (!username) return { screen: 'Home' };
+    if (!username) return { screen: 'Feed' };
+    return this.handleArtistFanLanding(username);
+  }
 
-    // Store as deferred link so onboarding can pick it up if user isn't onboarded yet
-    await this.saveDeferredArtistLink(username);
+  /** Fan page / community entry — persist creator and open profile when possible */
+  private async handleArtistFanLanding(username: string): Promise<DeepLinkData> {
+    const normalized = username.toLowerCase().trim();
+    if (!normalized) return { screen: 'Feed' };
 
     try {
       const { data } = await supabase
         .from('profiles')
         .select('id')
-        .eq('username', username)
-        .single();
+        .ilike('username', normalized)
+        .maybeSingle();
+      await this.saveDeferredArtistLink(normalized, data?.id);
+      console.log('🔗 Fan landing attribution stored:', normalized, data?.id ?? 'no id');
       if (data?.id) {
         return { screen: 'CreatorProfile', params: { creatorId: data.id, fromFanLanding: true } };
       }
-    } catch (_) {}
-    return { screen: 'Home' };
+    } catch (_) {
+      await this.saveDeferredArtistLink(normalized);
+    }
+
+    // Still persist username — backend can resolve on complete-onboarding
+    return { screen: 'Auth', params: { startInSignUp: true } };
+  }
+
+  // ===== JOIN LINKS (referral + Sound Academy) =====
+
+  private async parseJoinUrl(pathSegments: string[], searchParams: URLSearchParams): Promise<DeepLinkData> {
+    const [subpath] = pathSegments;
+
+    // soundbridge://join/soundacademy  or  https://soundbridge.live/join/soundacademy
+    if (subpath === 'soundacademy') {
+      return { screen: 'SoundAcademySignup' };
+    }
+
+    // soundbridge://join?ref=danedmund  or  https://soundbridge.live/join?ref=danedmund
+    const refCode = searchParams.get('ref');
+    if (refCode) {
+      await referralService.storeReferralCode(refCode);
+      console.log('🔗 Referral code stored:', refCode);
+    }
+
+    // /join is partner-referral only (?ref=) — not community_creator (web confirmed 2026-06-08)
+    return { screen: 'Auth', params: { startInSignUp: true } };
+  }
+
+  /** Web signup fallback: /signup?community_creator=[username] or ?ref= */
+  private async parseSignupUrl(searchParams: URLSearchParams): Promise<DeepLinkData> {
+    const refCode = searchParams.get('ref');
+    if (refCode) {
+      await referralService.storeReferralCode(refCode);
+      console.log('🔗 Signup referral code stored:', refCode);
+    }
+
+    const communityCreator = searchParams.get('community_creator');
+    if (communityCreator) {
+      await this.saveDeferredArtistLink(communityCreator);
+      console.log('🔗 Signup community_creator stored:', communityCreator);
+    }
+
+    return { screen: 'Auth', params: { startInSignUp: true } };
   }
 
   // ===== DEFERRED ARTIST LINK (fan landing page) =====
 
-  async saveDeferredArtistLink(username: string): Promise<void> {
-    try {
-      await AsyncStorage.setItem(DEFERRED_ARTIST_LINK_KEY, username);
-    } catch (_) {}
+  async saveDeferredArtistLink(username: string, creatorId?: string): Promise<void> {
+    await communityEntryService.persistCreatorEntry(username, creatorId);
   }
 
   async consumeDeferredArtistLink(): Promise<string | null> {
-    try {
-      const username = await AsyncStorage.getItem(DEFERRED_ARTIST_LINK_KEY);
-      if (username) {
-        await AsyncStorage.removeItem(DEFERRED_ARTIST_LINK_KEY);
-      }
-      return username;
-    } catch (_) {
-      return null;
-    }
+    return communityEntryService.consumeDeferredArtistLink();
   }
 
   // ===== NOTIFICATION DEEP LINKING =====
@@ -573,14 +633,19 @@ class DeepLinkingService {
         // ===== NUDGE NOTIFICATIONS =====
         case 'nudge':
           deepLinkData = {
-            screen: (data as any).screen || 'Home',
+            screen: (data as any).screen || 'Feed',
             params: (data as any).screenParams,
           };
           break;
 
+        // ===== EARLY ADOPTER EXPIRY =====
+        case 'early_adopter_expiry':
+          deepLinkData = { screen: 'Upgrade' };
+          break;
+
         default:
           console.log('⚠️ Unknown notification type:', data.type, '- navigating to Home');
-          deepLinkData = { screen: 'Home' };
+          deepLinkData = { screen: 'Feed' };
       }
 
       this.navigate(deepLinkData);
@@ -592,7 +657,8 @@ class DeepLinkingService {
   // ===== NAVIGATION =====
 
   private navigate(deepLinkData: DeepLinkData) {
-    if (!this.navigationRef || !this.isReady) {
+    const nav = this.resolveNavigationRef();
+    if (!nav || !this.isReady) {
       console.log('⚠️ Navigation not ready, storing deep link for later');
       this.storePendingNavigation(deepLinkData);
       return;
@@ -603,14 +669,14 @@ class DeepLinkingService {
 
       // Handle tab navigation first if needed
       if (deepLinkData.tab) {
-        this.navigationRef.navigate('MainTabs', { 
+        nav.navigate('MainTabs', { 
           screen: deepLinkData.tab,
           initial: false 
         });
       }
 
       // Navigate to the specific screen
-      this.navigationRef.navigate(deepLinkData.screen as never, deepLinkData.params as never);
+      nav.navigate(deepLinkData.screen as never, deepLinkData.params as never);
 
       // Mark notification as read if it was from a notification
       if (deepLinkData.params?.requestId) {
@@ -860,7 +926,7 @@ class DeepLinkingService {
   // ===== GETTERS =====
 
   get isNavigationReady(): boolean {
-    return this.isReady && this.navigationRef !== null;
+    return this.isReady && this.resolveNavigationRef() !== null;
   }
 }
 

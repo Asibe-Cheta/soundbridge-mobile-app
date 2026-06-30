@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,8 @@ import { supabase } from '../lib/supabase';
 import { SystemTypography as Typography } from '../constants/Typography';
 import BackButton from '../components/BackButton';
 import TipModal from '../components/TipModal';
+import { useSearchHistory } from '../hooks/useSearchHistory';
+import SearchHistoryPanel from '../components/SearchHistoryPanel';
 
 interface Creator {
   id: string;
@@ -55,6 +57,15 @@ export default function AllCreatorsScreen() {
   const [selectedGenre, setSelectedGenre] = useState<FilterGenre>('all');
   const [showTipModal, setShowTipModal] = useState(false);
   const [tipTarget, setTipTarget] = useState<Creator | null>(null);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const blurRef = useRef<ReturnType<typeof setTimeout>>();
+  const { history, addToHistory, removeFromHistory, clearHistory } = useSearchHistory('creators');
+
+  const handleSearchFocus = () => { clearTimeout(blurRef.current); setSearchFocused(true); };
+  const handleSearchBlur = () => {
+    blurRef.current = setTimeout(() => setSearchFocused(false), 200);
+    if (searchQuery.trim().length >= 2) addToHistory(searchQuery.trim());
+  };
 
   const sortOptions = [
     { key: 'recent', label: 'Most Recent' },
@@ -392,6 +403,9 @@ export default function AllCreatorsScreen() {
             placeholderTextColor={theme.colors.textSecondary}
             value={searchQuery}
             onChangeText={setSearchQuery}
+            onFocus={handleSearchFocus}
+            onBlur={handleSearchBlur}
+            onSubmitEditing={() => { if (searchQuery.trim().length >= 2) addToHistory(searchQuery.trim()); }}
           />
         </View>
       </View>
@@ -424,27 +438,39 @@ export default function AllCreatorsScreen() {
       </View>
 
       {/* Content */}
-      <FlatList
-        data={filteredCreators}
-        renderItem={({ item }) => renderCreatorCard(item)}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContainer}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons name="people-outline" size={64} color={theme.colors.textSecondary} />
-            <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
-              No creators found
-            </Text>
-            <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
-              {searchQuery ? 'Try adjusting your search' : 'Check back later for new creators'}
-            </Text>
+      <View style={{ flex: 1 }}>
+        <FlatList
+          data={filteredCreators}
+          renderItem={({ item }) => renderCreatorCard(item)}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContainer}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="people-outline" size={64} color={theme.colors.textSecondary} />
+              <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
+                No creators found
+              </Text>
+              <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+                {searchQuery ? 'Try adjusting your search' : 'Check back later for new creators'}
+              </Text>
+            </View>
+          }
+        />
+        {searchFocused && !searchQuery && history.length > 0 && (
+          <View style={[StyleSheet.absoluteFill, { zIndex: 10, backgroundColor: theme.colors.background }]}>
+            <SearchHistoryPanel
+              history={history}
+              onSelect={(term) => { clearTimeout(blurRef.current); setSearchQuery(term); addToHistory(term); setSearchFocused(false); }}
+              onRemove={removeFromHistory}
+              onClearAll={clearHistory}
+            />
           </View>
-        }
-      />
+        )}
+      </View>
       {tipTarget && (
         <TipModal
           visible={showTipModal}

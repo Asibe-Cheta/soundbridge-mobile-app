@@ -17,6 +17,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import BackButton from '../components/BackButton';
+import { useCreatorAgreement } from '../hooks/useCreatorAgreement';
+import CreatorAgreementModal from '../components/CreatorAgreementModal';
 import {
   upsertServiceProviderProfile,
   fetchServiceProviderProfile,
@@ -44,7 +46,9 @@ export default function ServiceProviderOnboardingScreen() {
   const { user, session } = useAuth();
   const { theme } = useTheme();
   const navigation = useNavigation();
+  const { requestAgreement, agreementVisible, agreementSubmitting, onAgreed, onDismiss } = useCreatorAgreement();
   const [loading, setLoading] = useState(false);
+  const [serviceDisclaimerAccepted, setServiceDisclaimerAccepted] = useState(false);
   const [step, setStep] = useState<'profile' | 'complete'>('profile');
   const [formData, setFormData] = useState<ServiceProviderProfileInput>({
     displayName: '',
@@ -89,6 +93,10 @@ export default function ServiceProviderOnboardingScreen() {
   };
 
   const handleSave = async () => {
+    // Creator agreement gate — first creative action only
+    const agreed = await requestAgreement();
+    if (!agreed) return;
+
     if (!formData.displayName.trim()) {
       Alert.alert('Required', 'Please enter a display name for your service business');
       return;
@@ -243,11 +251,31 @@ export default function ServiceProviderOnboardingScreen() {
           </Text>
         </View>
 
+        {/* Service listing disclaimer */}
+        <TouchableOpacity
+          style={[styles.serviceDisclaimerRow, { borderColor: theme.colors.border }]}
+          onPress={() => setServiceDisclaimerAccepted(v => !v)}
+          activeOpacity={0.7}
+        >
+          <View style={[
+            styles.serviceDisclaimerCheckbox,
+            { borderColor: serviceDisclaimerAccepted ? theme.colors.primary : theme.colors.border },
+            serviceDisclaimerAccepted && { backgroundColor: theme.colors.primary },
+          ]}>
+            {serviceDisclaimerAccepted && (
+              <Ionicons name="checkmark" size={13} color="#fff" />
+            )}
+          </View>
+          <Text style={[styles.serviceDisclaimerText, { color: theme.colors.textSecondary }]}>
+            By listing this service I confirm I am offering it as an independent contractor. SoundBridge is not a party to any service agreement between me and my clients.
+          </Text>
+        </TouchableOpacity>
+
         {/* Save Button */}
         <TouchableOpacity
           style={styles.saveButton}
           onPress={handleSave}
-          disabled={loading || !formData.displayName.trim()}
+          disabled={loading || !formData.displayName.trim() || !serviceDisclaimerAccepted}
         >
           <LinearGradient
             colors={[theme.colors.gradientPrimary.start, theme.colors.gradientPrimary.end]}
@@ -268,11 +296,44 @@ export default function ServiceProviderOnboardingScreen() {
         </Text>
       </ScrollView>
       </SafeAreaView>
+
+      {/* Creator Agreement — shown once before first creative action */}
+      <CreatorAgreementModal
+        visible={agreementVisible}
+        onAgreed={onAgreed}
+        onDismiss={onDismiss}
+        submitting={agreementSubmitting}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  serviceDisclaimerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginHorizontal: 0,
+    marginBottom: 16,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  serviceDisclaimerCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 5,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+    flexShrink: 0,
+  },
+  serviceDisclaimerText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+  },
   container: {
     flex: 1,
   },

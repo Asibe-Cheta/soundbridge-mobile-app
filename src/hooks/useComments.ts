@@ -33,6 +33,7 @@ export const useComments = (postId: string) => {
       setPage(pageNum);
     } catch (err: any) {
       setError(err instanceof Error ? err.message : 'Failed to load comments');
+      setHasMore(false);
       console.error('Error loading comments:', err);
     } finally {
       setLoading(false);

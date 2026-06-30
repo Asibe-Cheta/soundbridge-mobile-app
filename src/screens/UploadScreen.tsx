@@ -36,6 +36,8 @@ import subscriptionService from '../services/SubscriptionService';
 import { walkthroughable } from 'react-native-copilot';
 import { useServiceProviderPrompt } from '../hooks/useServiceProviderPrompt';
 import ServiceProviderPromptModal from '../components/ServiceProviderPromptModal';
+import { useCreatorAgreement } from '../hooks/useCreatorAgreement';
+import CreatorAgreementModal from '../components/CreatorAgreementModal';
 import { collectDeviceInfo } from '../utils/deviceInfo';
 // Temporarily disabled for Expo Go compatibility
 // import DraggableFlatList, { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
@@ -114,6 +116,7 @@ interface UploadFormData {
   price: string;
   currency: 'USD' | 'GBP' | 'EUR';
   liveInterestEnabled: boolean;
+  moodTags: string[];
 }
 
 interface AlbumTrack {
@@ -144,6 +147,7 @@ export default function UploadScreen() {
   const navigation = useNavigation<any>();
   const { user, session } = useAuth();
   const { theme } = useTheme();
+  const { requestAgreement, agreementVisible, agreementSubmitting, onAgreed, onDismiss } = useCreatorAgreement();
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadQuota, setUploadQuota] = useState<UploadQuota | null>(null);
@@ -212,8 +216,9 @@ export default function UploadScreen() {
     price: '',
     currency: 'USD',
     liveInterestEnabled: false,
+    moodTags: [],
   });
-  
+
   // Album-specific state
   const [albumFormData, setAlbumFormData] = useState<AlbumFormData>({
     albumTitle: '',
@@ -230,6 +235,12 @@ export default function UploadScreen() {
     'Gospel', 'Afrobeats', 'UK Drill', 'Hip Hop', 'R&B', 'Pop',
     'Rock', 'Electronic', 'Jazz', 'Classical', 'Country', 'Reggae',
     'Folk', 'Blues', 'Funk', 'Soul', 'Alternative', 'Indie', 'Other'
+  ];
+
+  const MOOD_OPTIONS = [
+    'Worshipful', 'Energetic', 'Reflective', 'Celebratory', 'Raw and honest',
+    'Uplifting', 'Melancholic', 'Peaceful', 'Intense', 'Romantic',
+    'Nostalgic', 'Motivational',
   ];
 
   const podcastCategories = [
@@ -1213,6 +1224,10 @@ export default function UploadScreen() {
 
 
   const handleUpload = async () => {
+    // Creator agreement gate — first creative action only
+    const agreed = await requestAgreement();
+    if (!agreed) return;
+
     // Comprehensive validation (mirroring web app logic)
     const validation = validateUploadForm();
     if (!validation.isValid) {
@@ -1403,7 +1418,9 @@ export default function UploadScreen() {
         price: formData.isPaid && formData.price ? parseFloat(formData.price) : null,
         currency: formData.isPaid ? formData.currency : null,
         // Live interest prompt (music only)
-        live_interest_enabled: formData.contentType === 'music' ? formData.liveInterestEnabled : false,
+        live_interest_enabled: formData.contentType === 'music', // always on for music; creator can opt out in track settings
+        // Mood tags (music only)
+        mood_tags: formData.contentType === 'music' && formData.moodTags.length > 0 ? formData.moodTags : null,
       };
 
       const trackResult = await createAudioTrack(user.id, trackData);
@@ -1449,6 +1466,7 @@ export default function UploadScreen() {
         price: '',
         currency: 'USD',
         liveInterestEnabled: false,
+        moodTags: [],
       });
       setAgreedToCopyright(false);
       setAgreedToMixtapeTerms(false);
@@ -1469,11 +1487,14 @@ export default function UploadScreen() {
       setAcrcloudError(null);
       setIsOriginalConfirmed(false);
 
-      Alert.alert(
-        'Upload Successful!',
-        `Your ${formData.contentType} has been uploaded successfully.`,
-        [{ text: 'OK' }]
-      );
+      const moodLine = formData.moodTags.length > 0
+        ? ` and ${formData.moodTags.slice(0, 2).join(', ').toLowerCase()} mood`
+        : '';
+      const guidanceMessage = formData.contentType === 'music'
+        ? `Your track is live. Here is how SoundBridge will find your audience:\n\nYour music will be served to listeners who have opted in for ${formData.genre || 'your genre'}${moodLine} in your location.\n\nAs listeners engage we build a clearer picture of who loves your sound. Check your Audience Intelligence dashboard to see this data grow.\n\nThe more genuine the engagement, the further your music travels.`
+        : `Your ${formData.contentType} has been uploaded successfully.`;
+
+      Alert.alert('Track is Live', guidanceMessage, [{ text: 'Got it' }]);
 
       // Trigger service provider prompt after first upload
       const currentUploadCount = uploadQuota?.uploads_this_month ?? 0;
@@ -2470,6 +2491,47 @@ export default function UploadScreen() {
       </ScrollView>
     </View>
             </View>
+
+                {/* Mood Tags — music only, up to 3 */}
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>What mood does this track create?</Text>
+                  <Text style={[styles.hintText, { color: theme.colors.textSecondary, marginBottom: 8 }]}>
+                    Choose up to 3 moods (optional)
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {MOOD_OPTIONS.map((mood) => {
+                      const selected = formData.moodTags.includes(mood);
+                      const atLimit = formData.moodTags.length >= 3 && !selected;
+                      return (
+                        <TouchableOpacity
+                          key={mood}
+                          style={[
+                            styles.genreChip,
+                            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                            selected && { backgroundColor: '#8B5CF6', borderColor: '#8B5CF6' },
+                            atLimit && { opacity: 0.4 },
+                          ]}
+                          onPress={() => {
+                            if (atLimit) return;
+                            const next = selected
+                              ? formData.moodTags.filter((m) => m !== mood)
+                              : [...formData.moodTags, mood];
+                            handleInputChange('moodTags', next);
+                          }}
+                        >
+                          <Text style={[
+                            styles.genreChipText,
+                            { color: theme.colors.text },
+                            selected && { color: '#FFFFFF' },
+                          ]}>
+                            {mood}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+
               </>
             ) : formData.contentType === 'audio_book' ? (
               <>
@@ -3007,27 +3069,7 @@ export default function UploadScreen() {
           </GlassSection>
         )}
 
-        {/* Live Interest Toggle — music only */}
-        {formData.contentType === 'music' && (
-          <GlassSection>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <View style={{ flex: 1, marginRight: 12 }}>
-                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginBottom: 4 }]}>
-                  Ask listeners if they'd like to hear this live
-                </Text>
-                <Text style={[styles.hintText, { color: theme.colors.textSecondary }]}>
-                  This helps us gather data on where your audience wants to see you perform. We'll show a subtle prompt to listeners after they've played this track.
-                </Text>
-              </View>
-              <Switch
-                value={formData.liveInterestEnabled}
-                onValueChange={(value) => handleInputChange('liveInterestEnabled', value)}
-                trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
-                thumbColor={formData.liveInterestEnabled ? theme.colors.primary : theme.colors.textSecondary}
-              />
-            </View>
-          </GlassSection>
-        )}
+        {/* Live interest is enabled automatically for all music tracks — no toggle here */}
 
         {/* Privacy Settings */}
         <GlassSection>
@@ -3198,6 +3240,7 @@ export default function UploadScreen() {
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.publishButtonGradient}
+                pointerEvents="none"
               >
                 <Text style={styles.publishButtonText} numberOfLines={1}>
                   {isUploading ? 'Uploading...' : 'Publish'}
@@ -3266,6 +3309,14 @@ export default function UploadScreen() {
         onSetupProfile={handleSetupProfile}
         onRemindLater={handleRemindLater}
         onDontShowAgain={handleDontShowAgain}
+      />
+
+      {/* Creator Agreement — shown once before first upload */}
+      <CreatorAgreementModal
+        visible={agreementVisible}
+        onAgreed={onAgreed}
+        onDismiss={onDismiss}
+        submitting={agreementSubmitting}
       />
     </View>
   );

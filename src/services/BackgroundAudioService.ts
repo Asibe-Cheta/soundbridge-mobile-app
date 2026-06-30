@@ -1,3 +1,4 @@
+import { createAudioPlayer, setAudioModeAsync, AudioPlayer } from 'expo-audio';
 import { NativeModules, Platform, AppState } from 'react-native';
 import { Audio, AVPlaybackStatus, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
 import type { Sound } from 'expo-av';
@@ -53,12 +54,10 @@ function getTrackPlayerConstants() {
   }
 }
 
-// Android: expo-av works fine (OS foreground service not needed, background works).
-// iOS: expo-av does NOT update MPNowPlayingInfoCenter, so iOS kills the audio session after
-// ~60s when the screen is off. TrackPlayer updates Now Playing automatically and keeps the
-// session alive. If TrackPlayer is unavailable (Expo Go / iOS 26 crash), expo-av is the
-// automatic fallback via playWithExpoAv().
-const USE_EXPO_AV = Platform.OS !== 'ios';
+// Android: expo-av. iOS regular playback: expo-audio (1.4.0 — worked in production).
+// TrackPlayer code below is retained but bypassed for iOS playTrack/pause/resume/stop.
+const USE_EXPO_AV = Platform.OS === 'android';
+const USE_EXPO_AUDIO_IOS = Platform.OS === 'ios';
 
 class BackgroundAudioService {
   private isInitialized = false;
@@ -74,6 +73,9 @@ class BackgroundAudioService {
 
   // expo-av path (Android + fallback)
   private avSound: Sound | null = null;
+  // iOS expo-audio path (1.4.0)
+  private expoAudioPlayer: AudioPlayer | null = null;
+  private expoAudioStatusListener: (() => void) | null = null;
   private lastLoggedPlaying: boolean | null = null;
   private lastPersistAt = 0;
   // Incremented by playTrack/stop to abort any in-flight _resumeAfterJsRestart
@@ -390,7 +392,11 @@ class BackgroundAudioService {
     }
   }
 
-  private notifyCallbacks() {
+  /** Push status to React — foreground only (position UI not needed in background). */
+  private notifyCallbacks(force = false) {
+    if (!force && AppState.currentState !== 'active') {
+      return;
+    }
     this.statusCallbacks.forEach(cb =>
       cb({ position: this.position, duration: this.duration, isPlaying: this.isPlaying })
     );
@@ -408,6 +414,64 @@ class BackgroundAudioService {
     }
   }
 
+  private stopExpoAudioPlayer() {
+    if (!this.expoAudioPlayer) return;
+    try {
+      this.expoAudioPlayer.pause();
+      if (this.expoAudioStatusListener) {
+        this.expoAudioPlayer.removeListener('playbackStatusUpdate', this.expoAudioStatusListener);
+      }
+      this.expoAudioPlayer.remove();
+    } catch {}
+    this.expoAudioPlayer = null;
+    this.expoAudioStatusListener = null;
+  }
+
+  private onExpoAudioStatusUpdate = () => {
+    const player = this.expoAudioPlayer;
+    if (!player) return;
+    const newPosition = Math.floor(player.currentTime || 0);
+    const newDuration = Math.floor(player.duration || 0);
+    const newIsPlaying = player.playing || false;
+    if (newDuration > 0 && newPosition >= newDuration - 0.5 && this.position < newDuration - 0.5) {
+      this.isPlaying = false;
+      this.notifyCallbacks();
+      if (this.onTrackFinishedCallback) this.onTrackFinishedCallback();
+      return;
+    }
+    this.position = newPosition;
+    this.duration = newDuration;
+    this.isPlaying = newIsPlaying;
+    this.notifyCallbacks();
+    if (player.isLoaded && newDuration > 0 && newPosition >= newDuration) {
+      if (this.onTrackFinishedCallback) this.onTrackFinishedCallback();
+    }
+  };
+
+  /** iOS regular playback — 1.4.0 expo-audio config (production-proven). */
+  private async playWithExpoAudio(track: BackgroundAudioTrack) {
+    await setAudioModeAsync({
+      allowsRecording: false,
+      shouldPlayInBackground: true,
+      playsInSilentMode: true,
+      interruptionModeAndroid: 'duckOthers',
+      interruptionMode: 'mixWithOthers',
+    });
+    this.stopExpoAudioPlayer();
+    await new Promise(r => setTimeout(r, 50));
+    audioLog('PLAY_TRACK', { title: track.title, engine: 'expo-audio' });
+    this.expoAudioPlayer = createAudioPlayer(
+      { uri: track.url },
+      { updateInterval: 500, keepAudioSessionActive: true },
+    );
+    this.expoAudioStatusListener = this.onExpoAudioStatusUpdate.bind(this);
+    this.expoAudioPlayer.addListener('playbackStatusUpdate', this.expoAudioStatusListener);
+    this.expoAudioPlayer.play();
+    this.isPlaying = true;
+    this.notifyCallbacks();
+    audioLog('EXPO_AUDIO_PLAY_OK', { title: track.title });
+  }
+
   async playTrack(track: BackgroundAudioTrack, queue?: BackgroundAudioTrack[], queueIndex?: number) {
     this._resumeGeneration++;
     this._userPaused = false;
@@ -417,6 +481,11 @@ class BackgroundAudioService {
     this.duration = track.duration || 0;
     this.lastLoggedPlaying = null;
     this._persistState();
+
+    if (USE_EXPO_AUDIO_IOS) {
+      await this.playWithExpoAudio(track);
+      return;
+    }
 
     if (USE_EXPO_AV) {
       await this.playWithExpoAv(track);
@@ -551,7 +620,9 @@ class BackgroundAudioService {
   async pause(caller = 'unknown') {
     this._userPaused = true; // user explicitly paused
     audioLog('PAUSE_CALLED', { caller, useExpoAv: USE_EXPO_AV, hasSound: !!this.avSound });
-    if (USE_EXPO_AV || !NativeModules.TrackPlayerModule) {
+    if (USE_EXPO_AUDIO_IOS && this.expoAudioPlayer) {
+      try { this.expoAudioPlayer.pause(); } catch {}
+    } else if (USE_EXPO_AV || !NativeModules.TrackPlayerModule) {
       if (this.avSound) {
         try { await this.avSound.pauseAsync(); } catch {}
       }
@@ -567,7 +638,9 @@ class BackgroundAudioService {
   async resume() {
     this._userPaused = false;
     audioLog('RESUME_CALLED');
-    if (USE_EXPO_AV || !NativeModules.TrackPlayerModule) {
+    if (USE_EXPO_AUDIO_IOS && this.expoAudioPlayer) {
+      try { this.expoAudioPlayer.play(); } catch {}
+    } else if (USE_EXPO_AV || !NativeModules.TrackPlayerModule) {
       if (this.avSound) {
         try { await this.avSound.playAsync(); } catch {}
       }
@@ -584,7 +657,9 @@ class BackgroundAudioService {
     this._resumeGeneration++;
     this._userPaused = false;
     audioLog('STOP_CALLED', { caller });
-    if (USE_EXPO_AV || !NativeModules.TrackPlayerModule) {
+    if (USE_EXPO_AUDIO_IOS) {
+      this.stopExpoAudioPlayer();
+    } else if (USE_EXPO_AV || !NativeModules.TrackPlayerModule) {
       await this.stopAvSound();
     } else {
       const TrackPlayer = getTrackPlayer();
@@ -599,7 +674,9 @@ class BackgroundAudioService {
   }
 
   async seekTo(position: number) {
-    if (USE_EXPO_AV || !NativeModules.TrackPlayerModule) {
+    if (USE_EXPO_AUDIO_IOS && this.expoAudioPlayer) {
+      try { await this.expoAudioPlayer.seekTo(position); } catch {}
+    } else if (USE_EXPO_AV || !NativeModules.TrackPlayerModule) {
       if (this.avSound) {
         try { await this.avSound.setPositionAsync(position * 1000); } catch {}
       }
@@ -612,7 +689,9 @@ class BackgroundAudioService {
   }
 
   async setVolume(volume: number) {
-    if (USE_EXPO_AV || !NativeModules.TrackPlayerModule) {
+    if (USE_EXPO_AUDIO_IOS && this.expoAudioPlayer) {
+      this.expoAudioPlayer.volume = volume;
+    } else if (USE_EXPO_AV || !NativeModules.TrackPlayerModule) {
       if (this.avSound) {
         try { await this.avSound.setVolumeAsync(volume); } catch {}
       }

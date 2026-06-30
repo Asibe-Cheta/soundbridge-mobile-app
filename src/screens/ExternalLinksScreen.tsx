@@ -21,6 +21,7 @@ import { supabase } from '../lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import { ExternalLink, PlatformType } from '../types/external-links';
 import { externalLinksService } from '../services/ExternalLinksService';
+import { isBgIsolationEnabled, loadBgIsolationFlags } from '../config/bgAudioIsolationFlags';
 import { AddExternalLinkModal } from '../components/ExternalLinks/AddExternalLinkModal';
 import { PLATFORM_METADATA } from '../config/external-links-config';
 import { SystemTypography as Typography } from '../constants/Typography';
@@ -35,18 +36,27 @@ export default function ExternalLinksScreen({ navigation }: any) {
   const [editingLink, setEditingLink] = useState<ExternalLink | null>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    let subscription: { unsubscribe: () => void } | null = null;
+
+    const init = async () => {
+      await loadBgIsolationFlags();
+      const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
       if (session?.user?.id) {
         loadLinks();
       }
-    });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
+      if (!isBgIsolationEnabled('disableAuthListener')) {
+        const { data: { subscription: sub } } = supabase.auth.onAuthStateChange((_event, session) => {
+          setSession(session);
+        });
+        subscription = sub;
+      }
+    };
 
-    return () => subscription.unsubscribe();
+    init();
+
+    return () => subscription?.unsubscribe();
   }, []);
 
   const loadLinks = async () => {

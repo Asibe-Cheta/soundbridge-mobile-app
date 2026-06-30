@@ -21,6 +21,49 @@ interface FAQItem {
   category: string;
 }
 
+const howItWorksFaqData: FAQItem[] = [
+  {
+    category: 'How SoundBridge Works',
+    question: 'How is SoundBridge different from other platforms?',
+    answer: 'Other platforms tell you where your music has been heard. SoundBridge tells you who actually wants more of you and where they are. We track what listeners do, not just what they play. A listener who plays your track three times, tips you directly, and says they would like to hear you live is a completely different signal from someone who streamed your track once from a playlist. SoundBridge separates those two types of listener and builds your audience from the ones who genuinely want to be in your world.',
+  },
+  {
+    category: 'How SoundBridge Works',
+    question: 'How does discovery work on SoundBridge?',
+    answer: 'When you upload your music your tracks are served to listeners who have opted in for your genre and mood in your location. But we do not stop at genre matching. We pay attention to listener behaviour. Repeat listens, tips, shares, and live interest expressions all build a clearer picture of who your real audience is. The more your listeners engage, the more precisely SoundBridge understands your audience and finds more people like them.',
+  },
+  {
+    category: 'How SoundBridge Works',
+    question: 'What is the difference between streaming data and SoundBridge data?',
+    answer: 'Other platforms can tell you that thousands of people played your song last month. That is consumption data. SoundBridge tells you which listeners played your track more than twice, which ones tipped you directly, and which ones said they would like to hear you live and where they are located. That is intention data. One tells you where your music reached. The other tells you where your audience lives and wants to experience you in person.',
+  },
+  {
+    category: 'How SoundBridge Works',
+    question: 'How does event promotion work?',
+    answer: 'When you have enough listener data SoundBridge understands where your audience is concentrated, when they are available, and which cities have the strongest live interest in your sound. When you post an event SoundBridge promotes it for free, not to everyone, but to the specific listeners who expressed interest in hearing you live and to fans of your genre in that city who have not yet discovered you. Your event reaches the right people automatically with no ad spend required.',
+  },
+  {
+    category: 'How SoundBridge Works',
+    question: 'Can I earn from my music without having thousands of streams?',
+    answer: 'Yes. When a listener feels something while playing your music on SoundBridge they can tip you directly. You keep up to 90% of every tip instantly. There is no stream threshold to reach, no eligibility requirement, and no waiting period. Your first listener can be your first payment.',
+  },
+  {
+    category: 'How SoundBridge Works',
+    question: 'What is the Live Interest feature?',
+    answer: 'When a listener plays your track more than once a subtle prompt appears asking if they would like to hear you perform this song live. If they say yes their location and availability preference is captured. This gives you real demand data before you have planned a single event. You can see which cities have the most interest in hearing you live and plan accordingly rather than guessing.',
+  },
+  {
+    category: 'How SoundBridge Works',
+    question: 'Does SoundBridge replace my distribution to other platforms?',
+    answer: 'No. SoundBridge is not a distribution platform. It is your professional home where you build direct relationships with your audience, earn directly from your fans, and plan your career intelligently. Distribution to streaming platforms is a separate step and SoundBridge will be introducing a trusted distribution partner integration very soon.',
+  },
+  {
+    category: 'How SoundBridge Works',
+    question: 'How does the service marketplace work?',
+    answer: 'If you offer professional services such as session work, mixing, production, vocal coaching or sound engineering you can list them on SoundBridge with your rates and availability. Other creators, event organisers and industry professionals can find and book you directly through the platform without you needing to cold pitch anyone.',
+  },
+];
+
 const faqData: FAQItem[] = [
   {
     category: 'Getting Started',
@@ -71,6 +114,12 @@ export default function HelpSupportScreen() {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
 
   const categories = ['All', ...Array.from(new Set(faqData.map(item => item.category)))];
+
+  const filteredHowItWorks = howItWorksFaqData.filter(item =>
+    !searchQuery ||
+    item.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item.answer.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const filteredFAQs = faqData.filter(item => {
     const matchesSearch = item.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -187,6 +236,32 @@ export default function HelpSupportScreen() {
           </ScrollView>
         </View>
 
+        {/* How SoundBridge Works */}
+        {filteredHowItWorks.length > 0 && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, styles.howItWorksSectionTitle]}>How SoundBridge Works</Text>
+            {filteredHowItWorks.map((item, index) => (
+              <TouchableOpacity
+                key={`how-${index}`}
+                style={styles.faqItem}
+                onPress={() => setExpandedFAQ(expandedFAQ === `how-${index}` ? null : `how-${index}`)}
+              >
+                <View style={styles.faqHeader}>
+                  <Text style={styles.faqQuestion}>{item.question}</Text>
+                  <Ionicons
+                    name={expandedFAQ === `how-${index}` ? 'chevron-up' : 'chevron-down'}
+                    size={20}
+                    color="#666"
+                  />
+                </View>
+                {expandedFAQ === `how-${index}` && (
+                  <Text style={styles.faqAnswer}>{item.answer}</Text>
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         {/* FAQ */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
@@ -219,6 +294,27 @@ export default function HelpSupportScreen() {
           )}
         </View>
 
+        {/* Legal */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Legal</Text>
+          {[
+            { label: 'Terms of Service', url: 'https://www.soundbridge.live/legal/terms' },
+            { label: 'Privacy Policy', url: 'https://www.soundbridge.live/legal/privacy' },
+            { label: 'Copyright Policy', url: 'https://www.soundbridge.live/legal/copyright' },
+            { label: 'AML Policy', url: 'https://www.soundbridge.live/aml-policy' },
+            { label: 'DMCA Notice & Takedown', url: 'https://www.soundbridge.live/legal/dmca' },
+          ].map(({ label, url }) => (
+            <TouchableOpacity
+              key={label}
+              style={styles.legalItem}
+              onPress={() => Linking.openURL(url)}
+            >
+              <Text style={styles.legalItemText}>{label}</Text>
+              <Ionicons name="open-outline" size={16} color="#888" />
+            </TouchableOpacity>
+          ))}
+        </View>
+
         {/* Contact Information */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Still Need Help?</Text>
@@ -249,6 +345,19 @@ export default function HelpSupportScreen() {
 }
 
 const styles = StyleSheet.create({
+  legalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  legalItemText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+  },
   container: {
     flex: 1,
     backgroundColor: '#000000',
@@ -294,6 +403,9 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 16,
+  },
+  howItWorksSectionTitle: {
+    color: '#DC2626',
   },
   quickActions: {
     flexDirection: 'row',

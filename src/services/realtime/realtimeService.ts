@@ -1,13 +1,26 @@
 import { supabase } from '../../lib/supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { isBgIsolationEnabled } from '../../config/bgAudioIsolationFlags';
+import { audioLog } from '../../lib/audioDebugLog';
 
 export class RealtimeService {
   private channels: Map<string, RealtimeChannel> = new Map();
+
+  private noopUnsub(): () => void {
+    return () => {};
+  }
+
+  private skipIfIsolated(method: string): boolean {
+    if (!isBgIsolationEnabled('disableRealtime')) return false;
+    audioLog('BG_ISO_SKIP_REALTIME', { method });
+    return true;
+  }
 
   /**
    * Subscribe to new posts in feed
    */
   subscribeToFeedPosts(callback: (post: any) => void): () => void {
+    if (this.skipIfIsolated('subscribeToFeedPosts')) return this.noopUnsub();
     const channel = supabase
       .channel('feed-posts')
       .on(
@@ -39,6 +52,7 @@ export class RealtimeService {
     postId: string,
     callback: (reaction: any) => void
   ): () => void {
+    if (this.skipIfIsolated('subscribeToPostReactions')) return this.noopUnsub();
     const channelName = `post-reactions-${postId}`;
     const channel = supabase
       .channel(channelName)
@@ -71,6 +85,7 @@ export class RealtimeService {
     postId: string,
     callback: (comment: any) => void
   ): () => void {
+    if (this.skipIfIsolated('subscribeToPostComments')) return this.noopUnsub();
     const channelName = `post-comments-${postId}`;
     const channel = supabase
       .channel(channelName)
@@ -103,6 +118,7 @@ export class RealtimeService {
     userId: string,
     callback: (request: any) => void
   ): () => void {
+    if (this.skipIfIsolated('subscribeToConnectionRequests')) return this.noopUnsub();
     const channelName = `connection-requests-${userId}`;
     const channel = supabase
       .channel(channelName)
@@ -135,6 +151,7 @@ export class RealtimeService {
     userId: string,
     callback: (update: any) => void
   ): () => void {
+    if (this.skipIfIsolated('subscribeToConnectionUpdates')) return this.noopUnsub();
     const channelName = `connection-updates-${userId}`;
     const channel = supabase
       .channel(channelName)

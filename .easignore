@@ -1,0 +1,26 @@
+# Exclude planning/spec documents — not needed in build server
+*.md
+*.MD
+*.txt
+
+# Doc folders
+docs/
+WEB_TEAM_IMPLEMENTATION_PACKAGE/
+
+# Supabase edge functions (not part of native build)
+supabase/
+supabase_functions/
+
+# Extra dist directories
+dist2/
+dist3/
+dist5/
+"dist 2"/
+"dist 3"/
+
+# Scripts only needed locally
+scripts/
+
+# Misc
+Untitled
+*.jsonl

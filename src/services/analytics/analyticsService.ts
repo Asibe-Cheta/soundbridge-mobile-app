@@ -1,5 +1,7 @@
 import { supabase } from '../../lib/supabase';
 import { apiFetch } from '../../lib/apiClient';
+import { AppState } from 'react-native';
+import { audioLog } from '../../lib/audioDebugLog';
 
 export interface AnalyticsEvent {
   category: string;
@@ -24,6 +26,10 @@ export class AnalyticsService {
     try {
       // Start periodic flush of events
       this.flushInterval = setInterval(() => {
+        audioLog('ANALYTICS_FLUSH_TIMER', {
+          appState: AppState.currentState,
+          eventsQueueLen: this.eventsQueue.length,
+        });
         this.flushEvents();
       }, 30000); // Flush every 30 seconds
 

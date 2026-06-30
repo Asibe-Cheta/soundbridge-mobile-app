@@ -41,6 +41,8 @@ export interface VenueNotificationPreferences {
   preferred_location_lng?: number | null
   preferred_location_name?: string | null
   notification_radius_km: number
+  opportunity_scouting_enabled?: boolean
+  last_opportunity_search_at?: string | null
 }
 
 export const VENUE_TYPES = [
@@ -333,6 +335,8 @@ class VenueService {
         preferred_location_lng: data.preferred_location_lng ?? null,
         preferred_location_name: data.preferred_location_name ?? null,
         notification_radius_km: data.notification_radius_km ?? 10,
+        opportunity_scouting_enabled: data.opportunity_scouting_enabled ?? false,
+        last_opportunity_search_at: data.last_opportunity_search_at ?? null,
       }
     } catch {
       return null

@@ -6,6 +6,7 @@ import {
   Modal,
   TouchableOpacity,
   Alert,
+  Clipboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,6 +27,8 @@ interface PostActionsModalProps {
   onSaveImage?: () => void;
   onReport?: () => void;
   onBlocked?: () => void;
+  onViewDetail?: () => void;
+  onRepost?: () => void;
 }
 
 export default function PostActionsModal({
@@ -41,6 +44,8 @@ export default function PostActionsModal({
   onSaveImage,
   onReport,
   onBlocked,
+  onViewDetail,
+  onRepost,
 }: PostActionsModalProps) {
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -110,6 +115,46 @@ export default function PostActionsModal({
 
             {/* Actions */}
             <View style={styles.actions}>
+              {onViewDetail && (
+                <TouchableOpacity
+                  style={[styles.actionItem, { borderBottomColor: theme.colors.border }]}
+                  onPress={() => {
+                    onViewDetail();
+                    onClose();
+                  }}
+                >
+                  <Ionicons name="open-outline" size={24} color={theme.colors.text} />
+                  <Text style={[styles.actionText, { color: theme.colors.text }]}>View drop</Text>
+                </TouchableOpacity>
+              )}
+
+              {post.content?.trim().length > 0 && (
+                <TouchableOpacity
+                  style={[styles.actionItem, { borderBottomColor: theme.colors.border }]}
+                  onPress={() => {
+                    Clipboard.setString(post.content.trim());
+                    Alert.alert('Copied', 'Drop text copied to clipboard.');
+                    onClose();
+                  }}
+                >
+                  <Ionicons name="copy-outline" size={24} color={theme.colors.text} />
+                  <Text style={[styles.actionText, { color: theme.colors.text }]}>Copy text</Text>
+                </TouchableOpacity>
+              )}
+
+              {onRepost && (
+                <TouchableOpacity
+                  style={[styles.actionItem, { borderBottomColor: theme.colors.border }]}
+                  onPress={() => {
+                    onRepost();
+                    onClose();
+                  }}
+                >
+                  <Ionicons name="repeat-outline" size={24} color={theme.colors.text} />
+                  <Text style={[styles.actionText, { color: theme.colors.text }]}>Redrop</Text>
+                </TouchableOpacity>
+              )}
+
               {/* Share */}
               <TouchableOpacity
                 style={[styles.actionItem, { borderBottomColor: theme.colors.border }]}

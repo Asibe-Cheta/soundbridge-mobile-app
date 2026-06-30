@@ -7,6 +7,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Platform } from 'react-native';
 import { withQueryTimeout } from '../utils/dataLoading';
 import { config } from '../config/environment';
+import { isBgIsolationEnabled } from '../config/bgAudioIsolationFlags';
+import { audioLog } from './audioDebugLog';
 import type {
   CreatorAvailability,
   CollaborationRequest,
@@ -38,6 +40,16 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // ⭐ CRITICAL: Set up AppState listener for proper session refresh in React Native
 if (Platform.OS !== 'web') {
   AppState.addEventListener('change', (state) => {
+    if (isBgIsolationEnabled('disableAuthListener')) {
+      supabase.auth.stopAutoRefresh();
+      audioLog('BG_ISO_AUTH_LAYER_BLOCKED', { appState: state });
+      return;
+    }
+    if (isBgIsolationEnabled('disableTokenRefresh')) {
+      supabase.auth.stopAutoRefresh();
+      audioLog('BG_ISO_TOKEN_REFRESH_BLOCKED', { appState: state });
+      return;
+    }
     if (state === 'active') {
       supabase.auth.startAutoRefresh();
     } else {
@@ -257,6 +269,7 @@ export const dbHelpers = {
           likes_count,
           creator_id,
           created_at,
+          live_interest_enabled,
           creator:profiles!audio_tracks_creator_id_fkey(
             id,
             username,
@@ -985,65 +998,97 @@ export const dbHelpers = {
     }
   },
 
-  // ✅ OPTIMIZED: Get personalized tracks with timeout and retry logic
+  // ✅ OPTIMIZED: Get personalized tracks with mood + genre priority matching
   async getPersonalizedTracks(userId: string, limit = 20) {
     try {
       console.log('🎯 Getting personalized tracks for user:', userId);
-      
-      // Get user's genre preferences with timeout
-      const { data: userGenres } = await withQueryTimeout<any>(
-        this.getUserGenres(userId),
-        { timeout: 3000, fallback: [] }
-      );
-      
+
+      // Fetch genre prefs and mood prefs in parallel
+      const [genreResult, moodResult] = await Promise.allSettled([
+        withQueryTimeout<any>(this.getUserGenres(userId), { timeout: 3000, fallback: [] }),
+        withQueryTimeout<any>(
+          supabase.from('profiles').select('preferred_moods').eq('id', userId).single(),
+          { timeout: 3000, fallback: null }
+        ),
+      ]);
+
+      const userGenres = genreResult.status === 'fulfilled' ? genreResult.value.data : [];
+      const preferredMoods: string[] | null =
+        moodResult.status === 'fulfilled' ? moodResult.value.data?.preferred_moods ?? null : null;
+
       if (!userGenres || userGenres.length === 0) {
         console.log('ℹ️ No user genres found, returning general trending tracks');
         return this.getTrendingTracks(limit);
       }
 
       const genreNames = userGenres.map((g: any) => g.name || g.genre_name || g.genre);
-      console.log('🎵 Filtering by genre names:', genreNames);
+      console.log('🎵 Genres:', genreNames, '| Moods:', preferredMoods);
 
-      // Get tracks that match user's genres with timeout
-      // Note: Using genre field directly since content_genres table doesn't exist
-      const { data: manualData, error: manualError } = await withQueryTimeout(
-        supabase
-          .from('audio_tracks')
-          .select(`
-            id,
-            title,
-            description,
-            audio_url,
-            file_url,
-            cover_art_url,
-            artwork_url,
-            duration,
-            play_count,
-            likes_count,
-            created_at,
-            genre,
-            creator:profiles!creator_id(
-              id,
-              username,
-              display_name,
-              avatar_url
-            )
-          `)
-          .eq('is_public', true)
+      const trackSelect = `
+        id, title, description, audio_url, file_url,
+        cover_art_url, artwork_url, duration, play_count,
+        likes_count, created_at, genre, mood_tags, live_interest_enabled,
+        creator:profiles!creator_id(id, username, display_name, avatar_url)
+      `;
+      const baseFilter = (q: any) =>
+        q.eq('is_public', true)
           .not('content_type', 'in', '(podcast,mixtape)')
-          .in('genre', genreNames)
-          .order('play_count', { ascending: false })
-          .limit(limit),
-        { timeout: 6000, fallback: [] }
-      );
+          .in('moderation_status', ['pending_check', 'checking', 'clean', 'approved']);
 
-      if (manualError || !manualData || manualData.length === 0) {
-        console.log('⚠️ Error with personalized query, falling back to trending:', manualError?.message);
-        return this.getTrendingTracks(limit);
+      const hasMoods = preferredMoods && preferredMoods.length > 0;
+      const perBucket = Math.ceil(limit / (hasMoods ? 4 : 2));
+
+      // Priority 1: genre + mood + location (mood overlap via @> operator)
+      // Priority 2: genre + mood
+      // Priority 3: genre only (no mood filter)
+      // Merge, deduplicate, return up to limit
+
+      const results: any[] = [];
+      const seen = new Set<string>();
+
+      const addUnique = (tracks: any[]) => {
+        for (const t of tracks) {
+          if (!seen.has(t.id)) { seen.add(t.id); results.push(t); }
+        }
+      };
+
+      if (hasMoods) {
+        // Bucket 1: genre AND mood (overlap)
+        const { data: b1 } = await withQueryTimeout(
+          baseFilter(supabase.from('audio_tracks').select(trackSelect))
+            .in('genre', genreNames)
+            .overlaps('mood_tags', preferredMoods!)
+            .order('play_count', { ascending: false })
+            .limit(perBucket),
+          { timeout: 5000, fallback: [] }
+        );
+        addUnique(b1 ?? []);
+        console.log('🎯 Bucket 1 (genre+mood):', (b1 ?? []).length);
       }
 
-      console.log('✅ Found personalized tracks:', manualData.length);
-      return { data: manualData, error: null };
+      // Bucket 2: genre only (fills remainder)
+      const remaining = limit - results.length;
+      if (remaining > 0) {
+        const { data: b2, error: b2err } = await withQueryTimeout(
+          baseFilter(supabase.from('audio_tracks').select(trackSelect))
+            .in('genre', genreNames)
+            .order('play_count', { ascending: false })
+            .limit(remaining + (hasMoods ? perBucket : 0)), // fetch extra; dedup trims it
+          { timeout: 6000, fallback: [] }
+        );
+        if (b2err) {
+          console.log('⚠️ Personalized query error, falling back to trending:', b2err.message);
+          return this.getTrendingTracks(limit);
+        }
+        addUnique(b2 ?? []);
+        console.log('🎯 Bucket 2 (genre only):', (b2 ?? []).length);
+      }
+
+      const final = results.slice(0, limit);
+      if (final.length === 0) return this.getTrendingTracks(limit);
+
+      console.log('✅ Personalized tracks returned:', final.length);
+      return { data: final, error: null };
     } catch (error) {
       console.error('❌ Error getting personalized tracks:', error);
       return this.getTrendingTracks(limit);

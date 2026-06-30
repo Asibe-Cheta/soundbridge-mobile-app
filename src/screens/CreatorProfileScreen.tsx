@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,15 +14,21 @@ import {
   RefreshControl,
   StatusBar,
   FlatList,
+  Dimensions,
+  Share,
+  Clipboard,
+  Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import VerifiedBadge from '../components/VerifiedBadge';
+import PremiumBadge from '../components/PremiumBadge';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { supabase } from '../lib/supabase';
 import { config } from '../config/environment';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
@@ -50,8 +56,16 @@ import BlockUserModal from '../modals/BlockUserModal';
 import ReportContentModal from '../modals/ReportContentModal';
 import { blockService } from '../services/api/blockService';
 import { deepLinkingService } from '../services/DeepLinkingService';
+import { followService } from '../services/FollowService';
+import { communityService } from '../services/CommunityService';
 import QRCodeModal from '../components/QRCodeModal';
 import { useBranding } from '../hooks/useBranding';
+import PhotoPostEditorModal from '../components/PhotoPostEditorModal';
+import { useCreatorAgreement } from '../hooks/useCreatorAgreement';
+import CreatorAgreementModal from '../components/CreatorAgreementModal';
+import FanPageShareModal from '../components/FanPageShareModal';
+import * as ImagePicker from 'expo-image-picker';
+import { uploadImage } from '../services/UploadService';
 
 interface Creator {
   id: string;
@@ -96,9 +110,13 @@ export default function CreatorProfileScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const { user, session } = useAuth();
+  const { showToast } = useToast();
   const { play, addToQueue } = useAudioPlayer();
+  const fanIconScale = useRef(new Animated.Value(1)).current;
   const { getBookingStatus } = useCollaboration();
+  const { requestAgreement, agreementVisible, agreementSubmitting, onAgreed: onAgreementAgreed, onDismiss: onAgreementDismiss } = useCreatorAgreement();
 
   // Service Provider Prompt Modal
   const {
@@ -112,8 +130,13 @@ export default function CreatorProfileScreen() {
   // Debug route params
   console.log('🔍 Route params:', route.params);
   
-  const params = route.params as { creatorId?: string; creator?: Creator; fromFanLanding?: boolean } || {};
-  const { creatorId, creator: initialCreator, fromFanLanding } = params;
+  const params = route.params as {
+    creatorId?: string;
+    creator?: Creator;
+    fromFanLanding?: boolean;
+    welcomeFollow?: boolean;
+  } || {};
+  const { creatorId, creator: initialCreator, fromFanLanding, welcomeFollow } = params;
   
   console.log('🔍 Extracted creatorId:', creatorId);
   console.log('🔍 Extracted initialCreator:', initialCreator);
@@ -151,7 +174,9 @@ export default function CreatorProfileScreen() {
   const [loading, setLoading] = useState(!initialCreator);
   const [refreshing, setRefreshing] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
+  const [isCommunityMember, setIsCommunityMember] = useState(false);
   const [showTipModal, setShowTipModal] = useState(false);
+  const [showFanPageModal, setShowFanPageModal] = useState(false);
   const [bookingStatus, setBookingStatus] = useState<BookingStatus | null>(null);
   const [availability, setAvailability] = useState<CreatorAvailability[]>([]);
   const [showCollabModal, setShowCollabModal] = useState(false);
@@ -171,13 +196,22 @@ export default function CreatorProfileScreen() {
   const [externalLinks, setExternalLinks] = useState<ExternalLink[]>([]);
 
   // Tab and posts state
-  const [activeTab, setActiveTab] = useState<'drops' | 'tracks' | 'albums' | 'about'>('drops');
+  const [activeTab, setActiveTab] = useState<'drops' | 'tracks' | 'albums' | 'about' | 'photos'>('drops');
   const [albums, setAlbums] = useState<{ id: string; title: string; cover_image_url?: string; tracks_count?: number; total_plays?: number; created_at: string }[]>([]);
   const [loadingAlbums, setLoadingAlbums] = useState(false);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [postsPage, setPostsPage] = useState(1);
   const [hasMorePosts, setHasMorePosts] = useState(true);
+
+  // Photos tab state
+  const [photoPosts, setPhotoPosts] = useState<Post[]>([]);
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
+  const [photosPage, setPhotosPage] = useState(1);
+  const [hasMorePhotos, setHasMorePhotos] = useState(true);
+  const [selectedPhoto, setSelectedPhoto] = useState<Post | null>(null);
+  const [showPhotoViewer, setShowPhotoViewer] = useState(false);
+  const [showPhotoEditor, setShowPhotoEditor] = useState(false);
 
   // Ratings state
   const [ratingSummary, setRatingSummary] = useState<RatingSummary | null>(null);
@@ -202,12 +236,50 @@ export default function CreatorProfileScreen() {
 
   // QR code modal
   const [showQRModal, setShowQRModal] = useState(false);
+  const [bannerUploading, setBannerUploading] = useState(false);
 
   // Fan landing page welcome prompt
   const [showFanWelcome, setShowFanWelcome] = useState(false);
 
   const isOwnProfile = user?.id === creatorId;
   const { branding } = useBranding(creatorId);
+
+  // Event poll nudge — own profile only
+  const [pollNudgeCount, setPollNudgeCount] = useState(0);
+  const [hasActivePoll, setHasActivePoll] = useState(false);
+
+  const loadPollNudge = async (creatorId: string) => {
+    try {
+      const { data: trackIds } = await supabase
+        .from('audio_tracks')
+        .select('id')
+        .eq('creator_id', creatorId);
+
+      if (!trackIds || trackIds.length === 0) return;
+
+      const ids = trackIds.map((t: any) => t.id);
+
+      const [{ count }, { data: activeCampaign }] = await Promise.all([
+        supabase
+          .from('live_interest_responses')
+          .select('user_id', { count: 'exact', head: true })
+          .eq('responded_yes', true)
+          .in('track_id', ids),
+        supabase
+          .from('poll_campaigns')
+          .select('id')
+          .eq('creator_id', creatorId)
+          .eq('status', 'active')
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      setPollNudgeCount(count ?? 0);
+      setHasActivePoll(!!activeCampaign);
+    } catch {
+      // non-critical
+    }
+  };
 
   const canRequestCollaboration = useMemo(() => {
     if (bookingStatus) {
@@ -217,15 +289,29 @@ export default function CreatorProfileScreen() {
   }, [bookingStatus, availability.length]);
 
   useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(fanIconScale, { toValue: 1.22, duration: 850, useNativeDriver: true }),
+        Animated.timing(fanIconScale, { toValue: 1.0, duration: 850, useNativeDriver: true }),
+      ]),
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [fanIconScale]);
+
+  useEffect(() => {
     loadCreatorProfile();
     loadCreatorTracks();
     loadAlbums();
     checkFollowStatus();
+    checkMembershipStatus();
     loadBookingStatus();
     loadCreatorAvailability();
     loadUserPosts(1);
+    loadPhotoPosts(1);
     loadExternalLinks();
     loadCreatorProfessionalProfile();
+    if (isOwnProfile && user?.id) loadPollNudge(user.id);
   }, [creatorId]);
 
   // Show welcome prompt for fans arriving via the artist fan landing page
@@ -494,7 +580,8 @@ export default function CreatorProfileScreen() {
           created_at,
           is_paid,
           price,
-          currency
+          currency,
+          live_interest_enabled
         `)
         .eq('creator_id', creatorId)
         .eq('is_public', true)
@@ -557,19 +644,16 @@ export default function CreatorProfileScreen() {
   };
 
   const checkFollowStatus = async () => {
-    if (!user?.id) return;
+    if (!user?.id || !creatorId) return;
+
+    if (welcomeFollow) {
+      setIsFollowing(true);
+      return;
+    }
 
     try {
-      const { data, error } = await supabase
-        .from('follows')
-        .select('follower_id')
-        .eq('follower_id', user.id)
-        .eq('following_id', creatorId)
-        .single();
-
-      if (error && error.code !== 'PGRST116') throw error;
-
-      setIsFollowing(!!data);
+      const following = await followService.isFollowing(creatorId);
+      setIsFollowing(following);
     } catch (error) {
       console.error('❌ Error checking follow status:', error);
     }
@@ -583,42 +667,71 @@ export default function CreatorProfileScreen() {
 
     try {
       if (isFollowing) {
-        // Unfollow
-        const { error } = await supabase
-          .from('follows')
-          .delete()
-          .eq('follower_id', user.id)
-          .eq('following_id', creatorId);
-
-        if (error) throw error;
+        const ok = await followService.unfollow(creatorId);
+        if (!ok) throw new Error('Unfollow failed');
 
         setIsFollowing(false);
         setCreator(prev => prev ? { ...prev, followers_count: Math.max(0, (prev.followers_count || 0) - 1) } : null);
-        
-        // Also remove notification preferences
         await removeCreatorNotificationPreferences();
       } else {
-        // Follow
-        const { error } = await supabase
-          .from('follows')
-          .insert({
-            follower_id: user.id,
-            following_id: creatorId,
-            created_at: new Date().toISOString()
-          });
-
-        if (error) throw error;
+        const ok = await followService.follow(creatorId);
+        if (!ok) throw new Error('Follow failed');
 
         setIsFollowing(true);
         setCreator(prev => prev ? { ...prev, followers_count: (prev.followers_count || 0) + 1 } : null);
-        
-        // Show notification preferences modal
         setShowNotifPrefsModal(true);
       }
     } catch (error) {
       console.error('❌ Error following/unfollowing:', error);
       Alert.alert('Error', 'Failed to update follow status');
     }
+  };
+
+  const checkMembershipStatus = async () => {
+    if (!user?.id || !creatorId) return;
+    const member = await communityService.isMember(creatorId);
+    setIsCommunityMember(member);
+  };
+
+  const handleJoinCommunity = async (source: 'manual' | 'post_tip_prompt' = 'manual') => {
+    if (!user?.id) {
+      Alert.alert('Login Required', 'Please log in to join communities');
+      return;
+    }
+    const ok = await communityService.join(creatorId, source);
+    if (ok) {
+      setIsCommunityMember(true);
+      if (source === 'manual') {
+        Alert.alert(
+          'Community Joined',
+          `You have joined ${creator?.display_name ?? 'this creator'}'s community. You will now receive their updates and announcements.`
+        );
+      }
+    } else {
+      Alert.alert('Error', 'Failed to join community. Please try again.');
+    }
+  };
+
+  const handleLeaveCommunity = async () => {
+    Alert.alert(
+      `Leave ${creator?.display_name ?? 'this'}'s community?`,
+      'You will no longer receive their community updates.',
+      [
+        {
+          text: 'Leave Community',
+          style: 'destructive',
+          onPress: async () => {
+            const ok = await communityService.leave(creatorId);
+            if (ok) {
+              setIsCommunityMember(false);
+            } else {
+              Alert.alert('Error', 'Failed to leave community. Please try again.');
+            }
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
   };
 
   const saveCreatorNotificationPreferences = async () => {
@@ -713,11 +826,9 @@ export default function CreatorProfileScreen() {
   };
 
   const handleTipSuccess = async (amountInCents: number, message?: string) => {
-    // Convert cents to dollars for display
     const amountInDollars = amountInCents / 100;
     console.log('🎉 Tip sent successfully:', { amountInCents, amountInDollars, message });
 
-    // Update creator stats locally (store in dollars, not cents)
     setCreator(prev => prev ? {
       ...prev,
       total_tips_received: (prev.total_tips_received || 0) + amountInDollars,
@@ -726,8 +837,24 @@ export default function CreatorProfileScreen() {
       tips_this_month_count: (prev.tips_this_month_count || 0) + 1,
     } : null);
 
-    // Optionally refresh the profile to get updated data
-    // await loadCreatorProfile();
+    // Post-tip community join prompt — only if not already a member
+    if (!isCommunityMember) {
+      const shouldShow = await communityService.shouldShowJoinPrompt(creatorId);
+      if (shouldShow) {
+        await communityService.suppressJoinPrompt(creatorId);
+        Alert.alert(
+          `You just supported ${creator?.display_name ?? 'this creator'}.`,
+          `Would you like to join their community to stay connected with their journey, upcoming events and exclusive moments?`,
+          [
+            {
+              text: 'Join Their Community',
+              onPress: () => handleJoinCommunity('post_tip_prompt'),
+            },
+            { text: 'Maybe Later', style: 'cancel' },
+          ]
+        );
+      }
+    }
   };
 
   const handleSubmitRating = async () => {
@@ -820,6 +947,28 @@ export default function CreatorProfileScreen() {
     setShowTipModal(true);
   };
 
+  const loadPhotoPosts = async (page: number = 1) => {
+    if (!creatorId) return;
+    try {
+      setLoadingPhotos(true);
+      const { posts: newPhotos, hasMore } = await feedService.getPhotoPostsByUser(creatorId, page, 30);
+      if (page === 1) {
+        setPhotoPosts(newPhotos);
+      } else {
+        setPhotoPosts(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          return [...prev, ...newPhotos.filter(p => !existingIds.has(p.id))];
+        });
+      }
+      setHasMorePhotos(hasMore);
+      setPhotosPage(page);
+    } catch (error) {
+      console.error('❌ Error loading photo posts:', error);
+    } finally {
+      setLoadingPhotos(false);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([
@@ -827,9 +976,11 @@ export default function CreatorProfileScreen() {
       loadCreatorTracks(),
       loadAlbums(),
       checkFollowStatus(),
+      checkMembershipStatus(),
       loadBookingStatus(),
       loadCreatorAvailability(),
-      loadUserPosts(1)
+      loadUserPosts(1),
+      loadPhotoPosts(1),
     ]);
     setRefreshing(false);
   };
@@ -868,6 +1019,50 @@ export default function CreatorProfileScreen() {
     } catch (error) {
       console.error('❌ Error loading creator availability:', error);
       setAvailability([]);
+    }
+  };
+
+  const handleChangeBannerImage = async () => {
+    if (!user?.id || !session) return;
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'We need camera roll permissions to update your cover photo.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [3, 1],
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        setBannerUploading(true);
+        const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
+        const mimeType: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+        const uploadResult = await uploadImage(user.id, {
+          uri: asset.uri,
+          name: `banner_${Date.now()}.${fileExt}`,
+          type: mimeType[fileExt] || 'image/jpeg',
+        }, 'cover-art');
+        if (!uploadResult.success || !uploadResult.data?.url) {
+          throw new Error(uploadResult.error?.message || 'Upload failed');
+        }
+        const bannerUrl = uploadResult.data.url;
+        const { error: dbError } = await supabase
+          .from('profiles')
+          .update({ banner_url: bannerUrl })
+          .eq('id', user.id);
+        if (dbError) throw dbError;
+        setCreator(prev => prev ? { ...prev, banner_url: bannerUrl } : null);
+        showToast('Cover photo updated', 'success', 2500);
+      }
+    } catch (error: any) {
+      console.error('❌ Error updating cover photo:', error);
+      Alert.alert('Error', error.message || 'Failed to update cover photo');
+    } finally {
+      setBannerUploading(false);
     }
   };
 
@@ -1048,6 +1243,16 @@ export default function CreatorProfileScreen() {
                 style={styles.bannerPlaceholder}
               />
             )}
+            {/* Bottom-to-top dark fade — blends cover photo into the profile content below */}
+            {creator.banner_url ? (
+              <LinearGradient
+                colors={['transparent', 'rgba(0,0,0,0.45)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={StyleSheet.absoluteFillObject}
+                pointerEvents="none"
+              />
+            ) : null}
             {/* Custom logo — glassmorphic pill container */}
             {branding.custom_logo_url ? (
               <View
@@ -1072,6 +1277,34 @@ export default function CreatorProfileScreen() {
               </View>
             )}
           </View>
+
+          {/* Cover photo edit button — own profile only, sits at bottom-right of banner */}
+          {isOwnProfile && (
+            <TouchableOpacity
+              style={styles.bannerEditBtn}
+              onPress={handleChangeBannerImage}
+              disabled={bannerUploading}
+              activeOpacity={0.75}
+            >
+              {bannerUploading ? (
+                <ActivityIndicator size="small" color="rgba(255,255,255,0.9)" />
+              ) : (
+                <Ionicons name="pencil" size={15} color="rgba(255,255,255,0.9)" />
+              )}
+            </TouchableOpacity>
+          )}
+
+          {/* Fan page icon — own profile only, overlays banner top-right */}
+          {isOwnProfile && creator?.role === 'creator' && creator?.username ? (
+            <TouchableOpacity
+              style={styles.fanPageIconBtn}
+              onPress={() => setShowFanPageModal(true)}
+            >
+              <Animated.View style={{ transform: [{ scale: fanIconScale }] }}>
+                <Ionicons name="people" size={17} color="rgba(255,255,255,0.92)" />
+              </Animated.View>
+            </TouchableOpacity>
+          ) : null}
 
           {/* Avatar — centered, overlaps banner */}
           <View style={styles.avatarWrapper}>
@@ -1134,23 +1367,15 @@ export default function CreatorProfileScreen() {
           {/* Name, headline, username — centered */}
           <View style={styles.nameSection}>
             <View style={styles.nameRow}>
+              {(creator.subscription_tier === 'premium' || creator.subscription_tier === 'unlimited') && (
+                <PremiumBadge tier={creator.subscription_tier} size={18} />
+              )}
               <Text style={[styles.displayName, { color: theme.colors.text }]}>{creator.display_name}</Text>
               {creator.is_verified && <VerifiedBadge size={16} />}
               {creator.early_adopter && (
                 <View style={[styles.earlyAdopterBadge]}>
                   <Ionicons name="rocket" size={10} color="#FFFFFF" />
                   <Text style={styles.earlyAdopterText}>Early</Text>
-                </View>
-              )}
-              {creator.subscription_tier === 'premium' && (
-                <View style={styles.proBadge}>
-                  <Ionicons name="diamond" size={12} color="#FFFFFF" />
-                </View>
-              )}
-              {creator.subscription_tier === 'unlimited' && (
-                <View style={styles.proPlusBadge}>
-                  <Ionicons name="diamond" size={12} color="#FFFFFF" />
-                  <Text style={styles.proPlusText}>+</Text>
                 </View>
               )}
             </View>
@@ -1272,6 +1497,27 @@ export default function CreatorProfileScreen() {
                 )}
               </View>
 
+              {/* Join Community button — full width, only for creator profiles */}
+              {creator?.role === 'creator' && (
+                <TouchableOpacity
+                  style={[
+                    styles.joinCommunityBtn,
+                    {
+                      backgroundColor: isCommunityMember ? theme.colors.primary + '18' : 'transparent',
+                      borderColor: theme.colors.primary,
+                    },
+                  ]}
+                  onPress={isCommunityMember ? handleLeaveCommunity : () => handleJoinCommunity('manual')}
+                >
+                  {isCommunityMember && (
+                    <Ionicons name="checkmark-circle" size={16} color={theme.colors.primary} />
+                  )}
+                  <Text style={[styles.joinCommunityBtnText, { color: theme.colors.primary }]}>
+                    {isCommunityMember ? 'Community Member' : 'Join Community'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
               {/* Collaborate button — full width, only if available */}
               <TouchableOpacity
                 style={[
@@ -1291,6 +1537,35 @@ export default function CreatorProfileScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+          )}
+
+          {/* Event Poll Nudge — own profile, 25+ interested listeners, no active poll */}
+          {isOwnProfile && pollNudgeCount >= 25 && !hasActivePoll && (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => navigation.navigate('EventPollSetup' as never, { interestedCount: pollNudgeCount } as never)}
+              style={[styles.pollNudgeCard]}
+            >
+              <LinearGradient
+                colors={['#6D28D9', '#8B5CF6']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.pollNudgeGradient}
+              >
+                <View style={styles.pollNudgeLeft}>
+                  <Ionicons name="radio-outline" size={22} color="#fff" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pollNudgeTitle}>
+                      {pollNudgeCount} listeners want you live
+                    </Text>
+                    <Text style={styles.pollNudgeSub}>
+                      Ask them when and where — tap to send a date poll
+                    </Text>
+                  </View>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.7)" />
+              </LinearGradient>
+            </TouchableOpacity>
           )}
 
           {/* Available Time Slots */}
@@ -1369,6 +1644,22 @@ export default function CreatorProfileScreen() {
               { color: activeTab === 'albums' ? theme.colors.primary : theme.colors.textSecondary }
             ]}>
               Albums
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.tab,
+              activeTab === 'photos' && styles.activeTab,
+              activeTab === 'photos' && { borderBottomColor: theme.colors.primary }
+            ]}
+            onPress={() => setActiveTab('photos')}
+          >
+            <Text style={[
+              styles.tabText,
+              { color: activeTab === 'photos' ? theme.colors.primary : theme.colors.textSecondary }
+            ]}>
+              Portfolio
             </Text>
           </TouchableOpacity>
 
@@ -1544,6 +1835,95 @@ export default function CreatorProfileScreen() {
             )}
           </View>
         )}
+
+        {/* Photos Tab */}
+        {activeTab === 'photos' && (() => {
+          const SW = Dimensions.get('window').width;
+          const GAP = 1;
+          const TILE = Math.floor((SW - GAP * 2) / 3);
+
+          return (
+            <View>
+              {/* + button top-right, own profile only */}
+              {isOwnProfile && (
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 12, paddingVertical: 10 }}>
+                  <TouchableOpacity
+                    onPress={async () => { const ok = await requestAgreement(); if (ok) setShowPhotoEditor(true); }}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    accessibilityLabel="Add portfolio content"
+                  >
+                    <Ionicons name="add-circle-outline" size={26} color={theme.colors.primary} />
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {loadingPhotos && photoPosts.length === 0 ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                </View>
+              ) : photoPosts.length > 0 ? (
+                <FlatList
+                  data={photoPosts}
+                  numColumns={3}
+                  keyExtractor={(item) => item.id}
+                  columnWrapperStyle={{ gap: GAP }}
+                  ItemSeparatorComponent={() => <View style={{ height: GAP }} />}
+                  renderItem={({ item }) => {
+                    const thumb = item.image_url || item.image_urls?.[0];
+                    return (
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => {
+                          setSelectedPhoto(item);
+                          setShowPhotoViewer(true);
+                        }}
+                        style={{ width: TILE, height: TILE }}
+                      >
+                        {thumb ? (
+                          <Image
+                            source={{ uri: thumb }}
+                            style={{ width: '100%', height: '100%' }}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={{ flex: 1, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center' }}>
+                            <Ionicons name="image-outline" size={24} color={theme.colors.textSecondary} />
+                          </View>
+                        )}
+                        {item.image_urls && item.image_urls.length > 1 && (
+                          <View style={{ position: 'absolute', top: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 4, padding: 2 }}>
+                            <Ionicons name="copy-outline" size={11} color="#fff" />
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  }}
+                  onEndReached={() => { if (!loadingPhotos && hasMorePhotos) loadPhotoPosts(photosPage + 1); }}
+                  onEndReachedThreshold={0.5}
+                  ListFooterComponent={
+                    loadingPhotos && photoPosts.length > 0
+                      ? <ActivityIndicator size="small" color={theme.colors.primary} style={{ padding: 16 }} />
+                      : null
+                  }
+                  scrollEnabled={false}
+                  nestedScrollEnabled
+                />
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="images-outline" size={64} color={theme.colors.textSecondary} />
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
+                    No photos yet
+                  </Text>
+                  {!isOwnProfile && (
+                    <Text style={[styles.emptyStateSubText, { color: theme.colors.textSecondary }]}>
+                      This creator hasn't added any portfolio content yet
+                    </Text>
+                  )}
+                </View>
+              )}
+            </View>
+          );
+        })()}
 
         {/* About Tab */}
         {activeTab === 'about' && (
@@ -2000,6 +2380,14 @@ export default function CreatorProfileScreen() {
         />
       )}
 
+      {creator?.username && (
+        <FanPageShareModal
+          visible={showFanPageModal}
+          username={creator.username}
+          onClose={() => setShowFanPageModal(false)}
+        />
+      )}
+
       {/* Service Provider Prompt Modal */}
       <ServiceProviderPromptModal
         visible={showServiceProviderPrompt}
@@ -2049,6 +2437,57 @@ export default function CreatorProfileScreen() {
           </LinearGradient>
         </View>
       </Modal>
+
+      {/* Photo Viewer Modal */}
+      <Modal
+        visible={showPhotoViewer}
+        animationType="slide"
+        onRequestClose={() => setShowPhotoViewer(false)}
+        statusBarTranslucent
+      >
+        <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, paddingTop: insets.top + 10, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
+            <TouchableOpacity onPress={() => setShowPhotoViewer(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+              <Ionicons name="close" size={26} color={theme.colors.text} />
+            </TouchableOpacity>
+            <Text style={[styles.tabText, { color: theme.colors.text, marginLeft: 12, fontSize: 17, fontWeight: '600' }]}>Portfolio</Text>
+          </View>
+          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom }}>
+            {selectedPhoto && (
+              <PostCard
+                post={selectedPhoto}
+                onPress={() => {}}
+                onShare={(post) => deepLinkingService.sharePost(post.id, post.content?.substring(0, 100))}
+                onTip={handleTipFromPost}
+                onAuthorPress={(authorId) => {
+                  setShowPhotoViewer(false);
+                  if (authorId !== creatorId) {
+                    (navigation as any).navigate('CreatorProfile', { creatorId: authorId });
+                  }
+                }}
+              />
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Creator Agreement — shown once before first creative action */}
+      <CreatorAgreementModal
+        visible={agreementVisible}
+        onAgreed={onAgreementAgreed}
+        onDismiss={onAgreementDismiss}
+        submitting={agreementSubmitting}
+      />
+
+      {/* Photo Post Editor */}
+      <PhotoPostEditorModal
+        visible={showPhotoEditor}
+        onClose={() => setShowPhotoEditor(false)}
+        onPosted={() => {
+          setShowPhotoEditor(false);
+          loadPhotoPosts(1);
+        }}
+      />
 
       </SafeAreaView>
     </View>
@@ -2373,32 +2812,6 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
     letterSpacing: 0.3,
   },
-  proBadge: {
-    backgroundColor: '#DC2626',
-    borderRadius: 10,
-    width: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  proPlusBadge: {
-    backgroundColor: '#DC2626',
-    borderRadius: 12,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    height: 20,
-  },
-  proPlusText: {
-    color: '#FFFFFF',
-    ...Typography.label,
-    fontSize: 10,
-    lineHeight: 12,
-    fontWeight: '700',
-    marginTop: -1,
-  },
   professionalHeadline: {
     fontFamily: Typography.body.fontFamily,
     fontSize: 14,
@@ -2415,6 +2828,37 @@ const styles = StyleSheet.create({
     fontWeight: '300',
     letterSpacing: -0.4,
     textAlign: 'center',
+  },
+  pollNudgeCard: {
+    marginHorizontal: 16,
+    marginBottom: 14,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  pollNudgeGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 12,
+  },
+  pollNudgeLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  pollNudgeTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 20,
+  },
+  pollNudgeSub: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
   },
   actionButtons: {
     paddingHorizontal: 16,
@@ -2464,6 +2908,20 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '300',
     letterSpacing: -0.4,
+  },
+  joinCommunityBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 24,
+    borderWidth: 1,
+    gap: 6,
+  },
+  joinCommunityBtnText: {
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 14,
+    fontWeight: '600',
   },
   tipButton: {
     flexDirection: 'row',
@@ -3109,6 +3567,15 @@ const styles = StyleSheet.create({
     fontWeight: '300',
     letterSpacing: -0.4,
   },
+  emptyStateSubText: {
+    fontFamily: Typography.body.fontFamily,
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '300',
+    letterSpacing: -0.2,
+    textAlign: 'center',
+  },
   aboutSection: {
     padding: 16,
   },
@@ -3183,5 +3650,33 @@ const styles = StyleSheet.create({
     fontFamily: Typography.body.fontFamily,
     fontSize: 13,
     lineHeight: 20,
+  },
+  bannerEditBtn: {
+    position: 'absolute',
+    top: 106,
+    right: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    zIndex: 10,
+  },
+  fanPageIconBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    zIndex: 10,
   },
 });

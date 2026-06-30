@@ -27,7 +27,7 @@ import { subscriptionPlans, Plan } from '../constants/subscriptionPlans';
 
 export default function UpgradeScreen() {
   const navigation = useNavigation();
-  const { user, session, refreshUser } = useAuth();
+  const { user, session, refreshUser, userProfile } = useAuth();
   const { theme } = useTheme();
   const { width } = Dimensions.get('window');
 
@@ -65,7 +65,7 @@ export default function UpgradeScreen() {
   const checkSubscriptionStatus = async () => {
     try {
       console.log('🔍 Checking subscription status...');
-      console.log('👤 User profile subscription_tier:', (user as any)?.subscription_tier);
+      console.log('👤 User profile subscription_tier:', userProfile?.subscription_tier);
 
       // Development bypass: Use hardcoded tier
       if (config.bypassRevenueCat && config.developmentTier) {
@@ -89,7 +89,7 @@ export default function UpgradeScreen() {
         console.warn('⚠️ RevenueCat not ready after waiting 10 seconds');
         console.warn('⚠️ This means RevenueCat SDK failed to initialize. Check API key and network.');
         // Fallback to user profile
-        const tier = (user as any)?.subscription_tier;
+        const tier = userProfile?.subscription_tier;
         if (tier === 'premium' || tier === 'unlimited') {
           console.log(`✅ Using ${tier} tier from user profile (RevenueCat timeout)`);
           setCurrentPlan(tier);
@@ -106,8 +106,13 @@ export default function UpgradeScreen() {
 
       if (!customerInfo) {
         console.warn('⚠️ No customer info returned from RevenueCat');
-        console.warn('⚠️ This might indicate a network issue or SDK problem');
-        setCurrentPlan('free');
+        const profileTier = userProfile?.subscription_tier;
+        if (profileTier === 'premium' || profileTier === 'unlimited') {
+          console.log(`✅ Using ${profileTier} from Supabase profile (RevenueCat returned null)`);
+          setCurrentPlan(profileTier);
+        } else {
+          setCurrentPlan('free');
+        }
         return;
       }
 
@@ -147,15 +152,23 @@ export default function UpgradeScreen() {
           setCurrentBillingCycle('monthly');
         }
       } else {
-        console.log('⚠️ Setting currentPlan to FREE');
-        setCurrentPlan('free');
-        setCurrentBillingCycle(null);
+        // RevenueCat says free — check Supabase profile for institutional access
+        const profileTier = userProfile?.subscription_tier;
+        if (profileTier === 'premium' || profileTier === 'unlimited') {
+          console.log(`✅ RevenueCat returned free but Supabase profile shows ${profileTier} — using institutional tier`);
+          setCurrentPlan(profileTier);
+          setCurrentBillingCycle(null);
+        } else {
+          console.log('⚠️ Setting currentPlan to FREE');
+          setCurrentPlan('free');
+          setCurrentBillingCycle(null);
+        }
       }
 
     } catch (error) {
       console.error('❌ Error checking subscription status:', error);
       // Fallback to user profile data
-      const tier = (user as any)?.subscription_tier;
+      const tier = userProfile?.subscription_tier;
       if (tier === 'premium' || tier === 'unlimited') {
         console.log('⚠️ Using fallback from user profile:', tier);
         setCurrentPlan(tier);
