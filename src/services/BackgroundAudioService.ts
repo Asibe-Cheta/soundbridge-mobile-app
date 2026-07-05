@@ -180,7 +180,7 @@ class BackgroundAudioService {
         // Use _trackBeforeBackground instead of this.currentTrack — a spurious
         // PlaybackQueueEnded in background may have nulled this.currentTrack already.
         const resumeTrack = this._trackBeforeBackground;
-        if (!USE_EXPO_AV && this._playingSnapshotBeforeBackground && resumeTrack) {
+        if (!USE_EXPO_AV && !USE_EXPO_AUDIO_IOS && this._playingSnapshotBeforeBackground && resumeTrack) {
           const TrackPlayer = getTrackPlayer();
           const constants = getTrackPlayerConstants();
           if (TrackPlayer && constants) {
