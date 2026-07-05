@@ -450,12 +450,15 @@ class BackgroundAudioService {
 
   /** iOS regular playback — 1.4.0 expo-audio config (production-proven). */
   private async playWithExpoAudio(track: BackgroundAudioTrack) {
+    // doNotMix: exclusive audio session so iOS registers this app as the Now Playing
+    // source, which enables lock screen / Control Centre player controls.
+    // shouldPlayInBackground is what keeps audio alive in background — independent of doNotMix.
     await setAudioModeAsync({
       allowsRecording: false,
       shouldPlayInBackground: true,
       playsInSilentMode: true,
       interruptionModeAndroid: 'duckOthers',
-      interruptionMode: 'mixWithOthers',
+      interruptionMode: 'doNotMix',
     });
     this.stopExpoAudioPlayer();
     await new Promise(r => setTimeout(r, 50));
@@ -470,6 +473,29 @@ class BackgroundAudioService {
     this.isPlaying = true;
     this.notifyCallbacks();
     audioLog('EXPO_AUDIO_PLAY_OK', { title: track.title });
+
+    // Initialize RNTP (registers MPRemoteCommandCenter capabilities) and load the
+    // track into its queue so MPNowPlayingInfoCenter shows title/artist/artwork on the
+    // lock screen. Actual audio comes from expo-audio above — TrackPlayer.play() is
+    // intentionally NOT called here to avoid double-audio conflicts.
+    try {
+      await this.initialize();
+      const TrackPlayer = getTrackPlayer();
+      if (TrackPlayer) {
+        await TrackPlayer.reset();
+        await TrackPlayer.add({
+          id: track.id,
+          url: track.url,
+          title: track.title,
+          artist: track.artist,
+          artwork: track.artwork,
+          duration: track.duration,
+        });
+        audioLog('RNTP_META_LOADED', { title: track.title });
+      }
+    } catch (e) {
+      audioLog('RNTP_META_ERR', String(e));
+    }
   }
 
   async playTrack(track: BackgroundAudioTrack, queue?: BackgroundAudioTrack[], queueIndex?: number) {

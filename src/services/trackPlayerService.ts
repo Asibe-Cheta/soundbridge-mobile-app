@@ -11,6 +11,20 @@ const RESTORE_KEY = 'sb_audio_restore';
 const BG_PROBE_ANCHOR_KEY = 'sb_bg_probe_anchor';
 const BG_PROBE_SECONDS = [5, 15, 30, 45, 60];
 
+// On iOS the headless service runs in the same JS context as the main app, so
+// require() here returns the same singleton as the rest of the app. Remote events
+// (play/pause/seek) route to BackgroundAudioService → expo-audio instead of
+// calling TrackPlayer.play(), which would conflict with expo-audio's audio stream.
+function getBackgroundAudioServiceIOS() {
+  try {
+    const { Platform } = require('react-native');
+    if (Platform.OS !== 'ios') return null;
+    return require('./BackgroundAudioService').backgroundAudioService;
+  } catch {
+    return null;
+  }
+}
+
 // Use a SEPARATE key from the main debug log to avoid race conditions.
 // The main log (sb_audio_debug_v1) and this key are merged in the About screen viewer.
 const HEADLESS_LOG_KEY = 'sb_hs_debug_v1';
@@ -216,6 +230,15 @@ async function headlessResolveUrl(track) {
 }
 
 async function headlessEnsurePlaying(reason: string) {
+  // iOS uses expo-audio via BackgroundAudioService — RNTP never plays audio directly.
+  // Calling TrackPlayer.play() here would conflict with expo-audio's stream.
+  {
+    const { Platform } = require('react-native');
+    if (Platform.OS === 'ios') {
+      headlessLog('KEEPALIVE_SKIP_IOS', { reason });
+      return;
+    }
+  }
   // Only recover from a fully dead player (Stopped/None/Error) — never fight Paused.
   // Periodic resume while Paused caused Control Center glitches and ~60s stop/resume loops.
   try {
@@ -287,6 +310,13 @@ module.exports = async function () {
 
   TrackPlayer.addEventListener(Event.RemotePlay, async () => {
     headlessLog('RemotePlay');
+    // iOS: route to expo-audio via BackgroundAudioService (RNTP is metadata-only on iOS)
+    const svc = getBackgroundAudioServiceIOS();
+    if (svc) {
+      await headlessMarkPlaying();
+      await svc.resume();
+      return;
+    }
     await headlessMarkPlaying();
     await TrackPlayer.setVolume(1.0);
     await TrackPlayer.play();
@@ -294,6 +324,12 @@ module.exports = async function () {
 
   TrackPlayer.addEventListener(Event.RemotePause, async () => {
     headlessLog('RemotePause');
+    const svc = getBackgroundAudioServiceIOS();
+    if (svc) {
+      await headlessMarkPaused();
+      await svc.pause('lockscreen');
+      return;
+    }
     await headlessMarkPaused();
     await TrackPlayer.pause();
   });
@@ -304,6 +340,12 @@ module.exports = async function () {
   // so the track survives in the native layer across background sessions.
   TrackPlayer.addEventListener(Event.RemoteStop, async () => {
     await headlessLogNativeEvent('RemoteStop');
+    const svc = getBackgroundAudioServiceIOS();
+    if (svc) {
+      await headlessMarkPaused();
+      await svc.pause('lockscreen-stop');
+      return;
+    }
     await headlessMarkPaused();
     await TrackPlayer.pause();
   });
@@ -328,6 +370,11 @@ module.exports = async function () {
 
   TrackPlayer.addEventListener(Event.RemoteSeek, async ({ position }: { position: number }) => {
     headlessLog('RemoteSeek', { position });
+    const svc = getBackgroundAudioServiceIOS();
+    if (svc) {
+      await svc.seekTo(position);
+      return;
+    }
     await TrackPlayer.seekTo(position);
   });
 
@@ -377,6 +424,16 @@ module.exports = async function () {
       }
 
       // Background (Home / app switcher) — never stay paused.
+      // iOS uses expo-audio (RNTP is metadata-only) — with a track loaded in Ready
+      // state, RNTP.play() would start double audio. Skip keepalive; expo-audio
+      // continues uninterrupted via its own shouldPlayInBackground session.
+      {
+        const { Platform } = require('react-native');
+        if (Platform.OS === 'ios') {
+          headlessLog('RemoteDuck_BG_SKIP_IOS');
+          return;
+        }
+      }
       headlessLog('RemoteDuck_BG_KEEPALIVE');
       await TrackPlayer.setVolume(1.0);
       const state = await TrackPlayer.getState();
