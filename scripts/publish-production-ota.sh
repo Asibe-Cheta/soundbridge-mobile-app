@@ -106,7 +106,7 @@ EAS_SKIP_AUTO_FINGERPRINT=1 npx eas update \
   --skip-bundler \
   --input-dir dist \
   --message "$MESSAGE" \
-  "${EXTRA_ARGS[@]}"
+  ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 
 echo ""
 echo "✓ Published. Users need force-quit → reopen (×2) to apply."

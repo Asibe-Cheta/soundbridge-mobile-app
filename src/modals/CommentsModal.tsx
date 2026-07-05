@@ -39,6 +39,7 @@ interface CommentsModalProps {
   post: Post;
   onClose: () => void;
   onViewFullPost?: (postId: string) => void;
+  onCommentAdded?: () => void;
 }
 
 export default function CommentsModal({
@@ -46,6 +47,7 @@ export default function CommentsModal({
   post,
   onClose,
   onViewFullPost,
+  onCommentAdded,
 }: CommentsModalProps) {
   const { theme } = useTheme();
   const { userProfile, user } = useAuth();
@@ -228,6 +230,7 @@ export default function CommentsModal({
 
     try {
       await addCommentAPI(text, replyingTo || undefined, imageUrl);
+      onCommentAdded?.();
     } catch (err) {
       console.error('Failed to add comment:', err);
     } finally {

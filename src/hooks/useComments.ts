@@ -24,10 +24,11 @@ export const useComments = (postId: string) => {
       setLoading(pageNum === 1);
       setError(null);
       const { comments: newComments, hasMore: more } = await feedService.getComments(postId, pageNum, 20);
+      const topLevel = newComments.filter(c => !c.parent_comment_id);
       if (pageNum === 1) {
-        setComments(newComments);
+        setComments(topLevel);
       } else {
-        setComments((prev) => [...prev, ...newComments]);
+        setComments((prev) => [...prev, ...topLevel]);
       }
       setHasMore(more);
       setPage(pageNum);
@@ -235,6 +236,7 @@ export const useComments = (postId: string) => {
   // Real-time updates for top-level comments
   useEffect(() => {
     const unsubscribe = realtimeService.subscribeToPostComments(postId, (newComment) => {
+      if (newComment.parent_comment_id) return; // replies go into repliesMap, not top-level list
       setComments((prev) => {
         if (prev.some((c) => c.id === newComment.id)) return prev;
         return [newComment, ...prev];

@@ -133,6 +133,7 @@ const PostCard = memo(function PostCard({
   const [showReportModal, setShowReportModal] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [showCommentsModal, setShowCommentsModal] = useState(false);
+  const [localCommentsCount, setLocalCommentsCount] = useState(post.comments_count);
   const [showReactionsModal, setShowReactionsModal] = useState(false);
   const [showRepostModal, setShowRepostModal] = useState(false);
   const [isReposting, setIsReposting] = useState(false);
@@ -996,7 +997,7 @@ const PostCard = memo(function PostCard({
         </View>
 
         {/* Summary Line - LinkedIn style */}
-        {(totalReactions > 0 || post.comments_count > 0 || (post.shares_count ?? 0) > 0) && (
+        {(totalReactions > 0 || localCommentsCount > 0 || (post.shares_count ?? 0) > 0) && (
           <View style={styles.summaryLine}>
             {/* Left: emoji bubbles + reaction count */}
             {totalReactions > 0 && (
@@ -1038,7 +1039,7 @@ const PostCard = memo(function PostCard({
 
             {/* Right: comments + redrops */}
             <View style={styles.summaryRight}>
-              {post.comments_count > 0 && (
+              {localCommentsCount > 0 && (
                 <TouchableOpacity
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1046,11 +1047,11 @@ const PostCard = memo(function PostCard({
                   }}
                 >
                   <Text style={[styles.summaryText, { color: theme.colors.textSecondary }]}>
-                    {post.comments_count} comment{post.comments_count !== 1 ? 's' : ''}
+                    {localCommentsCount} comment{localCommentsCount !== 1 ? 's' : ''}
                   </Text>
                 </TouchableOpacity>
               )}
-              {post.comments_count > 0 && (post.shares_count ?? 0) > 0 && (
+              {localCommentsCount > 0 && (post.shares_count ?? 0) > 0 && (
                 <Text style={[styles.summaryDot, { color: theme.colors.textSecondary }]}> · </Text>
               )}
               {(post.shares_count ?? 0) > 0 && (
@@ -1084,6 +1085,7 @@ const PostCard = memo(function PostCard({
         visible={showCommentsModal}
         post={post}
         onClose={() => setShowCommentsModal(false)}
+        onCommentAdded={() => setLocalCommentsCount(c => c + 1)}
       />
 
       {/* Repost Modal */}
@@ -1138,7 +1140,7 @@ const PostCard = memo(function PostCard({
           onClose={() => setShowFullScreenImage(false)}
           userReaction={post.user_reaction}
           reactionsCount={post.reactions_count}
-          commentsCount={post.comments_count}
+          commentsCount={localCommentsCount}
           onReactionPress={handleReactionPress}
           onCommentPress={() => setShowCommentsModal(true)}
         />

@@ -659,6 +659,15 @@ export default function FeedScreen() {
             setSelectedPostForComments(null);
             handlePostPress(postId);
           }}
+          onCommentAdded={() => {
+            updatePostLocally({
+              ...selectedPostForComments,
+              comments_count: selectedPostForComments.comments_count + 1,
+            });
+            setSelectedPostForComments(prev =>
+              prev ? { ...prev, comments_count: prev.comments_count + 1 } : prev
+            );
+          }}
         />
       )}
 
