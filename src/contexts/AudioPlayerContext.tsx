@@ -197,7 +197,13 @@ export function AudioPlayerProvider({ children }: AudioPlayerProviderProps) {
   // When a playing update arrives with no current track set, restore the MiniPlayer.
   useEffect(() => {
     const unsub = backgroundAudioService.onStatusUpdate((s) => {
-      applyServiceStatusToUi(s, { restoreTrack: true });
+      // Only restore mini player when audio is genuinely playing.
+      // Prevents ghost mini player on cold launch after app kill — in that case
+      // _resumeAfterJsRestart fires notifyCallbacks() with isPlaying=false, and
+      // we must not restore currentTrack from null or the mini player will show
+      // with no audio backing it. Background JS restarts where native audio is
+      // still playing will have isPlaying=true and restore correctly.
+      applyServiceStatusToUi(s, { restoreTrack: s.isPlaying });
     });
     statusUnsubscribeRef.current = unsub;
 
