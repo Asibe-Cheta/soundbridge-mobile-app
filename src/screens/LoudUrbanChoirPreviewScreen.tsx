@@ -23,9 +23,9 @@ const COVER_PHOTO = require('../../assets/loud-cover-photo.jpg');
 const PROFILE_PIC = require('../../assets/loud-profile-pic.jpg');
 const RISE_COVER = require('../../assets/loud-rise-cover.jpg');
 const SOMEWHERE_COVER = require('../../assets/loud-somewhere-cover.jpg');
-const MEMBER_1 = require('../../assets/loud-member-1.jpg');
-const MEMBER_2 = require('../../assets/loud-member-2.jpg');
-const MEMBER_3 = require('../../assets/loud-member-3.jpg');
+const MEMBER_1 = require('../../assets/loud-member-1.png');
+const MEMBER_2 = require('../../assets/loud-member-2.png');
+const MEMBER_3 = require('../../assets/loud-member-3.png');
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const GRID_ITEM = (SCREEN_W - 4) / 3;
