@@ -30,6 +30,7 @@ import AuthScreen from './src/screens/AuthScreen';
 import CardRecoveryScreen from './src/screens/CardRecoveryScreen';
 import SoundAcademySignupScreen from './src/screens/SoundAcademySignupScreen';
 import AbbeyRoadSignupScreen from './src/screens/AbbeyRoadSignupScreen';
+import LoudUrbanChoirPreviewScreen from './src/screens/LoudUrbanChoirPreviewScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import TestFeedScreen from './src/screens/TestFeedScreen';
 import DiscoverScreen from './src/screens/DiscoverScreen';
@@ -1157,6 +1158,7 @@ function AppNavigator() {
             <Stack.Screen name="Auth" component={AuthScreen} />
             <Stack.Screen name="SoundAcademySignup" component={SoundAcademySignupScreen} options={{ headerShown: false }} />
             <Stack.Screen name="AbbeyRoadSignup" component={AbbeyRoadSignupScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="LoudUrbanChoirPreview" component={LoudUrbanChoirPreviewScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CardRecovery" component={CardRecoveryScreen} options={{ headerShown: false }} />
             <Stack.Screen 
               name="TwoFactorVerification" 

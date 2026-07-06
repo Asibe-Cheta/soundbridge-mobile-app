@@ -2264,6 +2264,20 @@ export default function ProfileScreen() {
         </View>
       )}
 
+      {user?.email === 'asibechetachukwu@gmail.com' && (
+        <View style={[styles.section, { marginTop: 8 }]}>
+          <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+            <TouchableOpacity style={styles.groupedRow} onPress={() => (navigation as any).navigate('LoudUrbanChoirPreview')}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+                <Ionicons name="eye-outline" size={18} color={theme.colors.primary} />
+              </View>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Preview: Loud Urban Choir</Text>
+              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* Sign Out */}
       <TouchableOpacity style={[styles.signOutButton, { backgroundColor: theme.colors.error + '20', borderColor: theme.colors.error }]} onPress={handleSignOut}>
         <Text style={[styles.signOutText, { color: theme.colors.error }]}>Sign Out</Text>
