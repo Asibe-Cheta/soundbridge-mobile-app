@@ -1158,7 +1158,6 @@ function AppNavigator() {
             <Stack.Screen name="Auth" component={AuthScreen} />
             <Stack.Screen name="SoundAcademySignup" component={SoundAcademySignupScreen} options={{ headerShown: false }} />
             <Stack.Screen name="AbbeyRoadSignup" component={AbbeyRoadSignupScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="LoudUrbanChoirPreview" component={LoudUrbanChoirPreviewScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CardRecovery" component={CardRecoveryScreen} options={{ headerShown: false }} />
             <Stack.Screen 
               name="TwoFactorVerification" 
@@ -1259,6 +1258,7 @@ function AppNavigator() {
             <Stack.Screen name="ListVenue" component={ListVenueScreen} options={{ headerShown: false }} />
             <Stack.Screen name="MyVenues" component={MyVenuesScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} />
+            <Stack.Screen name="LoudUrbanChoirPreview" component={LoudUrbanChoirPreviewScreen} options={{ headerShown: false }} />
             <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
             <Stack.Screen name="EventsPickedForYou" component={EventsPickedForYouScreen} />
             <Stack.Screen name="TicketConfirmation" component={TicketConfirmationScreen} options={{ headerShown: false, gestureEnabled: false }} />
