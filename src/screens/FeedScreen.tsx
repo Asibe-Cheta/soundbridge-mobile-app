@@ -10,6 +10,8 @@ import {
   Modal,
   Linking,
   Image,
+  ScrollView,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -53,6 +55,12 @@ type FeedItem = Post | typeof CAUGHT_UP_MARKER;
 const WalkthroughableView = walkthroughable(View);
 const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
 
+// ─── Partner banner carousel ─────────────────────────────────────────────────
+// ARI_LOGO is the single path to change when the real Abbey Road asset arrives.
+const ARI_LOGO = require('../../assets/ari.png');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const BANNER_WIDTH = SCREEN_WIDTH - 32; // matches marginHorizontal: 16 on each side
+
 export default function FeedScreen() {
   const navigation = useNavigation();
   const { theme } = useTheme();
@@ -87,6 +95,12 @@ export default function FeedScreen() {
   const markerSeenRef = useRef(false);
   const userIdRef = useRef<string | undefined>(undefined);
   const viewabilityConfig = useRef({ viewAreaCoveragePercentThreshold: 60 });
+
+  // ── Partner banner carousel ──────────────────────────────────────────────
+  const [bannerIndex, setBannerIndex] = useState(0);
+  const bannerScrollRef = useRef<ScrollView>(null);
+  const bannerAutoPlayRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const BANNER_COUNT = 2;
 
   // Early adopter conversion modal
   const isExpiredEarlyAdopter =
@@ -178,6 +192,39 @@ export default function FeedScreen() {
       loadBookmarkStatus();
     }
   }, [posts.length, user?.id]); // Only reload when post count or user changes
+
+  const startBannerAutoPlay = useCallback(() => {
+    if (bannerAutoPlayRef.current) clearInterval(bannerAutoPlayRef.current);
+    bannerAutoPlayRef.current = setInterval(() => {
+      setBannerIndex(prev => {
+        const next = (prev + 1) % BANNER_COUNT;
+        bannerScrollRef.current?.scrollTo({ x: next * BANNER_WIDTH, animated: true });
+        return next;
+      });
+    }, 3000);
+  }, []);
+
+  const handleBannerScroll = useCallback((e: any) => {
+    const index = Math.round(e.nativeEvent.contentOffset.x / BANNER_WIDTH);
+    setBannerIndex(index);
+  }, []);
+
+  const handleBannerDragStart = useCallback(() => {
+    if (bannerAutoPlayRef.current) clearInterval(bannerAutoPlayRef.current);
+    bannerAutoPlayRef.current = null;
+  }, []);
+
+  const handleBannerMomentumEnd = useCallback(() => {
+    startBannerAutoPlay();
+  }, [startBannerAutoPlay]);
+
+  useEffect(() => {
+    startBannerAutoPlay();
+    return () => {
+      if (bannerAutoPlayRef.current) clearInterval(bannerAutoPlayRef.current);
+    };
+  }, [startBannerAutoPlay]);
+
 
   // Keep a stable ref to user.id so viewability callback never has stale closure
   useEffect(() => { userIdRef.current = user?.id; }, [user?.id]);
@@ -537,57 +584,133 @@ export default function FeedScreen() {
                     <CreatePostPrompt onPress={handleCreatePost} />
                   </WalkthroughableView>
                   <LiveAudioBanner />
-                  {/* Sound Academy Education Partner Banner */}
-                  <TouchableOpacity
-                    style={styles.saPartnerBanner}
-                    activeOpacity={0.75}
-                    onPress={() => {
-                      proResourceAnalytics.track('explore_courses_tap');
-                      (navigation as any).navigate('ProResources');
-                    }}
-                  >
-                    <LinearGradient
-                      colors={['#1C1235', '#2A1650', '#1C1235']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={StyleSheet.absoluteFillObject}
-                    />
-                    <LinearGradient
-                      colors={['rgba(139,92,246,0.18)', 'transparent', 'rgba(88,28,135,0.12)']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={StyleSheet.absoluteFillObject}
-                    />
-                    <View style={styles.saTopRow}>
-                      <View style={styles.saLogoWrap}>
-                        <Image
-                          source={require('../../assets/sa-2.png')}
-                          style={styles.saLogo}
-                          resizeMode="cover"
+                  {/* Partner Banner Carousel — Sound Academy + Abbey Road Institute */}
+                  <View style={styles.carouselWrapper}>
+                    <ScrollView
+                      ref={bannerScrollRef}
+                      horizontal
+                      pagingEnabled
+                      showsHorizontalScrollIndicator={false}
+                      scrollEventThrottle={16}
+                      onScroll={handleBannerScroll}
+                      onScrollBeginDrag={handleBannerDragStart}
+                      onMomentumScrollEnd={handleBannerMomentumEnd}
+                    >
+                      {/* Slide 0: Sound Academy */}
+                      <TouchableOpacity
+                        style={styles.saBannerItem}
+                        activeOpacity={0.75}
+                        onPress={() => {
+                          proResourceAnalytics.track('explore_courses_tap');
+                          (navigation as any).navigate('ProResources');
+                        }}
+                      >
+                        <LinearGradient
+                          colors={['#1C1235', '#2A1650', '#1C1235']}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={StyleSheet.absoluteFillObject}
                         />
-                      </View>
-                      <View style={styles.saPartnerBadge}>
-                        <View style={styles.saPartnerDot} />
-                        <Text style={styles.saPartnerBadgeText}>EDUCATION PARTNER</Text>
-                      </View>
+                        <LinearGradient
+                          colors={['rgba(139,92,246,0.18)', 'transparent', 'rgba(88,28,135,0.12)']}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={StyleSheet.absoluteFillObject}
+                        />
+                        <View style={styles.saTopRow}>
+                          <View style={styles.saLogoWrap}>
+                            <Image
+                              source={require('../../assets/sa-2.png')}
+                              style={styles.saLogo}
+                              resizeMode="cover"
+                            />
+                          </View>
+                          <View style={styles.saPartnerBadge}>
+                            <View style={styles.saPartnerDot} />
+                            <Text style={styles.saPartnerBadgeText}>EDUCATION PARTNER</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.saHeadline}>Level Up Your Sound</Text>
+                        <Text style={styles.saSubheadline}>
+                          World-class audio engineering & DJ courses.{'\n'}Pro Tools certified · 5 countries.
+                        </Text>
+                        <View style={styles.saCtaButton}>
+                          <Ionicons name="school-outline" size={15} color="#fff" style={{ marginRight: 6 }} />
+                          <Text style={styles.saCtaText}>Explore Courses</Text>
+                        </View>
+                        <View style={styles.saFooterStrip}>
+                          <Text style={styles.saFooterText}>Official SoundBridge Education Partner</Text>
+                          <Image
+                            source={require('../../assets/images/logos/logo-trans-lockup.png')}
+                            style={styles.saFooterLogo}
+                            resizeMode="contain"
+                          />
+                        </View>
+                      </TouchableOpacity>
+
+                      {/* Slide 1: Abbey Road Institute */}
+                      <TouchableOpacity
+                        style={styles.ariBannerItem}
+                        activeOpacity={0.75}
+                        onPress={() => {
+                          proResourceAnalytics.track('ari_explore_tap');
+                          (navigation as any).navigate('ProResources');
+                        }}
+                      >
+                        <LinearGradient
+                          colors={['#1C0A0A', '#2A1010', '#1C0808']}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={StyleSheet.absoluteFillObject}
+                        />
+                        <LinearGradient
+                          colors={['rgba(220,38,38,0.18)', 'transparent', 'rgba(153,27,27,0.12)']}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={StyleSheet.absoluteFillObject}
+                        />
+                        <View style={styles.saTopRow}>
+                          <View style={styles.saLogoWrap}>
+                            <Image
+                              source={ARI_LOGO}
+                              style={styles.saLogo}
+                              resizeMode="cover"
+                            />
+                          </View>
+                          <View style={styles.ariPartnerBadge}>
+                            <View style={styles.ariPartnerDot} />
+                            <Text style={styles.ariPartnerBadgeText}>EDUCATION PARTNER</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.saHeadline}>Train at Abbey Road</Text>
+                        <Text style={styles.saSubheadline}>
+                          Pro audio engineering in a world-famous studio.{'\n'}Avid certified · Weekend & intensive programmes.
+                        </Text>
+                        <View style={styles.ariCtaButton}>
+                          <Ionicons name="school-outline" size={15} color="#fff" style={{ marginRight: 6 }} />
+                          <Text style={styles.saCtaText}>Explore Programmes</Text>
+                        </View>
+                        <View style={styles.saFooterStrip}>
+                          <Text style={styles.saFooterText}>Official SoundBridge Education Partner</Text>
+                          <Image
+                            source={require('../../assets/images/logos/logo-trans-lockup.png')}
+                            style={styles.saFooterLogo}
+                            resizeMode="contain"
+                          />
+                        </View>
+                      </TouchableOpacity>
+                    </ScrollView>
+
+                    {/* Pagination dots */}
+                    <View style={styles.carouselDots}>
+                      {[0, 1].map(i => (
+                        <View
+                          key={i}
+                          style={[styles.carouselDot, bannerIndex === i && styles.carouselDotActive]}
+                        />
+                      ))}
                     </View>
-                    <Text style={styles.saHeadline}>Level Up Your Sound</Text>
-                    <Text style={styles.saSubheadline}>
-                      World-class audio engineering & DJ courses.{'\n'}Pro Tools certified · 5 countries.
-                    </Text>
-                    <View style={styles.saCtaButton}>
-                      <Ionicons name="school-outline" size={15} color="#fff" style={{ marginRight: 6 }} />
-                      <Text style={styles.saCtaText}>Explore Courses</Text>
-                    </View>
-                    <View style={styles.saFooterStrip}>
-                      <Text style={styles.saFooterText}>Official SoundBridge Education Partner</Text>
-                      <Image
-                        source={require('../../assets/images/logos/logo-trans-lockup.png')}
-                        style={styles.saFooterLogo}
-                        resizeMode="contain"
-                      />
-                    </View>
-                  </TouchableOpacity>
+                  </View>
                 </>
               }
               ListFooterComponent={
@@ -879,11 +1002,14 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
 
-  // ── Sound Academy Partner Banner ──────────────────────────
-  saPartnerBanner: {
+  // ── Partner Banner Carousel ────────────────────────────────
+  carouselWrapper: {
     marginHorizontal: 16,
     marginTop: 12,
     marginBottom: 4,
+  },
+  saBannerItem: {
+    width: BANNER_WIDTH,
     borderRadius: 20,
     overflow: 'hidden',
     borderWidth: 1,
@@ -896,6 +1022,64 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 16,
     elevation: 10,
+  },
+  ariBannerItem: {
+    width: BANNER_WIDTH,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(220,38,38,0.25)',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 0,
+    shadowColor: '#B91C1C',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  ariPartnerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(220,38,38,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(220,38,38,0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  ariPartnerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FCA5A5' },
+  ariPartnerBadgeText: { fontSize: 10, fontWeight: '700', color: '#FCA5A5', letterSpacing: 0.8 },
+  ariCtaButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 24,
+    marginBottom: 14,
+  },
+  carouselDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 2,
+    gap: 6,
+  },
+  carouselDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  carouselDotActive: {
+    backgroundColor: '#A78BFA',
+    width: 18,
   },
   saTopRow: {
     flexDirection: 'row',

@@ -440,6 +440,11 @@ class DeepLinkingService {
       return { screen: 'SoundAcademySignup' };
     }
 
+    // soundbridge://join/abbeyroad  or  https://soundbridge.live/join/abbeyroad
+    if (subpath === 'abbeyroad') {
+      return { screen: 'AbbeyRoadSignup' };
+    }
+
     // soundbridge://join?ref=danedmund  or  https://soundbridge.live/join?ref=danedmund
     const refCode = searchParams.get('ref');
     if (refCode) {

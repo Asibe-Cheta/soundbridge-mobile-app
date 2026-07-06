@@ -60,6 +60,9 @@ import EventPromotionTrackingService from '../services/EventPromotionTrackingSer
 
 const WalkthroughableView = walkthroughable(View);
 const { width: SCREEN_W } = Dimensions.get('window');
+const CARD_WIDTH = SCREEN_W - 32;
+// Single path to swap when real ARI asset arrives
+const ARI_LOGO_TF = require('../../assets/ari.png');
 
 // Screen 02 — collection tab labels
 const FILTER_TABS = ['For You', 'Following', 'Events'];
@@ -203,9 +206,9 @@ function LiveAudioCard({ onPress }: { onPress: () => void }) {
 // ─────────────────────────────────────────────────────────────
 // SoundAcademyCard — Screen 02 card design, deep purple
 // ─────────────────────────────────────────────────────────────
-function SoundAcademyCard({ onPress }: { onPress: () => void }) {
+function SoundAcademyCard({ onPress, carousel }: { onPress: () => void; carousel?: boolean }) {
   return (
-    <TouchableOpacity style={cardStyles.card} activeOpacity={0.88} onPress={onPress}>
+    <TouchableOpacity style={carousel ? cardStyles.carouselCard : cardStyles.card} activeOpacity={0.88} onPress={onPress}>
       {/* Deep purple gradient */}
       <LinearGradient
         colors={['#1C1235', '#2A1650', '#1C1235']}
@@ -246,6 +249,63 @@ function SoundAcademyCard({ onPress }: { onPress: () => void }) {
         <Text style={cardStyles.subtitle}>World-class audio engineering &amp; DJ courses · Pro Tools certified</Text>
         <View style={cardStyles.ctaRow}>
           <Text style={cardStyles.ctaText}>Explore Courses</Text>
+          <LinearGradient
+            colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0)', 'rgba(255,255,255,0.12)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={cardStyles.glassCircle}
+          >
+            <View style={{ transform: [{ rotate: '45deg' }] }}>
+              <Ionicons name="arrow-up-outline" size={20} color="#fff" />
+            </View>
+          </LinearGradient>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// AbbeyRoadCard — Screen 02 card design, dark red / burgundy
+// ─────────────────────────────────────────────────────────────
+function AbbeyRoadCard({ onPress, carousel }: { onPress: () => void; carousel?: boolean }) {
+  return (
+    <TouchableOpacity style={carousel ? cardStyles.carouselCard : cardStyles.card} activeOpacity={0.88} onPress={onPress}>
+      <LinearGradient
+        colors={['#1C0A0A', '#2A1010', '#1C0808']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={['rgba(220,38,38,0.35)', 'transparent', 'rgba(153,27,27,0.25)']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+
+      <Image
+        source={ARI_LOGO_TF}
+        style={cardStyles.saLogoBg}
+        resizeMode="contain"
+      />
+
+      <LinearGradient
+        colors={['transparent', 'rgba(28,4,4,0.95)']}
+        start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
+        style={cardStyles.bottomGradient}
+      />
+
+      <View style={[cardStyles.badge, cardStyles.ariBadge]}>
+        <View style={[cardStyles.liveDot, { backgroundColor: '#FCA5A5' }]} />
+        <Text style={[cardStyles.badgeText, { color: '#FCA5A5' }]}>EDUCATION PARTNER</Text>
+      </View>
+
+      <View style={cardStyles.content}>
+        <Text style={cardStyles.title}>
+          Train at{' '}<Text style={{ color: 'rgba(255,255,255,0.9)' }}>Abbey Road</Text>
+        </Text>
+        <Text style={cardStyles.subtitle}>Pro audio engineering in a world-famous studio · Avid certified</Text>
+        <View style={cardStyles.ctaRow}>
+          <Text style={cardStyles.ctaText}>Explore Programmes</Text>
           <LinearGradient
             colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0)', 'rgba(255,255,255,0.12)']}
             start={{ x: 0, y: 0 }}
@@ -377,6 +437,44 @@ const cardStyles = StyleSheet.create({
     opacity: 0.38,
     zIndex: 0,
   },
+  carouselCard: {
+    width: CARD_WIDTH,
+    height: 300,
+    borderRadius: 24,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    elevation: 14,
+  },
+  ariBadge: {
+    backgroundColor: 'rgba(220,38,38,0.2)',
+    borderColor: 'rgba(220,38,38,0.4)',
+  },
+  partnerCarouselWrapper: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 4,
+  },
+  partnerCarouselDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 2,
+    gap: 6,
+  },
+  partnerCarouselDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  partnerCarouselDotActive: {
+    backgroundColor: '#A78BFA',
+    width: 18,
+  },
 });
 
 export default function TestFeedScreen() {
@@ -393,6 +491,12 @@ export default function TestFeedScreen() {
   } = useFeed();
 
   const [activeFilter, setActiveFilter] = useState('For You');
+
+  // ── Partner card carousel ────────────────────────────────────────────────
+  const [cardIndex, setCardIndex] = useState(0);
+  const cardScrollRef = useRef<ScrollView>(null);
+  const cardAutoPlayRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const CARD_COUNT = 2;
 
   // Following tab — set of user IDs the logged-in user follows
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
@@ -512,6 +616,38 @@ export default function TestFeedScreen() {
       setEventsLoading(false);
     });
   }, [activeFilter]);
+
+  const startCardAutoPlay = useCallback(() => {
+    if (cardAutoPlayRef.current) clearInterval(cardAutoPlayRef.current);
+    cardAutoPlayRef.current = setInterval(() => {
+      setCardIndex(prev => {
+        const next = (prev + 1) % CARD_COUNT;
+        cardScrollRef.current?.scrollTo({ x: next * CARD_WIDTH, animated: true });
+        return next;
+      });
+    }, 3000);
+  }, []);
+
+  const handleCardScroll = useCallback((e: any) => {
+    const index = Math.round(e.nativeEvent.contentOffset.x / CARD_WIDTH);
+    setCardIndex(index);
+  }, []);
+
+  const handleCardDragStart = useCallback(() => {
+    if (cardAutoPlayRef.current) clearInterval(cardAutoPlayRef.current);
+    cardAutoPlayRef.current = null;
+  }, []);
+
+  const handleCardMomentumEnd = useCallback(() => {
+    startCardAutoPlay();
+  }, [startCardAutoPlay]);
+
+  useEffect(() => {
+    startCardAutoPlay();
+    return () => {
+      if (cardAutoPlayRef.current) clearInterval(cardAutoPlayRef.current);
+    };
+  }, [startCardAutoPlay]);
 
   // ── Handlers (unchanged) ────────────────────────────────────
   const handleCalendarNudgeDismiss = async () => {
@@ -843,12 +979,37 @@ export default function TestFeedScreen() {
                 </ScrollView>
               </View>
 
-              {/* Live Audio + Sound Academy — Screen 02 card design */}
+              {/* Live Audio + Partner Banner Carousel — Screen 02 card design */}
               <LiveAudioCard onPress={() => navigation.navigate('LiveSessions' as never)} />
-              <SoundAcademyCard onPress={() => {
-                proResourceAnalytics.track('explore_courses_tap');
-                (navigation as any).navigate('ProResources');
-              }} />
+              <View style={cardStyles.partnerCarouselWrapper}>
+                <ScrollView
+                  ref={cardScrollRef}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  scrollEventThrottle={16}
+                  onScroll={handleCardScroll}
+                  onScrollBeginDrag={handleCardDragStart}
+                  onMomentumScrollEnd={handleCardMomentumEnd}
+                >
+                  <SoundAcademyCard carousel onPress={() => {
+                    proResourceAnalytics.track('explore_courses_tap');
+                    (navigation as any).navigate('ProResources');
+                  }} />
+                  <AbbeyRoadCard carousel onPress={() => {
+                    proResourceAnalytics.track('ari_explore_tap');
+                    (navigation as any).navigate('ProResources');
+                  }} />
+                </ScrollView>
+                <View style={cardStyles.partnerCarouselDots}>
+                  {[0, 1].map(i => (
+                    <View
+                      key={i}
+                      style={[cardStyles.partnerCarouselDot, cardIndex === i && cardStyles.partnerCarouselDotActive]}
+                    />
+                  ))}
+                </View>
+              </View>
 
               {/* Section label above posts — Screen 01 number/label pattern */}
               <View style={styles.sectionLabel}>

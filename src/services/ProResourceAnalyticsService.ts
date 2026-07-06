@@ -4,6 +4,7 @@ type EventType = 'explore_courses_tap' | 'screen_view' | 'resource_tap';
 
 function partnerNameFromResource(resource: string): string | null {
   if (resource.startsWith('sa_')) return 'Sound Academy';
+  if (resource.startsWith('ari_')) return 'Abbey Road Institute';
   if (resource.startsWith('t2d_')) return 'Talk2Dan';
   if (resource.startsWith('herts_')) return 'University of Hertfordshire';
   if (resource.startsWith('mbg_')) return 'MBG Sonics';
