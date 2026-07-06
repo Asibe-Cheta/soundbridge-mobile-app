@@ -142,57 +142,71 @@ const ARI_LOGO = require('../../assets/ari.png');
 
 const ARI_STATS = [
   { value: '30+', label: 'Years of Excellence' },
-  { value: 'Abbey Road', label: 'World-Famous Studio' },
-  { value: 'Avid', label: 'Certified Partner' },
-  { value: 'Weekend', label: 'Flexible Format' },
+  { value: 'Grammy', label: 'Award-Winning Faculty' },
+  { value: 'Abbey Road', label: 'Iconic Studio Access' },
+  { value: 'Dolby', label: 'Atmos Certified' },
 ];
 
-const ARI_MODULES = [
+const ARI_COURSES = [
   {
-    id: 'ari-m1',
-    moduleNumber: 1,
-    title: 'Studio Recording & Pro Tools',
-    subtitle: 'Foundation',
-    description: 'Learn professional recording techniques inside one of the world\'s most iconic studios. Master Pro Tools workflows used daily by top engineers.',
-    duration: '1 month',
-    format: 'Weekends · Sat & Sun · 10am–6pm',
-    overlayColors: ['rgba(220,38,38,0.48)', 'rgba(153,27,27,0.48)'] as [string, string],
-    gradientColors: ['#DC2626', '#991B1B'] as [string, string],
-    subModules: [
-      { number: 1, title: 'Professional Studio Workflow', topics: ['Signal chain in a world-class studio', 'Pro Tools session setup and templates'] },
-      { number: 2, title: 'Microphone Techniques', topics: ['Room acoustics and mic placement', 'Recording vocals, instruments and drums'] },
-      { number: 3, title: 'Session Management', topics: ['Take management and overdubbing', 'Input/output configuration and routing'] },
-      { number: 4, title: 'Introduction to Mixing', topics: ['Signal flow and static balances', 'Initial EQ and dynamic processing'] },
-    ],
-    certifications: ['Avid Pro Tools Operator'],
-    ctaUrl: 'https://www.abbeyroadinstitute.com',
-    ctaLabel: 'Enquire Now',
+    id: 'ari-c1',
+    courseNumber: 1,
+    title: 'Advanced Diploma — Music Production & Sound Engineering',
+    subtitle: 'Full-Time · 1 Year',
+    description:
+      'Train at one of London\'s most iconic institutions. Master every stage of professional production — from signal chain and tracking to mixing, mastering and client management.',
+    overlayColors: ['rgba(220,38,38,0.52)', 'rgba(127,29,29,0.52)'] as [string, string],
+    gradientColors: ['#DC2626', '#7F1D1D'] as [string, string],
+    units: 4,
+    award: 'Advanced Diploma',
+    ctaUrl: 'https://abbeyroadinstitute.co.uk/category/events/#apply-now',
   },
   {
-    id: 'ari-m2',
-    moduleNumber: 2,
-    title: 'Mixing & Mastering for Release',
-    subtitle: 'Advanced',
-    description: 'Take your mixes from good to release-ready on professional playback systems. Learn mastering fundamentals used in world-class productions.',
-    duration: '1 month',
-    format: 'Weekends · Sat & Sun · 10am–6pm',
-    overlayColors: ['rgba(153,27,27,0.48)', 'rgba(220,38,38,0.48)'] as [string, string],
+    id: 'ari-c2',
+    courseNumber: 2,
+    title: 'Song Production Masterclass',
+    subtitle: 'Intensive · 4 Days',
+    description:
+      'Record and mix a full song at Abbey Road Studios and Angel Studios alongside Grammy-winning engineer Ben Baptie (Lady Gaga, Radiohead, U2).',
+    overlayColors: ['rgba(153,27,27,0.52)', 'rgba(220,38,38,0.52)'] as [string, string],
     gradientColors: ['#991B1B', '#DC2626'] as [string, string],
-    subModules: [
-      { number: 5, title: 'Advanced Mixing Techniques', topics: ['Frequency management and dynamic control', 'Spatial processing and bus mixing'] },
-      { number: 6, title: 'Professional Automation', topics: ['Level, send and plugin automation', 'Mix dynamics and energy management'] },
-      { number: 7, title: 'Mastering Fundamentals', topics: ['Loudness standards and delivery formats', 'Final quality control'] },
-      { number: 8, title: 'Certification & Portfolio', topics: ['Exam preparation and portfolio review', 'Avid Pro Tools Expert certification'] },
-    ],
-    certifications: ['Avid Pro Tools Expert'],
-    ctaUrl: 'https://www.abbeyroadinstitute.com',
-    ctaLabel: 'Enquire Now',
+    units: 4,
+    award: 'Certificate of Completion',
+    ctaUrl: 'https://abbeyroadinstitute.co.uk/category/events/#apply-now',
+  },
+  {
+    id: 'ari-c3',
+    courseNumber: 3,
+    title: 'Dolby Atmos Mixing For Music',
+    subtitle: 'Part-Time · 12 Weeks',
+    description:
+      'Learn immersive spatial audio mixing in a dedicated Dolby Atmos studio at Angel Studios, London. Led by Grammy-winning engineer James Auwarter.',
+    overlayColors: ['rgba(127,29,29,0.48)', 'rgba(185,28,28,0.48)'] as [string, string],
+    gradientColors: ['#7F1D1D', '#B91C1C'] as [string, string],
+    units: 3,
+    award: 'Dolby Atmos Certificate',
+    ctaUrl: 'https://abbeyroadinstitute.co.uk/category/events/#apply-now',
+  },
+  {
+    id: 'ari-c4',
+    courseNumber: 4,
+    title: 'Advanced Diploma — Audio Post Production for Film & TV',
+    subtitle: 'Part-Time · 5½ Months',
+    description:
+      'Specialise in professional audio for film and television. Build the practical skills and industry contacts to work on screen productions at the highest level.',
+    overlayColors: ['rgba(185,28,28,0.48)', 'rgba(153,27,27,0.48)'] as [string, string],
+    gradientColors: ['#B91C1C', '#991B1B'] as [string, string],
+    units: 3,
+    award: 'Advanced Diploma',
+    ctaUrl: 'https://abbeyroadinstitute.co.uk/category/events/#apply-now',
   },
 ];
 
-const ARI_MODULE_IMAGES: Record<string, any> = {
-  'ari-m1': require('../../assets/fund.jpg'),
-  'ari-m2': require('../../assets/mix.jpg'),
+const ARI_COURSE_IMAGES: Record<string, any> = {
+  'ari-c1': require('../../assets/fund.jpg'),
+  'ari-c2': require('../../assets/mix.jpg'),
+  'ari-c3': require('../../assets/fund.jpg'),
+  'ari-c4': require('../../assets/mix.jpg'),
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -200,7 +214,7 @@ const ARI_MODULE_IMAGES: Record<string, any> = {
 type TabId = 'sound-academy' | 'abbey-road' | 'talk2dan' | 'herts' | 'mbg-sonics';
 const TABS: { id: TabId; label: string }[] = [
   { id: 'sound-academy', label: 'Sound Academy' },
-  { id: 'abbey-road',    label: 'Abbey Road' },
+  { id: 'abbey-road',    label: 'Abbey Road Inst.' },
   { id: 'talk2dan',      label: 'Talk 2 Dan' },
   { id: 'herts',         label: 'Herts Uni' },
   { id: 'mbg-sonics',    label: 'MBG Sonics' },
@@ -255,7 +269,7 @@ export default function ProResourcesScreen() {
       {/* Scrollable tab content */}
       <ScrollView showsVerticalScrollIndicator={false}>
         {activeTab === 'sound-academy' && <SoundAcademyTab navigation={navigation} theme={theme} />}
-        {activeTab === 'abbey-road'   && <AbbeyRoadTab navigation={navigation} theme={theme} />}
+        {activeTab === 'abbey-road'   && <AbbeyRoadTab theme={theme} />}
         {activeTab === 'talk2dan'     && <Talk2DanTab theme={theme} />}
         {activeTab === 'herts'        && <HertsTab theme={theme} />}
         {activeTab === 'mbg-sonics'   && <MBGSonicsTab navigation={navigation} theme={theme} />}
@@ -366,7 +380,7 @@ function SoundAcademyTab({ navigation, theme }: any) {
 
 // ─── Abbey Road Institute ─────────────────────────────────────────────────────
 
-function AbbeyRoadTab({ navigation, theme }: any) {
+function AbbeyRoadTab({ theme }: any) {
   return (
     <View>
       {/* Partner badge row */}
@@ -378,54 +392,64 @@ function AbbeyRoadTab({ navigation, theme }: any) {
         </View>
       </View>
 
-      {/* Section: Sound Engineering Programme */}
+      {/* Section header */}
       <View style={styles.sectionHeader}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Sound Engineering</Text>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Courses &amp; Programmes</Text>
       </View>
       <Text style={[styles.sectionMeta, { color: theme.colors.textSecondary }]}>
-        2-month programme · Weekends · Official Avid Learning Partner
+        4 days to 1 year · Abbey Road &amp; Angel Studios · Grammy-winning faculty
       </Text>
 
-      {/* Module cards — horizontal scroll */}
-      <FlatList
+      {/* Course cards — horizontal scroll */}
+      <ScrollView
         horizontal
-        data={ARI_MODULES}
-        keyExtractor={(m) => m.id}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.cardListContent}
-        renderItem={({ item: mod, index }) => (
+      >
+        {ARI_COURSES.map((course, index) => (
           <TouchableOpacity
+            key={course.id}
             style={[styles.htmlCard, index === 0 && { marginLeft: 24 }]}
             onPress={() => {
-              proResourceAnalytics.track('resource_tap', `ari_module_${mod.moduleNumber}`);
-              Linking.openURL(mod.ctaUrl);
+              proResourceAnalytics.track('resource_tap', `ari_course_${course.courseNumber}`);
+              Linking.openURL(course.ctaUrl);
             }}
             activeOpacity={0.88}
           >
-            <Image source={ARI_MODULE_IMAGES[mod.id]} style={{ position: 'absolute', top: 0, left: 0, width: 280, height: 380 }} resizeMode="cover" />
-            <LinearGradient colors={mod.overlayColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />
-            <LinearGradient colors={['transparent', 'rgba(0,0,0,0.35)', 'rgba(0,0,0,0.82)']} style={styles.htmlCardGradient} />
+            <Image
+              source={ARI_COURSE_IMAGES[course.id]}
+              style={{ position: 'absolute', top: 0, left: 0, width: 280, height: 380 }}
+              resizeMode="cover"
+            />
+            <LinearGradient
+              colors={course.overlayColors}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <LinearGradient
+              colors={['transparent', 'rgba(0,0,0,0.35)', 'rgba(0,0,0,0.82)']}
+              style={styles.htmlCardGradient}
+            />
 
-            {/* Badge */}
             <View style={styles.htmlBadge}>
-              <Text style={styles.htmlBadgeText}>MODULE {mod.moduleNumber}</Text>
+              <Text style={styles.htmlBadgeText}>COURSE {course.courseNumber}</Text>
             </View>
 
-            {/* Content */}
             <View style={styles.htmlCardContent}>
-              <Text style={styles.htmlCardTitle} numberOfLines={2}>{mod.title}</Text>
-              <Text style={styles.htmlCardArtist}>{mod.subtitle}</Text>
+              <Text style={styles.htmlCardTitle} numberOfLines={2}>{course.title}</Text>
+              <Text style={styles.htmlCardArtist}>{course.subtitle}</Text>
               <View style={styles.htmlCardMeta}>
                 <Ionicons name="list-outline" size={12} color="rgba(255,255,255,0.4)" />
-                <Text style={styles.htmlCardMetaText}>{mod.subModules.length} units</Text>
+                <Text style={styles.htmlCardMetaText}>{course.units} units</Text>
                 <View style={styles.htmlDot} />
                 <Ionicons name="ribbon-outline" size={12} color="rgba(255,255,255,0.4)" />
-                <Text style={styles.htmlCardMetaText}>{mod.certifications.length} cert{mod.certifications.length > 1 ? 's' : ''}</Text>
+                <Text style={styles.htmlCardMetaText}>1 cert</Text>
               </View>
             </View>
           </TouchableOpacity>
-        )}
-      />
+        ))}
+      </ScrollView>
 
       {/* Stats section */}
       <View style={[styles.sectionHeader, { marginTop: 32 }]}>
@@ -433,7 +457,13 @@ function AbbeyRoadTab({ navigation, theme }: any) {
       </View>
       <View style={styles.statsGrid}>
         {ARI_STATS.map((s) => (
-          <View key={s.label} style={[styles.statCard, { backgroundColor: theme.isDark ? 'rgba(255,255,255,0.05)' : theme.colors.card, borderColor: theme.isDark ? 'rgba(255,255,255,0.08)' : theme.colors.border }]}>
+          <View
+            key={s.label}
+            style={[styles.statCard, {
+              backgroundColor: theme.isDark ? 'rgba(255,255,255,0.05)' : theme.colors.card,
+              borderColor: theme.isDark ? 'rgba(255,255,255,0.08)' : theme.colors.border,
+            }]}
+          >
             <Text style={[styles.statValue, { color: '#DC2626' }]}>{s.value}</Text>
             <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>{s.label}</Text>
           </View>
@@ -444,8 +474,8 @@ function AbbeyRoadTab({ navigation, theme }: any) {
       <TouchableOpacity
         style={styles.saCtaWrap}
         onPress={() => {
-          proResourceAnalytics.track('resource_tap', 'ari_enquiry');
-          Linking.openURL('https://www.abbeyroadinstitute.com');
+          proResourceAnalytics.track('resource_tap', 'ari_apply');
+          Linking.openURL('https://abbeyroadinstitute.co.uk/category/events/#apply-now');
         }}
         activeOpacity={0.85}
       >
@@ -455,8 +485,8 @@ function AbbeyRoadTab({ navigation, theme }: any) {
           end={{ x: 1, y: 0 }}
           style={styles.ctaBtnGradient}
         >
-          <Ionicons name="school-outline" size={18} color="#fff" />
-          <Text style={styles.ctaBtnText}>Explore Programmes</Text>
+          <Ionicons name="arrow-forward-outline" size={18} color="#fff" />
+          <Text style={styles.ctaBtnText}>Apply Now</Text>
         </LinearGradient>
       </TouchableOpacity>
     </View>
