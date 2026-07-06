@@ -203,10 +203,10 @@ const ARI_COURSES = [
 ];
 
 const ARI_COURSE_IMAGES: Record<string, any> = {
-  'ari-c1': require('../../assets/fund.jpg'),
-  'ari-c2': require('../../assets/mix.jpg'),
-  'ari-c3': require('../../assets/fund.jpg'),
-  'ari-c4': require('../../assets/mix.jpg'),
+  'ari-c1': require('../../assets/ari-studio.jpg'),
+  'ari-c2': require('../../assets/ari-session.jpg'),
+  'ari-c3': require('../../assets/ari-atmos.jpg'),
+  'ari-c4': require('../../assets/ari-film.jpg'),
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────

@@ -60,7 +60,9 @@ import EventPromotionTrackingService from '../services/EventPromotionTrackingSer
 
 const WalkthroughableView = walkthroughable(View);
 const { width: SCREEN_W } = Dimensions.get('window');
-const CARD_WIDTH = SCREEN_W - 32;
+// Item narrower than screen so next slide peeks on the right
+const CARD_WIDTH = SCREEN_W - 58;
+const CARD_SNAP = CARD_WIDTH + 10;
 // Single path to swap when real ARI asset arrives
 const ARI_LOGO_TF = require('../../assets/abbey-logo.png');
 
@@ -439,7 +441,8 @@ const cardStyles = StyleSheet.create({
   },
   carouselCard: {
     width: CARD_WIDTH,
-    height: 300,
+    marginRight: 10,
+    height: 260,
     borderRadius: 24,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -453,7 +456,7 @@ const cardStyles = StyleSheet.create({
     borderColor: 'rgba(220,38,38,0.4)',
   },
   partnerCarouselWrapper: {
-    marginHorizontal: 16,
+    marginLeft: 16,
     marginTop: 16,
     marginBottom: 4,
   },
@@ -622,14 +625,14 @@ export default function TestFeedScreen() {
     cardAutoPlayRef.current = setInterval(() => {
       setCardIndex(prev => {
         const next = (prev + 1) % CARD_COUNT;
-        cardScrollRef.current?.scrollTo({ x: next * CARD_WIDTH, animated: true });
+        cardScrollRef.current?.scrollTo({ x: next * CARD_SNAP, animated: true });
         return next;
       });
     }, 3000);
   }, []);
 
   const handleCardScroll = useCallback((e: any) => {
-    const index = Math.round(e.nativeEvent.contentOffset.x / CARD_WIDTH);
+    const index = Math.round(e.nativeEvent.contentOffset.x / CARD_SNAP);
     setCardIndex(index);
   }, []);
 
@@ -985,7 +988,9 @@ export default function TestFeedScreen() {
                 <ScrollView
                   ref={cardScrollRef}
                   horizontal
-                  pagingEnabled
+                  snapToInterval={CARD_SNAP}
+                  snapToAlignment="start"
+                  decelerationRate="fast"
                   showsHorizontalScrollIndicator={false}
                   scrollEventThrottle={16}
                   onScroll={handleCardScroll}

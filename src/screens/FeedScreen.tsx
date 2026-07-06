@@ -59,7 +59,9 @@ const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
 // ARI_LOGO is the single path to change when the real Abbey Road asset arrives.
 const ARI_LOGO = require('../../assets/abbey-logo.png');
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const BANNER_WIDTH = SCREEN_WIDTH - 32; // matches marginHorizontal: 16 on each side
+// Item narrower than screen so next slide peeks on the right
+const BANNER_WIDTH = SCREEN_WIDTH - 58;
+const BANNER_SNAP = BANNER_WIDTH + 10;
 
 export default function FeedScreen() {
   const navigation = useNavigation();
@@ -198,14 +200,14 @@ export default function FeedScreen() {
     bannerAutoPlayRef.current = setInterval(() => {
       setBannerIndex(prev => {
         const next = (prev + 1) % BANNER_COUNT;
-        bannerScrollRef.current?.scrollTo({ x: next * BANNER_WIDTH, animated: true });
+        bannerScrollRef.current?.scrollTo({ x: next * BANNER_SNAP, animated: true });
         return next;
       });
     }, 3000);
   }, []);
 
   const handleBannerScroll = useCallback((e: any) => {
-    const index = Math.round(e.nativeEvent.contentOffset.x / BANNER_WIDTH);
+    const index = Math.round(e.nativeEvent.contentOffset.x / BANNER_SNAP);
     setBannerIndex(index);
   }, []);
 
@@ -589,7 +591,9 @@ export default function FeedScreen() {
                     <ScrollView
                       ref={bannerScrollRef}
                       horizontal
-                      pagingEnabled
+                      snapToInterval={BANNER_SNAP}
+                      snapToAlignment="start"
+                      decelerationRate="fast"
                       showsHorizontalScrollIndicator={false}
                       scrollEventThrottle={16}
                       onScroll={handleBannerScroll}
@@ -1004,18 +1008,19 @@ const styles = StyleSheet.create({
 
   // ── Partner Banner Carousel ────────────────────────────────
   carouselWrapper: {
-    marginHorizontal: 16,
+    marginLeft: 16,
     marginTop: 12,
     marginBottom: 4,
   },
   saBannerItem: {
     width: BANNER_WIDTH,
+    marginRight: 10,
     borderRadius: 20,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(139,92,246,0.25)',
     paddingHorizontal: 16,
-    paddingTop: 14,
+    paddingTop: 10,
     paddingBottom: 0,
     shadowColor: '#7C3AED',
     shadowOffset: { width: 0, height: 6 },
@@ -1025,12 +1030,13 @@ const styles = StyleSheet.create({
   },
   ariBannerItem: {
     width: BANNER_WIDTH,
+    marginRight: 10,
     borderRadius: 20,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(220,38,38,0.25)',
     paddingHorizontal: 16,
-    paddingTop: 14,
+    paddingTop: 10,
     paddingBottom: 0,
     shadowColor: '#B91C1C',
     shadowOffset: { width: 0, height: 6 },
@@ -1059,9 +1065,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.2)',
     paddingHorizontal: 16,
-    paddingVertical: 9,
+    paddingVertical: 6,
     borderRadius: 24,
-    marginBottom: 14,
+    marginBottom: 10,
   },
   carouselDots: {
     flexDirection: 'row',
@@ -1085,7 +1091,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   saLogoWrap: {
     width: 52,
@@ -1108,7 +1114,7 @@ const styles = StyleSheet.create({
   saPartnerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#A78BFA' },
   saPartnerBadgeText: { fontSize: 10, fontWeight: '700', color: '#C4B5FD', letterSpacing: 0.8 },
   saHeadline: { fontSize: 20, fontWeight: '700', color: '#FFFFFF', marginBottom: 6, letterSpacing: 0.1 },
-  saSubheadline: { fontSize: 13, color: 'rgba(255,255,255,0.55)', lineHeight: 19, marginBottom: 14 },
+  saSubheadline: { fontSize: 13, color: 'rgba(255,255,255,0.55)', lineHeight: 19, marginBottom: 8 },
   saCtaButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1117,16 +1123,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.2)',
     paddingHorizontal: 16,
-    paddingVertical: 9,
+    paddingVertical: 6,
     borderRadius: 24,
-    marginBottom: 14,
+    marginBottom: 10,
   },
   saCtaText: { fontSize: 13, fontWeight: '600', color: '#FFFFFF' },
   saFooterStrip: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 10,
+    paddingVertical: 7,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.07)',
     marginTop: 2,
