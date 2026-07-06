@@ -62,7 +62,7 @@ const WalkthroughableView = walkthroughable(View);
 const { width: SCREEN_W } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_W - 32;
 // Single path to swap when real ARI asset arrives
-const ARI_LOGO_TF = require('../../assets/ari.png');
+const ARI_LOGO_TF = require('../../assets/abbey-logo.png');
 
 // Screen 02 — collection tab labels
 const FILTER_TABS = ['For You', 'Following', 'Events'];

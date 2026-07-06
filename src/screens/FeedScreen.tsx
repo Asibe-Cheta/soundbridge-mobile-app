@@ -57,7 +57,7 @@ const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
 
 // ─── Partner banner carousel ─────────────────────────────────────────────────
 // ARI_LOGO is the single path to change when the real Abbey Road asset arrives.
-const ARI_LOGO = require('../../assets/ari.png');
+const ARI_LOGO = require('../../assets/abbey-logo.png');
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const BANNER_WIDTH = SCREEN_WIDTH - 32; // matches marginHorizontal: 16 on each side
 
@@ -674,7 +674,7 @@ export default function FeedScreen() {
                             <Image
                               source={ARI_LOGO}
                               style={styles.saLogo}
-                              resizeMode="cover"
+                              resizeMode="contain"
                             />
                           </View>
                           <View style={styles.ariPartnerBadge}>

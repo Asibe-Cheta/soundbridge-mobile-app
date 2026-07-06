@@ -24,7 +24,7 @@ import { referralService } from '../services/ReferralService';
 const { width } = Dimensions.get('window');
 
 // Single path to swap when real ARI logo asset arrives
-const ARI_LOGO = require('../../assets/ari.png');
+const ARI_LOGO = require('../../assets/abbey-logo.png');
 
 export default function AbbeyRoadSignupScreen() {
   const navigation = useNavigation<any>();

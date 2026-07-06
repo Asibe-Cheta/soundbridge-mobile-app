@@ -138,7 +138,7 @@ const SA_MODULE_IMAGES: Record<string, any> = {
 // ─── Abbey Road Institute data ────────────────────────────────────────────────
 
 // Single path to swap when real ARI logo asset arrives
-const ARI_LOGO = require('../../assets/ari.png');
+const ARI_LOGO = require('../../assets/abbey-logo.png');
 
 const ARI_STATS = [
   { value: '30+', label: 'Years of Excellence' },
@@ -385,7 +385,7 @@ function AbbeyRoadTab({ theme }: any) {
     <View>
       {/* Partner badge row */}
       <View style={styles.partnerRow}>
-        <Image source={ARI_LOGO} style={styles.partnerLogoSm} resizeMode="cover" />
+        <Image source={ARI_LOGO} style={styles.partnerLogoSm} resizeMode="contain" />
         <View style={[styles.partnerBadge, { backgroundColor: 'rgba(220,38,38,0.15)', borderColor: 'rgba(220,38,38,0.35)' }]}>
           <View style={[styles.partnerDot, { backgroundColor: '#FCA5A5' }]} />
           <Text style={[styles.partnerBadgeText, { color: '#FCA5A5' }]}>EDUCATION PARTNER · UK</Text>
