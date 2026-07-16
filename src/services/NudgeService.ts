@@ -22,10 +22,9 @@ const NUDGE = {
   // Coming soon
   COMING_SOON_SPONSORSHIP:   'coming_soon_sponsorship',
   COMING_SOON_COMPETITION:   'coming_soon_competition',
-  // Milestone (fires per-milestone, not strictly once globally)
-  MILESTONE_1000:            'milestone_1000',
-  MILESTONE_2000:            'milestone_2000',
-  MILESTONE_5000:            'milestone_5000',
+  // Milestone — id/copy computed dynamically per-thousand at fire time,
+  // see resolveMilestoneNudge(). This entry only reserves its priority slot.
+  MILESTONE_GROWTH:          'milestone_growth',
   // Service provider
   SERVICE_PROVIDER_GIG_ALERTS: 'service_provider_gig_alerts',
   GENERAL_SERVICE_DISCOVERY:   'general_service_discovery',
@@ -36,6 +35,8 @@ const NUDGE = {
 } as const;
 
 type NudgeId = typeof NUDGE[keyof typeof NUDGE];
+
+type NudgeRow = { nudge_id: string; sent_at: string | null; tapped_at: string | null };
 
 interface NudgeDef {
   id: NudgeId;
@@ -133,23 +134,14 @@ const NUDGES: NudgeDef[] = [
     screen: 'ComingSoon',
   },
 
-  // ─── Milestones (fire once per milestone, not once globally) ─────────────
+  // ─── Milestone (fires once per thousand crossed, not once globally) ──────
+  // Placeholder only — reserves this priority slot. The real id/title/body
+  // are computed dynamically in resolveMilestoneNudge() from the live user
+  // count, so this never goes stale as the platform grows past 5,000.
   {
-    id: NUDGE.MILESTONE_1000,
-    title: 'We just hit 1,000 users on SoundBridge',
-    body: 'The network is growing. The bigger it gets the more powerful it becomes for every creator here. Share it with one person today.',
-    screen: 'ShareProfile',
-  },
-  {
-    id: NUDGE.MILESTONE_2000,
-    title: 'We just hit 2,000 users on SoundBridge',
-    body: 'The network is growing. The bigger it gets the more powerful it becomes for every creator here. Share it with one person today.',
-    screen: 'ShareProfile',
-  },
-  {
-    id: NUDGE.MILESTONE_5000,
-    title: 'We just hit 5,000 users on SoundBridge',
-    body: 'The network is growing. The bigger it gets the more powerful it becomes for every creator here. Share it with one person today.',
+    id: NUDGE.MILESTONE_GROWTH,
+    title: '',
+    body: '',
     screen: 'ShareProfile',
   },
 
@@ -195,8 +187,6 @@ class NudgeService {
     if (!userId) return;
 
     try {
-      type NudgeRow = { nudge_id: string; sent_at: string | null; tapped_at: string | null };
-
       const { data: rows } = await supabase
         .from('user_nudges')
         .select('nudge_id, sent_at, tapped_at')
@@ -214,6 +204,13 @@ class NudgeService {
       if (sentToday >= DAILY_CAP) return;
 
       for (const nudge of NUDGES) {
+        if (nudge.id === NUDGE.MILESTONE_GROWTH) {
+          const dynamicNudge = await this.resolveMilestoneNudge(rowMap);
+          if (!dynamicNudge) continue;
+          await this.fire(dynamicNudge, userId);
+          return; // One scheduled per session
+        }
+
         const row = rowMap.get(nudge.id);
 
         // User tapped through to the screen — this nudge is done
@@ -246,6 +243,37 @@ class NudgeService {
   // Reset the per-session lock (called when user signs out)
   reset(): void {
     this.sessionFired = false;
+  }
+
+  // ─── Milestone (dynamic) ──────────────────────────────────────────────────
+
+  // Builds the growth-milestone nudge from the live registered-user count —
+  // same source as the admin "Total Accounts (Platform)" stat — so the copy
+  // never goes stale as the platform crosses each new thousand. The nudge_id
+  // itself is milestone-specific (e.g. "milestone_2000"), so each thousand
+  // fires independently and 3-day repeats/taps are tracked per milestone.
+  private async resolveMilestoneNudge(rowMap: Map<string, NudgeRow>): Promise<NudgeDef | null> {
+    const { data: total, error } = await supabase.rpc('total_registered_users_count');
+    if (error || typeof total !== 'number') return null;
+
+    const milestone = Math.floor(total / 1000) * 1000;
+    if (milestone < 1000) return null;
+
+    const nudgeId = `milestone_${milestone}`;
+    const row = rowMap.get(nudgeId);
+
+    if (row?.tapped_at) return null;
+    if (row?.sent_at) {
+      const daysSince = (Date.now() - new Date(row.sent_at).getTime()) / 86_400_000;
+      if (daysSince < REPEAT_INTERVAL_DAYS) return null;
+    }
+
+    return {
+      id: nudgeId as NudgeId,
+      title: `We just hit over ${milestone.toLocaleString()} users on SoundBridge`,
+      body: 'The network is growing. The bigger it gets the more powerful it becomes for every creator here. Share it with one person today.',
+      screen: 'ShareProfile',
+    };
   }
 
   // ─── Condition checkers ──────────────────────────────────────────────────
@@ -405,28 +433,8 @@ class NudgeService {
           return (count ?? 0) > 0;
         }
 
-        // ─── Milestones ────────────────────────────────────────────────────
-
-        case NUDGE.MILESTONE_1000: {
-          const { count } = await supabase
-            .from('profiles')
-            .select('id', { count: 'exact', head: true });
-          return (count ?? 0) >= 1000;
-        }
-
-        case NUDGE.MILESTONE_2000: {
-          const { count } = await supabase
-            .from('profiles')
-            .select('id', { count: 'exact', head: true });
-          return (count ?? 0) >= 2000;
-        }
-
-        case NUDGE.MILESTONE_5000: {
-          const { count } = await supabase
-            .from('profiles')
-            .select('id', { count: 'exact', head: true });
-          return (count ?? 0) >= 5000;
-        }
+        // Milestone eligibility is resolved separately in resolveMilestoneNudge()
+        // since its id/copy depend on the live count — never reached here.
 
         // ─── Service provider nudges ───────────────────────────────────────
 
@@ -540,6 +548,18 @@ class NudgeService {
   async markTappedForScreen(screen: string, userId: string): Promise<void> {
     try {
       const ids = NUDGES.filter(n => n.screen === screen).map(n => n.id);
+
+      // Milestone nudge_ids are dynamic ("milestone_2000", etc.) and never
+      // appear in the static NUDGES list — catch them separately by pattern.
+      if (screen === 'ShareProfile') {
+        await supabase
+          .from('user_nudges')
+          .update({ tapped_at: new Date().toISOString() })
+          .eq('user_id', userId)
+          .like('nudge_id', 'milestone_%')
+          .is('tapped_at', null);
+      }
+
       if (ids.length === 0) return;
       await supabase
         .from('user_nudges')
