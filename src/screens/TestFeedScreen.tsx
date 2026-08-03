@@ -358,7 +358,7 @@ function CreateEventCard({ onPress }: { onPress: () => void }) {
         <Text style={cardStyles.title}>
           Create{' '}<Text style={{ color: 'rgba(255,255,255,0.9)' }}>an Event</Text>
         </Text>
-        <Text style={cardStyles.subtitle}>Sell tickets, promote to local audiences, manage your event</Text>
+        <Text style={cardStyles.subtitle}>Get discovered fast — we know where your audience is, what they want, and notify them automatically</Text>
         <View style={cardStyles.ctaRow}>
           <Text style={cardStyles.ctaText}>Get Started</Text>
           <LinearGradient
@@ -409,6 +409,55 @@ function DiscoverTalentCard({ onPress }: { onPress: () => void }) {
         <Text style={cardStyles.subtitle}>Browse musicians, DJs, and performers available to book</Text>
         <View style={cardStyles.ctaRow}>
           <Text style={cardStyles.ctaText}>Browse Artists</Text>
+          <LinearGradient
+            colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0)', 'rgba(255,255,255,0.12)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={cardStyles.glassCircle}
+          >
+            <View style={{ transform: [{ rotate: '45deg' }] }}>
+              <Ionicons name="arrow-up-outline" size={20} color="#fff" />
+            </View>
+          </LinearGradient>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// EarnFromEventsCard — green, for musician carousel. Leads to the Tip Room
+// tab on Live Sessions, where musicians get tipped directly by listeners.
+// ─────────────────────────────────────────────────────────────
+function EarnFromEventsCard({ onPress }: { onPress: () => void }) {
+  return (
+    <TouchableOpacity style={cardStyles.carouselCard} activeOpacity={0.88} onPress={onPress}>
+      <LinearGradient
+        colors={['#031A0F', '#052A18', '#031A0A']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={['rgba(16,185,129,0.35)', 'transparent', 'rgba(6,95,70,0.3)']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={['transparent', 'rgba(3,26,15,0.95)']}
+        start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
+        style={cardStyles.bottomGradient}
+      />
+      <View style={[cardStyles.badge, { backgroundColor: 'rgba(16,185,129,0.2)', borderColor: 'rgba(16,185,129,0.4)' }]}>
+        <View style={[cardStyles.liveDot, { backgroundColor: '#34D399' }]} />
+        <Text style={[cardStyles.badgeText, { color: '#6EE7B7' }]}>EARN</Text>
+      </View>
+      <View style={cardStyles.content}>
+        <Text style={cardStyles.title}>
+          Earn{' '}<Text style={{ color: 'rgba(255,255,255,0.9)' }}>from Events</Text>
+        </Text>
+        <Text style={cardStyles.subtitle}>Go live and get tipped directly by fans in the Tip Room</Text>
+        <View style={cardStyles.ctaRow}>
+          <Text style={cardStyles.ctaText}>Start Earning</Text>
           <LinearGradient
             colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0)', 'rgba(255,255,255,0.12)']}
             start={{ x: 0, y: 0 }}
@@ -705,6 +754,11 @@ export default function TestFeedScreen() {
   const eoCardScrollRef = useRef<ScrollView>(null);
   const EO_CARD_COUNT = 2;
 
+  // ── Musician carousel ────────────────────────────────────────────────────
+  const [musicianCardIndex, setMusicianCardIndex] = useState(0);
+  const musicianCardScrollRef = useRef<ScrollView>(null);
+  const MUSICIAN_CARD_COUNT = 2;
+
   // Following tab — set of user IDs the logged-in user follows
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
   // Events tab — same source as Discover screen
@@ -884,6 +938,11 @@ export default function TestFeedScreen() {
   const handleEoCardScroll = useCallback((e: any) => {
     const index = Math.round(e.nativeEvent.contentOffset.x / CARD_SNAP);
     setEoCardIndex(index);
+  }, []);
+
+  const handleMusicianCardScroll = useCallback((e: any) => {
+    const index = Math.round(e.nativeEvent.contentOffset.x / CARD_SNAP);
+    setMusicianCardIndex(index);
   }, []);
 
   // One-time redirect for new event organiser users — navigates to CreateEvent on first mount
@@ -1299,6 +1358,33 @@ export default function TestFeedScreen() {
               {userProfile?.onboarding_user_type === 'industry_professional' && (
                 <View style={cardStyles.partnerCarouselWrapper}>
                   <DiscoverTalentCard onPress={() => (navigation as any).navigate('TalentDiscovery')} />
+                </View>
+              )}
+
+              {/* Musician banners — Create an Event + Earn from Events (Tip Room) */}
+              {userProfile?.onboarding_user_type === 'music_creator' && (
+                <View style={cardStyles.partnerCarouselWrapper}>
+                  <ScrollView
+                    ref={musicianCardScrollRef}
+                    horizontal
+                    snapToInterval={CARD_SNAP}
+                    snapToAlignment="start"
+                    decelerationRate="fast"
+                    showsHorizontalScrollIndicator={false}
+                    scrollEventThrottle={16}
+                    onScroll={handleMusicianCardScroll}
+                  >
+                    <CreateEventCard onPress={() => (navigation as any).navigate('CreateEvent')} />
+                    <EarnFromEventsCard onPress={() => (navigation as any).navigate('LiveSessions', { initialTab: 'tip_room' })} />
+                  </ScrollView>
+                  <View style={cardStyles.partnerCarouselDots}>
+                    {Array.from({ length: MUSICIAN_CARD_COUNT }).map((_, i) => (
+                      <View
+                        key={i}
+                        style={[cardStyles.partnerCarouselDot, musicianCardIndex === i && cardStyles.partnerCarouselDotActive]}
+                      />
+                    ))}
+                  </View>
                 </View>
               )}
 

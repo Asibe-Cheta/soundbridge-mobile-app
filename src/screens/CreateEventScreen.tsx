@@ -820,6 +820,61 @@ export default function CreateEventScreen() {
     }
   };
 
+  // Preview the event page before publishing — EventDetailsScreen accepts a full
+  // `event` object via route params and skips its Supabase fetch when one is
+  // passed (see `initialEvent` in EventDetailsScreen.tsx), so this doesn't
+  // require actually creating a row first.
+  const canPreview = !!(formData.title.trim() && formData.description.trim() && formData.event_date && formData.event_time);
+
+  const handlePreview = () => {
+    if (!canPreview) {
+      Alert.alert('Almost there', 'Add a title, description, date and time to preview your event page.');
+      return;
+    }
+
+    const locationParts = Object.entries(formData.addressFields)
+      .filter(([, value]) => value.trim())
+      .map(([, value]) => value);
+    const location = locationParts.join(', ') || formData.venue.trim() || 'Location TBD';
+
+    const eventDateTime = new Date(`${formData.event_date}T${formData.event_time}`);
+
+    const prices = formData.isFree
+      ? {}
+      : Object.fromEntries(
+          Object.entries(formData.prices)
+            .filter(([, value]) => value)
+            .map(([currency, value]) => [`price_${currency.toLowerCase()}`, parseFloat(value)])
+        );
+
+    const previewEvent = {
+      id: 'preview',
+      title: formData.title.trim(),
+      description: formData.description.trim(),
+      event_date: eventDateTime.toISOString(),
+      location,
+      venue: formData.venue.trim() || undefined,
+      category: formData.category,
+      max_attendees: formData.max_attendees ? parseInt(formData.max_attendees, 10) : undefined,
+      current_attendees: 0,
+      image_url: formData.image_url || undefined,
+      creator_id: user?.id,
+      organizer_id: user?.id,
+      created_at: new Date().toISOString(),
+      organizer: user?.id
+        ? {
+            id: user.id,
+            username: userProfile?.username || '',
+            display_name: userProfile?.display_name || userProfile?.username || '',
+            avatar_url: userProfile?.avatar_url,
+          }
+        : undefined,
+      ...prices,
+    };
+
+    (navigation as any).navigate('EventDetails', { event: previewEvent });
+  };
+
   const filteredCountries = COUNTRY_ADDRESS_CONFIGS.filter(country =>
     country.countryName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     country.countryCode.toLowerCase().includes(searchQuery.toLowerCase())
@@ -1516,6 +1571,16 @@ export default function CreateEventScreen() {
             </Text>
           </TouchableOpacity>
 
+          {/* Preview — see how the event page will look before publishing */}
+          <TouchableOpacity
+            style={[styles.previewButton, { borderColor: theme.colors.primary, opacity: canPreview ? 1 : 0.5 }]}
+            onPress={handlePreview}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="eye-outline" size={18} color={theme.colors.primary} />
+            <Text style={[styles.previewButtonText, { color: theme.colors.primary }]}>Preview Your Event Page</Text>
+          </TouchableOpacity>
+
         </ScrollView>
 
         {/* Country Picker Modal */}
@@ -1642,6 +1707,21 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     lineHeight: 18,
+  },
+  previewButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 32,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  previewButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   container: {
     flex: 1,
