@@ -22,6 +22,7 @@ import { supabase } from '../lib/supabase';
 import { SystemTypography as Typography } from '../constants/Typography';
 import BackButton from '../components/BackButton';
 import TipModal from '../components/TipModal';
+import InstitutionBadge from '../components/InstitutionBadge';
 import { useSearchHistory } from '../hooks/useSearchHistory';
 import SearchHistoryPanel from '../components/SearchHistoryPanel';
 
@@ -36,6 +37,7 @@ interface Creator {
   role: string;
   created_at: string;
   isFollowing?: boolean;
+  institution_badge?: string | null;
 }
 
 type SortOption = 'recent' | 'alphabetical';
@@ -103,7 +105,7 @@ export default function AllCreatorsScreen() {
       
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, username, display_name, bio, avatar_url, location, genre, role, created_at')
+        .select('id, username, display_name, bio, avatar_url, location, genre, role, institution_badge, created_at')
         .eq('role', 'creator')
         .order('created_at', { ascending: false });
       
@@ -260,9 +262,12 @@ export default function AllCreatorsScreen() {
         )}
         
         <View style={styles.creatorInfo}>
-          <Text style={[styles.creatorName, { color: theme.colors.text }]} numberOfLines={1}>
-            {creator.display_name}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={[styles.creatorName, { color: theme.colors.text }]} numberOfLines={1}>
+              {creator.display_name}
+            </Text>
+            <InstitutionBadge institution={creator.institution_badge} size={14} />
+          </View>
           <Text style={[styles.creatorUsername, { color: theme.colors.textSecondary }]} numberOfLines={1}>
             @{creator.username}
           </Text>

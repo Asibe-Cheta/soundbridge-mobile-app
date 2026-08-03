@@ -9,16 +9,27 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 MESSAGE=""
+KEEP_DIST=0
 EXTRA_ARGS=()
-for arg in "$@"; do
-  if [[ "$arg" == --message && -n "${2:-}" ]]; then
-    MESSAGE="$2"
-    shift
-  elif [[ "$arg" == --message=* ]]; then
-    MESSAGE="${arg#--message=}"
-  else
-    EXTRA_ARGS+=("$arg")
-  fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --message)
+      MESSAGE="${2:-}"
+      shift 2
+      ;;
+    --message=*)
+      MESSAGE="${1#--message=}"
+      shift
+      ;;
+    --keep-dist)
+      KEEP_DIST=1
+      shift
+      ;;
+    *)
+      EXTRA_ARGS+=("$1")
+      shift
+      ;;
+  esac
 done
 
 if [[ -z "$MESSAGE" ]]; then
@@ -66,9 +77,17 @@ if [[ "${SB_OTA_CONFIRM:-}" != "YES_I_PUBLISH_TO_LIVE_USERS" ]]; then
   exit 1
 fi
 
-echo "Exporting iOS + Android bundle to dist/ …"
-rm -rf dist
-npx expo export --platform ios --platform android --output-dir dist
+if [[ "$KEEP_DIST" == 1 ]]; then
+  echo "Skipping export (--keep-dist) — using existing dist/ …"
+  if [[ ! -d dist/_expo/static/js ]]; then
+    echo "ERROR: dist/ is missing or incomplete. Remove --keep-dist to re-export."
+    exit 1
+  fi
+else
+  echo "Exporting iOS + Android bundle to dist/ …"
+  rm -rf dist
+  npx expo export --platform ios --platform android --output-dir dist
+fi
 
 IOS_BUNDLE=$(find dist/_expo/static/js/ios -name '*.hbc' 2>/dev/null | head -1)
 if [[ -z "$IOS_BUNDLE" ]]; then
@@ -98,15 +117,45 @@ fi
 
 echo "✓ Bundle contains: ${MARKERS[*]}"
 echo ""
-echo "Uploading to production …"
+echo "Uploading to production (platforms separately, auto-retry with new pipeline on timeout) …"
 
-EAS_SKIP_AUTO_FINGERPRINT=1 npx eas update \
-  --channel production \
-  --non-interactive \
-  --skip-bundler \
-  --input-dir dist \
-  --message "$MESSAGE" \
-  ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+_eas_upload() {
+  local platform="$1"
+  EXPO_UNSTABLE_USE_NEW_UPLOAD_PIPELINE=1 EAS_SKIP_AUTO_FINGERPRINT=1 eas update \
+    --channel production \
+    --platform "$platform" \
+    --non-interactive \
+    --skip-bundler \
+    --input-dir dist \
+    --message "$MESSAGE" \
+    ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+}
+
+# iOS — first attempt
+if _eas_upload ios; then
+  echo ""
+  echo "iOS published."
+else
+  echo ""
+  echo "iOS first attempt timed out. Retrying once …"
+  _eas_upload ios
+  echo ""
+  echo "iOS published."
+fi
+
+echo "Uploading Android …"
+
+# Android — first attempt
+if _eas_upload android; then
+  echo ""
+  echo "Android published."
+else
+  echo ""
+  echo "Android first attempt timed out. Retrying once …"
+  _eas_upload android
+  echo ""
+  echo "Android published."
+fi
 
 echo ""
-echo "✓ Published. Users need force-quit → reopen (×2) to apply."
+echo "✓ Published (iOS + Android). Users need force-quit → reopen (×2) to apply."

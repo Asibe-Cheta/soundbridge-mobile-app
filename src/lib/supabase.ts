@@ -125,6 +125,7 @@ export const dbHelpers = {
             country,
             genre,
             role,
+            institution_badge,
             created_at
           `)
           .eq('role', 'creator')
@@ -305,6 +306,7 @@ export const dbHelpers = {
           genre,
           role,
           is_verified,
+          institution_badge,
           created_at,
           followers:follows!follows_following_id_fkey(count),
           tracks:audio_tracks!audio_tracks_creator_id_fkey(count)
@@ -345,6 +347,8 @@ export const dbHelpers = {
           location,
           genre,
           role,
+          is_verified,
+          institution_badge,
           created_at,
           followers:follows!follows_following_id_fkey(count),
           tracks:audio_tracks!audio_tracks_creator_id_fkey(count)

@@ -159,6 +159,7 @@ export default function LiveTippingModal({
       const { error: initError } = await initPaymentSheet({
         paymentIntentClientSecret: createResponse.clientSecret,
         merchantDisplayName: 'SoundBridge',
+        returnURL: 'soundbridge://stripe-redirect',
         ...(createResponse.customer_id && createResponse.ephemeral_key_secret
           ? { customerId: createResponse.customer_id, customerEphemeralKeySecret: createResponse.ephemeral_key_secret }
           : {}),

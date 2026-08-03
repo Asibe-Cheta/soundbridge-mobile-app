@@ -198,6 +198,7 @@ export default function MBGSonicsDistributionScreen() {
       const { error: initErr } = await initPaymentSheet({
         paymentIntentClientSecret: clientSecret,
         merchantDisplayName: 'SoundBridge',
+        returnURL: 'soundbridge://stripe-redirect',
         defaultBillingDetails: {
           email: user.email ?? undefined,
           name: userProfile?.display_name ?? undefined,

@@ -94,8 +94,9 @@ export default function PostSignupSetupScreen() {
     }
   };
 
-  const handleContinue = async () => {
-    await postSignupSetupState.markSeen(user!.id);
+  const handleContinue = () => {
+    if (!user?.id) return;
+    postSignupSetupState.markSeen(user.id);
   };
 
   const hasCompletedProfile = !!(

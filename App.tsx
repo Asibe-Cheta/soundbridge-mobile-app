@@ -12,6 +12,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { StripeProvider } from '@stripe/stripe-react-native';
+// Cache-bust for EAS Android asset pipeline retry — 2026-07-31
 import { CopilotProvider, walkthroughable } from 'react-native-copilot';
 import { useTheme } from './src/contexts/ThemeContext';
 import GlassmorphicTabBar from './src/components/GlassmorphicTabBar';
@@ -31,6 +32,8 @@ import CardRecoveryScreen from './src/screens/CardRecoveryScreen';
 import SoundAcademySignupScreen from './src/screens/SoundAcademySignupScreen';
 import AbbeyRoadSignupScreen from './src/screens/AbbeyRoadSignupScreen';
 import LoudUrbanChoirPreviewScreen from './src/screens/LoudUrbanChoirPreviewScreen';
+import CreatorProfileMockupScreen from './src/screens/CreatorProfileMockupScreen';
+import CommunityMockupScreen from './src/screens/CommunityMockupScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import TestFeedScreen from './src/screens/TestFeedScreen';
 import DiscoverScreen from './src/screens/DiscoverScreen';
@@ -74,6 +77,8 @@ import WithdrawalScreen from './src/screens/WithdrawalScreen';
 import WithdrawalMethodsScreen from './src/screens/WithdrawalMethodsScreen';
 import AddWithdrawalMethodScreen from './src/screens/AddWithdrawalMethodScreen';
 import AllCreatorsScreen from './src/screens/AllCreatorsScreen';
+import TalentDiscoveryScreen from './src/screens/TalentDiscoveryScreen';
+import TalentDiscoveryResultsScreen from './src/screens/TalentDiscoveryResultsScreen';
 import AllEventsScreen from './src/screens/AllEventsScreen';
 import AllTracksScreen from './src/screens/AllTracksScreen';
 import AllAlbumsScreen from './src/screens/AllAlbumsScreen';
@@ -94,6 +99,7 @@ import OnboardingScreen from './src/screens/OnboardingScreen';
 import AvailabilityCalendarScreen from './src/screens/AvailabilityCalendarScreen';
 import CollaborationRequestsScreen from './src/screens/CollaborationRequestsScreen';
 import ServiceProviderOnboardingScreen from './src/screens/ServiceProviderOnboardingScreen';
+import CreatorUpgradeScreen from './src/screens/CreatorUpgradeScreen';
 import ServiceProviderDashboardScreen from './src/screens/ServiceProviderDashboardScreen';
 import AudioEnhancementExpoScreen from './src/screens/AudioEnhancementScreen.expo';
 import TwoFactorVerificationScreen from './src/screens/TwoFactorVerificationScreen';
@@ -106,6 +112,7 @@ import InstrumentsManagementScreen from './src/screens/InstrumentsManagementScre
 import AnalyticsDashboardScreen from './src/screens/AnalyticsDashboardScreen';
 import CreatorEarningsDashboardScreen from './src/screens/CreatorEarningsDashboardScreen';
 import CreatorInsightsDashboardScreen from './src/screens/CreatorInsightsDashboardScreen';
+import EventsAnalyticsOverviewScreen from './src/screens/EventsAnalyticsOverviewScreen';
 import BrandingCustomizationScreen from './src/screens/BrandingCustomizationScreen';
 import TracksListScreen from './src/screens/TracksListScreen';
 import FollowersListScreen from './src/screens/FollowersListScreen';
@@ -150,6 +157,9 @@ import ShareMyCardModal from './src/components/ShareMyCardModal';
 import EarlyAdopterConversionModal from './src/components/EarlyAdopterConversionModal';
 import { useEarlyAdopterConversion } from './src/hooks/useEarlyAdopterConversion';
 import { isExpiredEarlyAdopter } from './src/utils/earlyAdopterUtils';
+import { isCreator } from './src/utils/roles';
+import TalentCategoryModal from './src/components/TalentCategoryModal';
+import type { TalentCategory } from './src/utils/talentCategoryLabels';
 import MiniPlayer from './src/components/MiniPlayer';
 import SoundBridgeErrorBoundary from './src/components/SoundBridgeErrorBoundary';
 import ScreenCaptureBanner from './src/components/ScreenCaptureBanner';
@@ -547,9 +557,37 @@ function AppNavigator() {
 
   const [showCreatorTeaser, setShowCreatorTeaser] = React.useState(false);
   const [showCreatorCard, setShowCreatorCard] = React.useState(false);
+  const [showTalentCategoryModal, setShowTalentCategoryModal] = React.useState(false);
   const launchCountedRef = React.useRef(false);
+  const talentCategoryCheckedRef = React.useRef(false);
   const calendarNudgeOpenRecordedRef = React.useRef(false);
   const { theme } = useTheme();
+
+  // Talent category self-identification — one-time prompt for creators, gated by
+  // profiles.talent_category_prompted (see TALENT_DISCOVERY_ADDITIONS.MD).
+  React.useEffect(() => {
+    if (!userProfile || talentCategoryCheckedRef.current) return;
+    talentCategoryCheckedRef.current = true;
+    if (isCreator(userProfile) && !userProfile.talent_category_prompted) {
+      const timer = setTimeout(() => setShowTalentCategoryModal(true), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [userProfile]);
+
+  const handleTalentCategorySubmit = async (categories: TalentCategory[]) => {
+    if (user?.id) {
+      const rows = categories.map((category) => ({ user_id: user.id, category, source: 'self_identified' as const }));
+      const { error } = await supabase.from('user_talent_categories').upsert(rows, { onConflict: 'user_id,category' });
+      if (error) console.error('❌ Error saving talent categories:', error);
+    }
+    await updateUserProfile({ talent_category_prompted: true });
+    setShowTalentCategoryModal(false);
+  };
+
+  const handleTalentCategorySkip = async () => {
+    await updateUserProfile({ talent_category_prompted: true });
+    setShowTalentCategoryModal(false);
+  };
 
   // Calendar nudge — count app opens for all users (once per cold start)
   React.useEffect(() => {
@@ -694,7 +732,7 @@ function AppNavigator() {
   // Creator launch counter — runs once when userProfile first loads for a creator
   React.useEffect(() => {
     if (!user?.id || !userProfile || launchCountedRef.current) return;
-    if (userProfile.role !== 'creator') { launchCountedRef.current = true; return; }
+    if (!isCreator(userProfile)) { launchCountedRef.current = true; return; }
     if (userProfile.fan_link_shared) { launchCountedRef.current = true; return; }
 
     launchCountedRef.current = true;
@@ -1247,6 +1285,8 @@ function AppNavigator() {
             <Stack.Screen name="WithdrawalMethods" component={WithdrawalMethodsScreen} />
             <Stack.Screen name="AddWithdrawalMethod" component={AddWithdrawalMethodScreen} />
             <Stack.Screen name="AllCreators" component={AllCreatorsScreen} />
+            <Stack.Screen name="TalentDiscovery" component={TalentDiscoveryScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="TalentDiscoveryResults" component={TalentDiscoveryResultsScreen} options={{ headerShown: false }} />
             <Stack.Screen name="AllEvents" component={AllEventsScreen} />
             <Stack.Screen name="SavedEvents" component={AllEventsScreen} />
             <Stack.Screen name="AllTracks" component={AllTracksScreen} />
@@ -1259,6 +1299,8 @@ function AppNavigator() {
             <Stack.Screen name="MyVenues" component={MyVenuesScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} />
             <Stack.Screen name="LoudUrbanChoirPreview" component={LoudUrbanChoirPreviewScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="CreatorProfileMockup" component={CreatorProfileMockupScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="CommunityMockup" component={CommunityMockupScreen} options={{ headerShown: false }} />
             <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
             <Stack.Screen name="EventsPickedForYou" component={EventsPickedForYouScreen} />
             <Stack.Screen name="TicketConfirmation" component={TicketConfirmationScreen} options={{ headerShown: false, gestureEnabled: false }} />
@@ -1277,6 +1319,7 @@ function AppNavigator() {
             <Stack.Screen name="AvailabilityCalendar" component={AvailabilityCalendarScreen} />
             <Stack.Screen name="CollaborationRequests" component={CollaborationRequestsScreen} />
             <Stack.Screen name="ServiceProviderOnboarding" component={ServiceProviderOnboardingScreen} />
+            <Stack.Screen name="CreatorUpgrade" component={CreatorUpgradeScreen} options={{ headerShown: false }} />
             <Stack.Screen name="ServiceProviderDashboard" component={ServiceProviderDashboardScreen} />
             <Stack.Screen name="AudioEnhancementExpo" component={AudioEnhancementExpoScreen} options={{ headerShown: false }} />
             <Stack.Screen name="ExperienceManagement" component={ExperienceManagementScreen} />
@@ -1285,6 +1328,7 @@ function AppNavigator() {
             <Stack.Screen name="AnalyticsDashboard" component={AnalyticsDashboardScreen} />
             <Stack.Screen name="CreatorEarningsDashboard" component={CreatorEarningsDashboardScreen} />
             <Stack.Screen name="CreatorInsightsDashboard" component={CreatorInsightsDashboardScreen} />
+            <Stack.Screen name="EventsAnalyticsOverview" component={EventsAnalyticsOverviewScreen} />
             <Stack.Screen name="BrandingCustomization" component={BrandingCustomizationScreen} />
             <Stack.Screen name="TracksList" component={TracksListScreen} />
             <Stack.Screen name="FollowersList" component={FollowersListScreen} />
@@ -1332,7 +1376,7 @@ function AppNavigator() {
         {user && !needsOnboarding && activeRouteName !== 'SessionDBlank' && <MiniPlayer />}
 
         {/* Creator teaser — fires every 4th app launch until card is shared */}
-        {userProfile && userProfile.role === 'creator' && !userProfile.fan_link_shared && (
+        {userProfile && isCreator(userProfile) && !userProfile.fan_link_shared && (
           <>
             <CreatorTeaserModal
               visible={showCreatorTeaser}
@@ -1362,6 +1406,13 @@ function AppNavigator() {
             />
           </>
         )}
+
+        {/* Talent category self-identification — one-time, creators only */}
+        <TalentCategoryModal
+          visible={showTalentCategoryModal}
+          onSubmit={handleTalentCategorySubmit}
+          onSkip={handleTalentCategorySkip}
+        />
 
         {/* Early adopter conversion modal — shown on foreground after grant expires */}
         <EarlyAdopterConversionModal

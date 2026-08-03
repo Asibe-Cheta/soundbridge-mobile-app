@@ -18,35 +18,97 @@ import VerifiedBadge from '../components/VerifiedBadge';
 import BackButton from '../components/BackButton';
 import { SystemTypography as Typography } from '../constants/Typography';
 
-// Replace these placeholder files with real Loud Urban Choir assets
-const COVER_PHOTO = require('../../assets/loud-cover-photo.jpg');
+const COVER_PHOTO = require('../../assets/luc-cover-banner.png');
 const PROFILE_PIC = require('../../assets/loud-profile-pic.jpg');
 const RISE_COVER = require('../../assets/loud-rise-cover.jpg');
 const SOMEWHERE_COVER = require('../../assets/loud-somewhere-cover.jpg');
-const MEMBER_1 = require('../../assets/loud-member-1.png');
-const MEMBER_2 = require('../../assets/loud-member-2.png');
-const MEMBER_3 = require('../../assets/loud-member-3.png');
+
+const PORTFOLIO_IMAGES = [
+  require('../../assets/images/luc/Frame-1000003451.png'),
+  require('../../assets/images/luc/Frame-1000003452-2.png'),
+  require('../../assets/images/luc/Frame-1000003451-5.png'),
+  require('../../assets/images/luc/Frame-1000003451-3.png'),
+  require('../../assets/images/luc/Frame-1000003451-4.png'),
+  require('../../assets/images/luc/Frame-1000003451-7.png'),
+  require('../../assets/images/luc/Frame-1000003451-9.png'),
+  require('../../assets/images/luc/Frame-1000003451-10.png'),
+  require('../../assets/images/luc/Frame-1000003452-5.png'),
+  require('../../assets/images/luc/Frame-1000003452-6.png'),
+  require('../../assets/images/luc/Frame-1000003452-8.png'),
+  require('../../assets/images/luc/Frame-1000003452-9.png'),
+  require('../../assets/images/luc/Frame-1000003452-10.png'),
+];
 
 const { width: SCREEN_W } = Dimensions.get('window');
-const GRID_ITEM = (SCREEN_W - 4) / 3;
+const GRID_ITEM = (SCREEN_W - 6) / 3;
 
 const MOCK_TRACKS = [
   { id: '1', title: 'RISE', subtitle: 'Released Oct 2025', cover: RISE_COVER },
   { id: '2', title: 'Somewhere', subtitle: 'Debut single', cover: SOMEWHERE_COVER },
 ];
 
-const MOCK_MEMBERS = [
-  { id: '1', image: MEMBER_1, name: 'Shimmer' },
-  { id: '2', image: MEMBER_2, name: 'Angelika Belle' },
-  { id: '3', image: MEMBER_3, name: 'SpiritVibes' },
+const MOCK_EVENTS = [
+  {
+    id: '1',
+    title: 'Lagos Fashion Weekend',
+    date: 'Dec 15, 2025',
+    time: '7:00 PM',
+    venue: 'Eko Hall',
+    location: 'Lagos, Nigeria',
+    status: 'past',
+  },
+  {
+    id: '2',
+    title: 'AJOYO X Loud Urban Choir',
+    date: 'Jan 10, 2026',
+    time: '6:00 PM',
+    venue: 'Accra Theatre',
+    location: 'Accra, Ghana',
+    status: 'past',
+  },
+  {
+    id: '3',
+    title: 'Living Loud — The Concert',
+    date: 'Feb 20, 2026',
+    time: '8:00 PM',
+    venue: 'National Theatre',
+    location: 'Abuja, Nigeria',
+    status: 'past',
+  },
+  {
+    id: '4',
+    title: 'Canada Tour',
+    date: 'TBA',
+    time: '',
+    venue: 'Toronto · Vancouver · Montreal',
+    location: 'Canada',
+    status: 'upcoming',
+  },
+  {
+    id: '5',
+    title: 'UK Tour',
+    date: 'TBA',
+    time: '',
+    venue: 'London · Manchester · Birmingham',
+    location: 'United Kingdom',
+    status: 'upcoming',
+  },
 ];
 
-type Tab = 'drops' | 'tracks' | 'albums' | 'photos' | 'about';
+type Tab = 'drops' | 'releases' | 'events' | 'photos' | 'about';
 
 export default function LoudUrbanChoirPreviewScreen() {
   const navigation = useNavigation();
   const { theme } = useTheme();
   const [activeTab, setActiveTab] = useState<Tab>('drops');
+
+  const TABS: { key: Tab; label: string }[] = [
+    { key: 'drops', label: 'Drops' },
+    { key: 'releases', label: 'Releases' },
+    { key: 'events', label: 'Events' },
+    { key: 'photos', label: 'Portfolio' },
+    { key: 'about', label: 'About' },
+  ];
 
   return (
     <View style={styles.container}>
@@ -61,15 +123,9 @@ export default function LoudUrbanChoirPreviewScreen() {
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <StatusBar barStyle={theme.isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
-        {/* Admin preview ribbon */}
-        <View style={styles.previewRibbon}>
-          <Ionicons name="eye-outline" size={12} color="rgba(255,255,255,0.8)" />
-          <Text style={styles.previewRibbonText}>ADMIN PREVIEW — Not visible to users</Text>
-        </View>
-
-        {/* Header — matches CreatorProfileScreen exactly */}
-        <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
-          <BackButton style={styles.headerButton} onPress={() => navigation.goBack()} />
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: 'transparent', borderBottomColor: 'transparent' }]}>
+          <BackButton style={[styles.headerButton, { borderWidth: 0 }]} onPress={() => navigation.goBack()} />
           <View style={styles.headerTitleRow}>
             <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Loud Urban Choir</Text>
             <VerifiedBadge size={14} />
@@ -84,15 +140,24 @@ export default function LoudUrbanChoirPreviewScreen() {
             <View style={styles.bannerContainer}>
               <Image source={COVER_PHOTO} style={styles.bannerImage} resizeMode="cover" />
               <LinearGradient
-                colors={['transparent', 'rgba(0,0,0,0.45)']}
+                colors={['rgba(0,0,0,0.15)', 'rgba(0,0,0,0.72)']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 0, y: 1 }}
                 style={StyleSheet.absoluteFillObject}
                 pointerEvents="none"
               />
+              {/* Floating action buttons — matches CreatorProfileScreen */}
+              <View style={styles.bannerActions}>
+                <TouchableOpacity style={styles.bannerIconBtn} activeOpacity={0.8}>
+                  <Ionicons name="people-outline" size={18} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.bannerIconBtn} activeOpacity={0.8}>
+                  <Ionicons name="pencil-outline" size={18} color="#fff" />
+                </TouchableOpacity>
+              </View>
             </View>
 
-            {/* Avatar — centered, overlaps banner */}
+            {/* Avatar */}
             <View style={styles.avatarWrapper}>
               <LinearGradient
                 colors={['#9333EA', '#F59E0B']}
@@ -156,14 +221,14 @@ export default function LoudUrbanChoirPreviewScreen() {
 
           {/* Tabs */}
           <View style={[styles.tabsContainer, { borderBottomColor: theme.colors.border }]}>
-            {(['drops', 'tracks', 'albums', 'photos', 'about'] as Tab[]).map((tab) => (
+            {TABS.map(({ key, label }) => (
               <TouchableOpacity
-                key={tab}
-                style={[styles.tab, activeTab === tab && styles.activeTab, activeTab === tab && { borderBottomColor: theme.colors.primary }]}
-                onPress={() => setActiveTab(tab)}
+                key={key}
+                style={[styles.tab, activeTab === key && styles.activeTab, activeTab === key && { borderBottomColor: theme.colors.primary }]}
+                onPress={() => setActiveTab(key)}
               >
-                <Text style={[styles.tabText, { color: activeTab === tab ? theme.colors.primary : theme.colors.textSecondary }]}>
-                  {tab === 'photos' ? 'Portfolio' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                <Text style={[styles.tabText, { color: activeTab === key ? theme.colors.primary : theme.colors.textSecondary }]}>
+                  {label}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -172,8 +237,8 @@ export default function LoudUrbanChoirPreviewScreen() {
           {/* Tab Content */}
           <View style={styles.tabContent}>
             {activeTab === 'drops' && <DropsTab theme={theme} />}
-            {activeTab === 'tracks' && <TracksTab theme={theme} />}
-            {activeTab === 'albums' && <EmptyTab theme={theme} icon="disc-outline" message="No albums yet" />}
+            {activeTab === 'releases' && <ReleasesTab theme={theme} />}
+            {activeTab === 'events' && <EventsTab theme={theme} />}
             {activeTab === 'photos' && <PortfolioTab theme={theme} />}
             {activeTab === 'about' && <AboutTab theme={theme} />}
           </View>
@@ -198,7 +263,7 @@ function DropsTab({ theme }: { theme: any }) {
   );
 }
 
-function TracksTab({ theme }: { theme: any }) {
+function ReleasesTab({ theme }: { theme: any }) {
   return (
     <View style={{ paddingHorizontal: 12, paddingTop: 8 }}>
       {MOCK_TRACKS.map((track) => (
@@ -217,11 +282,39 @@ function TracksTab({ theme }: { theme: any }) {
   );
 }
 
-function EmptyTab({ theme, icon, message }: { theme: any; icon: any; message: string }) {
+function EventsTab({ theme }: { theme: any }) {
   return (
-    <View style={styles.emptyState}>
-      <Ionicons name={icon} size={48} color={theme.colors.textSecondary} />
-      <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>{message}</Text>
+    <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+      {MOCK_EVENTS.map((event) => (
+        <View
+          key={event.id}
+          style={[
+            styles.eventCard,
+            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+            event.status === 'upcoming' && { borderColor: theme.colors.primary + '40' },
+          ]}
+        >
+          <View style={styles.eventDateBadge}>
+            <Text style={[styles.eventDateText, { color: theme.colors.primary }]}>{event.date}</Text>
+            {event.time ? <Text style={[styles.eventTimeText, { color: theme.colors.textSecondary }]}>{event.time}</Text> : null}
+          </View>
+          <View style={styles.eventInfo}>
+            <View style={styles.eventTitleRow}>
+              <Text style={[styles.eventTitle, { color: theme.colors.text }]}>{event.title}</Text>
+              {event.status === 'upcoming' && (
+                <View style={[styles.upcomingBadge, { backgroundColor: theme.colors.primary + '20' }]}>
+                  <Text style={[styles.upcomingText, { color: theme.colors.primary }]}>Coming Soon</Text>
+                </View>
+              )}
+            </View>
+            <Text style={[styles.eventVenue, { color: theme.colors.textSecondary }]}>{event.venue}</Text>
+            <View style={styles.eventLocationRow}>
+              <Ionicons name="location-outline" size={12} color={theme.colors.textSecondary} />
+              <Text style={[styles.eventLocation, { color: theme.colors.textSecondary }]}>{event.location}</Text>
+            </View>
+          </View>
+        </View>
+      ))}
     </View>
   );
 }
@@ -229,17 +322,16 @@ function EmptyTab({ theme, icon, message }: { theme: any; icon: any; message: st
 function PortfolioTab({ theme }: { theme: any }) {
   return (
     <View style={styles.portfolioGrid}>
-      {MOCK_MEMBERS.map((m) => (
-        <View key={m.id} style={styles.portfolioItem}>
-          <Image source={m.image} style={styles.portfolioImage} resizeMode="cover" />
+      {PORTFOLIO_IMAGES.map((img, index) => (
+        <View key={index} style={styles.portfolioItem}>
+          <Image source={img} style={styles.portfolioImage} resizeMode="cover" />
           <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.65)']}
-            start={{ x: 0, y: 0 }}
+            colors={['transparent', 'rgba(0,0,0,0.45)']}
+            start={{ x: 0, y: 0.6 }}
             end={{ x: 0, y: 1 }}
             style={StyleSheet.absoluteFillObject}
             pointerEvents="none"
           />
-          <Text style={styles.portfolioLabel}>{m.name}</Text>
         </View>
       ))}
     </View>
@@ -256,7 +348,7 @@ function AboutTab({ theme }: { theme: any }) {
         </Text>
       </View>
       <View style={[styles.aboutCard, { backgroundColor: theme.colors.surface }]}>
-        <View style={[styles.aboutRow]}>
+        <View style={styles.aboutRow}>
           <Ionicons name="location-outline" size={16} color={theme.colors.textSecondary} />
           <Text style={[styles.aboutText, { color: theme.colors.textSecondary }]}>Lagos, Nigeria</Text>
         </View>
@@ -277,21 +369,6 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   mainGradient: { position: 'absolute', width: '100%', height: '100%', top: 0, left: 0 },
   safeArea: { flex: 1, backgroundColor: 'transparent' },
-
-  previewRibbon: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    backgroundColor: 'rgba(220,38,38,0.75)',
-    paddingVertical: 4,
-  },
-  previewRibbonText: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-  },
 
   header: {
     flexDirection: 'row',
@@ -321,8 +398,24 @@ const styles = StyleSheet.create({
   scrollView: { flex: 1, backgroundColor: 'transparent' },
   profileSection: { paddingBottom: 8 },
 
-  bannerContainer: { width: '100%', height: 150, overflow: 'hidden' },
-  bannerImage: { width: '100%', height: 150 },
+  bannerContainer: { width: '100%', height: 160, overflow: 'hidden' },
+  bannerImage: { width: '100%', height: 160 },
+  bannerActions: {
+    position: 'absolute',
+    right: 12,
+    bottom: 12,
+    gap: 8,
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
+  bannerIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   avatarWrapper: { alignSelf: 'center', marginTop: -50, marginBottom: 12 },
   avatarGradientRing: { width: 106, height: 106, borderRadius: 53, padding: 3, alignItems: 'center', justifyContent: 'center' },
@@ -385,7 +478,7 @@ const styles = StyleSheet.create({
   tabsContainer: { flexDirection: 'row', borderBottomWidth: 1, marginBottom: 0 },
   tab: { flex: 1, paddingVertical: 16, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
   activeTab: { borderBottomWidth: 2 },
-  tabText: { fontFamily: Typography.body.fontFamily, fontSize: 15, lineHeight: 22, fontWeight: '300', letterSpacing: -0.4 },
+  tabText: { fontFamily: Typography.body.fontFamily, fontSize: 13, lineHeight: 22, fontWeight: '300', letterSpacing: -0.4 },
   tabContent: { flex: 1 },
 
   // Drops
@@ -396,7 +489,7 @@ const styles = StyleSheet.create({
   dropText: { fontFamily: Typography.body.fontFamily, fontSize: 14, lineHeight: 20, fontWeight: '300', marginBottom: 4 },
   dropTime: { fontFamily: Typography.body.fontFamily, fontSize: 12, fontWeight: '300' },
 
-  // Tracks
+  // Releases
   trackRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -412,25 +505,48 @@ const styles = StyleSheet.create({
   trackTitle: { fontFamily: Typography.body.fontFamily, fontSize: 14, lineHeight: 18, fontWeight: '300', letterSpacing: -0.4, marginBottom: 3 },
   trackSub: { fontFamily: Typography.body.fontFamily, fontSize: 12, fontWeight: '300' },
 
-  // Empty
-  emptyState: { padding: 60, alignItems: 'center', justifyContent: 'center' },
-  emptyText: { fontFamily: Typography.body.fontFamily, fontSize: 16, lineHeight: 22, fontWeight: '300', marginTop: 16 },
+  // Events
+  eventCard: {
+    flexDirection: 'row',
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 12,
+    gap: 12,
+  },
+  eventDateBadge: {
+    width: 56,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 2,
+  },
+  eventDateText: {
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: -0.2,
+    textAlign: 'center',
+  },
+  eventTimeText: {
+    fontFamily: Typography.body.fontFamily,
+    fontSize: 11,
+    fontWeight: '300',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  eventInfo: { flex: 1 },
+  eventTitleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
+  eventTitle: { fontFamily: Typography.body.fontFamily, fontSize: 14, fontWeight: '600', letterSpacing: -0.3, flex: 1 },
+  upcomingBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  upcomingText: { fontFamily: Typography.body.fontFamily, fontSize: 10, fontWeight: '600' },
+  eventVenue: { fontFamily: Typography.body.fontFamily, fontSize: 13, fontWeight: '300', letterSpacing: -0.3, marginBottom: 4 },
+  eventLocationRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  eventLocation: { fontFamily: Typography.body.fontFamily, fontSize: 12, fontWeight: '300' },
 
   // Portfolio grid
   portfolioGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   portfolioItem: { width: GRID_ITEM, height: GRID_ITEM, margin: 1, position: 'relative', overflow: 'hidden' },
   portfolioImage: { width: '100%', height: '100%' },
-  portfolioLabel: {
-    position: 'absolute',
-    bottom: 6,
-    left: 0,
-    right: 0,
-    textAlign: 'center',
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.2,
-  },
 
   // About
   aboutSection: { padding: 16 },

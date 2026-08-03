@@ -25,6 +25,14 @@ interface BecomeCreatorModalProps {
   onClose: () => void;
   onBecomeCreator: () => Promise<boolean>;
   loading?: boolean;
+  /**
+   * Optional override for recording agreement acceptance. Defaults to
+   * creatorAgreementService.acceptAgreement(), which also flips profiles.role
+   * server-side — destructive for an existing Audio Lover. Callers doing an
+   * additive upgrade (existing account gaining creator access alongside its
+   * current role) should pass their own additive-safe recorder here instead.
+   */
+  recordAgreement?: () => Promise<boolean>;
 }
 
 const CREATOR_PERKS = [
@@ -73,6 +81,7 @@ export default function BecomeCreatorModal({
   onClose,
   onBecomeCreator,
   loading = false,
+  recordAgreement,
 }: BecomeCreatorModalProps) {
   const { theme } = useTheme();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -97,7 +106,11 @@ export default function BecomeCreatorModal({
   const handleAgree = async () => {
     setIsSubmitting(true);
     try {
-      await creatorAgreementService.acceptAgreement();
+      if (recordAgreement) {
+        await recordAgreement();
+      } else {
+        await creatorAgreementService.acceptAgreement();
+      }
 
       const success = await onBecomeCreator();
       if (success) {

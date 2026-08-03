@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Modal,
@@ -155,12 +156,27 @@ export default function OutreachContactDetailScreen() {
     setSavingMeeting(false);
     if (error) { Alert.alert('Error', 'Could not save meeting.'); return; }
 
-    // Schedule a local reminder 60 minutes before the meeting.
-    // Only fires if the reminder time is still in the future.
+    // On first meeting creation, request alarm-capable permissions.
     try {
-      const contactName = contact?.contact_name ?? 'Contact';
-      const meetingTime = scheduleDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-      const locationPart = meetingLink.trim() ? ` ${meetingLink.trim()}` : '';
+      const permKey = 'outreach_alarm_perm_requested';
+      const alreadyRequested = await AsyncStorage.getItem(permKey);
+      if (!alreadyRequested) {
+        await AsyncStorage.setItem(permKey, '1');
+        await Notifications.requestPermissionsAsync(
+          Platform.OS === 'ios'
+            ? { ios: { allowAlert: true, allowSound: true, allowCriticalAlerts: true } }
+            : undefined
+        );
+      }
+    } catch {}
+
+    const contactName = contact?.contact_name ?? 'Contact';
+    const meetingTime = scheduleDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const locationPart = meetingLink.trim() ? ` · ${meetingLink.trim()}` : '';
+    const androidChannel = Platform.OS === 'android' ? { channelId: 'outreach_meetings' } : {};
+
+    // 60-minute advance reminder
+    try {
       const reminderDate = new Date(scheduleDate.getTime() - 60 * 60 * 1000);
       if (reminderDate.getTime() > Date.now()) {
         await Notifications.scheduleNotificationAsync({
@@ -168,10 +184,30 @@ export default function OutreachContactDetailScreen() {
             title: 'Meeting in 60 minutes',
             body: `${contactName} at ${meetingTime}.${locationPart}`,
             sound: 'default',
+            ...androidChannel,
           },
           trigger: {
             type: Notifications.SchedulableTriggerInputTypes.DATE,
             date: reminderDate,
+          },
+        });
+      }
+    } catch {}
+
+    // Alarm at the exact meeting time — audible even on silent (iOS critical / Android MAX)
+    try {
+      if (scheduleDate.getTime() > Date.now()) {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: `Meeting now — ${contactName}`,
+            body: `Starting now${locationPart || '.'}`,
+            sound: 'default',
+            priority: Notifications.AndroidNotificationPriority.MAX,
+            ...androidChannel,
+          },
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            date: scheduleDate,
           },
         });
       }

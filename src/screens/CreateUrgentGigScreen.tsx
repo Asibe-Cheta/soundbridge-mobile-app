@@ -206,6 +206,7 @@ export default function CreateUrgentGigScreen() {
     const { error: initError } = await initPaymentSheet({
       merchantDisplayName: 'SoundBridge',
       paymentIntentClientSecret: stripe_client_secret,
+      returnURL: 'soundbridge://stripe-redirect',
       ...(customer_id && ephemeral_key_secret
         ? { customerId: customer_id, customerEphemeralKeySecret: ephemeral_key_secret }
         : {}),

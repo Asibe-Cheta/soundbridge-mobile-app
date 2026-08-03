@@ -65,13 +65,17 @@ import QRCodeModal from '../components/QRCodeModal';
 import ShareDiagonalIcon from '../components/ShareDiagonalIcon';
 import ShareMyCardModal from '../components/ShareMyCardModal';
 import CreatorNudgeModal from '../components/CreatorNudgeModal';
+import BecomeCreatorModal from '../components/BecomeCreatorModal';
+import { isCreator } from '../utils/roles';
 import PhotoPostEditorModal from '../components/PhotoPostEditorModal';
 import { useCreatorAgreement } from '../hooks/useCreatorAgreement';
 import CreatorAgreementModal from '../components/CreatorAgreementModal';
+import { CREATOR_AGREEMENT_VERSION } from '../services/CreatorAgreementService';
 import { useToast } from '../contexts/ToastContext';
 import GoogleCalendarConnectCard from '../components/GoogleCalendarConnectCard';
 import GoogleCalendarPrivacyModal from '../components/GoogleCalendarPrivacyModal';
 import FanPageShareModal from '../components/FanPageShareModal';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   calendarIntegrationService,
   type CalendarConnectionStatus,
@@ -96,6 +100,7 @@ interface UserProfile {
   following_count: number;
   tracks_count: number;
   role: string;
+  is_creator?: boolean;
   is_verified: boolean;
   early_adopter?: boolean;
   rating_avg?: number | null;
@@ -165,9 +170,15 @@ export default function ProfileScreen() {
   const [showPhotoEditor, setShowPhotoEditor] = useState(false);
   const [followerAvatars, setFollowerAvatars] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
+
+  // ── Fan engagement (Audio Lover only) ──────────────────────────────────────
+  const [fanEngagementOptIn, setFanEngagementOptIn] = useState(false);
+  const [fanEngagementStats, setFanEngagementStats] = useState<{ tipCount: number; tipTotal: number } | null>(null);
+  const [fanEngagementLoading, setFanEngagementLoading] = useState(false);
   const [editingProfile, setEditingProfile] = useState<Partial<UserProfile>>({});
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [becomingServiceProvider, setBecomingServiceProvider] = useState(false);
+  const [showBecomeCreatorModal, setShowBecomeCreatorModal] = useState(false);
   const [hasSpProfile, setHasSpProfile] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
@@ -240,8 +251,9 @@ export default function ProfileScreen() {
     useCallback(() => {
       if (session && activeTab === 'settings') {
         loadCalendarStatus();
+        loadFanEngagement();
       }
-    }, [session, activeTab, loadCalendarStatus]),
+    }, [session, activeTab, loadCalendarStatus, loadFanEngagement]),
   );
 
   const handleCalendarConnectPress = () => {
@@ -305,11 +317,11 @@ export default function ProfileScreen() {
   // Show nudge when creator navigates to their own profile, once per session
   useFocusEffect(
     useCallback(() => {
-      if (profile?.role === 'creator' && !userProfile?.fan_link_shared && !nudgeDismissedThisSession) {
+      if (isCreator(profile) && !userProfile?.fan_link_shared && !nudgeDismissedThisSession) {
         const timer = setTimeout(() => setShowNudgeModal(true), 700);
         return () => clearTimeout(timer);
       }
-    }, [profile?.role === 'creator', userProfile?.fan_link_shared, nudgeDismissedThisSession]),
+    }, [isCreator(profile), userProfile?.fan_link_shared, nudgeDismissedThisSession]),
   );
 
   const handleMarkFanLinkShared = async (method: 'link' | 'card') => {
@@ -346,6 +358,56 @@ export default function ProfileScreen() {
   const handleNudgeShareCard = () => {
     setShowNudgeModal(false);
     setTimeout(() => setShowShareCardModal(true), 200);
+  };
+
+  // ── Fan engagement handlers (Audio Lover only) ──────────────────────────────
+  const loadFanEngagement = useCallback(async () => {
+    if (!user?.id || profile?.role !== 'listener') return;
+    const key = `@sb:fan_engagement_opt_in:${user.id}`;
+    const stored = await AsyncStorage.getItem(key).catch(() => null);
+    const isOptedIn = stored === '1';
+    setFanEngagementOptIn(isOptedIn);
+    if (!isOptedIn) { setFanEngagementStats(null); return; }
+    setFanEngagementLoading(true);
+    try {
+      const { data } = await supabase
+        .from('tips')
+        .select('amount')
+        .eq('sender_id', user.id)
+        .eq('status', 'completed');
+      if (data) {
+        setFanEngagementStats({
+          tipCount: data.length,
+          tipTotal: data.reduce((s: number, t: any) => s + (Number(t.amount) || 0), 0),
+        });
+      }
+    } catch {}
+    setFanEngagementLoading(false);
+  }, [user?.id, profile?.role]);
+
+  const handleFanEngagementToggle = async (value: boolean) => {
+    if (!user?.id) return;
+    const key = `@sb:fan_engagement_opt_in:${user.id}`;
+    if (value) {
+      await AsyncStorage.setItem(key, '1').catch(() => {});
+      setFanEngagementOptIn(true);
+      loadFanEngagement();
+    } else {
+      await AsyncStorage.removeItem(key).catch(() => {});
+      setFanEngagementOptIn(false);
+      setFanEngagementStats(null);
+    }
+  };
+
+  const handleFanReferralShare = async () => {
+    if (!profile?.username) return;
+    const url = `https://soundbridge.live/join?ref=${profile.username}`;
+    try {
+      await Share.share({
+        message: `Join me on SoundBridge — discover and support independent musicians, podcasters, and DJs\n${url}`,
+        url,
+      });
+    } catch {}
   };
 
   const checkBiometricAvailability = async () => {
@@ -667,6 +729,7 @@ export default function ProfileScreen() {
           following_count: followingCount,
           tracks_count: tracksCount,
           role: profileData.role || '',
+          is_creator: profileData.is_creator || false,
           is_verified: profileData.is_verified || false,
           early_adopter: profileData.early_adopter || false,
           rating_avg: profileData.rating_avg ?? null,
@@ -676,7 +739,7 @@ export default function ProfileScreen() {
         setProfile(profileObj);
 
         // Fetch follower avatars for the identity card (fire-and-forget, non-blocking)
-        if (profileData.role === 'creator') {
+        if (isCreator(profileData)) {
           supabase
             .from('follows')
             .select('follower:profiles!follower_id(avatar_url)')
@@ -1366,6 +1429,23 @@ export default function ProfileScreen() {
     );
   };
 
+  // Additive creator role upgrade (ADDITIVE_CREATOR_ROLE.MD) — profiles.role is
+  // never reassigned here; only is_creator is set, so Audio Lover data (tips,
+  // referral link, engagement stats) stays fully intact after upgrading.
+  const handleBecomeCreatorAgreement = async (): Promise<boolean> => {
+    const result = await updateUserProfile({
+      creator_agreement_accepted: true,
+      creator_agreement_version: CREATOR_AGREEMENT_VERSION,
+    });
+    return result.success;
+  };
+
+  const handleBecomeCreatorContinue = async (): Promise<boolean> => {
+    setShowBecomeCreatorModal(false);
+    navigation.navigate('CreatorUpgrade' as never);
+    return true;
+  };
+
   // Settings handlers
   const handlePrivacySecurity = () => {
     navigation.navigate('PrivacySecurity' as never);
@@ -1538,6 +1618,35 @@ export default function ProfileScreen() {
 
   const renderOverviewTab = () => (
     <View style={styles.tabContent}>
+
+      {/* Supporter status card — Audio Lover only, when opted in and has activity */}
+      {profile?.role === 'listener' && fanEngagementOptIn && fanEngagementStats && fanEngagementStats.tipCount > 0 && (
+        <View style={[styles.section, { marginTop: 8 }]}>
+          <View style={[styles.groupedCard, { backgroundColor: theme.colors.card, overflow: 'hidden' }]}>
+            <LinearGradient
+              colors={['rgba(236,72,153,0.08)', 'rgba(147,51,234,0.06)']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View style={[styles.groupedRow, { paddingVertical: 14 }]}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(236,72,153,0.15)' }]}>
+                <Ionicons name="heart" size={18} color="#EC4899" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.rowLabel, { color: theme.colors.text, fontWeight: '600' }]}>Supporter</Text>
+                <Text style={{ fontSize: 12, color: theme.colors.textSecondary, marginTop: 2 }}>
+                  {fanEngagementStats.tipCount} {fanEngagementStats.tipCount === 1 ? 'artist' : 'artists'} supported
+                  {fanEngagementStats.tipTotal > 0 ? ` · £${fanEngagementStats.tipTotal.toFixed(2)} given` : ''}
+                </Text>
+              </View>
+              <View style={{ backgroundColor: 'rgba(236,72,153,0.15)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#EC4899' }}>LEVEL 1</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      )}
+
       {/* Stats Cards */}
       <View style={styles.statsContainer}>
         <View style={[styles.statCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, marginLeft: 0 }]}>
@@ -1714,13 +1823,23 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.groupedRow}
+            style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}
             onPress={() => navigation.navigate('SavedEvents' as never, { mode: 'saved', title: 'Saved Events' } as never)}
           >
             <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
               <Ionicons name="bookmark" size={18} color="#F59E0B" />
             </View>
             <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Saved Events</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.groupedRow}
+            onPress={() => navigation.navigate('EventsAnalyticsOverview' as never)}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(59,130,246,0.12)' }]}>
+              <Ionicons name="bar-chart" size={18} color="#3B82F6" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Event Insights</Text>
             <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
         </View>
@@ -1928,7 +2047,7 @@ export default function ProfileScreen() {
       </View>
 
       {/* Fan Page Link */}
-      {profile?.role === 'creator' && profile?.username ? (
+      {isCreator(profile) && profile?.username ? (
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Your Fan Page Link</Text>
           <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
@@ -1952,6 +2071,83 @@ export default function ProfileScreen() {
           </View>
         </View>
       ) : null}
+
+      {/* Audio Fan Engagement — listener only */}
+      {profile?.role === 'listener' && (
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Audio Fan</Text>
+          <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+            {/* Opt-in toggle */}
+            <View style={[styles.groupedRow, fanEngagementOptIn ? { borderBottomWidth: 1, borderBottomColor: theme.colors.border } : {}]}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(236,72,153,0.12)' }]}>
+                <Ionicons name="heart-outline" size={18} color="#EC4899" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Engagement tracking & referral link</Text>
+                <Text style={{ fontSize: 12, color: theme.colors.textSecondary, marginTop: 2, lineHeight: 16 }}>
+                  Generate your referral link and track how many artists you've supported
+                </Text>
+              </View>
+              <Switch
+                value={fanEngagementOptIn}
+                onValueChange={handleFanEngagementToggle}
+                trackColor={{ false: theme.colors.border, true: '#EC4899' }}
+                thumbColor="#fff"
+              />
+            </View>
+
+            {/* Referral link */}
+            {fanEngagementOptIn && profile?.username && (
+              <View style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}>
+                <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.12)' }]}>
+                  <Ionicons name="link-outline" size={18} color="#6366F1" />
+                </View>
+                <Text style={[styles.rowValue, { color: theme.colors.text, flex: 1, fontSize: 13 }]} numberOfLines={1} ellipsizeMode="tail">
+                  soundbridge.live/join?ref={profile.username}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    Clipboard.setString(`https://soundbridge.live/join?ref=${profile.username}`);
+                    showToast('Referral link copied', 'success', 2500);
+                  }}
+                  hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                  style={{ marginRight: 10 }}
+                >
+                  <Ionicons name="copy-outline" size={18} color={theme.colors.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleFanReferralShare}
+                  hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                >
+                  <Ionicons name="share-outline" size={18} color={theme.colors.primary} />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Engagement stats */}
+            {fanEngagementOptIn && fanEngagementLoading && (
+              <View style={[styles.groupedRow, { justifyContent: 'center' }]}>
+                <ActivityIndicator size="small" color={theme.colors.textSecondary} />
+              </View>
+            )}
+            {fanEngagementOptIn && !fanEngagementLoading && fanEngagementStats && (
+              <View style={styles.groupedRow}>
+                <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
+                  <Ionicons name="stats-chart-outline" size={18} color="#10B981" />
+                </View>
+                <Text style={[styles.rowLabel, { color: theme.colors.text }]}>
+                  {fanEngagementStats.tipCount} {fanEngagementStats.tipCount === 1 ? 'tip' : 'tips'} given
+                </Text>
+                {fanEngagementStats.tipTotal > 0 && (
+                  <Text style={[styles.rowValue, { color: theme.colors.textSecondary }]}>
+                    £{fanEngagementStats.tipTotal.toFixed(2)} total
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
+        </View>
+      )}
 
       {/* Portfolio Links */}
       {session && user?.id && (
@@ -2053,6 +2249,22 @@ export default function ProfileScreen() {
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Creator Tools</Text>
         <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
+          {!isCreator(profile) && (
+            <TouchableOpacity
+              style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}
+              onPress={() => setShowBecomeCreatorModal(true)}
+            >
+              <LinearGradient
+                colors={['#ef4444', '#a855f7', '#60a5fa']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                style={[styles.rowIconWrap, { borderRadius: 8 }]}
+              >
+                <Ionicons name="rocket-outline" size={18} color="#FFFFFF" />
+              </LinearGradient>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Become a Creator</Text>
+              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('AICareerAdvisor' as never)}>
             <LinearGradient
               colors={['#ef4444', '#a855f7', '#60a5fa']}
@@ -2267,11 +2479,25 @@ export default function ProfileScreen() {
       {user?.email === 'asibechetachukwu@gmail.com' && (
         <View style={[styles.section, { marginTop: 8 }]}>
           <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
-            <TouchableOpacity style={styles.groupedRow} onPress={() => (navigation as any).navigate('LoudUrbanChoirPreview')}>
+            <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => (navigation as any).navigate('LoudUrbanChoirPreview')}>
               <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
                 <Ionicons name="eye-outline" size={18} color={theme.colors.primary} />
               </View>
               <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Preview: Loud Urban Choir</Text>
+              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => (navigation as any).navigate('CreatorProfileMockup')}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
+                <Ionicons name="bar-chart-outline" size={18} color={theme.colors.primary} />
+              </View>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Preview: Creator Dashboard</Text>
+              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.groupedRow} onPress={() => (navigation as any).navigate('CommunityMockup')}>
+              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(236,72,153,0.12)' }]}>
+                <Ionicons name="people-circle-outline" size={18} color={theme.colors.primary} />
+              </View>
+              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Preview: Community Hub</Text>
               <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
             </TouchableOpacity>
           </View>
@@ -2331,10 +2557,10 @@ export default function ProfileScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.headerButton}
-                    onPress={() => profile?.role === 'creator' ? setShowShareCardModal(true) : setShowQRModal(true)}
+                    onPress={() => isCreator(profile) ? setShowShareCardModal(true) : setShowQRModal(true)}
                   >
                     <Ionicons
-                      name={profile?.role === 'creator' ? 'card-outline' : 'qr-code-outline'}
+                      name={isCreator(profile) ? 'card-outline' : 'qr-code-outline'}
                       size={24}
                       color={theme.colors.text}
                     />
@@ -2428,7 +2654,7 @@ export default function ProfileScreen() {
               </TouchableOpacity>
 
               {/* Fan Page Icon — creators only */}
-              {profile?.role === 'creator' && profile?.username ? (
+              {isCreator(profile) && profile?.username ? (
                 <TouchableOpacity
                   style={styles.fanPageIconBtn}
                   onPress={() => setShowFanPageModal(true)}
@@ -2644,7 +2870,14 @@ export default function ProfileScreen() {
         loading={calendarBusy}
       />
 
-      {profile?.role === 'creator' && (
+      <BecomeCreatorModal
+        visible={showBecomeCreatorModal}
+        onClose={() => setShowBecomeCreatorModal(false)}
+        recordAgreement={handleBecomeCreatorAgreement}
+        onBecomeCreator={handleBecomeCreatorContinue}
+      />
+
+      {isCreator(profile) && (
         <>
           <CreatorNudgeModal
             visible={showNudgeModal}

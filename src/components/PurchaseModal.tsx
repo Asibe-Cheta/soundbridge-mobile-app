@@ -50,7 +50,7 @@ export default function PurchaseModal({
   coverImageUrl,
 }: PurchaseModalProps) {
   const { theme } = useTheme();
-  const { confirmPayment } = useStripe();
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [loading, setLoading] = useState(false);
 
   const formatPrice = (amount: number, curr: string) => {
@@ -101,12 +101,30 @@ export default function PurchaseModal({
 
       console.log('✅ Payment intent created:', data.payment_intent_id);
 
-      // 3. Confirm payment with Stripe SDK
-      const { error } = await confirmPayment(data.client_secret, {
-        paymentMethodType: 'Card',
+      // 3. Initialise and present Stripe's PaymentSheet — surfaces card, Apple/Google Pay,
+      // and PayPal (once enabled in the Stripe Dashboard) automatically, since the backend
+      // PaymentIntent already requests automatic_payment_methods.
+      const { error: initError } = await initPaymentSheet({
+        paymentIntentClientSecret: data.client_secret,
+        merchantDisplayName: 'SoundBridge',
+        returnURL: 'soundbridge://stripe-redirect',
+        ...(data.customer_id && data.ephemeral_key_secret
+          ? { customerId: data.customer_id, customerEphemeralKeySecret: data.ephemeral_key_secret }
+          : {}),
+        defaultBillingDetails: {
+          email: userSession.user?.email || undefined,
+        },
       });
 
+      if (initError) {
+        console.error('❌ Error initializing payment sheet:', initError);
+        throw new Error(initError.message);
+      }
+
+      const { error } = await presentPaymentSheet();
+
       if (error) {
+        if (error.code === 'Canceled') return;
         console.error('❌ Payment failed:', error);
         Alert.alert('Payment Failed', error.message);
         return;
@@ -201,9 +219,8 @@ export default function PurchaseModal({
             >
               <Ionicons name="card" size={20} color={theme.colors.primary} />
               <Text style={[styles.paymentMethodText, { color: theme.colors.text }]}>
-                Default Payment Method
+                Card, Apple Pay, Google Pay & more — choose next
               </Text>
-              <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />
             </TouchableOpacity>
           </View>
 

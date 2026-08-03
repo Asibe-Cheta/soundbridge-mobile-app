@@ -25,6 +25,11 @@ interface UserProfile {
   display_name?: string;
   avatar_url?: string;
   role?: 'creator' | 'listener';
+  is_creator?: boolean;
+  creator_agreement_accepted?: boolean;
+  creator_agreement_version?: string | null;
+  creator_upgraded_at?: string | null;
+  talent_category_prompted?: boolean;
   onboarding_completed?: boolean;
   country?: string;
   location?: string;

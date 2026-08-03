@@ -18,7 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -597,6 +597,7 @@ function AiBadge({ size = 28, radius = 8, fontSize = 10 }: { size?: number; radi
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export default function AICareerAdvisorScreen() {
   const navigation = useNavigation();
+  const route = useRoute<any>();
   const { theme } = useTheme();
   const { user, userProfile, session } = useAuth();
 
@@ -637,6 +638,16 @@ export default function AICareerAdvisorScreen() {
   const pulseOpacity = useRef(new Animated.Value(0.55)).current;
 
   const [proactiveWelcomeMsg, setProactiveWelcomeMsg] = useState<string | null>(null);
+
+  // ── initialPrompt from nudge navigation ──────────────────────────────────
+  const pendingPromptRef = useRef<string | null>(route.params?.initialPrompt ?? null);
+  useEffect(() => {
+    if (phase === 'results' && pendingPromptRef.current) {
+      const prompt = pendingPromptRef.current;
+      pendingPromptRef.current = null;
+      setChatInput(prompt);
+    }
+  }, [phase]);
 
   // ── Pulsating alert indicator ────────────────────────────────────────────
   useEffect(() => {
@@ -943,6 +954,7 @@ export default function AICareerAdvisorScreen() {
       const { error: initErr } = await initPaymentSheet({
         merchantDisplayName: 'SoundBridge',
         paymentIntentClientSecret: clientSecret,
+        returnURL: 'soundbridge://stripe-redirect',
       });
       if (initErr) { Alert.alert('Error', initErr.message); return; }
       const { error: presentErr } = await presentPaymentSheet();

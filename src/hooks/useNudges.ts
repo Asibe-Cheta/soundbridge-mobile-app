@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { isCreator as hasCreatorAccess } from '../utils/roles';
 
 export type NudgeType =
   | 'first_track'
@@ -101,7 +102,7 @@ export function useNudges() {
   const [activeNudge, setActiveNudge] = useState<NudgeType | null>(null);
   const checked = useRef(false);
 
-  const isCreator = userProfile?.role === 'creator';
+  const isCreator = hasCreatorAccess(userProfile);
 
   const checkNudges = useCallback(async () => {
     if (!userProfile?.id || !isCreator || checked.current) return;

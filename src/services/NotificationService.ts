@@ -334,6 +334,17 @@ class NotificationService {
         sound: 'default',
         vibrationPattern: [0, 200, 100, 200],
       },
+      {
+        id: 'outreach_meetings',
+        name: 'Meeting Alarms',
+        description: 'Alarm-style alerts for scheduled outreach meetings',
+        importance: Notifications.AndroidImportance.MAX,
+        sound: 'default',
+        vibrationPattern: [0, 500, 250, 500, 250, 500],
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        enableLights: true,
+        lightColor: '#8B5CF6',
+      },
     ];
 
     for (const channel of channels) {

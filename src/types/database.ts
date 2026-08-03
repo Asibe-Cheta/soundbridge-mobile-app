@@ -67,6 +67,12 @@ export interface Database {
           card_generations_lifetime: number | null
           card_generation_month: string | null
           preferred_moods: string[] | null
+          // Additive creator role upgrade
+          is_creator: boolean | null
+          creator_agreement_accepted: boolean | null
+          creator_agreement_version: string | null
+          creator_upgraded_at: string | null
+          talent_category_prompted: boolean | null
           created_at: string
           updated_at: string | null
         }
@@ -106,6 +112,11 @@ export interface Database {
           card_generations_lifetime?: number | null
           card_generation_month?: string | null
           preferred_moods?: string[] | null
+          is_creator?: boolean | null
+          creator_agreement_accepted?: boolean | null
+          creator_agreement_version?: string | null
+          creator_upgraded_at?: string | null
+          talent_category_prompted?: boolean | null
           created_at?: string
           updated_at?: string | null
         }
@@ -162,6 +173,11 @@ export interface Database {
           card_generations_lifetime?: number | null
           card_generation_month?: string | null
           preferred_moods?: string[] | null
+          is_creator?: boolean | null
+          creator_agreement_accepted?: boolean | null
+          creator_agreement_version?: string | null
+          creator_upgraded_at?: string | null
+          talent_category_prompted?: boolean | null
           created_at?: string
           updated_at?: string | null
         }
@@ -599,6 +615,29 @@ export interface Database {
         Update: {
           user_id?: string
           creator_type?: CreatorType
+          created_at?: string
+        }
+      }
+      user_talent_categories: {
+        Row: {
+          id: string
+          user_id: string
+          category: string
+          source: 'inferred' | 'self_identified'
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          category: string
+          source: 'inferred' | 'self_identified'
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          category?: string
+          source?: 'inferred' | 'self_identified'
           created_at?: string
         }
       }

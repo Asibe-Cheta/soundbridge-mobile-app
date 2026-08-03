@@ -25,6 +25,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { isCreator } from '../utils/roles';
 import { useNavigation, useFocusEffect, useScrollToTop } from '@react-navigation/native';
 import * as Notifications from 'expo-notifications';
 import { walkthroughable, useCopilot } from 'react-native-copilot';
@@ -57,6 +58,8 @@ import { calendarNudgeService } from '../services/CalendarNudgeService';
 import { calendarIntegrationService } from '../services/CalendarIntegrationService';
 import { useEventMatchIntelligence } from '../contexts/EventMatchIntelligenceContext';
 import EventPromotionTrackingService from '../services/EventPromotionTrackingService';
+import EarnMoneyLiveNudge from '../components/EarnMoneyLiveNudge';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const WalkthroughableView = walkthroughable(View);
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -70,6 +73,8 @@ const ARI_LOGO_TF = require('../../assets/abbey-logo.png');
 const FILTER_TABS = ['For You', 'Following', 'Events'];
 // Screen 01 — genre / brand strip (3 items, grayscale, opacity-40)
 const GENRE_STRIP = ['Electronic', 'R&B', 'Hip-Hop'];
+// Audio Lover welcome layer — shown only within this many days of account creation
+const AUDIO_LOVER_WELCOME_WINDOW_DAYS = 7;
 
 // ─────────────────────────────────────────────────────────────
 // Waveform bar config — directly mirrored from LiveAudioBanner
@@ -324,6 +329,200 @@ function AbbeyRoadCard({ onPress, carousel }: { onPress: () => void; carousel?: 
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// CreateEventCard — amber/orange, for event organiser carousel
+// ─────────────────────────────────────────────────────────────
+function CreateEventCard({ onPress }: { onPress: () => void }) {
+  return (
+    <TouchableOpacity style={cardStyles.carouselCard} activeOpacity={0.88} onPress={onPress}>
+      <LinearGradient
+        colors={['#1C1005', '#2A1A05', '#1C1000']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={['rgba(245,158,11,0.4)', 'transparent', 'rgba(180,83,9,0.3)']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={['transparent', 'rgba(28,14,0,0.95)']}
+        start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
+        style={cardStyles.bottomGradient}
+      />
+      <View style={[cardStyles.badge, { backgroundColor: 'rgba(245,158,11,0.2)', borderColor: 'rgba(245,158,11,0.4)' }]}>
+        <View style={[cardStyles.liveDot, { backgroundColor: '#F59E0B' }]} />
+        <Text style={[cardStyles.badgeText, { color: '#FCD34D' }]}>EVENT ORGANISER</Text>
+      </View>
+      <View style={cardStyles.content}>
+        <Text style={cardStyles.title}>
+          Create{' '}<Text style={{ color: 'rgba(255,255,255,0.9)' }}>an Event</Text>
+        </Text>
+        <Text style={cardStyles.subtitle}>Sell tickets, promote to local audiences, manage your event</Text>
+        <View style={cardStyles.ctaRow}>
+          <Text style={cardStyles.ctaText}>Get Started</Text>
+          <LinearGradient
+            colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0)', 'rgba(255,255,255,0.12)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={cardStyles.glassCircle}
+          >
+            <View style={{ transform: [{ rotate: '45deg' }] }}>
+              <Ionicons name="arrow-up-outline" size={20} color="#fff" />
+            </View>
+          </LinearGradient>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// DiscoverTalentCard — blue, for event organiser carousel
+// ─────────────────────────────────────────────────────────────
+function DiscoverTalentCard({ onPress }: { onPress: () => void }) {
+  return (
+    <TouchableOpacity style={cardStyles.carouselCard} activeOpacity={0.88} onPress={onPress}>
+      <LinearGradient
+        colors={['#050F1C', '#0A1A2E', '#050F1C']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={['rgba(59,130,246,0.35)', 'transparent', 'rgba(30,64,175,0.25)']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={['transparent', 'rgba(5,10,28,0.95)']}
+        start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
+        style={cardStyles.bottomGradient}
+      />
+      <View style={[cardStyles.badge, { backgroundColor: 'rgba(59,130,246,0.2)', borderColor: 'rgba(59,130,246,0.4)' }]}>
+        <View style={[cardStyles.liveDot, { backgroundColor: '#60A5FA' }]} />
+        <Text style={[cardStyles.badgeText, { color: '#93C5FD' }]}>DISCOVER</Text>
+      </View>
+      <View style={cardStyles.content}>
+        <Text style={cardStyles.title}>
+          Discover{' '}<Text style={{ color: 'rgba(255,255,255,0.9)' }}>Talent</Text>
+        </Text>
+        <Text style={cardStyles.subtitle}>Browse musicians, DJs, and performers available to book</Text>
+        <View style={cardStyles.ctaRow}>
+          <Text style={cardStyles.ctaText}>Browse Artists</Text>
+          <LinearGradient
+            colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0)', 'rgba(255,255,255,0.12)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={cardStyles.glassCircle}
+          >
+            <View style={{ transform: [{ rotate: '45deg' }] }}>
+              <Ionicons name="arrow-up-outline" size={20} color="#fff" />
+            </View>
+          </LinearGradient>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// AudioLoverDiscoverCard — blue, for Audio Lover welcome layer
+// (same gradient/badge treatment as DiscoverTalentCard, listener-facing copy)
+// ─────────────────────────────────────────────────────────────
+function AudioLoverDiscoverCard({ onPress }: { onPress: () => void }) {
+  return (
+    <TouchableOpacity style={cardStyles.carouselCard} activeOpacity={0.88} onPress={onPress}>
+      <LinearGradient
+        colors={['#050F1C', '#0A1A2E', '#050F1C']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={['rgba(59,130,246,0.35)', 'transparent', 'rgba(30,64,175,0.25)']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={['transparent', 'rgba(5,10,28,0.95)']}
+        start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
+        style={cardStyles.bottomGradient}
+      />
+      <View style={[cardStyles.badge, { backgroundColor: 'rgba(59,130,246,0.2)', borderColor: 'rgba(59,130,246,0.4)' }]}>
+        <View style={[cardStyles.liveDot, { backgroundColor: '#60A5FA' }]} />
+        <Text style={[cardStyles.badgeText, { color: '#93C5FD' }]}>DISCOVER</Text>
+      </View>
+      <View style={cardStyles.content}>
+        <Text style={cardStyles.title}>
+          Discover{' '}<Text style={{ color: 'rgba(255,255,255,0.9)' }}>Artists</Text>
+        </Text>
+        <Text style={cardStyles.subtitle}>Find musicians and creators making noise near you</Text>
+        <View style={cardStyles.ctaRow}>
+          <Text style={cardStyles.ctaText}>Start Exploring</Text>
+          <LinearGradient
+            colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0)', 'rgba(255,255,255,0.12)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={cardStyles.glassCircle}
+          >
+            <View style={{ transform: [{ rotate: '45deg' }] }}>
+              <Ionicons name="arrow-up-outline" size={20} color="#fff" />
+            </View>
+          </LinearGradient>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// AudioLoverSupportCard — purple, for Audio Lover welcome layer
+// (same gradient/badge treatment as SoundAcademyCard, listener-facing copy)
+// ─────────────────────────────────────────────────────────────
+function AudioLoverSupportCard({ onPress }: { onPress: () => void }) {
+  return (
+    <TouchableOpacity style={cardStyles.carouselCard} activeOpacity={0.88} onPress={onPress}>
+      <LinearGradient
+        colors={['#1C1235', '#2A1650', '#1C1235']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={['rgba(139,92,246,0.35)', 'transparent', 'rgba(88,28,135,0.25)']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={['transparent', 'rgba(10,4,28,0.95)']}
+        start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
+        style={cardStyles.bottomGradient}
+      />
+      <View style={[cardStyles.badge, cardStyles.saBadge]}>
+        <View style={[cardStyles.liveDot, { backgroundColor: '#A78BFA' }]} />
+        <Text style={[cardStyles.badgeText, { color: '#C4B5FD' }]}>SUPPORT</Text>
+      </View>
+      <View style={cardStyles.content}>
+        <Text style={cardStyles.title}>
+          Support{' '}<Text style={{ color: 'rgba(255,255,255,0.9)' }}>Creators</Text>
+        </Text>
+        <Text style={cardStyles.subtitle}>Keep the connection real — follow, tip, and grow with the artists you love</Text>
+        <View style={cardStyles.ctaRow}>
+          <Text style={cardStyles.ctaText}>Explore Creators</Text>
+          <LinearGradient
+            colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0)', 'rgba(255,255,255,0.12)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={cardStyles.glassCircle}
+          >
+            <View style={{ transform: [{ rotate: '45deg' }] }}>
+              <Ionicons name="arrow-up-outline" size={20} color="#fff" />
+            </View>
+          </LinearGradient>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 // Shared card styles (Screen 02 htmlCard design language)
 const cardStyles = StyleSheet.create({
   card: {
@@ -501,6 +700,11 @@ export default function TestFeedScreen() {
   const cardAutoPlayRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const CARD_COUNT = 2;
 
+  // ── Event organiser carousel ─────────────────────────────────────────────
+  const [eoCardIndex, setEoCardIndex] = useState(0);
+  const eoCardScrollRef = useRef<ScrollView>(null);
+  const EO_CARD_COUNT = 2;
+
   // Following tab — set of user IDs the logged-in user follows
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
   // Events tab — same source as Discover screen
@@ -538,6 +742,10 @@ export default function TestFeedScreen() {
   const flatListRef = useRef<any>(null);
   useScrollToTop(flatListRef);
 
+  // ── Audio Lover welcome layer — first-visit orientation for listener accounts ──
+  const [showAudioLoverWelcome, setShowAudioLoverWelcome] = useState(false);
+  const audioLoverWelcomeCheckedRef = useRef(false);
+
   useFocusEffect(useCallback(() => {
     refreshEventMatches();
   }, [refreshEventMatches]));
@@ -563,6 +771,27 @@ export default function TestFeedScreen() {
       } catch {}
     })();
   }, [user?.id, session]));
+
+  useEffect(() => {
+    if (!user?.id || !userProfile || audioLoverWelcomeCheckedRef.current) return;
+    // Audio Lover = listener role only (event organisers and creators are excluded at signup).
+    if (userProfile.role !== 'listener' || !userProfile.onboarding_completed) return;
+    audioLoverWelcomeCheckedRef.current = true;
+    (async () => {
+      try {
+        const dismissed = await AsyncStorage.getItem(`audio_lover_welcome_dismissed_${user.id}`);
+        if (dismissed === '1') return;
+        const createdAtMs = userProfile.created_at ? new Date(userProfile.created_at).getTime() : NaN;
+        const daysSinceCreated = Number.isFinite(createdAtMs) ? (Date.now() - createdAtMs) / (1000 * 60 * 60 * 24) : Infinity;
+        if (daysSinceCreated <= AUDIO_LOVER_WELCOME_WINDOW_DAYS) setShowAudioLoverWelcome(true);
+      } catch {}
+    })();
+  }, [user?.id, userProfile]);
+
+  const handleAudioLoverWelcomeDismiss = useCallback(() => {
+    setShowAudioLoverWelcome(false);
+    if (user?.id) AsyncStorage.setItem(`audio_lover_welcome_dismissed_${user.id}`, '1').catch(() => {});
+  }, [user?.id]);
 
   useFocusEffect(useCallback(() => {
     if (!user?.id || notifCheckedThisSession.current) return;
@@ -651,6 +880,24 @@ export default function TestFeedScreen() {
       if (cardAutoPlayRef.current) clearInterval(cardAutoPlayRef.current);
     };
   }, [startCardAutoPlay]);
+
+  const handleEoCardScroll = useCallback((e: any) => {
+    const index = Math.round(e.nativeEvent.contentOffset.x / CARD_SNAP);
+    setEoCardIndex(index);
+  }, []);
+
+  // One-time redirect for new event organiser users — navigates to CreateEvent on first mount
+  useFocusEffect(
+    useCallback(() => {
+      if (userProfile?.onboarding_user_type !== 'event_organiser') return;
+      AsyncStorage.getItem('@sb:eo_onboard_redirect').then(val => {
+        if (val === '1') {
+          AsyncStorage.removeItem('@sb:eo_onboard_redirect').catch(() => {});
+          (navigation as any).navigate('CreateEvent');
+        }
+      }).catch(() => {});
+    }, [userProfile?.onboarding_user_type, navigation]),
+  );
 
   // ── Handlers (unchanged) ────────────────────────────────────
   const handleCalendarNudgeDismiss = async () => {
@@ -758,6 +1005,9 @@ export default function TestFeedScreen() {
           backgroundColor="transparent"
           translucent
         />
+
+        {/* ── Earn Money Live nudge (creator-only, weekly cadence) ── */}
+        <EarnMoneyLiveNudge isCreator={isCreator(userProfile)} />
 
         <FlatList
           ref={flatListRef}
@@ -869,6 +1119,42 @@ export default function TestFeedScreen() {
 
           ListHeaderComponent={
             <>
+              {/* Audio Lover welcome layer — first few sessions after onboarding, listener accounts only */}
+              {showAudioLoverWelcome && (
+                <View style={styles.audioLoverWelcomeWrap}>
+                  <TouchableOpacity
+                    style={styles.audioLoverWelcomeDismissBtn}
+                    onPress={handleAudioLoverWelcomeDismiss}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityLabel="Dismiss welcome"
+                  >
+                    <Ionicons name="close" size={16} color={isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'} />
+                  </TouchableOpacity>
+
+                  <Text style={[styles.audioLoverWelcomeHeaderText, { color: theme.colors.text }]}>
+                    Welcome to SoundBridge, {userProfile?.display_name || 'there'}. Here's what's yours to explore.
+                  </Text>
+
+                  <View style={cardStyles.partnerCarouselWrapper}>
+                    <ScrollView
+                      horizontal
+                      snapToInterval={CARD_SNAP}
+                      snapToAlignment="start"
+                      decelerationRate="fast"
+                      showsHorizontalScrollIndicator={false}
+                    >
+                      <AudioLoverDiscoverCard onPress={() => navigation.navigate('Discover' as never)} />
+                      <AudioLoverSupportCard onPress={() => navigation.navigate('Discover' as never)} />
+                      {/* Referral card omitted: no per-user "referral link available" flag exists yet in the referral system */}
+                    </ScrollView>
+                  </View>
+
+                  <Text style={[styles.audioLoverWelcomeFooterText, { color: theme.colors.textSecondary }]}>
+                    The more you support artists you love, the more you'll unlock as we grow.
+                  </Text>
+                </View>
+              )}
+
               {showCalendarNudge && activeFilter === 'For You' && (
                 <GoogleCalendarNudgeBanner
                   onConnect={handleCalendarNudgeConnect}
@@ -981,6 +1267,40 @@ export default function TestFeedScreen() {
                   ))}
                 </ScrollView>
               </View>
+
+              {/* Event Organiser banners — shown only to event_organiser users */}
+              {userProfile?.onboarding_user_type === 'event_organiser' && (
+                <View style={cardStyles.partnerCarouselWrapper}>
+                  <ScrollView
+                    ref={eoCardScrollRef}
+                    horizontal
+                    snapToInterval={CARD_SNAP}
+                    snapToAlignment="start"
+                    decelerationRate="fast"
+                    showsHorizontalScrollIndicator={false}
+                    scrollEventThrottle={16}
+                    onScroll={handleEoCardScroll}
+                  >
+                    <CreateEventCard onPress={() => (navigation as any).navigate('CreateEvent')} />
+                    <DiscoverTalentCard onPress={() => (navigation as any).navigate('TalentDiscovery')} />
+                  </ScrollView>
+                  <View style={cardStyles.partnerCarouselDots}>
+                    {Array.from({ length: EO_CARD_COUNT }).map((_, i) => (
+                      <View
+                        key={i}
+                        style={[cardStyles.partnerCarouselDot, eoCardIndex === i && cardStyles.partnerCarouselDotActive]}
+                      />
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Discover Talent entry point for industry professionals — single banner, same component as the event organiser carousel above */}
+              {userProfile?.onboarding_user_type === 'industry_professional' && (
+                <View style={cardStyles.partnerCarouselWrapper}>
+                  <DiscoverTalentCard onPress={() => (navigation as any).navigate('TalentDiscovery')} />
+                </View>
+              )}
 
               {/* Live Audio + Partner Banner Carousel — Screen 02 card design */}
               <LiveAudioCard onPress={() => navigation.navigate('LiveSessions' as never)} />
@@ -1302,6 +1622,34 @@ const styles = StyleSheet.create({
   },
   sectionLabelLine: { flex: 1, height: 1 },
   sectionLabelText: { fontSize: 10, fontWeight: '700', letterSpacing: 2 },
+
+  // ── Audio Lover first-visit welcome layer ─────────────────
+  audioLoverWelcomeWrap: {
+    paddingTop: 16,
+    paddingBottom: 4,
+  },
+  audioLoverWelcomeDismissBtn: {
+    position: 'absolute',
+    top: 14,
+    right: 16,
+    zIndex: 1,
+    padding: 4,
+  },
+  audioLoverWelcomeHeaderText: {
+    fontSize: 17,
+    fontWeight: '600',
+    lineHeight: 23,
+    marginHorizontal: 16,
+    paddingRight: 24,
+    marginBottom: 4,
+  },
+  audioLoverWelcomeFooterText: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+  },
 
 
   // ── Events tab cards ──────────────────────────────────────

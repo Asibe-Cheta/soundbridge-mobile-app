@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useRoute } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -29,6 +30,7 @@ import SessionCard from '../components/live-sessions/SessionCard';
 import { SystemTypography as Typography } from '../constants/Typography';
 import RequestRoomBanner from '../components/RequestRoomBanner';
 import RadioLabCard from '../components/RadioLabCard';
+import { isCreator as hasCreatorAccess } from '../utils/roles';
 
 const TIP_BASE_URL = 'https://soundbridge.live/tip';
 
@@ -42,13 +44,16 @@ interface TipStats {
 }
 
 export default function LiveSessionsScreen({ navigation }: any) {
+  const route = useRoute<any>();
   const { user, userProfile } = useAuth();
   const { theme } = useTheme();
   const isDark = theme.isDark;
   const isAdmin = userProfile?.is_admin === true;
-  const isCreator = userProfile?.role === 'creator';
+  const isCreator = hasCreatorAccess(userProfile);
 
-  const [activeTab, setActiveTab] = useState<'live' | 'upcoming' | 'tip_room'>('live');
+  const [activeTab, setActiveTab] = useState<'live' | 'upcoming' | 'tip_room'>(
+    route.params?.initialTab ?? 'live'
+  );
   const [liveSessions, setLiveSessions] = useState<LiveSession[]>([]);
   const [upcomingSessions, setUpcomingSessions] = useState<LiveSession[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -255,16 +260,16 @@ export default function LiveSessionsScreen({ navigation }: any) {
       return (
         <View style={styles.tipRoomEmpty}>
           <Ionicons name="heart-outline" size={52} color={theme.colors.textSecondary} />
-          <Text style={[styles.tipRoomEmptyTitle, { color: theme.colors.text }]}>Tip Room is for creators</Text>
+          <Text style={[styles.tipRoomEmptyTitle, { color: theme.colors.text }]}>Your own Tip Room is for creators</Text>
           <Text style={[styles.tipRoomEmptySub, { color: theme.colors.textSecondary }]}>
-            Upgrade to a creator account to get your own Tip Room QR code.
+            This QR code page is for creators to receive tips. You can already tip any creator directly from their profile or posts.
           </Text>
           <TouchableOpacity
             style={[styles.tipRoomCTA, { backgroundColor: theme.colors.primary }]}
-            onPress={() => navigation.navigate('BecomeCreator')}
+            onPress={() => navigation.navigate('Discover')}
             activeOpacity={0.85}
           >
-            <Text style={styles.tipRoomCTAText}>Become a Creator</Text>
+            <Text style={styles.tipRoomCTAText}>Find Creators to Support</Text>
           </TouchableOpacity>
         </View>
       );
@@ -345,6 +350,21 @@ export default function LiveSessionsScreen({ navigation }: any) {
         <Text style={[styles.tipRoomNote, { color: theme.colors.textSecondary }]}>
           Supporters scan this code and pay directly — no SoundBridge account required. Tips go to your wallet after platform fees.
         </Text>
+
+        {/* Live usage guidance */}
+        <View style={[styles.guidanceCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <Text style={[styles.guidanceTitle, { color: theme.colors.text }]}>Using your QR code at live events</Text>
+          {[
+            { icon: 'laptop-outline' as const, text: 'Open soundbridge.live/tip/you on your laptop — no extra setup needed.' },
+            { icon: 'tv-outline' as const, text: 'Connect to a projector and beam it to the room. Any smartphone can scan it.' },
+            { icon: 'print-outline' as const, text: 'Print it as a card or poster for your merch table. It never expires or changes.' },
+          ].map(({ icon, text }) => (
+            <View key={icon} style={styles.guidanceRow}>
+              <Ionicons name={icon} size={15} color={theme.colors.primary} style={{ marginTop: 1 }} />
+              <Text style={[styles.guidanceText, { color: theme.colors.textSecondary }]}>{text}</Text>
+            </View>
+          ))}
+        </View>
       </ScrollView>
     );
   };
@@ -511,6 +531,19 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4, fontFamily: Typography.body.fontFamily },
   tipRoomNote: {
     fontSize: 13, lineHeight: 19, textAlign: 'center', fontFamily: Typography.body.fontFamily,
+    marginBottom: 24,
+  },
+  guidanceCard: {
+    borderRadius: 16, borderWidth: 1, padding: 16, gap: 12, marginBottom: 8,
+  },
+  guidanceTitle: {
+    fontSize: 14, fontWeight: '700', marginBottom: 4, fontFamily: Typography.body.fontFamily,
+  },
+  guidanceRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+  },
+  guidanceText: {
+    flex: 1, fontSize: 13, lineHeight: 19, fontFamily: Typography.body.fontFamily,
   },
 
   // Non-creator states

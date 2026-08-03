@@ -163,6 +163,7 @@ export default function OpportunityInterestListScreen() {
     const { error: initError } = await initPaymentSheet({
       merchantDisplayName: 'SoundBridge',
       paymentIntentClientSecret: client_secret,
+      returnURL: 'soundbridge://stripe-redirect',
       ...(customer_id && ephemeral_key_secret
         ? { customerId: customer_id, customerEphemeralKeySecret: ephemeral_key_secret }
         : {}),

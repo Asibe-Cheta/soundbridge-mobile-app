@@ -13,11 +13,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { isCreator } from '../utils/roles';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSearch } from '../hooks/useSearch';
 import BackButton from '../components/BackButton';
 import VerifiedBadge from '../components/VerifiedBadge';
+import InstitutionBadge from '../components/InstitutionBadge';
 import { formatServiceCategories } from '../utils/serviceCategoryLabels';
 import { useSearchHistory } from '../hooks/useSearchHistory';
 import SearchHistoryPanel from '../components/SearchHistoryPanel';
@@ -281,9 +283,10 @@ export default function SearchScreen() {
                           {artist.display_name || artist.username}
                         </Text>
                         {artist.is_verified && <VerifiedBadge size={12} />}
+                        <InstitutionBadge institution={artist.institution_badge} size={14} />
                       </View>
                       <Text style={[styles.resultSubtitle, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                        @{artist.username} · {artist.role === 'creator' ? 'Creator' : 'Listener'}
+                        @{artist.username} · {isCreator(artist) ? 'Creator' : 'Listener'}
                       </Text>
                     </View>
                     <Ionicons name="chevron-forward" size={16} color={theme.colors.textSecondary} />

@@ -23,6 +23,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import VerifiedBadge from '../components/VerifiedBadge';
+import InstitutionBadge from '../components/InstitutionBadge';
 import PremiumBadge from '../components/PremiumBadge';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -63,6 +64,7 @@ import { useBranding } from '../hooks/useBranding';
 import PhotoPostEditorModal from '../components/PhotoPostEditorModal';
 import { useCreatorAgreement } from '../hooks/useCreatorAgreement';
 import CreatorAgreementModal from '../components/CreatorAgreementModal';
+import { isCreator } from '../utils/roles';
 import FanPageShareModal from '../components/FanPageShareModal';
 import * as ImagePicker from 'expo-image-picker';
 import { uploadImage } from '../services/UploadService';
@@ -79,6 +81,7 @@ interface Creator {
   professional_headline?: string;
   subscription_tier?: 'free' | 'premium' | 'unlimited' | null;
   role?: 'user' | 'creator' | 'admin';  // User role - tips only allowed for 'creator'
+  is_creator?: boolean;  // Additive creator flag — see src/utils/roles.ts
   followers_count?: number;     // COMPUTED from follows table
   tracks_count?: number;        // COMPUTED from audio_tracks table
   events_count?: number;        // COMPUTED from events table
@@ -427,9 +430,11 @@ export default function CreatorProfileScreen() {
           subscription_tier,
           is_verified,
           early_adopter,
+          institution_badge,
           rating_avg,
           rating_count,
           role,
+          is_creator,
           created_at
         `)
         .eq('id', creatorId)
@@ -1167,11 +1172,12 @@ export default function CreatorProfileScreen() {
         <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
         
         {/* Header */}
-        <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
-        <BackButton style={styles.headerButton} onPress={() => navigation.goBack()} />
+        <View style={[styles.header, { backgroundColor: 'transparent', borderBottomColor: 'transparent' }]}>
+        <BackButton style={[styles.headerButton, { borderWidth: 0 }]} onPress={() => navigation.goBack()} />
         <View style={styles.headerTitleRow}>
           <Text style={[styles.headerTitle, { color: theme.colors.text }]}>{creator.display_name}</Text>
           {creator.is_verified && <VerifiedBadge size={14} />}
+          <InstitutionBadge institution={creator.institution_badge} size={16} />
         </View>
         {isOwnProfile ? (
           <View style={styles.headerActionsRow}>
@@ -1295,7 +1301,7 @@ export default function CreatorProfileScreen() {
           )}
 
           {/* Fan page icon — own profile only, overlays banner top-right */}
-          {isOwnProfile && creator?.role === 'creator' && creator?.username ? (
+          {isOwnProfile && isCreator(creator) && creator?.username ? (
             <TouchableOpacity
               style={styles.fanPageIconBtn}
               onPress={() => setShowFanPageModal(true)}
@@ -1372,6 +1378,7 @@ export default function CreatorProfileScreen() {
               )}
               <Text style={[styles.displayName, { color: theme.colors.text }]}>{creator.display_name}</Text>
               {creator.is_verified && <VerifiedBadge size={16} />}
+              <InstitutionBadge institution={creator.institution_badge} size={20} />
               {creator.early_adopter && (
                 <View style={[styles.earlyAdopterBadge]}>
                   <Ionicons name="rocket" size={10} color="#FFFFFF" />
@@ -1487,7 +1494,7 @@ export default function CreatorProfileScreen() {
                 >
                   <Ionicons name="star-outline" size={18} color={theme.colors.text} />
                 </TouchableOpacity>
-                {creator?.role === 'creator' && (
+                {isCreator(creator) && (
                   <TouchableOpacity
                     style={[styles.iconActionBtn, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
                     onPress={() => setShowTipModal(true)}
@@ -1498,7 +1505,7 @@ export default function CreatorProfileScreen() {
               </View>
 
               {/* Join Community button — full width, only for creator profiles */}
-              {creator?.role === 'creator' && (
+              {isCreator(creator) && (
                 <TouchableOpacity
                   style={[
                     styles.joinCommunityBtn,
@@ -2288,6 +2295,7 @@ export default function CreatorProfileScreen() {
               <View style={styles.fullScreenNameRow}>
                 <Text style={styles.fullScreenAvatarName}>{creator?.display_name}</Text>
                 {creator?.is_verified && <VerifiedBadge size={16} />}
+                <InstitutionBadge institution={creator?.institution_badge} size={18} />
                 {creator?.early_adopter && (
                   <View style={styles.earlyAdopterBadge}>
                     <Ionicons name="rocket" size={10} color="#FFFFFF" />

@@ -177,6 +177,7 @@ export default function OpportunityProjectScreen() {
       const { error: initError } = await initPaymentSheet({
         merchantDisplayName: 'SoundBridge',
         paymentIntentClientSecret: clientSecret,
+        returnURL: 'soundbridge://stripe-redirect',
         ...(customerId && customerEphemeralKeySecret
           ? { customerId, customerEphemeralKeySecret }
           : {}),

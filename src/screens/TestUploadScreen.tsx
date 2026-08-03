@@ -269,6 +269,7 @@ export default function TestUploadScreen() {
   // Copyright / Mixtape terms
   const [agreedToCopyright,    setAgreedToCopyright]    = useState(false);
   const [agreedToMixtapeTerms, setAgreedToMixtapeTerms] = useState(false);
+  const [rightsError,          setRightsError]          = useState(false);
 
   // Quota / upload
   const [uploadQuota, setUploadQuota] = useState<UploadQuota | null>(null);
@@ -498,12 +499,7 @@ export default function TestUploadScreen() {
 
     const termsAgreed = contentType === 'mixtape' ? agreedToMixtapeTerms : agreedToCopyright;
     if (!termsAgreed) {
-      Alert.alert(
-        'Terms Confirmation Required',
-        contentType === 'mixtape'
-          ? 'You must agree to the mixtape terms to upload your mix.'
-          : 'You must agree to the copyright terms to upload content.',
-      );
+      setRightsError(true);
       return;
     }
 
@@ -1271,9 +1267,19 @@ export default function TestUploadScreen() {
             <View style={{ marginTop: 12 }}>
               <Checkbox
                 checked={contentType === 'mixtape' ? agreedToMixtapeTerms : agreedToCopyright}
-                onPress={() => contentType === 'mixtape' ? setAgreedToMixtapeTerms(v => !v) : setAgreedToCopyright(v => !v)}
-                label={contentType === 'mixtape' ? 'I agree to the mixtape terms above' : 'I agree to the copyright terms above'}
+                onPress={() => {
+                  contentType === 'mixtape' ? setAgreedToMixtapeTerms(v => !v) : setAgreedToCopyright(v => !v);
+                  setRightsError(false);
+                }}
+                label={contentType === 'mixtape'
+                  ? 'I agree to the mixtape terms above'
+                  : 'I confirm that I own, or have the necessary rights and permissions, to distribute this recording and its underlying composition, including any samples, co-writes, or featured artists.'}
               />
+              {rightsError && (
+                <Text style={s.rightsError}>
+                  Please confirm you have the rights to upload this content before continuing.
+                </Text>
+              )}
             </View>
           </View>
 
@@ -1482,6 +1488,7 @@ const s = StyleSheet.create({
   acrMismatch: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 10, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(220,38,38,0.4)', backgroundColor: 'rgba(220,38,38,0.1)' },
   acrMismatchText: { flex: 1, fontSize: 12, color: '#FCA5A5', lineHeight: 17 },
   acrCheckboxRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginTop: 12, paddingVertical: 4 },
+  rightsError: { marginTop: 8, fontSize: 13, color: '#F87171', lineHeight: 18 },
 
   // ISRC verification
   isrcBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 12 },

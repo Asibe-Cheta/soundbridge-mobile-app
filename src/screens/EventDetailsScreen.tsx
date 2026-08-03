@@ -285,6 +285,7 @@ export default function EventDetailsScreen() {
       const { error: initError } = await initPaymentSheet({
         paymentIntentClientSecret: clientSecret,
         merchantDisplayName: 'SoundBridge',
+        returnURL: 'soundbridge://stripe-redirect',
         ...(customerId && customerEphemeralKeySecret
           ? { customerId, customerEphemeralKeySecret }
           : {}),

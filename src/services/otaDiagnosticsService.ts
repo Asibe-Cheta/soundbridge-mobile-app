@@ -8,7 +8,7 @@ import { otaLog, getOtaLogs } from '../lib/otaDebugLog';
 /** Bundle marker for build 267+ embedded OTA probe verification. */
 export const EMBEDDED_OTA_PROBE_MARKER = 'runEmbeddedOtaDiagnosticsOnLaunch';
 
-const ALERT_SEEN_PREFIX = 'sb_ota_embedded_alert_seen_';
+const ALERT_SEEN_PREFIX = 'sb_ota_embedded_alert_seen_v2_';
 const ERROR_LOG_CODES = new Set([
   'UpdateAssetsNotAvailable',
   'UpdateServerUnreachable',
@@ -252,10 +252,9 @@ async function runDiagnosticsPass(pass: 'LAUNCH' | 'FOREGROUND' | 'MENU') {
       const nativeLate = await readNativeLogEntries(`${pass}_T1`);
       const allEntries = nativeLate.length >= nativeEntries.length ? nativeLate : nativeEntries;
 
-      if (!launchAlertScheduled) {
-        launchAlertScheduled = true;
-        await showEmbeddedLaunchAlert(snapshot, allEntries);
-      }
+      // Launch alert intentionally suppressed — diagnostics run silently.
+      // Full report still available via Settings → About → tap version badge 5×.
+      launchAlertScheduled = true;
     } else if (pass === 'FOREGROUND') {
       await delay(1500);
       await runRemoteCheck(`${pass}_CHECK`);

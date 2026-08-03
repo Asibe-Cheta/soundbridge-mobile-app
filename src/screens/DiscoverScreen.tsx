@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { isCreator } from '../utils/roles';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { useAuth } from '../contexts/AuthContext';
@@ -43,6 +44,9 @@ import RevenueCatService from '../services/RevenueCatService';
 import type { ServiceProviderCard } from '../types';
 import { ModerationBadge } from '../components/ModerationBadge';
 import NotificationBellButton from '../components/NotificationBellButton';
+import InstitutionBadge from '../components/InstitutionBadge';
+import CreatorGridCard from '../components/CreatorGridCard';
+import FeaturedCreatorCard from '../components/FeaturedCreatorCard';
 import { walkthroughable } from 'react-native-copilot';
 import { SystemTypography as Typography } from '../constants/Typography';
 import UploadPromptCard from '../components/UploadPromptCard';
@@ -111,6 +115,7 @@ interface Creator {
   events_count?: number;
   genre?: string;
   location?: string;
+  institution_badge?: string | null;
 }
 
 interface Event {
@@ -1223,9 +1228,10 @@ function DiscoverScreen() {
           display_name: artist.display_name || artist.username,
           bio: artist.bio || 'Music creator',
           avatar_url: artist.avatar_url,
-          followers_count: artist.followers_count || 0, // Real data from database
-          tracks_count: artist.tracks_count || 0, // Real data from database
-          events_count: artist.events_count || 0, // Real data from database
+          followers_count: artist.followers_count || 0,
+          tracks_count: artist.tracks_count || 0,
+          events_count: artist.events_count || 0,
+          institution_badge: artist.institution_badge ?? null,
         }));
         
         setFeaturedArtists(transformedArtists);
@@ -1844,9 +1850,12 @@ function DiscoverScreen() {
                               )}
                             </View>
                             <View style={styles.searchArtistInfo}>
-                              <Text style={[styles.searchArtistName, { color: theme.colors.text }]} numberOfLines={1}>
-                                {artist.display_name || artist.username}
-                              </Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <Text style={[styles.searchArtistName, { color: theme.colors.text }]} numberOfLines={1}>
+                                  {artist.display_name || artist.username}
+                                </Text>
+                                <InstitutionBadge institution={artist.institution_badge} size={13} />
+                              </View>
                               <Text style={[styles.searchArtistUsername, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                                 @{artist.username}
                               </Text>
@@ -2020,14 +2029,7 @@ function DiscoverScreen() {
                   ItemSeparatorComponent={() => <View style={{ width: 16 }} />}
                 />
         ) : (
-                <View style={styles.htmlEmptyState}>
-                  <Ionicons name="musical-notes-outline" size={64} color="rgba(255,255,255,0.2)" />
-                  <Text style={styles.htmlEmptyStateTitle}>No trending tracks yet</Text>
-                  <Text style={styles.htmlEmptyStateText}>Check back soon for hot new music!</Text>
-                  <TouchableOpacity>
-                    <Text style={styles.htmlLearnMoreLink}>Learn More</Text>
-                  </TouchableOpacity>
-                </View>
+                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>Nothing trending right now</Text>
         )}
             </View>
 
@@ -2057,86 +2059,11 @@ function DiscoverScreen() {
                   horizontal
                   data={featuredArtists}
                   renderItem={({ item: artist, index }) => (
-                    <TouchableOpacity
-                      key={artist.id}
-                      style={[styles.htmlCard, index === 0 && { marginLeft: 24 }]}
+                    <FeaturedCreatorCard
+                      creator={artist}
+                      isFirst={index === 0}
                       onPress={() => handleCreatorPress(artist)}
-                      activeOpacity={0.9}
-                    >
-                      {/* Badge */}
-                      <View style={[styles.htmlBadge]}>
-                        <Text style={[styles.htmlBadgeText, { color: theme.colors.primary }]}>RISING</Text>
-                      </View>
-
-                      {/* Background Image with Gradient */}
-                      <View style={[StyleSheet.absoluteFill, { overflow: 'hidden', borderRadius: 24 }]}>
-                    {artist.avatar_url ? (
-                          <Image 
-                            source={{ uri: artist.avatar_url }} 
-                            style={[styles.htmlCardImage, { opacity: 0.8 }]}
-                          />
-                    ) : (
-                          <View style={[styles.htmlCardImage, { backgroundColor: theme.isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)', justifyContent: 'center', alignItems: 'center' }]}>
-                            <Ionicons name="person" size={80} color={theme.isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.2)"} />
-                      </View>
-                    )}
-                        <LinearGradient
-                          colors={theme.isDark ? ['transparent', 'rgba(19, 7, 34, 0.5)', '#130722'] : ['transparent', `${theme.colors.background}80`, theme.colors.background]}
-                          style={styles.htmlCardGradient}
-                        />
-                  </View>
-
-                      {/* Artist Content - Centered */}
-                      <View style={[styles.htmlCardContent, { alignItems: 'center', paddingBottom: 32 }]}>
-                        {/* Circular Avatar with Red Border */}
-                        <View style={{
-                          width: 80,
-                          height: 80,
-                          borderRadius: 40,
-                          borderWidth: 2,
-                          borderColor: theme.colors.primary,
-                          padding: 4,
-                          marginBottom: 16,
-                          backgroundColor: theme.isDark ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)',
-                        }}>
-                          {artist.avatar_url ? (
-                            <Image 
-                              source={{ uri: artist.avatar_url }} 
-                              style={{ width: '100%', height: '100%', borderRadius: 36 }}
-                            />
-                          ) : (
-                            <View style={{ width: '100%', height: '100%', borderRadius: 36, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' }}>
-                              <Ionicons name="person" size={32} color="rgba(255,255,255,0.4)" />
-                            </View>
-                          )}
-                        </View>
-
-                        <Text style={[styles.htmlCardTitle, { textAlign: 'center' }]} numberOfLines={1}>
-                        {artist.display_name || artist.username}
-                      </Text>
-                        <Text style={[styles.htmlCardArtist, { marginBottom: 16 }]} numberOfLines={1}>
-                          {formatNumber(artist.followers_count || 0)} Followers
-                          </Text>
-                        
-                        {/* Follow Button */}
-                        <TouchableOpacity 
-                          style={{
-                            width: '100%',
-                            paddingVertical: 8,
-                            paddingHorizontal: 24,
-                            backgroundColor: theme.colors.primary,
-                            borderRadius: 999,
-                            alignItems: 'center',
-                          }}
-                          onPress={(e: any) => {
-                            e.stopPropagation();
-                            // Follow logic here
-                          }}
-                        >
-                          <Text style={[Typography.label, { color: '#FFFFFF', fontSize: 14, fontWeight: '600' }]}>Follow</Text>
-                        </TouchableOpacity>
-                      </View>
-                </TouchableOpacity>
+                    />
                   )}
                   keyExtractor={(item) => item.id}
                   showsHorizontalScrollIndicator={false}
@@ -2144,38 +2071,7 @@ function DiscoverScreen() {
                   ItemSeparatorComponent={() => <View style={{ width: 16 }} />}
                 />
         ) : (
-                <View style={styles.emptyState}>
-                  <Ionicons name="mic" size={48} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>🎤 No Featured Artists Yet</Text>
-                  <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
-                    Be among the first to get featured!
-                  </Text>
-                  <Text style={[styles.emptyStateNote, { color: theme.colors.textSecondary, marginTop: 8 }]}>
-                    Premium users are featured 1x/month
-                  </Text>
-                  <Text style={[styles.emptyStateNote, { color: theme.colors.textSecondary }]}>
-                    Unlimited users are featured 2x/month
-                  </Text>
-                  <View style={styles.emptyStateButtons}>
-                    <TouchableOpacity
-                      style={[styles.emptyStateButton, styles.emptyStateButtonPrimary, { backgroundColor: theme.colors.primary }]}
-                      onPress={() => (navigation as any).navigate('Upgrade')}
-                    >
-                      <Ionicons name="rocket" size={16} color="#FFFFFF" />
-                      <Text style={styles.emptyStateButtonText}>Upgrade</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.emptyStateButton, { 
-                        borderColor: theme.colors.border,
-                        backgroundColor: theme.colors.card,
-                      }]}
-                      onPress={() => Alert.alert('Learn More', 'Featured artists are selected based on engagement, quality, and subscription tier. Premium users get featured once per month, while Unlimited users get featured twice per month.')}
-                    >
-                      <Ionicons name="information-circle-outline" size={16} color={theme.colors.textSecondary} />
-                      <Text style={[styles.emptyStateButtonText, { color: theme.colors.text }]}>Learn More</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>No featured artists yet</Text>
               )}
             </View>
 
@@ -2675,45 +2571,10 @@ function DiscoverScreen() {
                 <SkeletonHtmlCardRow count={3} />
         ) : featuredArtists.length > 0 ? (
                 <View style={styles.artistsGridContainer}>
-            {featuredArtists.map((artist) => (
-                    <TouchableOpacity
-                      key={artist.id}
-                      style={styles.artistGridCard}
-                      onPress={() => handleCreatorPress(artist)}
-                    >
-                      <View style={styles.artistGridAvatar}>
-                  {artist.avatar_url ? (
-                          <Image source={{ uri: artist.avatar_url }} style={styles.artistGridImage} />
-                  ) : (
-                          <View style={styles.defaultArtistGridImage}>
-                            <Ionicons name="person" size={40} color={theme.colors.textSecondary} />
-                    </View>
-                  )}
+                  {featuredArtists.map((artist) => (
+                    <CreatorGridCard key={artist.id} creator={artist} onPress={() => handleCreatorPress(artist)} />
+                  ))}
                 </View>
-                      <Text style={[styles.artistGridName, { color: theme.colors.text }]} numberOfLines={1}>
-                        {artist.display_name || artist.username}
-                      </Text>
-                      <Text style={[styles.artistGridUsername, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                        @{artist.username}
-                      </Text>
-                      <View style={styles.artistGridMeta}>
-                        {artist.genre && (
-                          <Text style={[styles.artistGridGenre, { color: theme.colors.primary }]} numberOfLines={1}>
-                            {artist.genre}
-                          </Text>
-                        )}
-                        {artist.location && (
-                          <Text style={[styles.artistGridLocation, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                            {artist.location}
-                          </Text>
-                        )}
-                      </View>
-                      <Text style={[styles.artistGridStats, { color: theme.colors.textSecondary }]}>
-                        {formatNumber(artist.followers_count)} followers • {formatNumber(artist.tracks_count)} tracks
-                      </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
         ) : (
                 <View style={styles.emptyState}>
                   <Ionicons name="people" size={48} color={theme.colors.textSecondary} />
@@ -2766,9 +2627,12 @@ function DiscoverScreen() {
                   )}
                   </View>
                       <View style={styles.topArtistInfo}>
-                        <Text style={[styles.topArtistName, { color: theme.colors.text }]} numberOfLines={1}>
-                          {artist.display_name || artist.username}
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Text style={[styles.topArtistName, { color: theme.colors.text }]} numberOfLines={1}>
+                            {artist.display_name || artist.username}
+                          </Text>
+                          <InstitutionBadge institution={artist.institution_badge} size={13} />
+                        </View>
                         <Text style={[styles.topArtistUsername, { color: theme.colors.textSecondary }]} numberOfLines={1}>
                           @{artist.username}
                         </Text>
@@ -2965,36 +2829,7 @@ function DiscoverScreen() {
                   ))}
                 </View>
               ) : (
-                <View style={styles.emptyState}>
-                  <Ionicons name="musical-notes" size={48} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>🎵 No Public Playlists Yet</Text>
-                  <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
-                    Be the first to create a playlist!
-                  </Text>
-                  <Text style={[styles.emptyStateNote, { color: theme.colors.textSecondary, marginTop: 8 }]}>
-                    Curate music, share with the community,
-                  </Text>
-                  <Text style={[styles.emptyStateNote, { color: theme.colors.textSecondary }]}>
-                    and grow your followers
-                  </Text>
-                  <View style={styles.emptyStateButtons}>
-                    <TouchableOpacity
-                      style={[styles.emptyStateButton, styles.emptyStateButtonPrimary, { backgroundColor: theme.colors.primary }]}
-                      onPress={() => (navigation as any).navigate('CreatePlaylist')}
-                    >
-                      <Text style={styles.emptyStateButtonText}>Create Playlist</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.emptyStateButton, { 
-                        borderColor: theme.colors.border,
-                        backgroundColor: theme.colors.card,
-                      }]}
-                      onPress={() => Alert.alert('How It Works', 'Create playlists to organize your favorite tracks. Share them publicly to grow your audience and help others discover great music!')}
-                    >
-                      <Text style={[styles.emptyStateButtonText, { color: theme.colors.text }]}>How It Works</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>No playlists yet</Text>
               )}
             </View>
           </>
@@ -3447,8 +3282,11 @@ function DiscoverScreen() {
                               </View>
                             )}
                             <View style={{ flex: 1 }}>
-                              <Text style={[Typography.label, { color: theme.colors.text, fontSize: 15, fontWeight: '500' }]}>{artist.display_name || artist.username}</Text>
-                              <Text style={[Typography.label, { color: theme.colors.textSecondary, fontSize: 13 }]}>@{artist.username} · {artist.role === 'creator' ? 'Creator' : 'Listener'}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <Text style={[Typography.label, { color: theme.colors.text, fontSize: 15, fontWeight: '500' }]}>{artist.display_name || artist.username}</Text>
+                                <InstitutionBadge institution={artist.institution_badge} size={14} />
+                              </View>
+                              <Text style={[Typography.label, { color: theme.colors.textSecondary, fontSize: 13 }]}>@{artist.username} · {isCreator(artist) ? 'Creator' : 'Listener'}</Text>
                             </View>
                             <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
                           </TouchableOpacity>
@@ -3828,6 +3666,12 @@ const styles = StyleSheet.create<any>({
     ...Typography.body,
     marginTop: 12,
     fontSize: 16,
+  },
+  quietEmpty: {
+    fontSize: 13,
+    textAlign: 'center',
+    paddingVertical: 20,
+    paddingHorizontal: 16,
   },
   emptyState: {
     alignItems: 'center',

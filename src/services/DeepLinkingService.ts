@@ -4,6 +4,7 @@
 import { Linking, Share } from 'react-native';
 import { NavigationContainerRef } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { handleURLCallback } from '@stripe/stripe-react-native';
 import { notificationService, NotificationData } from './NotificationService';
 import { supabase } from '../lib/supabase';
 import { referralService } from './ReferralService';
@@ -109,6 +110,14 @@ class DeepLinkingService {
 
   private async processUrl(url: string) {
     try {
+      // Stripe redirect-based payment methods (PayPal, iDEAL, etc.) return here after the
+      // user completes payment in an external app/browser — hand off to the Stripe SDK to
+      // resume the PaymentSheet flow instead of treating it as an in-app navigation link.
+      if (url.includes('stripe-redirect')) {
+        await handleURLCallback(url);
+        return;
+      }
+
       const deepLinkData = await this.parseUrl(url);
       if (deepLinkData) {
         this.navigate(deepLinkData);

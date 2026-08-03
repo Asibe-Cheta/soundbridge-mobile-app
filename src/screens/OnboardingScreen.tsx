@@ -18,6 +18,7 @@ import {
   ImageBackground,
   Platform,
   KeyboardAvoidingView,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -93,6 +94,8 @@ type OnboardingStep =
   | 'musicLover_genres'
   | 'musicLover_events'
   | 'musicLover_valueDemo'
+  | 'musicLover_purpose'
+  | 'musicLover_engagement'
   // Event Organiser Path steps
   | 'eventOrganiser_profileSetup'
   | 'eventOrganiser_eventTypes'
@@ -155,7 +158,7 @@ export default function OnboardingScreen() {
       case 'industry_professional':
         return 7; // User Type + 6 path steps
       case 'music_lover':
-        return 6; // User Type + 5 path steps
+        return 8; // User Type + 7 path steps (incl. engagement opt-in)
       case 'event_organiser':
         return 6; // User Type + 5 path steps
       default:
@@ -194,6 +197,8 @@ export default function OnboardingScreen() {
       'musicLover_genres': 3,
       'musicLover_events': 4,
       'musicLover_valueDemo': 5,
+      'musicLover_purpose': 6,
+      'musicLover_engagement': 7,
       // Event Organiser
       'eventOrganiser_profileSetup': 2,
       'eventOrganiser_eventTypes': 3,
@@ -370,6 +375,7 @@ export default function OnboardingScreen() {
   const [firstPostText, setFirstPostText] = useState('');
   const [firstPostImage, setFirstPostImage] = useState<string | null>(null);
   const [publishingPost, setPublishingPost] = useState(false);
+  const [fanEngagementToggle, setFanEngagementToggle] = useState(true); // pre-selected ON
 
   // Payment data
   const [cardNumber, setCardNumber] = useState('');
@@ -1540,6 +1546,10 @@ export default function OnboardingScreen() {
           break;
 
         case 'musicLover_valueDemo':
+          animateStepTransition('musicLover_purpose');
+          break;
+
+        case 'musicLover_purpose':
           animateStepTransition('notificationPermission');
           break;
 
@@ -1606,6 +1616,14 @@ export default function OnboardingScreen() {
 
         case 'notificationPermission':
           // handleNext here just means "skip" — actual permission request is in the dedicated handler
+          if (userType === 'music_lover') {
+            animateStepTransition('musicLover_engagement');
+          } else {
+            animateStepTransition('tierSelection');
+          }
+          break;
+
+        case 'musicLover_engagement':
           animateStepTransition('tierSelection');
           break;
 
@@ -1663,6 +1681,10 @@ export default function OnboardingScreen() {
               onboardingResult,
               setPendingCommunityWelcome,
             );
+
+            if (userType === 'event_organiser') {
+              await AsyncStorage.setItem('@sb:eo_onboard_redirect', '1').catch(() => {});
+            }
           } catch (error) {
             console.error('❌ Error completing onboarding:', error);
             Alert.alert('Error', 'Something went wrong. Please try again.');
@@ -1758,6 +1780,9 @@ export default function OnboardingScreen() {
       case 'musicLover_valueDemo':
         animateStepTransitionBack('musicLover_events');
         break;
+      case 'musicLover_purpose':
+        animateStepTransitionBack('musicLover_valueDemo');
+        break;
 
       // Event Organiser Path
       case 'eventOrganiser_profileSetup':
@@ -1786,15 +1811,22 @@ export default function OnboardingScreen() {
 
       // Shared steps
       case 'notificationPermission':
-        // Go back to path-specific value demo
+        // Go back to path-specific value demo (music_lover has an extra purpose step)
         if (userType === 'music_creator') animateStepTransitionBack('musicCreator_valueDemo');
         else if (userType === 'podcast_creator') animateStepTransitionBack('podcastCreator_valueDemo');
         else if (userType === 'industry_professional') animateStepTransitionBack('industryProfessional_valueDemo');
-        else if (userType === 'music_lover') animateStepTransitionBack('musicLover_valueDemo');
+        else if (userType === 'music_lover') animateStepTransitionBack('musicLover_purpose');
         else if (userType === 'event_organiser') animateStepTransitionBack('eventOrganiser_valueDemo');
         break;
-      case 'tierSelection':
+      case 'musicLover_engagement':
         animateStepTransitionBack('notificationPermission');
+        break;
+      case 'tierSelection':
+        if (userType === 'music_lover') {
+          animateStepTransitionBack('musicLover_engagement');
+        } else {
+          animateStepTransitionBack('notificationPermission');
+        }
         break;
 
       case 'firstPost':
@@ -2189,7 +2221,7 @@ export default function OnboardingScreen() {
               </View>
               <View style={styles.roleTextContent}>
                 <View style={styles.roleHeader}>
-                  <Text style={styles.roleTitle}>Music Lover</Text>
+                  <Text style={styles.roleTitle}>Audio Fan</Text>
                   <View style={[styles.radioCircle, selectedRole === 'music_lover' && styles.radioCircleChecked]}>
                     {selectedRole === 'music_lover' && <View style={styles.radioCircleInner} />}
                   </View>
@@ -5911,15 +5943,187 @@ export default function OnboardingScreen() {
     } catch (_) {
       // permission errors are non-fatal
     }
-    animateStepTransition('tierSelection');
+    if (userType === 'music_lover') {
+      animateStepTransition('musicLover_engagement');
+    } else {
+      animateStepTransition('tierSelection');
+    }
   };
 
   const handleSkipNotifications = async () => {
     await AsyncStorage.setItem('notif_permission_dismissed', '1').catch(() => {});
-    animateStepTransition('tierSelection');
+    if (userType === 'music_lover') {
+      animateStepTransition('musicLover_engagement');
+    } else {
+      animateStepTransition('tierSelection');
+    }
   };
 
   const isCreatorType = userType === 'music_creator' || userType === 'podcast_creator' || userType === 'industry_professional' || userType === 'event_organiser';
+
+  const handleFanEngagementContinue = async () => {
+    if (fanEngagementToggle && user?.id) {
+      await AsyncStorage.setItem(`@sb:fan_engagement_opt_in:${user.id}`, '1').catch(() => {});
+    }
+    animateStepTransition('tierSelection');
+  };
+
+  const renderMusicLoverEngagement = () => (
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.82)' }]} />
+      </ImageBackground>
+      <View style={styles.headerWithBack}>
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
+        <Text style={[styles.headerStepText, { color: 'rgba(255,255,255,0.5)' }]}>
+          {getStepIndicatorText(currentStep, userType)}
+        </Text>
+        <View style={styles.backButtonPlaceholder} />
+      </View>
+      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 48 }]} showsVerticalScrollIndicator={false}>
+        <Animated.View style={[{ opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: scaleAnim }] }]}>
+          <View style={{ alignItems: 'center', marginBottom: 24 }}>
+            <LinearGradient
+              colors={['#10B981', '#3B82F6']}
+              style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Ionicons name="people" size={38} color="#FFFFFF" />
+            </LinearGradient>
+          </View>
+          <Text style={{ color: '#FFFFFF', fontSize: 26, fontWeight: '800', textAlign: 'center', marginBottom: 10, letterSpacing: -0.3 }}>
+            Help artists{'\n'}know you care.
+          </Text>
+          <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 15, textAlign: 'center', lineHeight: 23, marginBottom: 28 }}>
+            Turn on engagement tracking to see the real difference you're making — how many artists you've supported and how much you've contributed — and get a personal referral link to invite friends.
+          </Text>
+
+          {/* Toggle row */}
+          <View style={{
+            backgroundColor: 'rgba(255,255,255,0.07)',
+            borderRadius: 16,
+            borderWidth: 1,
+            borderColor: 'rgba(255,255,255,0.12)',
+            flexDirection: 'row',
+            alignItems: 'center',
+            padding: 16,
+            marginBottom: 24,
+            gap: 12,
+          }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '600', marginBottom: 3 }}>
+                Track my support &amp; get referral link
+              </Text>
+              <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, lineHeight: 18 }}>
+                You can turn this off any time in your profile settings
+              </Text>
+            </View>
+            <Switch
+              value={fanEngagementToggle}
+              onValueChange={setFanEngagementToggle}
+              trackColor={{ false: 'rgba(255,255,255,0.15)', true: '#10B981' }}
+              thumbColor="#fff"
+            />
+          </View>
+
+          <TouchableOpacity
+            style={{ borderRadius: 999, overflow: 'hidden' }}
+            onPress={handleFanEngagementContinue}
+            activeOpacity={0.85}
+          >
+            <LinearGradient
+              colors={fanEngagementToggle ? ['#10B981', '#3B82F6'] : ['rgba(255,255,255,0.15)', 'rgba(255,255,255,0.15)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={{ paddingVertical: 17, alignItems: 'center', borderRadius: 999 }}
+            >
+              <Text style={{ color: '#FFFFFF', fontSize: 17, fontWeight: '700', letterSpacing: 0.2 }}>
+                {fanEngagementToggle ? "Let's do it" : 'Continue'}
+              </Text>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => { setFanEngagementToggle(false); animateStepTransition('tierSelection'); }}
+            style={{ marginTop: 18, alignItems: 'center' }}
+            activeOpacity={0.7}
+          >
+            <Text style={{ color: 'rgba(255,255,255,0.35)', fontSize: 14 }}>Skip for now</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </ScrollView>
+    </View>
+  );
+
+  const renderMusicLoverPurpose = () => (
+    <View style={styles.stepContainer}>
+      <ImageBackground
+        source={require('../../assets/images/logos/bg01.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.78)' }]} />
+      </ImageBackground>
+
+      <View style={styles.headerWithBack}>
+        <OnboardingBackButton style={styles.backButton} onPress={handleBack} />
+        <Text style={[styles.headerStepText, { color: 'rgba(255,255,255,0.5)' }]}>
+          {getStepIndicatorText(currentStep, userType)}
+        </Text>
+        <View style={styles.backButtonPlaceholder} />
+      </View>
+
+      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 48 }]} showsVerticalScrollIndicator={false}>
+        <Animated.View style={[{ opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: scaleAnim }] }]}>
+          {/* Icon */}
+          <View style={{ alignItems: 'center', marginBottom: 24 }}>
+            <LinearGradient
+              colors={['#EC4899', '#9333EA']}
+              style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Ionicons name="heart" size={38} color="#FFFFFF" />
+            </LinearGradient>
+          </View>
+
+          {/* Headline */}
+          <Text style={{ color: '#FFFFFF', fontSize: 26, fontWeight: '800', textAlign: 'center', marginBottom: 10, letterSpacing: -0.3 }}>
+            Discover artists.{'\n'}Support them directly.
+          </Text>
+
+          {/* Body */}
+          <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 15, textAlign: 'center', lineHeight: 23, marginBottom: 28 }}>
+            SoundBridge shows you musicians, podcasters, and DJs near you and matched to what you love. When you find someone you want to support, you can tip them directly, keep them going, and help them grow — no middleman, no waiting.
+          </Text>
+
+          {/* Supporting note */}
+          <Text style={{ color: 'rgba(255,255,255,0.38)', fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 36 }}>
+            The more you support artists you love, the more you'll unlock as we grow.
+          </Text>
+
+          {/* CTA */}
+          <TouchableOpacity
+            style={{ borderRadius: 999, overflow: 'hidden' }}
+            onPress={handleNext}
+            activeOpacity={0.85}
+          >
+            <LinearGradient
+              colors={['#EC4899', '#9333EA']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={{ paddingVertical: 17, alignItems: 'center', borderRadius: 999 }}
+            >
+              <Text style={{ color: '#FFFFFF', fontSize: 17, fontWeight: '700', letterSpacing: 0.2 }}>
+                Let's go
+              </Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
+      </ScrollView>
+    </View>
+  );
 
   const renderNotificationPermission = () => {
     const bullets = isCreatorType
@@ -6608,6 +6812,8 @@ export default function OnboardingScreen() {
       {currentStep === 'musicLover_genres' && renderMusicLoverGenres()}
       {currentStep === 'musicLover_events' && renderMusicLoverEvents()}
       {currentStep === 'musicLover_valueDemo' && renderMusicLoverValueDemo()}
+      {currentStep === 'musicLover_purpose' && renderMusicLoverPurpose()}
+      {currentStep === 'musicLover_engagement' && renderMusicLoverEngagement()}
 
       {/* Event Organiser Path */}
       {currentStep === 'eventOrganiser_profileSetup' && renderEventOrganiserProfileSetup()}
