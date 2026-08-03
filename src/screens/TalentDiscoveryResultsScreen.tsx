@@ -59,7 +59,11 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-const PROFILE_FIELDS = 'id, username, display_name, bio, avatar_url, location, genre, followers_count, tracks_count, last_active, institution_badge';
+// NOTE: tracks_count is NOT a column on profiles (it's always computed —
+// see dbHelpers.getCreatorsWithStats in src/lib/supabase.ts). Selecting it
+// directly errors the whole query silently (no `error` check here), which is
+// why results were always empty. Fetched separately below instead.
+const PROFILE_FIELDS = 'id, username, display_name, bio, avatar_url, location, genre, followers_count, last_active, institution_badge';
 
 export default function TalentDiscoveryResultsScreen() {
   const navigation = useNavigation<any>();
@@ -94,7 +98,8 @@ export default function TalentDiscoveryResultsScreen() {
       let query = supabase.from('profiles').select(PROFILE_FIELDS).in('id', userIds);
       if (genre) query = query.ilike('genre', genre);
 
-      const { data: profiles } = await query;
+      const { data: profiles, error: profilesError } = await query;
+      if (profilesError) throw profilesError;
 
       // Service-provider categories (e.g. Audio Engineers) carry lat/lng, which plain
       // profiles don't — pull it in for whichever of these users also has that row,
@@ -105,8 +110,16 @@ export default function TalentDiscoveryResultsScreen() {
         .in('user_id', userIds);
       const coordsByUser = new Map((providers ?? []).map((p: any) => [p.user_id, { lat: p.latitude, lng: p.longitude }]));
 
+      // tracks_count isn't a real column — tally it from audio_tracks in one round trip.
+      const { data: trackRows } = await supabase.from('audio_tracks').select('creator_id').in('creator_id', userIds);
+      const tracksCountByUser = new Map<string, number>();
+      (trackRows ?? []).forEach((t: any) => {
+        tracksCountByUser.set(t.creator_id, (tracksCountByUser.get(t.creator_id) ?? 0) + 1);
+      });
+
       setResults((profiles ?? []).map((p: any) => ({
         ...p,
+        tracks_count: tracksCountByUser.get(p.id) ?? 0,
         _lat: coordsByUser.get(p.id)?.lat ?? null,
         _lng: coordsByUser.get(p.id)?.lng ?? null,
       })));

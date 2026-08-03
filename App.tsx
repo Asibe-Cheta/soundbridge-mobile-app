@@ -78,6 +78,7 @@ import WithdrawalMethodsScreen from './src/screens/WithdrawalMethodsScreen';
 import AddWithdrawalMethodScreen from './src/screens/AddWithdrawalMethodScreen';
 import AllCreatorsScreen from './src/screens/AllCreatorsScreen';
 import TalentDiscoveryScreen from './src/screens/TalentDiscoveryScreen';
+import TalentDiscoveryGenresScreen from './src/screens/TalentDiscoveryGenresScreen';
 import TalentDiscoveryResultsScreen from './src/screens/TalentDiscoveryResultsScreen';
 import AllEventsScreen from './src/screens/AllEventsScreen';
 import AllTracksScreen from './src/screens/AllTracksScreen';
@@ -1286,6 +1287,7 @@ function AppNavigator() {
             <Stack.Screen name="AddWithdrawalMethod" component={AddWithdrawalMethodScreen} />
             <Stack.Screen name="AllCreators" component={AllCreatorsScreen} />
             <Stack.Screen name="TalentDiscovery" component={TalentDiscoveryScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="TalentDiscoveryGenres" component={TalentDiscoveryGenresScreen} options={{ headerShown: false }} />
             <Stack.Screen name="TalentDiscoveryResults" component={TalentDiscoveryResultsScreen} options={{ headerShown: false }} />
             <Stack.Screen name="AllEvents" component={AllEventsScreen} />
             <Stack.Screen name="SavedEvents" component={AllEventsScreen} />
