@@ -2,7 +2,10 @@
  * TalentDiscoveryGenresScreen
  * Genre sub-screen for "Musicians & Singers" (Part A of
  * CORECTED_TALENT_DISCOVERY_SCREEN.MD). Genres are pulled from the existing
- * genre taxonomy (genreService) rather than a new hardcoded list.
+ * genre taxonomy (genreService) rather than a new hardcoded list. Displayed
+ * as a 2-column grid — DiscoverScreen's compact grid card design (artistGridCard,
+ * see CreatorGridCard) is what it uses for grid layouts specifically, as
+ * opposed to the poster card used for horizontal-scrolling rows.
  */
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, ActivityIndicator } from 'react-native';
@@ -56,21 +59,22 @@ export default function TalentDiscoveryGenresScreen() {
           <ActivityIndicator color={theme.colors.primary} style={{ marginTop: 40 }} />
         ) : (
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-            <TouchableOpacity
-              style={[styles.genreRow, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-              onPress={() => openResults(undefined, 'Musicians & Singers')}
-            >
-              <Text style={[styles.genreRowText, { color: theme.colors.text }]}>All Genres</Text>
-            </TouchableOpacity>
-            {genres.map((genre) => (
-              <TouchableOpacity
-                key={genre.id}
-                style={[styles.genreRow, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-                onPress={() => openResults(genre.name, `Musicians & Singers · ${genre.name}`)}
-              >
-                <Text style={[styles.genreRowText, { color: theme.colors.text }]}>{genre.name}</Text>
+            <View style={styles.grid}>
+              <TouchableOpacity style={styles.gridCard} onPress={() => openResults(undefined, 'Musicians & Singers')}>
+                <Text style={[styles.gridCardText, { color: theme.colors.text }]}>All Genres</Text>
               </TouchableOpacity>
-            ))}
+              {genres.map((genre) => (
+                <TouchableOpacity
+                  key={genre.id}
+                  style={styles.gridCard}
+                  onPress={() => openResults(genre.name, `Musicians & Singers · ${genre.name}`)}
+                >
+                  <Text style={[styles.gridCardText, { color: theme.colors.text }]} numberOfLines={2}>
+                    {genre.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </ScrollView>
         )}
       </SafeAreaView>
@@ -95,17 +99,28 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontFamily: Typography.body.fontFamily,
   },
-  scrollContent: { padding: 16, paddingBottom: 40 },
-  genreRow: {
+  scrollContent: { paddingVertical: 16, paddingBottom: 40 },
+  // Matches DiscoverScreen's artistsGridContainer/artistGridCard exactly (see CreatorGridCard).
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 10,
+    justifyContent: 'space-between',
   },
-  genreRowText: {
-    ...Typography.body,
+  gridCard: {
+    width: '48%',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gridCardText: {
+    ...Typography.label,
     fontSize: 15,
     fontWeight: '600',
+    textAlign: 'center',
   },
 });

@@ -92,13 +92,25 @@ export default function TalentDiscoveryResultsScreen() {
         .select('user_id')
         .in('category', categories);
 
-      const userIds = Array.from(new Set((catRows ?? []).map((r: any) => r.user_id)));
+      let userIds = Array.from(new Set((catRows ?? []).map((r: any) => r.user_id)));
       if (userIds.length === 0) { setResults([]); return; }
 
-      let query = supabase.from('profiles').select(PROFILE_FIELDS).in('id', userIds);
-      if (genre) query = query.ilike('genre', genre);
+      // profiles.genre is a dead column (never written) and profiles.genres stores
+      // genre IDs, not names — the only reliable, populated, name-string genre
+      // signal is per-track (audio_tracks.genre, set directly from the upload
+      // picker). Narrow to creators who've uploaded a matching music track.
+      if (genre) {
+        const { data: genreTrackRows } = await supabase
+          .from('audio_tracks')
+          .select('creator_id')
+          .eq('content_type', 'music')
+          .ilike('genre', genre)
+          .in('creator_id', userIds);
+        userIds = Array.from(new Set((genreTrackRows ?? []).map((r: any) => r.creator_id)));
+        if (userIds.length === 0) { setResults([]); return; }
+      }
 
-      const { data: profiles, error: profilesError } = await query;
+      const { data: profiles, error: profilesError } = await supabase.from('profiles').select(PROFILE_FIELDS).in('id', userIds);
       if (profilesError) throw profilesError;
 
       // Service-provider categories (e.g. Audio Engineers) carry lat/lng, which plain

@@ -1,13 +1,14 @@
 /**
  * TalentCategoryCard
  *
- * A category tile for the Talent Discovery category-selection row (Part A of
- * CORECTED_TALENT_DISCOVERY_SCREEN.MD) — the card represents the CATEGORY
- * itself (icon + label), not a live creator preview. No equivalent exists on
- * DiscoverScreen (its cards are all creator/track shaped), so this is a new,
- * minimal component — but its outer container styling (radius, padding,
- * background) matches CreatorGridCard's artistGridCard exactly, so it reads
- * as the same design system rather than a one-off.
+ * Category tile for the Talent Discovery horizontal category row (Part A of
+ * CORECTED_TALENT_DISCOVERY_SCREEN.MD). Discover uses two distinct card
+ * designs depending on layout: the compact artistGridCard for wrapped
+ * vertical grids, and the poster-style htmlCard (see FeaturedCreatorCard)
+ * for horizontal-scrolling rows specifically. Since this is a horizontal
+ * row, this card matches htmlCard's container exactly — same 280x380 size,
+ * radius, border, background treatment — with an icon + label in place of
+ * a creator photo/name.
  */
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
@@ -19,46 +20,86 @@ interface TalentCategoryCardProps {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   onPress: () => void;
+  isFirst?: boolean;
 }
 
-export default function TalentCategoryCard({ icon, label, onPress }: TalentCategoryCardProps) {
+export default function TalentCategoryCard({ icon, label, onPress, isFirst = false }: TalentCategoryCardProps) {
   const { theme } = useTheme();
 
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
-      <View style={[styles.iconWrap, { backgroundColor: theme.colors.primary + '20' }]}>
-        <Ionicons name={icon} size={26} color={theme.colors.primary} />
+    <TouchableOpacity
+      style={[styles.htmlCard, isFirst && { marginLeft: 24 }, { backgroundColor: theme.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)' }]}
+      onPress={onPress}
+      activeOpacity={0.9}
+    >
+      <View style={styles.content}>
+        <View
+          style={[
+            styles.iconRing,
+            {
+              borderColor: theme.colors.primary,
+              backgroundColor: theme.isDark ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)',
+            },
+          ]}
+        >
+          <Ionicons name={icon} size={40} color={theme.colors.primary} />
+        </View>
+
+        <Text style={[styles.title, { color: theme.colors.text }]} numberOfLines={2}>
+          {label}
+        </Text>
+
+        <View style={[styles.viewAllBtn, { backgroundColor: theme.colors.primary }]}>
+          <Text style={styles.viewAllBtnText}>View All</Text>
+        </View>
       </View>
-      <Text style={[styles.label, { color: theme.colors.text }]} numberOfLines={2}>
-        {label}
-      </Text>
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    width: 140,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 12,
-    padding: 16,
-    marginRight: 12,
+  // Matches FeaturedCreatorCard's htmlCard exactly (same horizontal-row card
+  // design used for DiscoverScreen's Trending This Week / Featured Artists).
+  htmlCard: {
+    width: 280,
+    height: 380,
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginRight: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 130,
   },
-  iconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+  content: {
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  iconRing: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
+    marginBottom: 20,
   },
-  label: {
-    ...Typography.label,
-    fontSize: 13,
-    fontWeight: '600',
+  title: {
+    ...Typography.headerMedium,
+    fontSize: 22,
+    fontWeight: '700',
     textAlign: 'center',
+    letterSpacing: -0.5,
+    marginBottom: 20,
+  },
+  viewAllBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 28,
+    borderRadius: 999,
+  },
+  viewAllBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
