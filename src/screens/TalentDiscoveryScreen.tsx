@@ -23,16 +23,17 @@ import type { TalentCategory } from '../utils/talentCategoryLabels';
 interface TopLevelCategory {
   key: string;
   icon: React.ComponentProps<typeof TalentCategoryCard>['icon'];
+  image?: React.ComponentProps<typeof TalentCategoryCard>['image'];
   title: string;
   categories?: TalentCategory[];
   hasSubScreen?: boolean;
 }
 
 const TOP_LEVEL_CATEGORIES: TopLevelCategory[] = [
-  { key: 'musicians', icon: 'musical-notes', title: 'Musicians & Singers', hasSubScreen: true },
-  { key: 'djs', icon: 'disc', title: 'DJs', categories: ['dj'] },
-  { key: 'podcasters', icon: 'radio', title: 'Podcasters', categories: ['podcaster'] },
-  { key: 'audio-engineers', icon: 'mic', title: 'Audio Engineers & Producers', categories: ['audio_engineer', 'producer'] },
+  { key: 'musicians', icon: 'musical-notes', image: require('../../assets/images/talent/musician.jpg'), title: 'Musicians & Singers', hasSubScreen: true },
+  { key: 'djs', icon: 'disc', image: require('../../assets/images/talent/dj.jpg'), title: 'DJs', categories: ['dj'] },
+  { key: 'podcasters', icon: 'radio', image: require('../../assets/images/talent/podcaster.jpg'), title: 'Podcasters', categories: ['podcaster'] },
+  { key: 'audio-engineers', icon: 'mic', image: require('../../assets/images/talent/aud-engineer.jpg'), title: 'Audio Engineers & Producers', categories: ['audio_engineer', 'producer'] },
   { key: 'session-musicians', icon: 'people', title: 'Session Musicians & Instrumentalists', categories: ['session_musician', 'instrumentalist'] },
 ];
 
@@ -150,7 +151,7 @@ export default function TalentDiscoveryScreen() {
               data={TOP_LEVEL_CATEGORIES}
               keyExtractor={(item) => item.key}
               renderItem={({ item, index }) => (
-                <TalentCategoryCard icon={item.icon} label={item.title} isFirst={index === 0} onPress={() => handlePress(item)} />
+                <TalentCategoryCard icon={item.icon} image={item.image} label={item.title} isFirst={index === 0} onPress={() => handlePress(item)} />
               )}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.categoryRow}

@@ -6,12 +6,14 @@
  * designs depending on layout: the compact artistGridCard for wrapped
  * vertical grids, and the poster-style htmlCard (see FeaturedCreatorCard)
  * for horizontal-scrolling rows specifically. Since this is a horizontal
- * row, this card matches htmlCard's container exactly — same 280x380 size,
- * radius, border, background treatment — with an icon + label in place of
- * a creator photo/name.
+ * row, this card matches htmlCard's container and background-image+gradient
+ * treatment exactly — same 280x380 size, radius, border — with a category
+ * photo in place of a creator photo, falling back to an icon ring when no
+ * photo is supplied (e.g. Session Musicians & Instrumentalists).
  */
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ImageSourcePropType } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { SystemTypography as Typography } from '../constants/Typography';
@@ -21,31 +23,47 @@ interface TalentCategoryCardProps {
   label: string;
   onPress: () => void;
   isFirst?: boolean;
+  image?: ImageSourcePropType;
 }
 
-export default function TalentCategoryCard({ icon, label, onPress, isFirst = false }: TalentCategoryCardProps) {
+export default function TalentCategoryCard({ icon, label, onPress, isFirst = false, image }: TalentCategoryCardProps) {
   const { theme } = useTheme();
 
   return (
     <TouchableOpacity
-      style={[styles.htmlCard, isFirst && { marginLeft: 24 }, { backgroundColor: theme.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)' }]}
+      style={[styles.htmlCard, isFirst && { marginLeft: 24 }]}
       onPress={onPress}
       activeOpacity={0.9}
     >
-      <View style={styles.content}>
-        <View
-          style={[
-            styles.iconRing,
-            {
-              borderColor: theme.colors.primary,
-              backgroundColor: theme.isDark ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)',
-            },
-          ]}
-        >
-          <Ionicons name={icon} size={40} color={theme.colors.primary} />
-        </View>
+      <View style={[StyleSheet.absoluteFill, { overflow: 'hidden', borderRadius: 24 }]}>
+        {image ? (
+          <Image source={image} style={styles.htmlCardImage} />
+        ) : (
+          <View
+            style={[
+              styles.htmlCardImage,
+              {
+                backgroundColor: theme.isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
+                justifyContent: 'center',
+                alignItems: 'center',
+              },
+            ]}
+          >
+            <Ionicons name={icon} size={80} color={theme.isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'} />
+          </View>
+        )}
+        <LinearGradient
+          colors={
+            theme.isDark
+              ? ['transparent', 'rgba(19, 7, 34, 0.5)', '#130722']
+              : ['transparent', `${theme.colors.background}80`, theme.colors.background]
+          }
+          style={styles.htmlCardGradient}
+        />
+      </View>
 
-        <Text style={[styles.title, { color: theme.colors.text }]} numberOfLines={2}>
+      <View style={styles.content}>
+        <Text style={styles.title} numberOfLines={2}>
           {label}
         </Text>
 
@@ -66,32 +84,39 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     overflow: 'hidden',
     marginRight: 16,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  },
+  htmlCardImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
+  },
+  htmlCardGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '60%',
   },
   content: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 20,
+    zIndex: 10,
     alignItems: 'center',
-    paddingHorizontal: 24,
-    width: '100%',
-  },
-  iconRing: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
   },
   title: {
     ...Typography.headerMedium,
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '700',
+    color: 'white',
     textAlign: 'center',
     letterSpacing: -0.5,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   // Matches FeaturedCreatorCard's Follow button exactly.
   viewAllBtn: {
