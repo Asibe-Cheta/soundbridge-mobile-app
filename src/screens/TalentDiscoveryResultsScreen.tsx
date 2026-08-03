@@ -35,17 +35,15 @@ interface TalentResult {
   genre?: string | null;
   followers_count?: number | null;
   tracks_count?: number | null;
-  last_active?: string | null;
   institution_badge?: string | null;
   _lat?: number | null;
   _lng?: number | null;
 }
 
-type SortOption = 'followers' | 'active' | 'nearest';
+type SortOption = 'followers' | 'nearest';
 
 const SORT_OPTIONS: { key: SortOption; label: string }[] = [
   { key: 'followers', label: 'Most Followed' },
-  { key: 'active', label: 'Recently Active' },
   { key: 'nearest', label: 'Nearest' },
 ];
 
@@ -60,10 +58,11 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
 }
 
 // NOTE: tracks_count is NOT a column on profiles (it's always computed —
-// see dbHelpers.getCreatorsWithStats in src/lib/supabase.ts). Selecting it
-// directly errors the whole query silently (no `error` check here), which is
-// why results were always empty. Fetched separately below instead.
-const PROFILE_FIELDS = 'id, username, display_name, bio, avatar_url, location, genre, followers_count, last_active, institution_badge';
+// see dbHelpers.getCreatorsWithStats in src/lib/supabase.ts). last_active
+// isn't a real column either (confirmed via a live "column does not exist"
+// error) despite being in the local database.ts type — that type file is
+// stale for both fields. Selecting either directly errors the whole query.
+const PROFILE_FIELDS = 'id, username, display_name, bio, avatar_url, location, genre, followers_count, institution_badge';
 
 // Large categories (musician: 500+, session_musician: 490+) blow past URL length
 // limits when every matching id is stuffed into a single `.in(...)` filter —
@@ -191,13 +190,6 @@ export default function TalentDiscoveryResultsScreen() {
     const list = [...results];
     if (sortBy === 'followers') {
       return list.sort((a, b) => (b.followers_count || 0) - (a.followers_count || 0));
-    }
-    if (sortBy === 'active') {
-      return list.sort((a, b) => {
-        const aTime = a.last_active ? new Date(a.last_active).getTime() : 0;
-        const bTime = b.last_active ? new Date(b.last_active).getTime() : 0;
-        return bTime - aTime;
-      });
     }
     if (sortBy === 'nearest' && userCoords) {
       const withCoords = list.filter((r) => r._lat != null && r._lng != null);
