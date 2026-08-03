@@ -49,9 +49,9 @@ export default function TalentCategoryCard({ icon, label, onPress, isFirst = fal
           {label}
         </Text>
 
-        <View style={[styles.viewAllBtn, { backgroundColor: theme.colors.primary }]}>
+        <TouchableOpacity style={[styles.viewAllBtn, { backgroundColor: theme.colors.primary }]} onPress={onPress}>
           <Text style={styles.viewAllBtnText}>View All</Text>
-        </View>
+        </TouchableOpacity>
       </View>
     </TouchableOpacity>
   );
@@ -74,6 +74,7 @@ const styles = StyleSheet.create({
   content: {
     alignItems: 'center',
     paddingHorizontal: 24,
+    width: '100%',
   },
   iconRing: {
     width: 96,
@@ -92,12 +93,16 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
     marginBottom: 20,
   },
+  // Matches FeaturedCreatorCard's Follow button exactly.
   viewAllBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 28,
+    width: '100%',
+    paddingVertical: 8,
+    paddingHorizontal: 24,
     borderRadius: 999,
+    alignItems: 'center',
   },
   viewAllBtnText: {
+    ...Typography.label,
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',

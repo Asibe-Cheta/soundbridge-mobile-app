@@ -65,6 +65,26 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
 // why results were always empty. Fetched separately below instead.
 const PROFILE_FIELDS = 'id, username, display_name, bio, avatar_url, location, genre, followers_count, last_active, institution_badge';
 
+// Large categories (musician: 500+, session_musician: 490+) blow past URL length
+// limits when every matching id is stuffed into a single `.in(...)` filter —
+// that request fails outright, which is why big categories returned nothing
+// while the underlying data/RLS were both fine. Batch every `.in()` call that
+// can receive a large id list instead of sending them all in one request.
+const BATCH_SIZE = 100;
+async function fetchInBatches<T>(
+  ids: string[],
+  fetcher: (batch: string[]) => Promise<{ data: T[] | null; error: any }>
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+    const batch = ids.slice(i, i + BATCH_SIZE);
+    const { data, error } = await fetcher(batch);
+    if (error) throw error;
+    if (data) out.push(...data);
+  }
+  return out;
+}
+
 export default function TalentDiscoveryResultsScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -78,65 +98,77 @@ export default function TalentDiscoveryResultsScreen() {
 
   const [results, setResults] = useState<TalentResult[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('followers');
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [locatingUser, setLocatingUser] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       if (!categories || categories.length === 0) { setResults([]); return; }
 
-      const { data: catRows } = await supabase
-        .from('user_talent_categories')
-        .select('user_id')
-        .in('category', categories);
+      let userIds: string[];
 
-      let userIds = Array.from(new Set((catRows ?? []).map((r: any) => r.user_id)));
-      if (userIds.length === 0) { setResults([]); return; }
-
-      // profiles.genre is a dead column (never written) and profiles.genres stores
-      // genre IDs, not names — the only reliable, populated, name-string genre
-      // signal is per-track (audio_tracks.genre, set directly from the upload
-      // picker). Narrow to creators who've uploaded a matching music track.
       if (genre) {
-        const { data: genreTrackRows } = await supabase
+        // profiles.genre is a dead column (never written) and profiles.genres stores
+        // genre IDs, not names — the only reliable, populated, name-string genre
+        // signal is per-track (audio_tracks.genre, set directly from the upload
+        // picker). A genre-tagged music track is itself sufficient evidence of
+        // being a musician, so this queries audio_tracks directly rather than
+        // first pulling every musician id from user_talent_categories (which,
+        // for a category with hundreds of members, would otherwise need to be
+        // passed into a follow-up `.in()` filter — exactly the large-array
+        // problem this rewrite avoids).
+        const { data, error } = await supabase
           .from('audio_tracks')
           .select('creator_id')
           .eq('content_type', 'music')
-          .ilike('genre', genre)
-          .in('creator_id', userIds);
-        userIds = Array.from(new Set((genreTrackRows ?? []).map((r: any) => r.creator_id)));
-        if (userIds.length === 0) { setResults([]); return; }
+          .ilike('genre', genre);
+        if (error) throw error;
+        userIds = Array.from(new Set((data ?? []).map((r: any) => r.creator_id)));
+      } else {
+        const { data, error } = await supabase
+          .from('user_talent_categories')
+          .select('user_id')
+          .in('category', categories);
+        if (error) throw error;
+        userIds = Array.from(new Set((data ?? []).map((r: any) => r.user_id)));
       }
 
-      const { data: profiles, error: profilesError } = await supabase.from('profiles').select(PROFILE_FIELDS).in('id', userIds);
-      if (profilesError) throw profilesError;
+      if (userIds.length === 0) { setResults([]); return; }
+
+      const profiles = await fetchInBatches(userIds, (batch) =>
+        supabase.from('profiles').select(PROFILE_FIELDS).in('id', batch)
+      );
 
       // Service-provider categories (e.g. Audio Engineers) carry lat/lng, which plain
       // profiles don't — pull it in for whichever of these users also has that row,
       // so "Nearest" sort still works for them.
-      const { data: providers } = await supabase
-        .from('service_provider_profiles')
-        .select('user_id, latitude, longitude')
-        .in('user_id', userIds);
-      const coordsByUser = new Map((providers ?? []).map((p: any) => [p.user_id, { lat: p.latitude, lng: p.longitude }]));
+      const providers = await fetchInBatches(userIds, (batch) =>
+        supabase.from('service_provider_profiles').select('user_id, latitude, longitude').in('user_id', batch)
+      );
+      const coordsByUser = new Map(providers.map((p: any) => [p.user_id, { lat: p.latitude, lng: p.longitude }]));
 
       // tracks_count isn't a real column — tally it from audio_tracks in one round trip.
-      const { data: trackRows } = await supabase.from('audio_tracks').select('creator_id').in('creator_id', userIds);
+      const trackRows = await fetchInBatches(userIds, (batch) =>
+        supabase.from('audio_tracks').select('creator_id').in('creator_id', batch)
+      );
       const tracksCountByUser = new Map<string, number>();
-      (trackRows ?? []).forEach((t: any) => {
+      trackRows.forEach((t: any) => {
         tracksCountByUser.set(t.creator_id, (tracksCountByUser.get(t.creator_id) ?? 0) + 1);
       });
 
-      setResults((profiles ?? []).map((p: any) => ({
+      setResults(profiles.map((p: any) => ({
         ...p,
         tracks_count: tracksCountByUser.get(p.id) ?? 0,
         _lat: coordsByUser.get(p.id)?.lat ?? null,
         _lng: coordsByUser.get(p.id)?.lng ?? null,
       })));
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Error loading talent discovery results:', error);
+      setLoadError(error?.message || 'Something went wrong loading results.');
       setResults([]);
     } finally {
       setLoading(false);
@@ -249,8 +281,14 @@ export default function TalentDiscoveryResultsScreen() {
             showsVerticalScrollIndicator={false}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
-                <Ionicons name="people-outline" size={56} color={theme.colors.textSecondary} />
-                <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>No creators found in this category yet</Text>
+                <Ionicons
+                  name={loadError ? 'warning-outline' : 'people-outline'}
+                  size={56}
+                  color={loadError ? '#EF4444' : theme.colors.textSecondary}
+                />
+                <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>
+                  {loadError ? `Couldn't load results: ${loadError}` : 'No creators found in this category yet'}
+                </Text>
               </View>
             }
           />

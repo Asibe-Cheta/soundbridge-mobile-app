@@ -44,13 +44,13 @@ export default function TalentDiscoveryScreen() {
   const { theme } = useTheme();
   const isDark = theme.isDark;
 
-  const [topTipped, setTopTipped] = useState<FeaturedCreatorCardData[]>([]);
-  const [loadingTopTipped, setLoadingTopTipped] = useState(true);
+  const [topCreators, setTopCreators] = useState<FeaturedCreatorCardData[]>([]);
+  const [loadingTopCreators, setLoadingTopCreators] = useState(true);
   const [mostPlayed, setMostPlayed] = useState<FeaturedCreatorCardData[]>([]);
   const [loadingMostPlayed, setLoadingMostPlayed] = useState(true);
 
   useEffect(() => {
-    loadTopTipped();
+    loadTopCreators();
     loadMostPlayed();
   }, []);
 
@@ -61,29 +61,29 @@ export default function TalentDiscoveryScreen() {
     return idsInRankOrder.map((id) => byId.get(id)).filter(Boolean) as FeaturedCreatorCardData[];
   };
 
-  const loadTopTipped = async () => {
-    setLoadingTopTipped(true);
+  const loadTopCreators = async () => {
+    setLoadingTopCreators(true);
     try {
-      const { data: tipRows } = await supabase
-        .from('tips')
-        .select('recipient_id, amount')
-        .eq('status', 'completed')
-        .order('amount', { ascending: false })
-        .limit(500);
+      // creator_revenue is the real wallet/earnings source (same table the wallet
+      // and every other creator screen reads tip totals from) — a per-creator
+      // pre-aggregated summary, not the raw tips table.
+      const { data: revenueRows, error } = await supabase
+        .from('creator_revenue')
+        .select('creator_id, tips_received')
+        .order('tips_received', { ascending: false })
+        .limit(PERFORMER_LIMIT);
+      if (error) throw error;
 
-      const totals = new Map<string, number>();
-      (tipRows ?? []).forEach((t: any) => totals.set(t.recipient_id, (totals.get(t.recipient_id) ?? 0) + (t.amount || 0)));
-      const topIds = Array.from(totals.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, PERFORMER_LIMIT)
-        .map(([id]) => id);
+      const topIds = (revenueRows ?? [])
+        .filter((r: any) => (r.tips_received || 0) > 0)
+        .map((r: any) => r.creator_id);
 
-      setTopTipped(await rankedProfiles(topIds));
+      setTopCreators(await rankedProfiles(topIds));
     } catch (error) {
-      console.error('❌ Error loading top tipped creators:', error);
-      setTopTipped([]);
+      console.error('❌ Error loading top creators:', error);
+      setTopCreators([]);
     } finally {
-      setLoadingTopTipped(false);
+      setLoadingTopCreators(false);
     }
   };
 
@@ -159,20 +159,23 @@ export default function TalentDiscoveryScreen() {
 
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Top Tipped Creators</Text>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Top Creators</Text>
+              <Text style={[styles.sectionSubtitle, { color: theme.colors.textSecondary }]}>
+                See the creators who have either been most tipped or loved by listeners.
+              </Text>
             </View>
-            {loadingTopTipped ? (
+            {loadingTopCreators ? (
               <ActivityIndicator color={theme.colors.primary} style={{ marginLeft: 24 }} />
-            ) : topTipped.length > 0 ? (
+            ) : topCreators.length > 0 ? (
               <FlatList
                 horizontal
-                data={topTipped}
+                data={topCreators}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item, index }) => (
                   <FeaturedCreatorCard
                     creator={item}
                     isFirst={index === 0}
-                    badgeLabel="TOP TIPPED"
+                    badgeLabel="TOP CREATOR"
                     onPress={() => navigation.navigate('CreatorProfile', { creatorId: item.id })}
                   />
                 )}
@@ -180,13 +183,16 @@ export default function TalentDiscoveryScreen() {
                 contentContainerStyle={{ paddingRight: 24 }}
               />
             ) : (
-              <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>No tipped creators yet</Text>
+              <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>No top creators yet</Text>
             )}
           </View>
 
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Most Played</Text>
+              <Text style={[styles.sectionSubtitle, { color: theme.colors.textSecondary }]}>
+                Creators with the most streams across their music, podcasts, and mixtapes.
+              </Text>
             </View>
             {loadingMostPlayed ? (
               <ActivityIndicator color={theme.colors.primary} style={{ marginLeft: 24 }} />
@@ -245,6 +251,11 @@ const styles = StyleSheet.create({
     ...Typography.body,
     fontSize: 18,
     fontWeight: '700',
+  },
+  sectionSubtitle: {
+    ...Typography.label,
+    fontSize: 13,
+    marginTop: 4,
   },
   categoryRow: { paddingRight: 24 },
   quietEmpty: {
