@@ -50,11 +50,22 @@ class ReferralService {
 
   // ===== SUPABASE RPC CALLS =====
 
-  async recordReferralSignup(referredUserId: string, referralCode: string): Promise<void> {
+  /**
+   * `referralCode` — explicit ?ref= code, if present.
+   * `fanPageCreatorId` — last profile page visited before signup, if any. The RPC resolves
+   * whether that creator is an actual Partner, applies explicit-code-always-wins priority,
+   * and avoids double-crediting — no client-side partners lookup needed or possible (RLS).
+   */
+  async recordReferralSignup(
+    referredUserId: string,
+    referralCode?: string | null,
+    fanPageCreatorId?: string | null,
+  ): Promise<void> {
     try {
       await supabase.rpc('record_referral_signup', {
         p_referred_user_id: referredUserId,
-        p_referral_code: referralCode,
+        p_referral_code: referralCode ?? null,
+        p_fan_page_creator_id: fanPageCreatorId ?? null,
       });
     } catch (err) {
       console.error('[ReferralService] recordReferralSignup error:', err);

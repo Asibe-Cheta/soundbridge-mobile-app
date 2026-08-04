@@ -207,15 +207,21 @@ class CommunityEntryService {
     }
   }
 
-  /** Partner /join?ref= — sets community_entry_creator_id via RPC (same as web complete-onboarding) */
+  /**
+   * Partner /join?ref= — sets community_entry_creator_id via RPC (same as web complete-onboarding).
+   * Also fires when there's no explicit ref code but the last profile page visited before
+   * signup was a Partner's fan page — the RPC itself resolves whether that creator is an
+   * actual Partner, priority (explicit ref always wins), and no-double-crediting server-side.
+   * See MOBILE_TEAM_FAN_PAGE_REFERRAL_ATTRIBUTION_WEB_HANDOFF.MD.
+   */
   private async applyReferralAttribution(
     userId: string,
     attr: CommunityAttribution,
   ): Promise<void> {
-    if (!attr.referralCode) return;
+    if (!attr.referralCode && !attr.communityCreatorId) return;
     try {
-      await referralService.recordReferralSignup(userId, attr.referralCode);
-      console.log('[CommunityEntryService] record_referral_signup:', attr.referralCode);
+      await referralService.recordReferralSignup(userId, attr.referralCode, attr.communityCreatorId);
+      console.log('[CommunityEntryService] record_referral_signup:', attr.referralCode, attr.communityCreatorId);
     } catch (err) {
       console.warn('[CommunityEntryService] applyReferralAttribution error:', err);
     }
