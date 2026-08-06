@@ -796,6 +796,16 @@ export default function TestFeedScreen() {
   const flatListRef = useRef<any>(null);
   useScrollToTop(flatListRef);
 
+  // Entrance animation — softens the hard cut coming off the splash screen.
+  const feedEntranceAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(feedEntranceAnim, {
+      toValue: 1,
+      duration: 450,
+      useNativeDriver: true,
+    }).start();
+  }, [feedEntranceAnim]);
+
   // ── Audio Lover welcome layer — first-visit orientation for listener accounts ──
   const [showAudioLoverWelcome, setShowAudioLoverWelcome] = useState(false);
   const audioLoverWelcomeCheckedRef = useRef(false);
@@ -1048,7 +1058,23 @@ export default function TestFeedScreen() {
     posts;
 
   return (
-    <View style={[styles.root, { backgroundColor: isDark ? theme.colors.backgroundGradient.start : theme.colors.background }]}>
+    <Animated.View
+      style={[
+        styles.root,
+        { backgroundColor: isDark ? theme.colors.backgroundGradient.start : theme.colors.background },
+        {
+          opacity: feedEntranceAnim,
+          transform: [
+            {
+              translateY: feedEntranceAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [16, 0],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
       <LinearGradient
         colors={isDark
           ? [theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]
@@ -1566,7 +1592,7 @@ export default function TestFeedScreen() {
           </BlurView>
         </View>
       </Modal>
-    </View>
+    </Animated.View>
   );
 }
 

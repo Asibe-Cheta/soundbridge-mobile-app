@@ -31,7 +31,7 @@ export default function SplashScreen({ onVideoFinish }: SplashScreenProps) {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0A0E1A" />
       <Video
-        source={require('../../assets/images/Sb-splash.mp4')}
+        source={require('../../assets/images/Sb-splash-2.mp4')}
         style={StyleSheet.absoluteFillObject}
         resizeMode={ResizeMode.COVER}
         shouldPlay
