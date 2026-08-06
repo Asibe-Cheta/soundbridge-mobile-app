@@ -485,6 +485,7 @@ function AppNavigator() {
   } = useAuth();
 
   const [welcomePendingCreatorId, setWelcomePendingCreatorId] = React.useState<string | null>(null);
+  const [splashVideoDone, setSplashVideoDone] = React.useState(false);
   const [needsPostSignupSetup, setNeedsPostSignupSetup] = React.useState(false);
 
   // Check if the post-signup setup screen has been seen for this user
@@ -1164,7 +1165,16 @@ function AppNavigator() {
     }
   }, [user?.id]);
 
-  // No splash screen blocking - navigation works immediately
+  // Splash stays up until BOTH the splash video has finished AND auth has actually
+  // resolved (loading === false) — whichever takes longer. Without the `loading`
+  // gate, the Auth/login stack below could render as soon as `loading` flips false
+  // (e.g. via the failsafe timeout) before `user` is determined, flashing the login
+  // screen even for already-logged-in users. If auth is slower than the ~2s clip,
+  // the video freezes on its last frame (default behaviour, isLooping=false) until
+  // loading catches up.
+  if (loading || !splashVideoDone) {
+    return <SplashScreen onVideoFinish={() => setSplashVideoDone(true)} />;
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: '#1A1A1A' }}>

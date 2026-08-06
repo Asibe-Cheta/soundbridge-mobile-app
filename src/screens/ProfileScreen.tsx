@@ -31,8 +31,7 @@ import { useAuth } from '../contexts/AuthContext';
 const WalkthroughableTouchable = walkthroughable(TouchableOpacity);
 import { supabase, dbHelpers } from '../lib/supabase';
 import { apiFetch } from '../lib/apiClient';
-import { resetTour } from '../services/tourService';
-import { 
+import {
   loadQueriesInParallel, 
   waitForValidSession,
   LoadingStateManager,
@@ -42,7 +41,6 @@ import {
 import { contentCacheService } from '../services/contentCacheService';
 import * as ImagePicker from 'expo-image-picker';
 // Removed FileSystem import - using FormData for Cloudinary upload
-import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { becomeServiceProvider } from '../services/creatorExpansionService';
@@ -101,6 +99,7 @@ interface UserProfile {
   tracks_count: number;
   role: string;
   is_creator?: boolean;
+  collaboration_enabled?: boolean;
   is_verified: boolean;
   early_adopter?: boolean;
   rating_avg?: number | null;
@@ -137,7 +136,6 @@ interface UserTrack {
 
 export default function ProfileScreen() {
   const { user, userProfile, signOut, updatePassword, refreshUser, updateUserProfile, session, loading: authLoading } = useAuth();
-  const { autoPlay, toggleAutoPlay } = useAudioPlayer();
   const { theme } = useTheme();
   const { requestAgreement, agreementVisible, agreementSubmitting, onAgreed, onDismiss } = useCreatorAgreement();
   const { showToast } = useToast();
@@ -161,6 +159,8 @@ export default function ProfileScreen() {
   useScrollToTop(scrollRef);
   const initialCacheLoadRef = useRef(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [collaborationEnabled, setCollaborationEnabled] = useState(true);
+  const [savingCollaborationEnabled, setSavingCollaborationEnabled] = useState(false);
   const [showVenuePrefsModal, setShowVenuePrefsModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
   const [showShareCardModal, setShowShareCardModal] = useState(false);
@@ -202,6 +202,31 @@ export default function ProfileScreen() {
     });
     return unsubscribe;
   }, []);
+
+  // Sync the collaboration toggle from the loaded profile (defaults to true, matching the DB column's default)
+  useEffect(() => {
+    if (profile) {
+      setCollaborationEnabled(profile.collaboration_enabled ?? true);
+    }
+  }, [profile?.collaboration_enabled]);
+
+  const handleToggleCollaborationEnabled = async (value: boolean) => {
+    setCollaborationEnabled(value);
+    setSavingCollaborationEnabled(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ collaboration_enabled: value })
+        .eq('id', user?.id);
+      if (error) throw error;
+    } catch (err) {
+      console.error('❌ Error updating collaboration_enabled:', err);
+      setCollaborationEnabled(!value);
+      Alert.alert('Error', "Couldn't update your collaboration setting. Please try again.");
+    } finally {
+      setSavingCollaborationEnabled(false);
+    }
+  };
 
   useEffect(() => {
     const pulse = Animated.loop(
@@ -1554,27 +1579,6 @@ export default function ProfileScreen() {
     navigation.navigate('About' as never);
   };
 
-  const handleRestartTour = async () => {
-    Alert.alert(
-      'Restart App Tour',
-      'This will restart the app tour from the beginning. The tour will start when you navigate to the Feed screen.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Restart',
-          onPress: async () => {
-            await resetTour();
-            Alert.alert(
-              'Tour Reset!',
-              'Navigate to the Feed screen to start the tour again.',
-              [{ text: 'OK' }]
-            );
-          },
-        },
-      ]
-    );
-  };
-
   // Payout Settings handlers
   const handlePaymentMethods = () => {
     navigation.navigate('PaymentMethods' as never);
@@ -1974,7 +1978,8 @@ export default function ProfileScreen() {
 
   const renderSettingsTab = () => (
     <View style={styles.tabContent}>
-      {/* Professional Profile */}
+      {/* Professional Profile — creators only */}
+      {isCreator(profile) && (
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Professional Profile</Text>
         <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
@@ -2045,6 +2050,7 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
       </View>
+      )}
 
       {/* Fan Page Link */}
       {isCreator(profile) && profile?.username ? (
@@ -2265,6 +2271,8 @@ export default function ProfileScreen() {
               <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
             </TouchableOpacity>
           )}
+          {isCreator(profile) && (
+          <>
           <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('AICareerAdvisor' as never)}>
             <LinearGradient
               colors={['#ef4444', '#a855f7', '#60a5fa']}
@@ -2283,6 +2291,22 @@ export default function ProfileScreen() {
             <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Collaboration Availability</Text>
             <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
+          <View style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.12)' }]}>
+              <Ionicons name="people-circle-outline" size={18} color="#6366F1" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text, flex: 1 }]}>Available for Collaboration</Text>
+            <Switch
+              value={collaborationEnabled}
+              onValueChange={handleToggleCollaborationEnabled}
+              disabled={savingCollaborationEnabled}
+              trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
+              thumbColor={collaborationEnabled ? theme.colors.primary : theme.colors.textSecondary}
+            />
+          </View>
+          <Text style={{ fontSize: 11, color: theme.colors.textSecondary, paddingHorizontal: 16, paddingBottom: 12, lineHeight: 15 }}>
+            When on, other creators and industry professionals can send you collaboration requests. Turn this off if you're not looking to collaborate right now.
+          </Text>
           <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('ProviderAvailability' as never)}>
             <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
               <Ionicons name="flash-outline" size={18} color="#F59E0B" />
@@ -2321,6 +2345,8 @@ export default function ProfileScreen() {
               <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
             </TouchableOpacity>
           )}
+          </>
+          )}
         </View>
       </View>
 
@@ -2353,7 +2379,7 @@ export default function ProfileScreen() {
             name="profile_settings_control"
             text="Control everything: Manage privacy (who sees your drops), customize theme colors, notification preferences, and wallet settings. Your platform, your rules, your professional brand."
           >
-            <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('ThemeSettings' as never)}>
+            <TouchableOpacity style={styles.groupedRow} onPress={() => navigation.navigate('ThemeSettings' as never)}>
               <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
                 <Ionicons name="moon" size={18} color="#8B5CF6" />
               </View>
@@ -2361,25 +2387,6 @@ export default function ProfileScreen() {
               <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
             </TouchableOpacity>
           </WalkthroughableTouchable>
-          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => (navigation as any).navigate('AudioEnhancementExpo')}>
-            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
-              <Ionicons name="musical-notes" size={18} color={theme.colors.primary} />
-            </View>
-            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Audio Enhancement</Text>
-            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
-          </TouchableOpacity>
-          <View style={styles.groupedRow}>
-            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.12)' }]}>
-              <Ionicons name="play-circle" size={18} color="#6366F1" />
-            </View>
-            <Text style={[styles.rowLabel, { color: theme.colors.text, flex: 1 }]}>Auto-play</Text>
-            <Switch
-              value={autoPlay}
-              onValueChange={toggleAutoPlay}
-              trackColor={{ false: theme.colors.border, true: theme.colors.primary + '40' }}
-              thumbColor={autoPlay ? theme.colors.primary : theme.colors.textSecondary}
-            />
-          </View>
         </View>
       </View>
 
@@ -2424,13 +2431,6 @@ export default function ProfileScreen() {
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>Support & About</Text>
         <View style={[styles.groupedCard, { backgroundColor: theme.colors.card }]}>
-          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleRestartTour}>
-            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
-              <Ionicons name="footsteps" size={18} color={theme.colors.primary} />
-            </View>
-            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Restart App Tour</Text>
-            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
-          </TouchableOpacity>
           <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleHelpSupport}>
             <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(99,102,241,0.12)' }]}>
               <Ionicons name="help-circle" size={18} color="#6366F1" />

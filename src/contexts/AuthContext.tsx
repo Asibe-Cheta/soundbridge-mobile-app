@@ -224,11 +224,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
       authSubscription = subscription;
     };
 
-    // Set a timeout to ensure loading doesn't stay true forever (failsafe only)
+    // Set a timeout to ensure loading doesn't stay true forever (failsafe only).
+    // Must be long enough that getSession() (AsyncStorage read + possible token
+    // refresh) reliably wins the race on a normal cold start — 500ms was too
+    // short and routinely fired first, flipping loading=false with user still
+    // null and flashing the login screen before the real session landed.
     timeoutId = setTimeout(() => {
       console.log('Auth loading timeout - forcing loading to false');
       setLoading(false);
-    }, 500); // 500ms failsafe - should never be needed
+    }, 8000); // 8s failsafe - should never be needed
 
     bootstrapAuth();
 
