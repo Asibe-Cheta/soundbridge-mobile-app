@@ -88,60 +88,48 @@ export interface BillingHistory {
 }
 
 class RevenueService {
-  // Bank Account Management
+  // Bank Account Management — routed through the web API (not a direct Supabase
+  // write/read) because encryption (AES-256-GCM via TOTP_ENCRYPTION_KEY) is
+  // application-level, not a DB trigger — Postgres has no access to that key.
+  // See WEB_TEAM_BANK_ACCOUNT_ENCRYPTION_MOBILE_RESPONSE.MD. `userId` params
+  // are unused (the route derives the user from the bearer token) but kept in
+  // the signature so callers don't need to change.
   async getBankAccount(userId: string): Promise<BankAccount | null> {
     try {
-      const { data, error } = await supabase
-        .from('creator_bank_accounts')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return null;
 
-      if (error) {
-        // Return null for any error (missing table, RLS, no rows) so the UI
-        // shows the empty/setup state instead of an error dialog.
-        console.error('Error fetching bank account (returning null):', error);
-        return null;
-      }
+      const response = await fetch(`${config.apiUrl}/api/user/revenue/bank-account`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.has_account) return null;
 
-      return data;
+      return { ...result, account_number_encrypted: '', routing_number_encrypted: '' };
     } catch (error) {
       console.error('Error fetching bank account (returning null):', error);
       return null;
     }
   }
 
-  async setBankAccount(userId: string, formData: BankAccountFormData): Promise<{ success: boolean; error?: any }> {
+  async setBankAccount(userId: string, formData: BankAccountFormData & Record<string, unknown>): Promise<{ success: boolean; error?: any }> {
     try {
-      // In a real implementation, you would encrypt sensitive data before storing
-      const bankAccountData = {
-        user_id: userId,
-        account_holder_name: formData.account_holder_name,
-        bank_name: formData.bank_name,
-        account_number_encrypted: formData.account_number, // Should be encrypted
-        routing_number_encrypted: formData.routing_number, // Should be encrypted
-        account_type: formData.account_type,
-        currency: formData.currency,
-        verification_status: 'pending',
-        is_verified: false,
-        is_active: true,
-        updated_at: new Date().toISOString()
-      };
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return { success: false, error: 'Not authenticated' };
 
-      const { error } = await supabase
-        .from('creator_bank_accounts')
-        .upsert(bankAccountData, {
-          onConflict: 'user_id',
-          ignoreDuplicates: false
-        });
+      const response = await fetch(`${config.apiUrl}/api/user/revenue/bank-account`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify(formData),
+      });
 
-      if (error) {
-        throw error;
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return { success: false, error: result?.error || 'Failed to save bank account information' };
       }
-
       return { success: true };
     } catch (error) {
       console.error('Error saving bank account:', error);

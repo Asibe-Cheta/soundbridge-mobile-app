@@ -31,6 +31,7 @@ interface BankAccount {
   bank_name: string;
   account_number_encrypted: string;
   routing_number_encrypted: string;
+  account_last4?: string | null;
   account_type: 'checking' | 'savings';
   currency: string;
   verification_status: 'pending' | 'verified' | 'failed';
@@ -68,7 +69,6 @@ export default function PaymentMethodsScreen() {
   const [checkingStatus, setCheckingStatus] = useState(false);
   const [cleaningAccounts, setCleaningAccounts] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [showAccountDetails, setShowAccountDetails] = useState(false);
   const [isWiseCountry, setIsWiseCountry] = useState(false);
   
   const [formData, setFormData] = useState<BankAccountFormData>({
@@ -307,7 +307,7 @@ export default function PaymentMethodsScreen() {
 
   const handleCountryAwareBankSubmit = async (methodData: any) => {
     try {
-      console.log('🏦 Submitting country-aware bank account:', methodData);
+      console.log('🏦 Submitting country-aware bank account for currency:', methodData?.currency || methodData?.country);
 
       if (!user?.id) {
         Alert.alert('Error', 'User not authenticated');
@@ -318,13 +318,23 @@ export default function PaymentMethodsScreen() {
       const derivedCurrency = methodData.currency
         || (methodData.country ? currencyService.getCurrencyForCountry(methodData.country) : undefined)
         || 'USD';
+      // country/bank_code/swift_code/branch_code kept as their own fields (not
+      // collapsed into routing_number) — the web API validates per-country on
+      // `country` and checks `bank_code` specifically for NG, so aliasing
+      // bank_code into routing_number would misroute NG/GH/KE saves into the
+      // US validation branch and fail with "Routing number must be 9 digits."
+      const countryForCurrency: Record<string, string> = { NGN: 'NG', GHS: 'GH', KES: 'KE' };
       const formData = {
         account_holder_name: methodData.account_holder_name || methodData.accountHolderName,
         bank_name: methodData.bank_name || methodData.bankName,
         account_number: methodData.account_number || methodData.accountNumber,
-        routing_number: methodData.bank_code || methodData.routing_number || methodData.routingNumber || '',
         account_type: methodData.account_type || methodData.accountType || 'checking',
         currency: derivedCurrency,
+        country: methodData.country || countryForCurrency[derivedCurrency] || 'US',
+        bank_code: methodData.bank_code,
+        swift_code: methodData.swift_code,
+        branch_code: methodData.branch_code,
+        routing_number: methodData.routing_number || methodData.routingNumber,
       };
 
       const result = await revenueService.setBankAccount(user.id, formData);
@@ -815,21 +825,17 @@ export default function PaymentMethodsScreen() {
               </View>
             </View>
 
-            {/* Account Number (Masked) */}
+            {/* Account Number (Masked) — the full number is never sent to the client at all
+                (encrypted server-side, see WEB_TEAM_BANK_ACCOUNT_ENCRYPTION_MOBILE_RESPONSE.MD),
+                so there's nothing to "reveal" here anymore; account_last4 is the one plaintext
+                fragment the API does return, specifically so this display can work. */}
             <View style={[styles.accountNumberContainer, { backgroundColor: theme.colors.card }]}>
               <View>
                 <Text style={[styles.detailLabel, { color: theme.colors.textSecondary }]}>Account Number</Text>
                 <Text style={[styles.detailValue, { color: theme.colors.text }]}>
-                  {showAccountDetails ? formData.account_number : `****${formData.account_number.slice(-4)}`}
+                  {bankAccount.account_last4 ? `****${bankAccount.account_last4}` : '••••••••'}
                 </Text>
               </View>
-              <TouchableOpacity onPress={() => setShowAccountDetails(!showAccountDetails)}>
-                <Ionicons 
-                  name={showAccountDetails ? "eye-off" : "eye"} 
-                  size={20} 
-                  color={theme.colors.textSecondary} 
-                />
-              </TouchableOpacity>
             </View>
           </View>
         ) : (
