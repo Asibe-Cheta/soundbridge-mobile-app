@@ -766,20 +766,22 @@ export default function PaymentMethodsScreen() {
           <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
             <Text style={[styles.cardTitle, { color: theme.colors.text }]}>Bank Account</Text>
             
-            {/* Verification Status */}
+            {/* Verification Status — always reflects the real creator_bank_accounts.verification_status,
+                never hardcoded, so this can never disagree with the payout eligibility check
+                (which gates strictly on the same row's is_verified column). */}
             <View style={styles.statusContainer}>
               <View style={styles.statusInfo}>
-                <View style={[styles.statusIcon, { backgroundColor: `${getVerificationStatusColor(WISE_CURRENCIES.has(bankAccount.currency) ? 'verified' : bankAccount.verification_status)}20` }]}>
+                <View style={[styles.statusIcon, { backgroundColor: `${getVerificationStatusColor(bankAccount.verification_status)}20` }]}>
                   <Ionicons
-                    name={getVerificationStatusIcon(WISE_CURRENCIES.has(bankAccount.currency) ? 'verified' : bankAccount.verification_status) as any}
+                    name={getVerificationStatusIcon(bankAccount.verification_status) as any}
                     size={20}
-                    color={getVerificationStatusColor(WISE_CURRENCIES.has(bankAccount.currency) ? 'verified' : bankAccount.verification_status)}
+                    color={getVerificationStatusColor(bankAccount.verification_status)}
                   />
                 </View>
                 <View>
                   <Text style={[styles.statusTitle, { color: theme.colors.text }]}>Verification Status</Text>
                   <Text style={[styles.statusSubtitle, { color: theme.colors.textSecondary }]}>
-                    {WISE_CURRENCIES.has(bankAccount.currency) ? 'Active' : bankAccount.verification_status.charAt(0).toUpperCase() + bankAccount.verification_status.slice(1)}
+                    {bankAccount.verification_status.charAt(0).toUpperCase() + bankAccount.verification_status.slice(1)}
                   </Text>
                 </View>
               </View>
