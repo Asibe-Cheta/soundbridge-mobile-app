@@ -608,7 +608,14 @@ export default function WithdrawalScreen() {
                 </TouchableOpacity>
 
                 <Text style={[styles.payoutNote, { color: theme.colors.textSecondary }]}>
-                  Funds are sent via Fincra (Africa) or Stripe (UK/EU/US) and typically arrive in your local bank within 1–3 business days. No SoundBridge fees charged.
+                  Funds are sent via Fincra (Africa) or Stripe (UK/EU/US) and typically arrive in your local bank within 1–3 business days.
+                </Text>
+                <Text style={[styles.payoutNote, { color: theme.colors.textSecondary, marginTop: 8, textAlign: 'left' }]}>
+                  Where the fees go:{'\n'}
+                  • SoundBridge platform fee: 15% (already reflected in your available balance){'\n'}
+                  • Fincra transfer fee: from ₦50/transfer — covered by SoundBridge{'\n'}
+                  • Stripe processing fee: ~1.5% estimated — covered by SoundBridge{'\n'}
+                  You receive the full amount you request above — no further deductions.
                 </Text>
               </View>
             )}
