@@ -78,6 +78,7 @@ import WithdrawalMethodsScreen from './src/screens/WithdrawalMethodsScreen';
 import AddWithdrawalMethodScreen from './src/screens/AddWithdrawalMethodScreen';
 import AllCreatorsScreen from './src/screens/AllCreatorsScreen';
 import TalentDiscoveryScreen from './src/screens/TalentDiscoveryScreen';
+import LiveStreamSpikeTestScreen from './src/screens/LiveStreamSpikeTestScreen'; // TEMP — Step 1 compatibility spike, remove after reporting result
 import TalentDiscoveryGenresScreen from './src/screens/TalentDiscoveryGenresScreen';
 import TalentDiscoveryResultsScreen from './src/screens/TalentDiscoveryResultsScreen';
 import AllEventsScreen from './src/screens/AllEventsScreen';
@@ -1299,6 +1300,8 @@ function AppNavigator() {
             <Stack.Screen name="TalentDiscovery" component={TalentDiscoveryScreen} options={{ headerShown: false }} />
             <Stack.Screen name="TalentDiscoveryGenres" component={TalentDiscoveryGenresScreen} options={{ headerShown: false }} />
             <Stack.Screen name="TalentDiscoveryResults" component={TalentDiscoveryResultsScreen} options={{ headerShown: false }} />
+            {/* TEMP — Step 1 live-streaming compatibility spike, remove after reporting result */}
+            <Stack.Screen name="LiveStreamSpikeTest" component={LiveStreamSpikeTestScreen} options={{ headerShown: false }} />
             <Stack.Screen name="AllEvents" component={AllEventsScreen} />
             <Stack.Screen name="SavedEvents" component={AllEventsScreen} />
             <Stack.Screen name="AllTracks" component={AllTracksScreen} />
