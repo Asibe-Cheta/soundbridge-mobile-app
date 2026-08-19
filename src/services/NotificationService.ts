@@ -66,7 +66,13 @@ export type NotificationType =
   | 'opportunity'          // nearby planned opportunity matching user's skills
   | 'dispute_raised'       // other party raised a dispute
   | 'identity_verified'    // Persona KYC approved — verified professional badge granted
-  | 'venue_match';         // new venue listed that matches user preferences
+  | 'venue_match'          // new venue listed that matches user preferences
+  // Video live stream types (separate feature from live_session/Agora above —
+  // see MOBILE_TEAM_LIVE_STREAMING.MD)
+  | 'live_stream'            // a followed creator went live
+  | 'live_stream_ending_soon' // 2h45m warning, creator-facing
+  | 'live_stream_disconnected' // creator's stream dropped, tell them to reconnect
+  | 'live_stream_ended';      // creator-facing summary: duration + tips
 
 export interface NotificationData {
   type: NotificationType;
@@ -177,6 +183,17 @@ class NotificationService {
     }
     this.navigationCallback = callback;
     console.log('✅ Navigation callback registered for notification taps');
+  }
+
+  // Callback for the in-app "15 minutes left" banner while GoLiveScreen is
+  // foregrounded (video live streaming only — see MOBILE_TEAM_LIVE_STREAMING.MD).
+  // The push notification itself still reaches the user even when this is unset
+  // (app backgrounded / not on the live screen) — this only covers the foreground case.
+  private liveStreamEndingSoonCallback: (() => void) | null = null;
+
+  /** Call from GoLiveScreen on mount/unmount to receive the in-app ending-soon banner while live. */
+  setLiveStreamEndingSoonCallback(callback: (() => void) | null): void {
+    this.liveStreamEndingSoonCallback = callback;
   }
 
   // ===== INITIALIZATION =====
@@ -488,6 +505,12 @@ class NotificationService {
         trackId: data.trackId,
       });
       // The notification will be stored and user can tap to navigate
+    }
+
+    // Video live stream 15-minutes-left warning — show the in-app banner if
+    // GoLiveScreen is currently foregrounded (registered its callback).
+    if (data.type === 'live_stream_ending_soon') {
+      this.liveStreamEndingSoonCallback?.();
     }
   }
 

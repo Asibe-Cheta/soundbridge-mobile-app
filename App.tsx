@@ -78,7 +78,8 @@ import WithdrawalMethodsScreen from './src/screens/WithdrawalMethodsScreen';
 import AddWithdrawalMethodScreen from './src/screens/AddWithdrawalMethodScreen';
 import AllCreatorsScreen from './src/screens/AllCreatorsScreen';
 import TalentDiscoveryScreen from './src/screens/TalentDiscoveryScreen';
-import LiveStreamSpikeTestScreen from './src/screens/LiveStreamSpikeTestScreen'; // TEMP — Step 1 compatibility spike, remove after reporting result
+import GoLiveScreen from './src/screens/GoLiveScreen';
+import LiveStreamViewerScreen from './src/screens/LiveStreamViewerScreen';
 import TalentDiscoveryGenresScreen from './src/screens/TalentDiscoveryGenresScreen';
 import TalentDiscoveryResultsScreen from './src/screens/TalentDiscoveryResultsScreen';
 import AllEventsScreen from './src/screens/AllEventsScreen';
@@ -981,6 +982,30 @@ function AppNavigator() {
         }
         break;
 
+      // Video live stream notifications (separate feature from the Agora
+      // live_session above — see MOBILE_TEAM_LIVE_STREAMING.MD)
+      case 'live_stream': {
+        const liveCreatorId = data.creatorId || data.entityId;
+        if (liveCreatorId) {
+          navigationRef.current.navigate('LiveStreamViewer' as never, {
+            creatorId: liveCreatorId,
+            creatorName: data.creatorName,
+            creatorUsername: data.creatorUsername,
+            creatorAvatarUrl: data.creatorAvatarUrl,
+          } as never);
+        }
+        break;
+      }
+      case 'live_stream_ending_soon':
+      case 'live_stream_disconnected':
+        // Creator-facing — send them back to their own broadcast screen,
+        // which reconnects automatically if a stream is still active.
+        navigationRef.current.navigate('GoLive' as never);
+        break;
+      case 'live_stream_ended':
+        navigationRef.current.navigate('Wallet' as never, { tab: 'tips' } as never);
+        break;
+
       // Withdrawal notifications
       case 'withdrawal':
         navigationRef.current.navigate('Wallet' as never, { tab: 'withdrawals', withdrawalId: data.withdrawalId || data.entityId } as never);
@@ -1300,8 +1325,8 @@ function AppNavigator() {
             <Stack.Screen name="TalentDiscovery" component={TalentDiscoveryScreen} options={{ headerShown: false }} />
             <Stack.Screen name="TalentDiscoveryGenres" component={TalentDiscoveryGenresScreen} options={{ headerShown: false }} />
             <Stack.Screen name="TalentDiscoveryResults" component={TalentDiscoveryResultsScreen} options={{ headerShown: false }} />
-            {/* TEMP — Step 1 live-streaming compatibility spike, remove after reporting result */}
-            <Stack.Screen name="LiveStreamSpikeTest" component={LiveStreamSpikeTestScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="GoLive" component={GoLiveScreen} options={{ headerShown: false, gestureEnabled: false }} />
+            <Stack.Screen name="LiveStreamViewer" component={LiveStreamViewerScreen} options={{ headerShown: false }} />
             <Stack.Screen name="AllEvents" component={AllEventsScreen} />
             <Stack.Screen name="SavedEvents" component={AllEventsScreen} />
             <Stack.Screen name="AllTracks" component={AllTracksScreen} />

@@ -560,6 +560,30 @@ class DeepLinkingService {
           };
           break;
 
+        // ===== VIDEO LIVE STREAM NOTIFICATIONS =====
+        // Separate feature from live_session (Agora audio live) above — see
+        // MOBILE_TEAM_LIVE_STREAMING.MD.
+        case 'live_stream':
+          deepLinkData = {
+            screen: 'LiveStreamViewer',
+            params: {
+              creatorId: data.creatorId || data.entityId,
+              creatorName: data.creatorName,
+              creatorUsername: data.creatorUsername,
+              creatorAvatarUrl: data.creatorAvatarUrl,
+            },
+          };
+          break;
+
+        case 'live_stream_ending_soon':
+        case 'live_stream_disconnected':
+          deepLinkData = { screen: 'GoLive' };
+          break;
+
+        case 'live_stream_ended':
+          deepLinkData = { screen: 'Wallet', params: { tab: 'tips' } };
+          break;
+
         // ===== WITHDRAWAL NOTIFICATIONS =====
         case 'withdrawal':
           deepLinkData = {

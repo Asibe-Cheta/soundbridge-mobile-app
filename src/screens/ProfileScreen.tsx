@@ -73,6 +73,8 @@ import { useToast } from '../contexts/ToastContext';
 import GoogleCalendarConnectCard from '../components/GoogleCalendarConnectCard';
 import GoogleCalendarPrivacyModal from '../components/GoogleCalendarPrivacyModal';
 import FanPageShareModal from '../components/FanPageShareModal';
+import LiveBadge from '../components/LiveBadge';
+import { liveStreamService } from '../services/liveStreamService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   calendarIntegrationService,
@@ -239,6 +241,14 @@ export default function ProfileScreen() {
     return () => pulse.stop();
   }, [fanIconScale]);
 
+  const [isSelfLive, setIsSelfLive] = useState(false);
+
+  const loadLiveStatus = useCallback(async () => {
+    if (!user?.id) return;
+    const status = await liveStreamService.getActiveStatus(session, user.id);
+    setIsSelfLive(status.live);
+  }, [user?.id, session]);
+
   const loadCalendarStatus = useCallback(async () => {
     if (!session) return;
     setCalendarStatusLoading(true);
@@ -279,6 +289,12 @@ export default function ProfileScreen() {
         loadFanEngagement();
       }
     }, [session, activeTab, loadCalendarStatus, loadFanEngagement]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      loadLiveStatus();
+    }, [loadLiveStatus]),
   );
 
   const handleCalendarConnectPress = () => {
@@ -2273,6 +2289,13 @@ export default function ProfileScreen() {
           )}
           {isCreator(profile) && (
           <>
+          <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('GoLive' as never)}>
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(220,38,38,0.12)' }]}>
+              <Ionicons name="videocam" size={18} color="#DC2626" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Go Live</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
           <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('AICareerAdvisor' as never)}>
             <LinearGradient
               colors={['#ef4444', '#a855f7', '#60a5fa']}
@@ -2710,6 +2733,11 @@ export default function ProfileScreen() {
                         <View style={styles.earlyAdopterBadge}>
                           <Ionicons name="rocket" size={10} color="#FFFFFF" />
                           <Text style={styles.earlyAdopterBadgeText}>Early</Text>
+                        </View>
+                      )}
+                      {isSelfLive && (
+                        <View style={{ marginLeft: 6 }}>
+                          <LiveBadge size="small" />
                         </View>
                       )}
                     </View>

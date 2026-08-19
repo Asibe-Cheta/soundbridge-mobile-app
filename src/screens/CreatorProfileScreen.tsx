@@ -56,6 +56,8 @@ import { profileService } from '../services/ProfileService';
 import BlockUserModal from '../modals/BlockUserModal';
 import ReportContentModal from '../modals/ReportContentModal';
 import { blockService } from '../services/api/blockService';
+import LiveBadge from '../components/LiveBadge';
+import { liveStreamService } from '../services/liveStreamService';
 import { deepLinkingService } from '../services/DeepLinkingService';
 import { followService } from '../services/FollowService';
 import { communityService } from '../services/CommunityService';
@@ -316,6 +318,15 @@ export default function CreatorProfileScreen() {
     loadCreatorProfessionalProfile();
     if (isOwnProfile && user?.id) loadPollNudge(user.id);
   }, [creatorId]);
+
+  const [isCreatorLive, setIsCreatorLive] = useState(false);
+
+  useEffect(() => {
+    if (!creatorId) return;
+    liveStreamService.getActiveStatus(session, creatorId).then((status) => {
+      setIsCreatorLive(status.live);
+    });
+  }, [creatorId, session]);
 
   // Show welcome prompt for fans arriving via the artist fan landing page
   useEffect(() => {
@@ -1384,6 +1395,19 @@ export default function CreatorProfileScreen() {
                   <Ionicons name="rocket" size={10} color="#FFFFFF" />
                   <Text style={styles.earlyAdopterText}>Early</Text>
                 </View>
+              )}
+              {isCreatorLive && !isOwnProfile && (
+                <LiveBadge
+                  size="small"
+                  onPress={() =>
+                    (navigation as any).navigate('LiveStreamViewer', {
+                      creatorId: creator.id,
+                      creatorName: creator.display_name,
+                      creatorUsername: creator.username,
+                      creatorAvatarUrl: creator.avatar_url,
+                    })
+                  }
+                />
               )}
             </View>
             {creator.professional_headline && (

@@ -12,6 +12,10 @@ export interface CreateTipRequest {
   userTier?: string;
   paymentMethod?: TipPaymentMethod;
   trackId?: string;
+  /** Video live stream this tip was sent during (optional, additive — see MOBILE_TEAM_LIVE_STREAMING.MD).
+   * Backend validates it belongs to the creator and is currently active; if not, it silently
+   * tips without the live-stream tag rather than failing, so safe to always include while live. */
+  liveStreamId?: string;
 }
 
 export interface CreateTipResponse {

@@ -1,0 +1,352 @@
+/**
+ * LiveVideoTippingModal — tipping during a video live stream. Visually mirrors
+ * src/components/live-sessions/LiveTippingModal.tsx (the equivalent for the
+ * existing Agora audio-live feature) but is a separate component: this one is
+ * self-contained (calls the regular tip endpoints directly, no onSendTip
+ * callback / session record to update) and adds `liveStreamId` to the tip
+ * payload — the backend validates and tags it, or silently omits the tag if
+ * invalid, so it's always safe to include per MOBILE_TEAM_LIVE_STREAMING.MD.
+ */
+import React, { useMemo, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Modal,
+  TouchableOpacity,
+  TextInput,
+  Alert,
+  ActivityIndicator,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  Dimensions,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useStripe } from '@stripe/stripe-react-native';
+import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
+import { createTip, confirmTip } from '../services/TipService';
+
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+
+interface LiveVideoTippingModalProps {
+  visible: boolean;
+  creatorName: string;
+  creatorId: string;
+  liveStreamId: string | null;
+  onClose: () => void;
+}
+
+export default function LiveVideoTippingModal({
+  visible,
+  creatorName,
+  creatorId,
+  liveStreamId,
+  onClose,
+}: LiveVideoTippingModalProps) {
+  const { theme } = useTheme();
+  const { user, userProfile, session } = useAuth();
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
+
+  const [selectedAmount, setSelectedAmount] = useState<number | null>(null);
+  const [customAmount, setCustomAmount] = useState('');
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [processingMessage, setProcessingMessage] = useState<string | null>(null);
+
+  const quickAmounts = [1, 5, 10, 20, 50];
+
+  const userTier = useMemo<'free' | 'premium' | 'unlimited'>(() => {
+    const tierFromMetadata = (user?.user_metadata as any)?.subscription_tier;
+    const tierFromProfile = (userProfile as any)?.subscription_tier;
+    const tier = tierFromMetadata || tierFromProfile;
+    if (tier === 'premium' || tier === 'unlimited') return tier;
+    return 'free';
+  }, [user?.user_metadata, userProfile]);
+
+  const handleAmountSelect = (amount: number) => {
+    setSelectedAmount(amount);
+    setCustomAmount('');
+  };
+
+  const handleCustomAmountChange = (text: string) => {
+    setCustomAmount(text);
+    setSelectedAmount(null);
+  };
+
+  const getFinalAmount = (): number | null => {
+    if (selectedAmount) return selectedAmount;
+    if (customAmount) {
+      const parsed = parseFloat(customAmount);
+      return isNaN(parsed) ? null : parsed;
+    }
+    return null;
+  };
+
+  const resetForm = () => {
+    setSelectedAmount(null);
+    setCustomAmount('');
+    setMessage('');
+  };
+
+  const handleClose = () => {
+    if (!loading) {
+      resetForm();
+      onClose();
+    }
+  };
+
+  const handleSendTip = async () => {
+    if (!user?.id || !session) {
+      Alert.alert('Login Required', 'Please log in to send tips');
+      return;
+    }
+
+    const amount = getFinalAmount();
+    if (!amount || amount < 1) {
+      Alert.alert('Invalid Amount', 'Minimum tip amount is $1');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setProcessingMessage('Contacting payment service...');
+
+      const createResponse = await createTip(session, {
+        creatorId,
+        amount,
+        currency: 'USD',
+        message: message.trim() || undefined,
+        isAnonymous: false,
+        userTier,
+        paymentMethod: 'card',
+        liveStreamId: liveStreamId || undefined,
+      });
+
+      if (!createResponse?.success || !createResponse.clientSecret) {
+        throw new Error(createResponse?.message || 'Unable to start tip payment.');
+      }
+
+      const { error: initError } = await initPaymentSheet({
+        paymentIntentClientSecret: createResponse.clientSecret,
+        merchantDisplayName: 'SoundBridge',
+        returnURL: 'soundbridge://stripe-redirect',
+        ...(createResponse.customer_id && createResponse.ephemeral_key_secret
+          ? { customerId: createResponse.customer_id, customerEphemeralKeySecret: createResponse.ephemeral_key_secret }
+          : {}),
+        defaultBillingDetails: {
+          name: user?.display_name || user?.email || undefined,
+          email: user?.email || undefined,
+        },
+      });
+
+      if (initError) {
+        throw new Error(initError.localizedMessage || initError.message || 'Payment setup failed.');
+      }
+
+      setProcessingMessage('Confirming payment...');
+      const { error: presentError } = await presentPaymentSheet();
+
+      if (presentError) {
+        if (presentError.code === 'Canceled') return;
+        throw new Error(presentError.localizedMessage || presentError.message || 'Payment failed.');
+      }
+
+      setProcessingMessage('Finalizing tip...');
+      const confirmResponse = await confirmTip(session, createResponse.paymentIntentId);
+      if (!confirmResponse?.success) {
+        throw new Error(confirmResponse?.message || 'Failed to confirm tip payment.');
+      }
+
+      const platformFee = typeof createResponse.platformFee === 'number' ? createResponse.platformFee : amount * 0.15;
+      const creatorEarnings = typeof createResponse.creatorEarnings === 'number' ? createResponse.creatorEarnings : amount * 0.85;
+
+      resetForm();
+      onClose();
+
+      Alert.alert(
+        'Tip Sent! 🎉',
+        `You tipped $${amount.toFixed(2)} to ${creatorName}.\nCreator receives: $${creatorEarnings.toFixed(2)}\nPlatform fee: $${platformFee.toFixed(2)}`,
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      console.error('❌ Live video tip error:', error);
+      Alert.alert('Tip Failed', error instanceof Error ? error.message : 'Failed to send tip. Please try again.', [{ text: 'OK' }]);
+    } finally {
+      setLoading(false);
+      setProcessingMessage(null);
+    }
+  };
+
+  const finalAmount = getFinalAmount();
+  const platformFee = finalAmount ? finalAmount * 0.15 : 0;
+  const creatorReceives = finalAmount ? finalAmount - platformFee : 0;
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+        <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={handleClose} />
+
+        <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]}>
+          <View style={styles.handleBar}>
+            <View style={[styles.handle, { backgroundColor: theme.colors.border }]} />
+          </View>
+
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              <LinearGradient colors={['#DC2626', '#EF4444']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.tipIcon}>
+                <Ionicons name="cash" size={24} color="#FFFFFF" />
+              </LinearGradient>
+              <View>
+                <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Send Tip</Text>
+                <Text style={[styles.headerSubtitle, { color: theme.colors.textSecondary }]}>to {creatorName}</Text>
+              </View>
+            </View>
+            <TouchableOpacity onPress={handleClose} disabled={loading}>
+              <Ionicons name="close" size={28} color={theme.colors.text} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <View style={styles.section}>
+              <Text style={[styles.sectionLabel, { color: theme.colors.textSecondary }]}>Quick Amount</Text>
+              <View style={styles.quickAmounts}>
+                {quickAmounts.map((amount) => (
+                  <TouchableOpacity
+                    key={amount}
+                    style={[
+                      styles.amountButton,
+                      { backgroundColor: theme.colors.card, borderColor: selectedAmount === amount ? theme.colors.primary : theme.colors.border },
+                    ]}
+                    onPress={() => handleAmountSelect(amount)}
+                    disabled={loading}
+                  >
+                    <Text style={[styles.amountText, { color: selectedAmount === amount ? theme.colors.primary : theme.colors.text }]}>
+                      ${amount}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={[styles.sectionLabel, { color: theme.colors.textSecondary }]}>Or Enter Custom Amount</Text>
+              <View style={[styles.inputContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                <Text style={[styles.currencySymbol, { color: theme.colors.text }]}>$</Text>
+                <TextInput
+                  style={[styles.customAmountInput, { color: theme.colors.text }]}
+                  value={customAmount}
+                  onChangeText={handleCustomAmountChange}
+                  placeholder="0.00"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  keyboardType="decimal-pad"
+                  editable={!loading}
+                />
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={[styles.sectionLabel, { color: theme.colors.textSecondary }]}>Add a Message (Optional)</Text>
+              <TextInput
+                style={[styles.messageInput, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, color: theme.colors.text }]}
+                value={message}
+                onChangeText={setMessage}
+                placeholder="Say something nice..."
+                placeholderTextColor={theme.colors.textSecondary}
+                multiline
+                maxLength={200}
+                editable={!loading}
+              />
+              <Text style={[styles.characterCount, { color: theme.colors.textSecondary }]}>{message.length}/200</Text>
+            </View>
+
+            {finalAmount && finalAmount > 0 && (
+              <View style={[styles.breakdown, { backgroundColor: theme.colors.surface }]}>
+                <View style={styles.breakdownRow}>
+                  <Text style={[styles.breakdownLabel, { color: theme.colors.textSecondary }]}>Tip Amount</Text>
+                  <Text style={[styles.breakdownValue, { color: theme.colors.text }]}>${finalAmount.toFixed(2)}</Text>
+                </View>
+                <View style={styles.breakdownRow}>
+                  <Text style={[styles.breakdownLabel, { color: theme.colors.textSecondary }]}>Platform Fee (15%)</Text>
+                  <Text style={[styles.breakdownValue, { color: theme.colors.textSecondary }]}>-${platformFee.toFixed(2)}</Text>
+                </View>
+                <View style={[styles.breakdownRow, styles.breakdownTotal]}>
+                  <Text style={[styles.breakdownLabel, { color: theme.colors.text, fontWeight: '700' }]}>Creator Receives</Text>
+                  <Text style={[styles.breakdownValue, { color: theme.colors.primary, fontWeight: '700' }]}>${creatorReceives.toFixed(2)}</Text>
+                </View>
+              </View>
+            )}
+
+            <View style={[styles.infoBox, { backgroundColor: theme.colors.surface }]}>
+              <Ionicons name="information-circle" size={20} color={theme.colors.textSecondary} />
+              <Text style={[styles.infoText, { color: theme.colors.textSecondary }]}>
+                Tips are processed securely through Stripe, same fee split as any other tip. The creator receives 85% of the tip amount.
+              </Text>
+            </View>
+          </ScrollView>
+
+          {processingMessage && (
+            <View style={styles.processingContainer}>
+              <ActivityIndicator size="small" color={theme.colors.primary} />
+              <Text style={[styles.processingText, { color: theme.colors.textSecondary }]}>{processingMessage}</Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={[styles.sendButton, { opacity: finalAmount && finalAmount > 0 && !loading ? 1 : 0.5 }]}
+            onPress={handleSendTip}
+            disabled={!finalAmount || finalAmount <= 0 || loading}
+          >
+            <LinearGradient colors={['#DC2626', '#EF4444']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.sendButtonGradient}>
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <>
+                  <Ionicons name="cash-outline" size={20} color="#FFFFFF" />
+                  <Text style={styles.sendButtonText}>Send ${finalAmount ? finalAmount.toFixed(2) : '0.00'}</Text>
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  modalOverlay: { flex: 1, justifyContent: 'flex-end' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0, 0, 0, 0.5)' },
+  modalContent: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 24, maxHeight: Math.round(SCREEN_HEIGHT * 0.56) },
+  handleBar: { alignItems: 'center', paddingVertical: 12 },
+  handle: { width: 40, height: 4, borderRadius: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 20 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  tipIcon: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { fontSize: 20, fontWeight: 'bold' },
+  headerSubtitle: { fontSize: 14, marginTop: 2 },
+  section: { paddingHorizontal: 20, marginBottom: 24 },
+  sectionLabel: { fontSize: 13, fontWeight: '600', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
+  quickAmounts: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  amountButton: { paddingHorizontal: 24, paddingVertical: 16, borderRadius: 12, borderWidth: 2, minWidth: 80, alignItems: 'center' },
+  amountText: { fontSize: 18, fontWeight: '600' },
+  inputContainer: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, borderWidth: 2, paddingHorizontal: 16, paddingVertical: 12 },
+  currencySymbol: { fontSize: 24, fontWeight: '600', marginRight: 8 },
+  customAmountInput: { flex: 1, fontSize: 24, fontWeight: '600' },
+  messageInput: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, minHeight: 64, textAlignVertical: 'top' },
+  characterCount: { fontSize: 12, marginTop: 8, textAlign: 'right' },
+  breakdown: { marginHorizontal: 20, marginBottom: 16, padding: 16, borderRadius: 12 },
+  breakdownRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  breakdownTotal: { marginTop: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.1)' },
+  breakdownLabel: { fontSize: 14 },
+  breakdownValue: { fontSize: 14 },
+  infoBox: { flexDirection: 'row', alignItems: 'flex-start', marginHorizontal: 20, padding: 12, borderRadius: 12, gap: 10 },
+  infoText: { flex: 1, fontSize: 12, lineHeight: 18 },
+  processingContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, paddingHorizontal: 20, gap: 12 },
+  processingText: { fontSize: 14, fontWeight: '500' },
+  sendButton: { marginHorizontal: 20, marginTop: 16, borderRadius: 24, overflow: 'hidden' },
+  sendButtonGradient: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 16, gap: 8 },
+  sendButtonText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
+});
