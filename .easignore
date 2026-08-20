@@ -11,7 +11,8 @@ WEB_TEAM_IMPLEMENTATION_PACKAGE/
 supabase/
 supabase_functions/
 
-# Extra dist directories
+# dist directories — disposable build output, not needed in the native build
+dist/
 dist2/
 dist3/
 dist5/

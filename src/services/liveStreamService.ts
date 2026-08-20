@@ -48,12 +48,25 @@ function friendlyError(err: any): string {
   return err?.body?.error || err?.message || LIVE_STREAM_FALLBACK_ERROR;
 }
 
+/**
+ * Wraps an apiFetch error with the spec-compliant friendly message, while preserving
+ * status/body/isNetworkError on the wrapped Error for diagnostics (never shown to end
+ * users directly — callers must keep surfacing only `.message` in production UI).
+ */
+function wrapError(err: any): Error {
+  const wrapped = new Error(friendlyError(err));
+  (wrapped as any).status = err?.status;
+  (wrapped as any).body = err?.body;
+  (wrapped as any).isNetworkError = err?.isNetworkError;
+  return wrapped;
+}
+
 class LiveStreamService {
   async checkEligibility(session: Session | null): Promise<LiveEligibility> {
     try {
       return await apiFetch<LiveEligibility>('/api/live-streams/eligibility', { session, method: 'GET' });
     } catch (err) {
-      throw new Error(friendlyError(err));
+      throw wrapError(err);
     }
   }
 
@@ -65,7 +78,7 @@ class LiveStreamService {
         body: JSON.stringify({ title: title || undefined }),
       });
     } catch (err) {
-      throw new Error(friendlyError(err));
+      throw wrapError(err);
     }
   }
 
@@ -76,7 +89,7 @@ class LiveStreamService {
         method: 'POST',
       });
     } catch (err) {
-      throw new Error(friendlyError(err));
+      throw wrapError(err);
     }
   }
 
@@ -87,7 +100,7 @@ class LiveStreamService {
         method: 'GET',
       });
     } catch (err) {
-      throw new Error(friendlyError(err));
+      throw wrapError(err);
     }
   }
 
