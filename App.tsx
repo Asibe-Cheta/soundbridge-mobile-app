@@ -1174,6 +1174,15 @@ function AppNavigator() {
         }
         break;
 
+      // Marketing campaign landing pages (e.g. IG Live promo)
+      case 'campaign': {
+        const campaignScreen = deepLinkingService.resolveCampaignScreen(data.campaignId || data.entityId);
+        if (campaignScreen) {
+          navigationRef.current.navigate(campaignScreen as never, {} as never);
+        }
+        break;
+      }
+
       default:
         console.log('⚠️ Unknown notification type for navigation:', data.type);
     }

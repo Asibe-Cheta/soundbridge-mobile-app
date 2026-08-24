@@ -420,8 +420,14 @@ class DeepLinkingService {
 
   private parseCampaignUrl(pathSegments: string[]): DeepLinkData {
     const [slug] = pathSegments;
-    const screen = DeepLinkingService.CAMPAIGN_SCREENS[slug];
+    const screen = this.resolveCampaignScreen(slug);
     return screen ? { screen } : { screen: 'Feed' };
+  }
+
+  /** Slug -> screen name for a marketing campaign landing page (e.g. 'ig-live-sept4'). */
+  resolveCampaignScreen(slug: string | undefined): string | undefined {
+    if (!slug) return undefined;
+    return DeepLinkingService.CAMPAIGN_SCREENS[slug];
   }
 
   private async parseArtistUrl(pathSegments: string[]): Promise<DeepLinkData> {
@@ -698,8 +704,7 @@ class DeepLinkingService {
 
         // ===== MARKETING CAMPAIGN NOTIFICATIONS =====
         case 'campaign': {
-          const slug = data.campaignId || data.entityId;
-          const screen = slug ? DeepLinkingService.CAMPAIGN_SCREENS[slug] : undefined;
+          const screen = this.resolveCampaignScreen(data.campaignId || data.entityId);
           deepLinkData = { screen: screen || 'Feed' };
           break;
         }

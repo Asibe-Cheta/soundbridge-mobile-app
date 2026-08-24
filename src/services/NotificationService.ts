@@ -1181,6 +1181,8 @@ class NotificationService {
           deepLinkUrl = `soundbridge://project/${data.projectId || data.project_id}`;
         } else if (data.type === 'subscription') {
           deepLinkUrl = `soundbridge://wallet`;
+        } else if (data.type === 'campaign' && (data.campaignId || data.entityId)) {
+          deepLinkUrl = `soundbridge://campaigns/${data.campaignId || data.entityId}`;
         } else if (data.type && data.entityId) {
           deepLinkUrl = this.generateDeepLink(data.type, data.entityId);
         }
