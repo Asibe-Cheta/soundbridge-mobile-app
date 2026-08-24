@@ -6,9 +6,9 @@
  * feature (LiveSessionRoomScreen) — do not touch that.
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, StatusBar, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, StatusBar, Image, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { Video, ResizeMode, AVPlaybackStatus, Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
@@ -37,11 +37,29 @@ export default function LiveStreamViewerScreen() {
   const [viewerCount, setViewerCount] = useState(0);
   const [ended, setEnded] = useState(false);
   const [showTipModal, setShowTipModal] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [isBuffering, setIsBuffering] = useState(true);
+  const [playbackKey, setPlaybackKey] = useState(0);
   const videoRef = useRef<Video>(null);
   const joinedRef = useRef(false);
 
+  // Without this, iOS defaults to playsInSilentModeIOS: false — audio silently
+  // doesn't play whenever the device's mute switch is on. staysActiveInBackground
+  // matches the convention elsewhere in the app (PostAudioPlayer.tsx) so this
+  // doesn't fight TrackPlayer's shared AVAudioSession.
+  useEffect(() => {
+    Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: Platform.OS === 'ios',
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    }).catch(() => {});
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
+    setPlaybackError(null);
     const status = await liveStreamService.getActiveStatus(session, creatorId);
     if (!status.live || !status.liveStreamId || !status.hlsPlaybackUrl) {
       setEnded(true);
@@ -55,6 +73,12 @@ export default function LiveStreamViewerScreen() {
     setEnded(false);
     setLoading(false);
   }, [creatorId, session]);
+
+  const handleRetryPlayback = () => {
+    setPlaybackError(null);
+    setIsBuffering(true);
+    setPlaybackKey((k) => k + 1);
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -110,9 +134,16 @@ export default function LiveStreamViewerScreen() {
   }, [liveStreamId]);
 
   const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-    if (!status.isLoaded && (status as any).error) {
-      console.warn('[LiveStreamViewerScreen] playback error:', (status as any).error);
+    if (!status.isLoaded) {
+      if ((status as any).error) {
+        console.warn('[LiveStreamViewerScreen] playback error:', (status as any).error);
+        setIsBuffering(false);
+        setPlaybackError(String((status as any).error));
+      }
+      return;
     }
+    setPlaybackError(null);
+    setIsBuffering(status.isBuffering ?? false);
   };
 
   if (loading) {
@@ -142,6 +173,7 @@ export default function LiveStreamViewerScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#000" translucent />
       <Video
+        key={playbackKey}
         ref={videoRef}
         source={{ uri: hlsUrl }}
         style={styles.video}
@@ -150,6 +182,22 @@ export default function LiveStreamViewerScreen() {
         isLooping={false}
         onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
       />
+
+      {isBuffering && !playbackError && (
+        <View style={[styles.video, styles.centered]} pointerEvents="none">
+          <ActivityIndicator size="large" color="#fff" />
+        </View>
+      )}
+
+      {playbackError && (
+        <View style={[styles.video, styles.centered]}>
+          <Ionicons name="alert-circle-outline" size={40} color="rgba(255,255,255,0.6)" />
+          <Text style={styles.endedText}>Couldn't connect to the stream.</Text>
+          <TouchableOpacity style={styles.backButtonLarge} onPress={handleRetryPlayback}>
+            <Text style={styles.backButtonLargeText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <SafeAreaView style={styles.overlaySafeArea} edges={['top', 'bottom']}>
         <View style={styles.topBar}>

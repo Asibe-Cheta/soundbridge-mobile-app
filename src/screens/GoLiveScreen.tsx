@@ -46,6 +46,7 @@ export default function GoLiveScreen() {
   const [liveStream, setLiveStream] = useState<StartLiveStreamResponse | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [showEndingSoonBanner, setShowEndingSoonBanner] = useState(false);
+  const [viewerCount, setViewerCount] = useState(0);
   const startedAtRef = useRef<number | null>(null);
   const stream = useLiveStream({ autoStopOnUnmount: true });
   const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -105,6 +106,7 @@ export default function GoLiveScreen() {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'live_streams', filter: `id=eq.${liveStream.liveStreamId}` },
         (payload: any) => {
+          setViewerCount(payload.new.viewer_count ?? 0);
           if (payload.new.status !== 'active') {
             handleStreamEndedRemotely();
           }
@@ -125,6 +127,7 @@ export default function GoLiveScreen() {
     setPhase('setup');
     setLiveStream(null);
     setShowEndingSoonBanner(false);
+    setViewerCount(0);
     Alert.alert('Stream Ended', 'Your live stream has ended.');
   };
 
@@ -184,6 +187,7 @@ export default function GoLiveScreen() {
           setPhase('setup');
           setLiveStream(null);
           setShowEndingSoonBanner(false);
+          setViewerCount(0);
           navigation.goBack();
         },
       },
@@ -228,6 +232,10 @@ export default function GoLiveScreen() {
             <View style={styles.liveIndicatorPill}>
               <View style={styles.liveDot} />
               <Text style={styles.liveIndicatorText}>LIVE</Text>
+            </View>
+            <View style={styles.viewerCountPill}>
+              <Ionicons name="eye" size={12} color="#fff" />
+              <Text style={styles.viewerCountText}>{viewerCount}</Text>
             </View>
             <Text style={styles.elapsedText}>{formatElapsed(elapsedSeconds)}</Text>
             <TouchableOpacity onPress={() => stream.switchCamera()} style={styles.iconButton}>
@@ -377,7 +385,17 @@ const styles = StyleSheet.create({
   },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' },
   liveIndicatorText: { color: '#fff', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-  elapsedText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  viewerCountPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  viewerCountText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  elapsedText: { color: '#fff', fontSize: 14, fontWeight: '600', flex: 1, textAlign: 'center' },
   iconButton: { padding: 8, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 20 },
   endingSoonBanner: {
     flexDirection: 'row',
