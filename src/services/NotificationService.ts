@@ -72,7 +72,8 @@ export type NotificationType =
   | 'live_stream'            // a followed creator went live
   | 'live_stream_ending_soon' // 2h45m warning, creator-facing
   | 'live_stream_disconnected' // creator's stream dropped, tell them to reconnect
-  | 'live_stream_ended';      // creator-facing summary: duration + tips
+  | 'live_stream_ended'       // creator-facing summary: duration + tips
+  | 'campaign';               // one-off marketing campaign push (e.g. IG Live promo)
 
 export interface NotificationData {
   type: NotificationType;
@@ -96,6 +97,7 @@ export interface NotificationData {
   projectId?: string;
   gigId?: string;
   gigStatus?: string;
+  campaignId?: string;
   
   // Additional context
   amount?: number;

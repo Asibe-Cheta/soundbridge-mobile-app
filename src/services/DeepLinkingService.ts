@@ -131,8 +131,13 @@ class DeepLinkingService {
     'collaboration', 'profile', 'track', 'album', 'playlist', 'event', 'post',
     'opportunity', 'messages', 'wallet', 'live', 'creator', 'artist', 'join',
     'auth', 'login', 'signup', 'welcome', 'legal', 'api', 'discover', 'feed',
-    'upload', 'settings', 'admin', 'onboarding', 'upgrade', 'billing',
+    'upload', 'settings', 'admin', 'onboarding', 'upgrade', 'billing', 'campaigns',
   ]);
+
+  // Slug -> screen name for one-off marketing campaign landing pages.
+  private static readonly CAMPAIGN_SCREENS: Record<string, string> = {
+    'ig-live-sept4': 'CampaignIGLive',
+  };
 
   private async parseUrl(url: string): Promise<DeepLinkData | null> {
     try {
@@ -220,6 +225,10 @@ class DeepLinkingService {
 
         case 'signup':
           return await this.parseSignupUrl(urlObj.searchParams);
+
+        case 'campaigns':
+        case 'campaign':
+          return this.parseCampaignUrl(rest);
 
         default:
           console.log('⚠️ Unknown deep link section:', section);
@@ -407,6 +416,12 @@ class DeepLinkingService {
       screen: 'CreatorProfile',
       params: { creatorId }
     };
+  }
+
+  private parseCampaignUrl(pathSegments: string[]): DeepLinkData {
+    const [slug] = pathSegments;
+    const screen = DeepLinkingService.CAMPAIGN_SCREENS[slug];
+    return screen ? { screen } : { screen: 'Feed' };
   }
 
   private async parseArtistUrl(pathSegments: string[]): Promise<DeepLinkData> {
@@ -681,6 +696,14 @@ class DeepLinkingService {
           deepLinkData = { screen: 'Upgrade' };
           break;
 
+        // ===== MARKETING CAMPAIGN NOTIFICATIONS =====
+        case 'campaign': {
+          const slug = data.campaignId || data.entityId;
+          const screen = slug ? DeepLinkingService.CAMPAIGN_SCREENS[slug] : undefined;
+          deepLinkData = { screen: screen || 'Feed' };
+          break;
+        }
+
         default:
           console.log('⚠️ Unknown notification type:', data.type, '- navigating to Home');
           deepLinkData = { screen: 'Feed' };
@@ -822,6 +845,14 @@ class DeepLinkingService {
 
   generateEventLink(eventId: string): string {
     return `https://soundbridge.live/event/${eventId}`;
+  }
+
+  generateCampaignUrl(slug: string): string {
+    return `soundbridge://campaigns/${slug}`;
+  }
+
+  generateCampaignLink(slug: string): string {
+    return `https://soundbridge.live/campaigns/${slug}`;
   }
 
   // ===== SHARING =====
