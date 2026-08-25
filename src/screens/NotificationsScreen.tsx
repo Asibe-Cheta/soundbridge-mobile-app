@@ -17,6 +17,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { deepLinkingService } from '../services/DeepLinkingService';
 import BackButton from '../components/BackButton';
 import { SystemTypography as Typography } from '../constants/Typography';
 
@@ -465,6 +466,15 @@ export default function NotificationsScreen() {
           navigation.navigate(data.screen as never, (data.screenParams ?? {}) as never);
         }
         break;
+
+      // Marketing campaign landing pages (e.g. IG Live promo)
+      case 'campaign': {
+        const campaignScreen = deepLinkingService.resolveCampaignScreen(data?.campaignId || data?.entityId);
+        if (campaignScreen) {
+          navigation.navigate(campaignScreen as never, {} as never);
+        }
+        break;
+      }
 
       default:
         // Fallback: honour explicit deepLink or screen field present on any notification type
