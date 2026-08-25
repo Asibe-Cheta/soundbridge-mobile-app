@@ -137,6 +137,8 @@ class DeepLinkingService {
   // Slug -> screen name for one-off marketing campaign landing pages.
   private static readonly CAMPAIGN_SCREENS: Record<string, string> = {
     'ig-live-sept4': 'CampaignIGLive',
+    'video-content-teaser': 'CampaignVideoTease',
+    'earning-reminder': 'CampaignEarningReminder',
   };
 
   private async parseUrl(url: string): Promise<DeepLinkData | null> {

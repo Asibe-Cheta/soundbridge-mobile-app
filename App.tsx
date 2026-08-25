@@ -64,6 +64,8 @@ import ThemeSettingsScreen from './src/screens/ThemeSettingsScreen';
 import HelpSupportScreen from './src/screens/HelpSupportScreen';
 import AboutScreen from './src/screens/AboutScreen';
 import CampaignIGLiveScreen from './src/screens/CampaignIGLiveScreen';
+import CampaignVideoTeaseScreen from './src/screens/CampaignVideoTeaseScreen';
+import CampaignEarningReminderScreen from './src/screens/CampaignEarningReminderScreen';
 import MinimalAudioTestScreen from './src/screens/MinimalAudioTestScreen';
 import SessionDBlankScreen from './src/screens/SessionDBlankScreen';
 import TermsOfServiceScreen from './src/screens/TermsOfServiceScreen';
@@ -1307,6 +1309,8 @@ function AppNavigator() {
             <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
             <Stack.Screen name="About" component={AboutScreen} />
             <Stack.Screen name="CampaignIGLive" component={CampaignIGLiveScreen} />
+            <Stack.Screen name="CampaignVideoTease" component={CampaignVideoTeaseScreen} />
+            <Stack.Screen name="CampaignEarningReminder" component={CampaignEarningReminderScreen} />
             <Stack.Screen
               name="MinimalAudioTest"
               component={MinimalAudioTestScreen}

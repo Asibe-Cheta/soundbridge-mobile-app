@@ -42,7 +42,7 @@ import { contentCacheService } from '../services/contentCacheService';
 import * as ImagePicker from 'expo-image-picker';
 // Removed FileSystem import - using FormData for Cloudinary upload
 import { useTheme } from '../contexts/ThemeContext';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { becomeServiceProvider } from '../services/creatorExpansionService';
 import * as BiometricAuth from '../services/biometricAuth';
 import ConnectionsPreview from '../components/ConnectionsPreview';
@@ -142,6 +142,7 @@ export default function ProfileScreen() {
   const { requestAgreement, agreementVisible, agreementSubmitting, onAgreed, onDismiss } = useCreatorAgreement();
   const { showToast } = useToast();
   const navigation = useNavigation();
+  const route = useRoute();
   const { start: startTour } = useCopilot();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const { branding } = useBranding(user?.id);
@@ -166,6 +167,21 @@ export default function ProfileScreen() {
   const [showVenuePrefsModal, setShowVenuePrefsModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
   const [showShareCardModal, setShowShareCardModal] = useState(false);
+
+  // Deep link support: soundbridge://profile?openShareCard=true (or the
+  // { openShareCard: true } nav param) opens the digital card share modal
+  // directly, e.g. from the "start earning" notification campaign.
+  useEffect(() => {
+    const params = route.params as { openShareCard?: boolean } | undefined;
+    if (params?.openShareCard && profile) {
+      if (isCreator(profile)) {
+        setShowShareCardModal(true);
+      } else {
+        setShowQRModal(true);
+      }
+      navigation.setParams({ openShareCard: undefined } as never);
+    }
+  }, [route.params, profile]);
   const [showNudgeModal, setShowNudgeModal] = useState(false);
   const [showFanPageModal, setShowFanPageModal] = useState(false);
   const [nudgeDismissedThisSession, setNudgeDismissedThisSession] = useState(false);
