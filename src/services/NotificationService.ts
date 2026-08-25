@@ -261,6 +261,23 @@ class NotificationService {
       // Set up notification listeners
       this.setupNotificationListeners();
 
+      // addNotificationResponseReceivedListener above only catches taps that occur
+      // *after* it's subscribed — if the app was fully force-quit and the user
+      // launches it by tapping a notification, that tap happens before this JS is
+      // even running and the listener never sees it. getLastNotificationResponseAsync
+      // is the documented way to retrieve that missed cold-launch tap; route it
+      // through the same handler used for live taps so all existing per-type
+      // routing (including pendingDeepLink fallback for when navigation isn't
+      // ready yet) applies identically.
+      Notifications.getLastNotificationResponseAsync().then((lastResponse) => {
+        if (lastResponse) {
+          console.log('🚀 App launched via notification tap (cold start):', lastResponse);
+          this.handleNotificationResponse(lastResponse);
+        }
+      }).catch((err) => {
+        console.warn('⚠️ Failed to check for cold-start notification response:', err);
+      });
+
       // Initialize location and timezone
       await this.initializeLocationAndTimezone();
 
