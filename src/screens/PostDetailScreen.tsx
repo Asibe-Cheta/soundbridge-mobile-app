@@ -63,6 +63,9 @@ export default function PostDetailScreen() {
   const [reactors, setReactors] = useState<Reactor[]>([]);
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyingToName, setReplyingToName] = useState('');
+  const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set());
   const namesAnim = useRef(new Animated.Value(0)).current;
   const inputRef = useRef<TextInput>(null);
 
@@ -73,6 +76,9 @@ export default function PostDetailScreen() {
     addComment,
     likeComment,
     loadMore: loadMoreComments,
+    repliesMap,
+    loadingRepliesSet,
+    loadReplies,
   } = useComments(postId);
 
   useEffect(() => {
@@ -153,14 +159,44 @@ export default function PostDetailScreen() {
     }
   };
 
+  const handleReply = (commentId: string) => {
+    let comment = comments.find((c) => c.id === commentId);
+    if (!comment) {
+      for (const replies of Object.values(repliesMap)) {
+        const found = replies.find((c) => c.id === commentId);
+        if (found) { comment = found; break; }
+      }
+    }
+    if (comment) {
+      setReplyingTo(commentId);
+      setReplyingToName(comment.user?.display_name || comment.user?.username || 'user');
+      inputRef.current?.focus();
+    }
+  };
+
+  const handleViewReplies = (commentId: string) => {
+    setExpandedReplies((prev) => {
+      const next = new Set(prev);
+      if (next.has(commentId)) {
+        next.delete(commentId);
+      } else {
+        next.add(commentId);
+        loadReplies(commentId);
+      }
+      return next;
+    });
+  };
+
   const handleSubmitComment = async () => {
     if (!commentText.trim() || submittingComment) return;
     const text = commentText.trim();
     setCommentText('');
     setSubmittingComment(true);
+    setReplyingTo(null);
+    setReplyingToName('');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     try {
-      await addComment(text);
+      await addComment(text, replyingTo || undefined);
       if (post) setPost({ ...post, comments_count: post.comments_count + 1 });
     } catch (err: any) {
       showToast(err.message || 'Failed to post comment', 'error');
@@ -443,8 +479,17 @@ export default function PostDetailScreen() {
               <View style={styles.commentWrapper}>
                 <CommentCard
                   comment={item}
+                  currentUserId={userProfile?.id}
+                  postAuthorId={post?.author?.id}
                   onLike={() => likeComment(item.id)}
-                  onReply={() => inputRef.current?.focus()}
+                  onReply={handleReply}
+                  onViewReplies={handleViewReplies}
+                  showReplies={expandedReplies.has(item.id)}
+                  replies={repliesMap[item.id] ?? []}
+                  loadingReplies={loadingRepliesSet.has(item.id)}
+                  expandedReplies={expandedReplies}
+                  repliesMap={repliesMap}
+                  loadingRepliesSet={loadingRepliesSet}
                 />
               </View>
             )}
@@ -471,6 +516,19 @@ export default function PostDetailScreen() {
             onEndReachedThreshold={0.3}
             showsVerticalScrollIndicator={false}
           />
+
+          {/* Replying-to banner */}
+          {replyingTo && (
+            <View style={[styles.replyBanner, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+              <Text style={[styles.replyBannerText, { color: theme.colors.textSecondary }]}>
+                Replying to{' '}
+                <Text style={{ color: theme.colors.primary, fontWeight: '600' }}>@{replyingToName}</Text>
+              </Text>
+              <TouchableOpacity onPress={() => { setReplyingTo(null); setReplyingToName(''); }}>
+                <Ionicons name="close" size={16} color={theme.colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Comment input bar */}
           <View
@@ -693,6 +751,20 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
   },
   // Comment input
+  replyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 12,
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  replyBannerText: {
+    fontSize: 13,
+  },
   commentInputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
