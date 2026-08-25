@@ -14,6 +14,7 @@ import {
 } from '../config/bgAudioIsolationFlags';
 import * as Application from 'expo-application';
 import { fetchVersionConfig, AppVersionConfig } from '../services/versionCheckService';
+import { notificationService } from '../services/NotificationService';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import BackButton from '../components/BackButton';
@@ -94,6 +95,33 @@ export default function AboutScreen() {
     );
   }, []);
 
+  const CAMPAIGN_TEST_CASES: { label: string; campaignId: string; title: string; body: string }[] = [
+    { label: 'IG Live (Sept 4)', campaignId: 'ig-live-sept4', title: '[TEST] IG Live', body: 'Tap to verify routing to CampaignIGLive.' },
+    { label: 'Video Content Teaser', campaignId: 'video-content-teaser', title: '[TEST] Video Teaser', body: 'Tap to verify routing to CampaignVideoTease.' },
+    { label: 'Earning Reminder', campaignId: 'earning-reminder', title: '[TEST] Earning Reminder', body: 'Tap to verify routing to CampaignEarningReminder.' },
+  ];
+
+  const showCampaignTestMenu = useCallback(() => {
+    Alert.alert(
+      'Test Campaign Notification',
+      'Fires a real local notification, 8 seconds from now, with the same payload shape a production push uses. Background or lock the app right after picking one, then tap the notification to verify routing.',
+      [
+        ...CAMPAIGN_TEST_CASES.map((c) => ({
+          text: c.label,
+          onPress: async () => {
+            await notificationService.scheduleLocalNotification(
+              c.title,
+              c.body,
+              { type: 'campaign', campaignId: c.campaignId } as any,
+              new Date(Date.now() + 8000),
+            );
+          },
+        })),
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  }, []);
+
   const handleVersionTap = useCallback(async () => {
     tapCountRef.current += 1;
     if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
@@ -113,6 +141,7 @@ export default function AboutScreen() {
       showOtaDebugAlert(body || 'No diagnostic data.', [
         { text: 'Clear', style: 'destructive', onPress: () => clearAudioLogs() },
         { text: 'BG Isolate', onPress: () => showBgIsolateMenu() },
+        { text: 'Test Campaign', onPress: () => showCampaignTestMenu() },
         {
           text: 'Session D',
           onPress: () => {
@@ -128,7 +157,7 @@ export default function AboutScreen() {
         { text: 'OK' },
       ]);
     }
-  }, [navigation, showBgIsolateMenu]);
+  }, [navigation, showBgIsolateMenu, showCampaignTestMenu]);
 
   const nativeVersion = Application.nativeApplicationVersion ?? '?';
   const nativeBuild = Application.nativeBuildVersion ?? '?';
