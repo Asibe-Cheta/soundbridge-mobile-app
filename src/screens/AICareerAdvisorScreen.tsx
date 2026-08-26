@@ -27,6 +27,9 @@ import { initPaymentSheet, presentPaymentSheet } from '@stripe/stripe-react-nati
 import { apiFetch } from '../lib/apiClient';
 import { payoutService } from '../services/PayoutService';
 import { creatorRevenueService } from '../services/CreatorRevenueService';
+import { liveInterestService } from '../services/liveInterestService';
+import { audienceIntelligenceService } from '../services/AudienceIntelligenceService';
+import { profileService } from '../services/ProfileService';
 import { Session } from '@supabase/supabase-js';
 
 const { width } = Dimensions.get('window');
@@ -88,6 +91,29 @@ interface CreatorContext {
   // Services
   isServiceProvider: boolean;
   serviceCategories: string[];
+  // Real audience location (fan spend by city + live-interest prompt responses)
+  topFanCities: { city: string; country: string; fanCount: number; totalSpent: number }[];
+  topFans: { username: string; city: string | null; country: string | null; totalSpent: number }[];
+  liveInterestCities: { city: string; country: string; count: number }[];
+  liveInterestTotalYes: number;
+  liveInterestAvailability: { weekends: number; weekdayEvenings: number; anyTime: number; notSure: number };
+  // Real per-track engagement/quality signals
+  trackQuality: {
+    title: string;
+    qualityScore: number;
+    uniqueListeners: number;
+    repeatListens: number;
+    tipRate: number;
+    shareCount: number;
+    bookmarkCount: number;
+  }[];
+  topAffinityFans: { username: string; affinityScore: number; repeatListens: number; tipsSent: number }[];
+  // Real professional profile data
+  professionalHeadline: string | null;
+  skills: string[];
+  instruments: string[];
+  experienceTitles: string[];
+  experienceCount: number;
 }
 
 interface UsageData {
@@ -239,10 +265,52 @@ async function fetchCreatorContext(userId: string, session: Session): Promise<Cr
   // Use wallet_transactions via getRevenueBySource — same source as Creator Insights (most accurate)
   const now = new Date().toISOString();
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-  const [allTimeRevenue, thisMonthRevenue] = await Promise.all([
+  const [
+    allTimeRevenue, thisMonthRevenue,
+    fanCities, topFansRaw,
+    liveInterestStats,
+    trackQualityRaw, affinityFansRaw,
+    headlineRes, skillsRes, instrumentsRes, experienceRes,
+  ] = await Promise.all([
     creatorRevenueService.getRevenueBySource(session).catch(() => null),
     creatorRevenueService.getRevenueBySource(session, monthStart, now).catch(() => null),
+    // Real fan location — where paying fans (tips + ticket buyers) actually are
+    creatorRevenueService.getFanDemographics(session, 5).catch(() => []),
+    creatorRevenueService.getTopFans(session, 5).catch(() => []),
+    // Real listener location + availability from the "want to hear them live?" prompt
+    liveInterestService.getStatsForCreator(userId).catch(() => []),
+    // Real per-track engagement/quality signals (unique listeners, repeat listens, tip rate, shares, bookmarks)
+    audienceIntelligenceService.getTrackQualitySignals(session).catch(() => []),
+    audienceIntelligenceService.getTopAffinityFans(session, 5).catch(() => []),
+    // Real professional profile depth — headline, skills, instruments, experience
+    profileService.getHeadline(session).catch(() => null),
+    profileService.getSkills(session).catch(() => null),
+    profileService.getInstruments(session).catch(() => null),
+    profileService.getExperience(session).catch(() => null),
   ]);
+
+  // Aggregate live-interest stats (collected per-track) into a creator-level summary —
+  // the raw per-track/per-response breakdown would bloat the prompt unnecessarily.
+  const cityTotals = new Map<string, { city: string; country: string; count: number }>();
+  const availabilityTotals = { weekends: 0, weekdayEvenings: 0, anyTime: 0, notSure: 0 };
+  let liveInterestTotalYes = 0;
+  for (const stat of liveInterestStats) {
+    liveInterestTotalYes += stat.yesCount;
+    availabilityTotals.weekends += stat.availabilityBreakdown.weekends;
+    availabilityTotals.weekdayEvenings += stat.availabilityBreakdown.weekday_evenings;
+    availabilityTotals.anyTime += stat.availabilityBreakdown.any_time;
+    availabilityTotals.notSure += stat.availabilityBreakdown.not_sure;
+    for (const loc of stat.locationBreakdown) {
+      if (!loc.city && !loc.country) continue;
+      const key = `${loc.city}|${loc.country}`;
+      const existing = cityTotals.get(key);
+      if (existing) existing.count += loc.count;
+      else cityTotals.set(key, { city: loc.city, country: loc.country, count: loc.count });
+    }
+  }
+  const liveInterestCities = Array.from(cityTotals.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
 
   const totalPlays = tracks.reduce((s: number, t: any) => s + (t.play_count ?? 0), 0);
   const topTracks  = tracks.slice(0, 5).map((t: any) => ({
@@ -303,6 +371,31 @@ async function fetchCreatorContext(userId: string, session: Session): Promise<Cr
     createdEvents,
     isServiceProvider:    !!spProfile,
     serviceCategories:    spProfile?.categories ?? [],
+    topFanCities: fanCities.map(f => ({ city: f.city, country: f.country, fanCount: f.fanCount, totalSpent: f.totalSpent })),
+    topFans: topFansRaw.map(f => ({ username: f.username, city: f.city ?? null, country: f.country ?? null, totalSpent: f.totalSpent })),
+    liveInterestCities,
+    liveInterestTotalYes,
+    liveInterestAvailability: availabilityTotals,
+    trackQuality: trackQualityRaw.slice(0, 5).map(t => ({
+      title: t.track_title,
+      qualityScore: t.quality_score,
+      uniqueListeners: t.unique_listeners,
+      repeatListens: t.repeat_listens,
+      tipRate: t.tip_rate,
+      shareCount: t.share_count,
+      bookmarkCount: t.bookmark_count,
+    })),
+    topAffinityFans: affinityFansRaw.map(f => ({
+      username: f.username,
+      affinityScore: f.affinity_score,
+      repeatListens: f.repeat_listens,
+      tipsSent: f.tips_sent,
+    })),
+    professionalHeadline: headlineRes?.headline ?? null,
+    skills: skillsRes?.skills ?? [],
+    instruments: instrumentsRes?.instruments ?? [],
+    experienceTitles: (experienceRes?.experience ?? []).map(e => e.title).slice(0, 5),
+    experienceCount: (experienceRes?.experience ?? []).length,
   };
 }
 
@@ -414,6 +507,16 @@ VERIFICATION AND PHOTO — only include these if the data shows they apply:
 - If no photo: "a simple, well-lit photo helps people feel like they know you before they've even heard your music."
 - Photo guidance is strictly limited to whether a photo exists, and technically: resolution, lighting, face visible. Never comment on personality, confidence, boldness, or presentation style.
 
+LOCATION CARD — use real audience geography, not just their home city:
+- The creator's own "Location" field is where THEY live, not where their audience is. Never build the location card around it alone.
+- Prioritise "Top fan cities" (real paying fans, from tips and ticket purchases) and "Live-interest cities" (real listeners who said yes to seeing them live) — these are actual audience geography. If either has entries, name the real city and explain what it means (e.g. "your fans in Manchester have shown up for you — that's a real signal, not a guess").
+- If both are empty, say honestly that there isn't enough activity yet to see where the audience is concentrated, and give one concrete step to start generating that signal (e.g. sharing a track where a specific community will see it).
+- Never invent a city that isn't in the data.
+
+TIMING CARD — no personalised timing data exists yet:
+- There is no real data yet on which days, times, or release patterns work best for this specific creator. Do NOT claim to have analysed their personal timing patterns, and do NOT invent a specific "best day/time" finding framed as personalised data.
+- Instead, give genuinely useful general best-practice guidance about release timing and consistency, clearly framed as general guidance ("a pattern that tends to work well is...") rather than "your data shows...". Be honest that this becomes personalised once there's enough activity to see real patterns.
+
 Output format:
 {
   "intro": "One warm opening sentence in second person. No name. Translate what the overall data means in plain language before anything else.",
@@ -433,18 +536,38 @@ Field rules:
 - detail: 2–3 sentences in second person. Plain language first, then number. End with one specific next step.
 - earnings detail: use the exact currency symbol — USD = $, GBP = £, NGN = ₦. Never convert or assume.`;
 
+  const availabilityLabel = (a: CreatorContext['liveInterestAvailability']) => {
+    const parts: string[] = [];
+    if (a.weekends) parts.push(`${a.weekends} weekends`);
+    if (a.weekdayEvenings) parts.push(`${a.weekdayEvenings} weekday evenings`);
+    if (a.anyTime) parts.push(`${a.anyTime} any time`);
+    if (a.notSure) parts.push(`${a.notSure} not sure`);
+    return parts.length > 0 ? parts.join(', ') : 'None recorded';
+  };
+
   const userContent = `Creator data:
 Onboarding type: ${ctx.onboardingUserType ?? 'Not specified'}
 Bio: ${ctx.bio ? 'Present' : 'Missing — profile incomplete'}
 Profile photo: ${ctx.hasAvatar ? 'Present' : 'Missing — no photo uploaded'}
 Verified: ${ctx.isVerified ? 'Yes' : 'No — not yet verified'}
+Professional headline: ${ctx.professionalHeadline ?? 'Not set'}
+Skills listed: ${ctx.skills.length > 0 ? ctx.skills.join(', ') : 'None listed'}
+Instruments listed: ${ctx.instruments.length > 0 ? ctx.instruments.join(', ') : 'None listed'}
+Experience entries: ${ctx.experienceCount > 0 ? `${ctx.experienceCount} (${ctx.experienceTitles.join('; ')})` : 'None added'}
 Genres: ${ctx.genres.length > 0 ? ctx.genres.join(', ') : 'Not specified'}
-Location: ${ctx.location ?? 'Not specified'}
+Location (creator's own, self-reported): ${ctx.location ?? 'Not specified'}
 Total public tracks: ${ctx.totalTracks}
 Total all-time plays: ${ctx.totalPlays}
 Top tracks: ${hasData ? ctx.topTracks.map(t => `"${t.title}" — ${t.plays} plays${t.genre ? ` (${t.genre})` : ''}`).join('; ') : 'None yet'}
+Track quality signals (real engagement, not just plays): ${ctx.trackQuality.length > 0 ? ctx.trackQuality.map(t => `"${t.title}" — ${t.uniqueListeners} unique listeners, ${t.repeatListens} repeat listens, ${(t.tipRate * 100).toFixed(0)}% tip rate, ${t.shareCount} shares, ${t.bookmarkCount} bookmarks`).join('; ') : 'Not enough activity yet to compute'}
 Mood tags: ${ctx.moodTags.length > 0 ? ctx.moodTags.join(', ') : 'None tagged'}
 Total earnings (net, wallet): ${tipsDisplay}
+Top fan cities (real paying fans — tips + ticket buyers, NOT the creator's own location): ${ctx.topFanCities.length > 0 ? ctx.topFanCities.map(c => `${c.city}, ${c.country} (${c.fanCount} fans, ${symbol}${c.totalSpent.toFixed(2)} spent)`).join('; ') : 'None yet'}
+Top individual fans: ${ctx.topFans.length > 0 ? ctx.topFans.map(f => `${f.username}${f.city ? ` (${f.city}${f.country ? `, ${f.country}` : ''})` : ''} — ${symbol}${f.totalSpent.toFixed(2)}`).join('; ') : 'None yet'}
+Live-interest cities (listeners who said yes to seeing you live, from the "want to hear them live?" prompt): ${ctx.liveInterestCities.length > 0 ? ctx.liveInterestCities.map(c => `${c.city}, ${c.country} (${c.count})`).join('; ') : 'None yet'}
+Live-interest total "yes" responses: ${ctx.liveInterestTotalYes}
+Live-interest availability (when interested listeners say they're free): ${availabilityLabel(ctx.liveInterestAvailability)}
+Top affinity fans (highest repeat engagement): ${ctx.topAffinityFans.length > 0 ? ctx.topAffinityFans.map(f => `${f.username} — ${f.repeatListens} repeat listens, ${f.tipsSent} tips sent`).join('; ') : 'Not enough activity yet'}
 Followers: ${ctx.followersCount}
 Following: ${ctx.followingCount}
 Community memberships: ${ctx.communityMemberships}
@@ -511,17 +634,26 @@ RULES — non-negotiable:
 9. Keep responses to 3–5 sentences. End with one specific, immediately actionable next step.
 10. If not verified, mention it warmly once: "One small thing that helps people trust you faster — your profile isn't verified yet. It only takes a couple of minutes and people tend to book and support verified profiles more readily."
 11. Photo guidance is strictly limited to whether a photo exists and technical quality (lighting, resolution, face clearly visible). Never comment on personality, confidence, boldness, or presentation style from a photo.
+12. If asked about location/cities (e.g. "why this city?"), answer using "Top fan cities" and "Live-interest cities" below — real audience geography — never the creator's own self-reported location alone. If both are empty, say honestly there isn't enough activity yet to see where the audience is concentrated.
+13. If asked about timing/release schedule, be honest that there's no personalised timing data yet — give general best-practice guidance framed as general guidance, never as "your data shows".
 
 Creator data:
 Profile photo: ${ctx.hasAvatar ? 'present' : 'missing'}
 Verified: ${ctx.isVerified ? 'yes' : 'no'}
 Bio: ${ctx.bio ? 'present' : 'missing'}
+Professional headline: ${ctx.professionalHeadline ?? 'not set'}
+Skills: ${ctx.skills.join(', ') || 'none listed'}
+Instruments: ${ctx.instruments.join(', ') || 'none listed'}
+Experience: ${ctx.experienceCount > 0 ? `${ctx.experienceCount} entries (${ctx.experienceTitles.join('; ')})` : 'none added'}
 Onboarding type: ${ctx.onboardingUserType ?? 'not specified'}
 Genres: ${ctx.genres.join(', ') || 'not specified'}
-Location: ${ctx.location ?? 'not specified'}
+Location (creator's own, self-reported — not audience location): ${ctx.location ?? 'not specified'}
 Tracks: ${ctx.totalTracks}, Total plays: ${ctx.totalPlays}
 Top track: ${ctx.topTracks[0] ? `"${ctx.topTracks[0].title}" (${ctx.topTracks[0].plays} plays)` : 'none yet'}
+Top track quality signal: ${ctx.trackQuality[0] ? `"${ctx.trackQuality[0].title}" — ${ctx.trackQuality[0].uniqueListeners} unique listeners, ${ctx.trackQuality[0].repeatListens} repeat listens, ${ctx.trackQuality[0].shareCount} shares, ${ctx.trackQuality[0].bookmarkCount} bookmarks` : 'not enough activity yet'}
 Earnings (net): ${chatTipsDisplay}
+Top fan cities (real paying fans): ${ctx.topFanCities.length > 0 ? ctx.topFanCities.map(c => `${c.city}, ${c.country} (${c.fanCount} fans)`).join('; ') : 'none yet'}
+Live-interest cities (real listener interest in seeing you live): ${ctx.liveInterestCities.length > 0 ? ctx.liveInterestCities.map(c => `${c.city}, ${c.country} (${c.count})`).join('; ') : 'none yet'}
 Followers: ${ctx.followersCount}, Following: ${ctx.followingCount}
 Posts: ${ctx.totalPosts}${ctx.postTypes.length > 0 ? ` (${ctx.postTypes.join(', ')})` : ''}
 Events created: ${ctx.createdEvents.length > 0 ? ctx.createdEvents.map(e => `"${e.title}" — ${e.attendees} attendees`).join('; ') : 'none'}
