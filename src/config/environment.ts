@@ -13,6 +13,8 @@ interface EnvironmentConfig {
   revenueCatAndroidApiKey: string;
   googlePlacesApiKey: string;
   removeBgApiKey: string;
+  openWeatherApiKey: string;
+  tomtomApiKey: string;
   bypassRevenueCat?: boolean;
   developmentTier?: 'free' | 'premium' | 'unlimited';
   useProfileTier?: boolean; // Use subscription_tier from user profile instead of hardcoded tier
@@ -28,6 +30,8 @@ const configs: Record<Environment, EnvironmentConfig> = {
     revenueCatAndroidApiKey: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY || '',
     googlePlacesApiKey: process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY || '',
     removeBgApiKey: process.env.EXPO_PUBLIC_REMOVE_BG_API_KEY || 'EhViRSWgEYMiF2YRxNgbkdzW',
+    openWeatherApiKey: process.env.EXPO_PUBLIC_OPENWEATHER_API_KEY || '',
+    tomtomApiKey: process.env.EXPO_PUBLIC_TOMTOM_API_KEY || '',
     // Bypass RevenueCat in Expo Go (native IAP not available)
     // Set to false when testing with a development build
     bypassRevenueCat: true,
@@ -48,6 +52,8 @@ const configs: Record<Environment, EnvironmentConfig> = {
     revenueCatAndroidApiKey: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY || '',
     googlePlacesApiKey: process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY || '',
     removeBgApiKey: process.env.EXPO_PUBLIC_REMOVE_BG_API_KEY || '',
+    openWeatherApiKey: process.env.EXPO_PUBLIC_OPENWEATHER_API_KEY || '',
+    tomtomApiKey: process.env.EXPO_PUBLIC_TOMTOM_API_KEY || '',
     analyticsEnabled: true,
     debugMode: true,
   },
@@ -60,6 +66,8 @@ const configs: Record<Environment, EnvironmentConfig> = {
     revenueCatAndroidApiKey: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY || '',
     googlePlacesApiKey: process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY || '',
     removeBgApiKey: process.env.EXPO_PUBLIC_REMOVE_BG_API_KEY || '',
+    openWeatherApiKey: process.env.EXPO_PUBLIC_OPENWEATHER_API_KEY || '',
+    tomtomApiKey: process.env.EXPO_PUBLIC_TOMTOM_API_KEY || '',
     // ✅ CRITICAL: Production MUST use real RevenueCat
     bypassRevenueCat: false,
     // developmentTier is not used in production

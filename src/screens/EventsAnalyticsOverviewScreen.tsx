@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import { useToast } from '../contexts/ToastContext';
 import { supabase } from '../lib/supabase';
 import eventAnalyticsService, { EventAnalytics } from '../services/EventAnalyticsService';
 import { notificationService } from '../services/NotificationService';
+import { eventEnvironmentService, EventEnvironmentData } from '../services/EventEnvironmentService';
 
 // Exactly match EventAnalyticsCard's Tier type and gating constants
 type Tier = 'free' | 'premium' | 'unlimited' | null | undefined;
@@ -27,6 +28,10 @@ interface EventRow {
   id: string;
   title: string;
   event_date: string;
+  location: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  country: string | null;
 }
 
 interface EventWithAnalytics {
@@ -60,8 +65,114 @@ function formatRevenue(amount: number): string {
   return `£${amount.toFixed(0)}`;
 }
 
+// ─── Weather + transport/road disruption section ───────────────────────────
+// Shown per-event as a suggestion/consideration, never a directive — see
+// WEATHER_AND_TRANSPORT.MD. Only rendered for upcoming/live events that have
+// coordinates; past events have no forward-looking forecast to show.
+function EventEnvironmentSection({
+  event,
+  session,
+  theme,
+}: {
+  event: EventRow;
+  session: any;
+  theme: any;
+}) {
+  const [data, setData] = useState<EventEnvironmentData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    if (event.latitude == null || event.longitude == null) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    eventEnvironmentService
+      .getForEvent(event.id, event.latitude, event.longitude, event.country, event.event_date, session)
+      .then(result => {
+        if (active) setData(result);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [event.id, event.latitude, event.longitude, event.country, event.event_date, session]);
+
+  if (event.latitude == null || event.longitude == null) return null;
+
+  if (loading) {
+    return (
+      <View style={[styles.envSection, { borderTopColor: theme.colors.border }]}>
+        <ActivityIndicator size="small" color={theme.colors.textSecondary} />
+      </View>
+    );
+  }
+
+  if (!data) return null;
+
+  const weatherText = (() => {
+    if (!data.weather.available) {
+      return data.weather.reason === 'too_far_out'
+        ? 'Weather forecast isn’t available yet for this date — worth checking back closer to the event, forecasts get more reliable nearer the time.'
+        : 'Weather forecast isn’t currently available for this location.';
+    }
+    const temp = data.weather.tempC != null ? `${data.weather.tempC}°C` : null;
+    const parts = [temp, data.weather.condition].filter(Boolean).join(', ');
+    return `Worth knowing: forecast is ${parts || 'unavailable in detail'} on the day.`;
+  })();
+
+  const railText = (() => {
+    if (!data.rail.available) {
+      if (data.rail.reason === 'outside_coverage') {
+        return 'Rail disruption data isn’t currently available outside the UK.';
+      }
+      return 'Rail disruption data isn’t currently available for this location.';
+    }
+    if (data.rail.messages.length === 0) {
+      return `No rail disruptions currently reported near ${data.rail.stationName ?? 'the nearest station'}.`;
+    }
+    return `You may want to consider: ${data.rail.messages.slice(0, 2).join(' ')}`;
+  })();
+
+  const roadText = (() => {
+    if (!data.road.available) {
+      return 'Road/traffic condition data isn’t currently available for this location.';
+    }
+    if (data.road.incidents.length === 0) {
+      return 'No significant road disruptions currently reported nearby.';
+    }
+    return `You may want to consider: ${data.road.incidents.slice(0, 2).join('; ')}`;
+  })();
+
+  return (
+    <View style={[styles.envSection, { borderTopColor: theme.colors.border }]}>
+      <View style={styles.envRow}>
+        <Ionicons name="partly-sunny-outline" size={14} color={theme.colors.textSecondary} />
+        <Text style={[styles.envText, { color: theme.colors.textSecondary }]}>{weatherText}</Text>
+      </View>
+      <View style={styles.envRow}>
+        <Ionicons name="train-outline" size={14} color={theme.colors.textSecondary} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.envLabel, { color: theme.colors.textSecondary }]}>Rail disruptions</Text>
+          <Text style={[styles.envText, { color: theme.colors.textSecondary }]}>{railText}</Text>
+        </View>
+      </View>
+      <View style={styles.envRow}>
+        <Ionicons name="car-outline" size={14} color={theme.colors.textSecondary} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.envLabel, { color: theme.colors.textSecondary }]}>Road/traffic conditions</Text>
+          <Text style={[styles.envText, { color: theme.colors.textSecondary }]}>{roadText}</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export default function EventsAnalyticsOverviewScreen({ navigation }: any) {
-  const { user, userProfile } = useAuth();
+  const { user, userProfile, session } = useAuth();
   const { theme } = useTheme();
   const { showToast } = useToast();
 
@@ -136,7 +247,7 @@ export default function EventsAnalyticsOverviewScreen({ navigation }: any) {
       const [eventsResult, analyticsResult] = await Promise.allSettled([
         supabase
           .from('events')
-          .select('id, title, event_date')
+          .select('id, title, event_date, location, latitude, longitude, country')
           .eq('creator_id', user.id)
           .order('event_date', { ascending: false }),
         eventAnalyticsService.getAllForCreator(user.id),
@@ -323,6 +434,10 @@ export default function EventsAnalyticsOverviewScreen({ navigation }: any) {
           renderMetricChips(analytics)
         ) : (
           renderLockedMetrics()
+        )}
+
+        {status !== 'past' && (
+          <EventEnvironmentSection event={event} session={session} theme={theme} />
         )}
       </View>
     );
@@ -577,6 +692,30 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 12,
     fontStyle: 'italic',
+  },
+
+  // Weather + transport/road disruption section
+  envSection: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  envRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  envLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  envText: {
+    fontSize: 12,
+    lineHeight: 17,
   },
 
   // Empty state — matches AnalyticsDashboardScreen pattern exactly
