@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { useTheme } from '../contexts/ThemeContext';
 import { venueService, VenueDisplayItem } from '../services/VenueService';
 import { SystemTypography as Typography } from '../constants/Typography';
@@ -86,9 +85,13 @@ export default function PostAvailabilityModal({ visible, venue, onClose, onPoste
   }];
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
-      <BlurView intensity={80} tint={theme.isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      onRequestClose={handleClose}
+      presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+    >
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.colors.background }]} edges={['top', 'bottom']}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
             <TouchableOpacity onPress={handleClose} style={styles.headerBtn}>
