@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import Slider from '@react-native-community/slider';
 import { useTheme } from '../contexts/ThemeContext';
 import { venueService, VenueNotificationPreferences, VENUE_TYPES } from '../services/VenueService';
@@ -101,9 +100,13 @@ export default function VenuePreferencesModal({ visible, userId, onClose, onSave
   }];
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <BlurView intensity={80} tint={theme.isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      onRequestClose={onClose}
+      presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+    >
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.colors.background }]} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
