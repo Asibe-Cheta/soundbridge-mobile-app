@@ -2,11 +2,14 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import stationsData from './uk-stations.json' assert { type: 'json' }
 
 // Set via: supabase secrets set RAIL_DATA_MARKETPLACE_API_KEY=<your_consumer_key>
-// Get the key at raildata.org.uk — subscribe to "Live Departure Board Web Service (LDBWS) - Public"
-// in the Data Product Catalogue, then find it under My Subscriptions > LDBWS - Public > Specification.
+// Get the key at raildata.org.uk — subscribe to "Live Departure Board" in the Data
+// Product Catalogue, then find it under My Subscriptions > Live Departure Board >
+// Specification. Note the base path includes a product-specific version suffix
+// (dep1_2) that isn't documented anywhere public — always confirm against the
+// Specification tab's example request rather than assuming a generic LDBWS path.
 const RAIL_API_KEY = Deno.env.get('RAIL_DATA_MARKETPLACE_API_KEY') ?? ''
 
-const LDBWS_BASE = 'https://api1.raildata.org.uk/1010-live-departure-board-dep/LDBWS/api/20220120/GetDepBoardWithDetails'
+const LDBWS_BASE = 'https://api1.raildata.org.uk/1010-live-departure-board-dep1_2/LDBWS/api/20220120/GetDepartureBoard'
 
 // Beyond this radius, we don't have a station close enough to the event to make rail
 // disruption info meaningful — honest "not available" rather than showing something
