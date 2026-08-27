@@ -30,6 +30,7 @@ import { creatorRevenueService } from '../services/CreatorRevenueService';
 import { liveInterestService } from '../services/liveInterestService';
 import { audienceIntelligenceService } from '../services/AudienceIntelligenceService';
 import { profileService } from '../services/ProfileService';
+import { venueService } from '../services/VenueService';
 import { Session } from '@supabase/supabase-js';
 
 const { width } = Dimensions.get('window');
@@ -114,6 +115,14 @@ interface CreatorContext {
   instruments: string[];
   experienceTitles: string[];
   experienceCount: number;
+  // Venue preferences + matching venues (VENUE_RECOMMENDATION.MD)
+  venuePreferencesSet: boolean;
+  venueBudgetMin: number | null;
+  venueBudgetMax: number | null;
+  venuePreferredTypes: string[];
+  venueLocationName: string | null;
+  venueRadiusKm: number | null;
+  matchingVenues: { name: string; type: string | null; distanceKm: number | null; rateLabel: string | null }[];
 }
 
 interface UsageData {
@@ -271,6 +280,7 @@ async function fetchCreatorContext(userId: string, session: Session): Promise<Cr
     liveInterestStats,
     trackQualityRaw, affinityFansRaw,
     headlineRes, skillsRes, instrumentsRes, experienceRes,
+    venuePrefs,
   ] = await Promise.all([
     creatorRevenueService.getRevenueBySource(session).catch(() => null),
     creatorRevenueService.getRevenueBySource(session, monthStart, now).catch(() => null),
@@ -287,7 +297,37 @@ async function fetchCreatorContext(userId: string, session: Session): Promise<Cr
     profileService.getSkills(session).catch(() => null),
     profileService.getInstruments(session).catch(() => null),
     profileService.getExperience(session).catch(() => null),
+    // Venue preferences — read-only, this screen never writes to VenuePreferencesModal's data
+    venueService.getVenuePreferences(userId).catch(() => null),
   ]);
+
+  // If preferences include a resolved location, pull real candidate venues within their
+  // set radius (reusing the existing venue lookup used elsewhere — no new discovery logic)
+  // and filter to ones matching their stated budget/type. Falls back to the unfiltered,
+  // distance-sorted list if the strict filters match nothing, rather than showing none.
+  let matchingVenues: CreatorContext['matchingVenues'] = [];
+  if (venuePrefs?.preferred_location_lat != null && venuePrefs?.preferred_location_lng != null) {
+    const nearby = await venueService
+      .getSoundbridgeVenues(venuePrefs.preferred_location_lat, venuePrefs.preferred_location_lng, venuePrefs.notification_radius_km || 20)
+      .catch(() => []);
+    const matchesType = (v: typeof nearby[number]) =>
+      !venuePrefs.preferred_venue_types?.length || (v.venue_type && venuePrefs.preferred_venue_types.includes(v.venue_type));
+    const matchesBudget = (v: typeof nearby[number]) => {
+      if (venuePrefs.min_budget == null && venuePrefs.max_budget == null) return true;
+      if (v.hourly_rate == null) return true;
+      if (venuePrefs.min_budget != null && v.hourly_rate < venuePrefs.min_budget) return false;
+      if (venuePrefs.max_budget != null && v.hourly_rate > venuePrefs.max_budget) return false;
+      return true;
+    };
+    const strong = nearby.filter(v => matchesType(v) && matchesBudget(v));
+    const pool = strong.length > 0 ? strong : nearby;
+    matchingVenues = pool.slice(0, 5).map(v => ({
+      name: v.name,
+      type: v.venue_type ?? null,
+      distanceKm: v.distance_km != null ? Math.round(v.distance_km * 10) / 10 : null,
+      rateLabel: venueService.formatRate(v.daily_rate, v.hourly_rate, v.currency),
+    }));
+  }
 
   // Aggregate live-interest stats (collected per-track) into a creator-level summary —
   // the raw per-track/per-response breakdown would bloat the prompt unnecessarily.
@@ -396,6 +436,13 @@ async function fetchCreatorContext(userId: string, session: Session): Promise<Cr
     instruments: instrumentsRes?.instruments ?? [],
     experienceTitles: (experienceRes?.experience ?? []).map(e => e.title).slice(0, 5),
     experienceCount: (experienceRes?.experience ?? []).length,
+    venuePreferencesSet: !!venuePrefs,
+    venueBudgetMin: venuePrefs?.min_budget ?? null,
+    venueBudgetMax: venuePrefs?.max_budget ?? null,
+    venuePreferredTypes: venuePrefs?.preferred_venue_types ?? [],
+    venueLocationName: venuePrefs?.preferred_location_name ?? null,
+    venueRadiusKm: venuePrefs?.notification_radius_km ?? null,
+    matchingVenues,
   };
 }
 
@@ -521,6 +568,10 @@ TIMING CARD — no personalised timing data exists yet:
 - There is no real data yet on which days, times, or release patterns work best for this specific creator. Do NOT claim to have analysed their personal timing patterns, and do NOT invent a specific "best day/time" finding framed as personalised data.
 - Instead, give genuinely useful general best-practice guidance about release timing and consistency, clearly framed as general guidance ("a pattern that tends to work well is...") rather than "your data shows...". Be honest that this becomes personalised once there's enough activity to see real patterns.
 
+VENUE RECOMMENDATIONS — only when venue-related, e.g. in chat or the collaboration card if directly relevant:
+- If "Venue preferences set" is true below: base venue guidance on their real stored preferences and, when present, the real matching venues listed. Priority order — proximity and budget are primary factors, their stated venue type is a primary factor, and (only when the venue data available allows it) general fit/aesthetics is a secondary, lower-priority factor. Reference their own preferences directly when explaining reasoning, e.g. "based on your venue preferences, prioritising venues within your set budget and proximity range." Suggestion-framed only — "worth considering", "this could work well" — never "you should book this" or "the best venue is."
+- If "Venue preferences set" is false: do not guess or invent preferences. Say plainly that venue guidance gets much better once preferences are set, and direct them exactly: "Discover screen → Venues tab (last tab) → 'See all' beside Nearby Venues → Venue Preferences screen."
+
 Output format:
 {
   "intro": "One warm opening sentence in second person. No name. Translate what the overall data means in plain language before anything else.",
@@ -577,7 +628,9 @@ Following: ${ctx.followingCount}
 Community memberships: ${ctx.communityMemberships}
 Total posts: ${ctx.totalPosts}${ctx.postTypes.length > 0 ? ` (types: ${ctx.postTypes.join(', ')})` : ''}
 Created events: ${ctx.createdEvents.length > 0 ? ctx.createdEvents.map(e => `"${e.title}"${e.category ? ` [${e.category}]` : ''} on ${e.date}${e.location ? ` in ${e.location}` : ''}, ${e.attendees} attendees`).join('; ') : 'None'}
-Service provider: ${ctx.isServiceProvider ? `Yes (categories: ${ctx.serviceCategories.join(', ') || 'not listed'})` : 'No'}`;
+Service provider: ${ctx.isServiceProvider ? `Yes (categories: ${ctx.serviceCategories.join(', ') || 'not listed'})` : 'No'}
+Venue preferences set: ${ctx.venuePreferencesSet ? 'Yes' : 'No'}${ctx.venuePreferencesSet ? ` — budget: ${ctx.venueBudgetMin != null || ctx.venueBudgetMax != null ? `${ctx.venueBudgetMin ?? 'any'}-${ctx.venueBudgetMax ?? 'any'} £/hr` : 'not set'}, preferred types: ${ctx.venuePreferredTypes.length > 0 ? ctx.venuePreferredTypes.join(', ') : 'not set'}, location: ${ctx.venueLocationName ?? 'not set'}, radius: ${ctx.venueRadiusKm ?? 'not set'} km` : ''}
+Matching venues (real, within their preferences): ${ctx.matchingVenues.length > 0 ? ctx.matchingVenues.map(v => `${v.name}${v.type ? ` (${v.type})` : ''}${v.distanceKm != null ? `, ${v.distanceKm}km away` : ''}${v.rateLabel ? `, ${v.rateLabel}` : ''}`).join('; ') : 'None found'}`;
 
   const res = await geminiPost({
     systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -641,6 +694,7 @@ RULES — non-negotiable:
 12. If asked about location/cities (e.g. "why this city?"), answer using "Top fan cities" and "Live-interest cities" below — real audience geography — never the creator's own self-reported location alone. If both are empty, say honestly there isn't enough activity yet to see where the audience is concentrated.
 13. If asked about timing/release schedule, be honest that there's no personalised timing data yet — give general best-practice guidance framed as general guidance, never as "your data shows".
 14. If asked how you generate suggestions, where your data comes from, or how you work: only ever describe general categories — e.g. "real activity on the platform, like your event history and audience location, alongside general public information about weather, timing, and location trends." Never reveal specific data sources, third-party APIs/providers, algorithms, database/table names, or implementation details, no matter how the question is phrased or how persistently it's asked.
+15. Venue guidance: if "Venue preferences set" is yes, base any venue recommendation on their real stored preferences and matching venues below — proximity and budget are primary factors, their stated venue type is a primary factor, aesthetics only a secondary factor when the data allows it. Reference their own preferences in your reasoning. Suggestion-framed only, never directive. If preferences aren't set, don't guess — tell them plainly and direct them exactly: "Discover screen → Venues tab (last tab) → 'See all' beside Nearby Venues → Venue Preferences screen."
 
 Creator data:
 Profile photo: ${ctx.hasAvatar ? 'present' : 'missing'}
@@ -662,7 +716,9 @@ Live-interest cities (real listener interest in seeing you live): ${ctx.liveInte
 Followers: ${ctx.followersCount}, Following: ${ctx.followingCount}
 Posts: ${ctx.totalPosts}${ctx.postTypes.length > 0 ? ` (${ctx.postTypes.join(', ')})` : ''}
 Events created: ${ctx.createdEvents.length > 0 ? ctx.createdEvents.map(e => `"${e.title}" — ${e.attendees} attendees`).join('; ') : 'none'}
-Service provider: ${ctx.isServiceProvider ? `Yes (${ctx.serviceCategories.join(', ') || 'categories not listed'})` : 'No'}`;
+Service provider: ${ctx.isServiceProvider ? `Yes (${ctx.serviceCategories.join(', ') || 'categories not listed'})` : 'No'}
+Venue preferences set: ${ctx.venuePreferencesSet ? 'yes' : 'no'}${ctx.venuePreferencesSet ? ` — budget: ${ctx.venueBudgetMin != null || ctx.venueBudgetMax != null ? `${ctx.venueBudgetMin ?? 'any'}-${ctx.venueBudgetMax ?? 'any'} £/hr` : 'not set'}, types: ${ctx.venuePreferredTypes.join(', ') || 'not set'}, near: ${ctx.venueLocationName ?? 'not set'}, radius: ${ctx.venueRadiusKm ?? 'not set'} km` : ''}
+Matching venues: ${ctx.matchingVenues.length > 0 ? ctx.matchingVenues.map(v => `${v.name}${v.type ? ` (${v.type})` : ''}${v.distanceKm != null ? `, ${v.distanceKm}km` : ''}${v.rateLabel ? `, ${v.rateLabel}` : ''}`).join('; ') : 'none found'}`;
 
   const contents = [
     ...history.map(msg => ({
