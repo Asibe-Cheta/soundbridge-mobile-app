@@ -158,6 +158,11 @@ function EventEnvironmentSection({
         <View style={{ flex: 1 }}>
           <Text style={[styles.envLabel, { color: theme.colors.textSecondary }]}>Rail disruptions</Text>
           <Text style={[styles.envText, { color: theme.colors.textSecondary }]}>{railText}</Text>
+          {data.rail.available && (
+            <Text style={[styles.envAttribution, { color: theme.colors.textSecondary }]}>
+              Source: Rail Delivery Group
+            </Text>
+          )}
         </View>
       </View>
       <View style={styles.envRow}>
@@ -716,6 +721,12 @@ const styles = StyleSheet.create({
   envText: {
     fontSize: 12,
     lineHeight: 17,
+  },
+  envAttribution: {
+    fontSize: 10,
+    fontStyle: 'italic',
+    marginTop: 2,
+    opacity: 0.7,
   },
 
   // Empty state — matches AnalyticsDashboardScreen pattern exactly
