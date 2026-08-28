@@ -57,6 +57,9 @@ interface InsightCardData {
   statUnit: string;
   statLabel: string;
   detail: string;
+  // Transparency + confidence (AI_ADVISOR_IMPROVEMENTS.MD Parts B & C)
+  dataBasis: string;
+  dataBacked: boolean;
 }
 
 interface CreatorContext {
@@ -567,6 +570,11 @@ LOCATION CARD — use real audience geography, not just their home city:
 TIMING CARD — no personalised timing data exists yet:
 - There is no real data yet on which days, times, or release patterns work best for this specific creator. Do NOT claim to have analysed their personal timing patterns, and do NOT invent a specific "best day/time" finding framed as personalised data.
 - Instead, give genuinely useful general best-practice guidance about release timing and consistency, clearly framed as general guidance ("a pattern that tends to work well is...") rather than "your data shows...". Be honest that this becomes personalised once there's enough activity to see real patterns.
+- This card's dataBacked must always be false.
+
+DATA TRANSPARENCY + CONFIDENCE — every card, non-negotiable:
+- dataBacked: true only if that card's specific guidance is genuinely grounded in real data present in the creator data block above. false if it's general best-practice guidance because there wasn't enough real data for that category to personalise (the timing card is always false; any other card is also false whenever its relevant data was empty/"None yet"/"Not enough activity yet").
+- dataBasis: one short plain-language phrase describing WHAT data and HOW MUCH/RECENT informed this card — scope and recency only, e.g. "Based on your last 5 tracks and 12 tips this month" or "Based on your top 3 fan cities from tips and ticket sales." Never name a table, API, algorithm, or technical implementation detail — same rule as the IP protection instruction above. If dataBacked is false, dataBasis should say plainly that this is general guidance, not personalised (e.g. "General guidance — not enough activity yet to personalise this").
 
 VENUE RECOMMENDATIONS — only when venue-related, e.g. in chat or the collaboration card if directly relevant:
 - If "Venue preferences set" is true below: base venue guidance on their real stored preferences and, when present, the real matching venues listed. Priority order — proximity and budget are primary factors, their stated venue type is a primary factor, and (only when the venue data available allows it) general fit/aesthetics is a secondary, lower-priority factor. Reference their own preferences directly when explaining reasoning, e.g. "based on your venue preferences, prioritising venues within your set budget and proximity range." Suggestion-framed only — "worth considering", "this could work well" — never "you should book this" or "the best venue is."
@@ -576,11 +584,11 @@ Output format:
 {
   "intro": "One warm opening sentence in second person. No name. Translate what the overall data means in plain language before anything else.",
   "cards": [
-    { "id": "performance",   "title": "...", "stat": "...", "statUnit": "...", "statLabel": "...", "detail": "..." },
-    { "id": "earnings",      "title": "...", "stat": "...", "statUnit": "...", "statLabel": "...", "detail": "..." },
-    { "id": "location",      "title": "...", "stat": "...", "statUnit": "...", "statLabel": "...", "detail": "..." },
-    { "id": "collaboration", "title": "...", "stat": "...", "statUnit": "...", "statLabel": "...", "detail": "..." },
-    { "id": "timing",        "title": "...", "stat": "...", "statUnit": "...", "statLabel": "...", "detail": "..." }
+    { "id": "performance",   "title": "...", "stat": "...", "statUnit": "...", "statLabel": "...", "detail": "...", "dataBasis": "...", "dataBacked": true },
+    { "id": "earnings",      "title": "...", "stat": "...", "statUnit": "...", "statLabel": "...", "detail": "...", "dataBasis": "...", "dataBacked": true },
+    { "id": "location",      "title": "...", "stat": "...", "statUnit": "...", "statLabel": "...", "detail": "...", "dataBasis": "...", "dataBacked": true },
+    { "id": "collaboration", "title": "...", "stat": "...", "statUnit": "...", "statLabel": "...", "detail": "...", "dataBasis": "...", "dataBacked": true },
+    { "id": "timing",        "title": "...", "stat": "...", "statUnit": "...", "statLabel": "...", "detail": "...", "dataBasis": "...", "dataBacked": false }
   ]
 }
 
@@ -588,6 +596,7 @@ Field rules:
 - stat: short number/value shown large (e.g. "108", "${symbol}4.25", "—")
 - statUnit: very short unit if applicable (e.g. "plays", "followers") or empty string
 - statLabel: one short contextual label (e.g. "all-time", "this month") or empty string
+- dataBasis / dataBacked: see DATA TRANSPARENCY + CONFIDENCE above
 - detail: 2–3 sentences in second person. Plain language first, then number. End with one specific next step.
 - earnings detail: use the exact currency symbol — USD = $, GBP = £, NGN = ₦. Never convert or assume.`;
 
@@ -659,6 +668,8 @@ Matching venues (real, within their preferences): ${ctx.matchingVenues.length > 
       statUnit:  card.statUnit  ?? '',
       statLabel: card.statLabel ?? '',
       detail:    card.detail    ?? 'Could not generate insight for this category.',
+      dataBasis: card.dataBasis ?? '',
+      dataBacked: card.dataBacked === true,
       _intro:    parsed.intro   ?? '',
     } as InsightCardData & { _intro: string };
   });
@@ -822,6 +833,11 @@ export default function AICareerAdvisorScreen() {
   const [showHistory, setShowHistory] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [allConversations, setAllConversations] = useState<{ id: string; startedAt: string; preview: string }[]>([]);
+  // Past analysis snapshots (AI_ADVISOR_IMPROVEMENTS.MD Part A)
+  const [showAnalysisHistory, setShowAnalysisHistory] = useState(false);
+  const [analysisHistoryLoading, setAnalysisHistoryLoading] = useState(false);
+  const [allAnalyses, setAllAnalyses] = useState<{ id: string; createdAt: string; preview: string }[]>([]);
+  const [activeAnalysisId, setActiveAnalysisId] = useState<string | null>(null);
   const creatorCtxRef = useRef<CreatorContext | null>(null);
   const analysisCardsRef = useRef<InsightCardData[]>([]);
 
@@ -993,6 +1009,65 @@ export default function AICareerAdvisorScreen() {
     ]);
   };
 
+  // ── Past analysis snapshots (view/delete) — mirrors conversation history above ──
+  const openAnalysisHistory = async () => {
+    if (!user?.id) return;
+    setShowAnalysisHistory(true);
+    setAnalysisHistoryLoading(true);
+    try {
+      const { data } = await supabase
+        .from('ai_adviser_analyses')
+        .select('id, created_at, analysis_json')
+        .eq('creator_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      setAllAnalyses(
+        (data ?? []).map((row: any) => ({
+          id: row.id,
+          createdAt: row.created_at,
+          preview: row.analysis_json?.intro?.slice(0, 70) || 'Analysis snapshot',
+        }))
+      );
+    } catch {}
+    setAnalysisHistoryLoading(false);
+  };
+
+  const loadAnalysisFromHistory = async (id: string) => {
+    try {
+      const { data } = await supabase
+        .from('ai_adviser_analyses')
+        .select('id, analysis_json')
+        .eq('id', id)
+        .single();
+      const savedCards = data?.analysis_json?.cards as InsightCardData[] | undefined;
+      if (savedCards?.length) {
+        const merged = CARD_CONFIGS.map(cfg => {
+          const card = savedCards.find(c => c.id === cfg.id);
+          return card ? { ...cfg, ...card } : { ...cfg, title: 'Analysis unavailable', stat: '—', statUnit: '', statLabel: '', detail: '', dataBasis: '', dataBacked: false };
+        });
+        setDynamicCards(merged);
+        analysisCardsRef.current = merged;
+        if (data?.analysis_json?.intro) setChatIntro(data.analysis_json.intro);
+        setActiveAnalysisId(id);
+        setPhase('results');
+      }
+    } catch {}
+    setShowAnalysisHistory(false);
+  };
+
+  const deleteAnalysisFromHistory = async (id: string) => {
+    Alert.alert('Delete this analysis?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive', onPress: async () => {
+          await supabase.from('ai_adviser_analyses').delete().eq('id', id);
+          setAllAnalyses(prev => prev.filter(a => a.id !== id));
+          if (activeAnalysisId === id) setActiveAnalysisId(null);
+        },
+      },
+    ]);
+  };
+
   // ── Determine locked state ────────────────────────────────────────────────
   const isAnalysisLocked = (() => {
     if (!usageData) return false;
@@ -1049,10 +1124,11 @@ export default function AICareerAdvisorScreen() {
 
       // Persist analysis
       try {
-        await supabase.from('ai_adviser_analyses').insert({
+        const { data: savedAnalysis } = await supabase.from('ai_adviser_analyses').insert({
           creator_id: user.id,
           analysis_json: { cards: clean, intro },
-        });
+        }).select('id').single();
+        if (savedAnalysis?.id) setActiveAnalysisId(savedAnalysis.id);
       } catch {}
 
       // Increment usage
@@ -1527,10 +1603,15 @@ export default function AICareerAdvisorScreen() {
                 </View>
               ) : (
                 <>
-                  <Text style={styles.sectionLabel}>YOUR INSIGHTS</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <Text style={styles.sectionLabel}>YOUR INSIGHTS</Text>
+                    <TouchableOpacity onPress={openAnalysisHistory} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Ionicons name="time-outline" size={20} color="rgba(255,255,255,0.45)" />
+                    </TouchableOpacity>
+                  </View>
 
                   {(dynamicCards.length > 0 ? dynamicCards : CARD_CONFIGS.map(cfg => ({
-                    ...cfg, title: 'Loading...', stat: '—', statUnit: '', statLabel: '', detail: '',
+                    ...cfg, title: 'Loading...', stat: '—', statUnit: '', statLabel: '', detail: '', dataBasis: '', dataBacked: false,
                   }))).map((card, i) => (
                     <Animated.View
                       key={card.id}
@@ -1555,7 +1636,23 @@ export default function AICareerAdvisorScreen() {
                             <Ionicons name={card.icon as any} size={20} color={card.color} />
                           </View>
                           <View style={styles.insightCardHeaderText}>
-                            <Text style={[styles.insightCardLabel, { color: card.color }]}>{card.label}</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Text style={[styles.insightCardLabel, { color: card.color }]}>{card.label}</Text>
+                              {card.dataBasis ? (
+                                <View
+                                  style={[
+                                    styles.confidenceBadge,
+                                    card.dataBacked
+                                      ? { backgroundColor: 'rgba(16,185,129,0.14)', borderColor: 'rgba(16,185,129,0.3)' }
+                                      : { backgroundColor: 'rgba(148,163,184,0.14)', borderColor: 'rgba(148,163,184,0.3)' },
+                                  ]}
+                                >
+                                  <Text style={[styles.confidenceBadgeText, { color: card.dataBacked ? '#10b981' : '#94a3b8' }]}>
+                                    {card.dataBacked ? 'Based on your data' : 'General guidance'}
+                                  </Text>
+                                </View>
+                              ) : null}
+                            </View>
                             <Text style={styles.insightCardTitle} numberOfLines={2}>{card.title}</Text>
                           </View>
                           <View style={styles.insightStatWrap}>
@@ -1567,6 +1664,16 @@ export default function AICareerAdvisorScreen() {
 
                         <View style={[styles.insightDivider, { backgroundColor: card.borderColor }]} />
                         <Text style={styles.insightDetail}>{card.detail}</Text>
+                        {card.dataBasis ? (
+                          <TouchableOpacity
+                            onPress={() => Alert.alert('What informed this', card.dataBasis)}
+                            activeOpacity={0.7}
+                            style={styles.dataBasisRow}
+                          >
+                            <Ionicons name="information-circle-outline" size={13} color="rgba(255,255,255,0.4)" />
+                            <Text style={styles.dataBasisText} numberOfLines={1}>{card.dataBasis}</Text>
+                          </TouchableOpacity>
+                        ) : null}
                       </View>
                     </Animated.View>
                   ))}
@@ -1758,6 +1865,49 @@ export default function AICareerAdvisorScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* ── Past analyses modal ── */}
+      <Modal visible={showAnalysisHistory} animationType="slide" transparent presentationStyle="overFullScreen">
+        <View style={styles.historyOverlay}>
+          <View style={[styles.historySheet, { backgroundColor: '#0e1220' }]}>
+            <View style={styles.historyHeader}>
+              <Text style={styles.historyTitle}>Past Analyses</Text>
+              <TouchableOpacity onPress={() => setShowAnalysisHistory(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="close" size={22} color="rgba(255,255,255,0.6)" />
+              </TouchableOpacity>
+            </View>
+
+            {analysisHistoryLoading ? (
+              <Text style={[styles.footerNote, { textAlign: 'center', marginTop: 32 }]}>Loading…</Text>
+            ) : allAnalyses.length === 0 ? (
+              <Text style={[styles.footerNote, { textAlign: 'center', marginTop: 32 }]}>No past analyses yet.</Text>
+            ) : (
+              <FlatList
+                data={allAnalyses}
+                keyExtractor={item => item.id}
+                contentContainerStyle={{ paddingBottom: 32 }}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.historyItem, item.id === activeAnalysisId && { borderColor: '#a855f740' }]}
+                    onPress={() => loadAnalysisFromHistory(item.id)}
+                    activeOpacity={0.75}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.historyItemPreview} numberOfLines={2}>{item.preview}</Text>
+                      <Text style={styles.historyItemDate}>
+                        {new Date(item.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={() => deleteAnalysisFromHistory(item.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Ionicons name="trash-outline" size={17} color="rgba(255,255,255,0.3)" />
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -1933,6 +2083,15 @@ const styles = StyleSheet.create({
   insightStatUnit: { fontSize: 11, fontWeight: '600', marginTop: -2 },
   insightStatLabel: { fontSize: 10, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
   insightDivider: { height: StyleSheet.hairlineWidth, marginBottom: 12 },
+  confidenceBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  confidenceBadgeText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.2 },
+  dataBasisRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10 },
+  dataBasisText: { flex: 1, fontSize: 11, color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' },
   insightDetail: { fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 19 },
 
   // Chat
