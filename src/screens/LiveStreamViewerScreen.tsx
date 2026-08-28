@@ -6,7 +6,7 @@
  * feature (LiveSessionRoomScreen) — do not touch that.
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, StatusBar, Image, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, StatusBar, Image, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Video, ResizeMode, AVPlaybackStatus, Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
@@ -196,6 +196,12 @@ export default function LiveStreamViewerScreen() {
           <TouchableOpacity style={styles.backButtonLarge} onPress={handleRetryPlayback}>
             <Text style={styles.backButtonLargeText}>Retry</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => Alert.alert('Connection details', `URL: ${hlsUrl}\n\nError: ${playbackError}`)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.detailsLink}>Show details</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -292,4 +298,5 @@ const styles = StyleSheet.create({
   endedText: { color: 'rgba(255,255,255,0.7)', fontSize: 15, textAlign: 'center' },
   backButtonLarge: { marginTop: 8, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 999 },
   backButtonLargeText: { color: '#fff', fontWeight: '600' },
+  detailsLink: { color: 'rgba(255,255,255,0.35)', fontSize: 12, marginTop: 4, textDecorationLine: 'underline' },
 });
