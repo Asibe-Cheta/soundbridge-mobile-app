@@ -31,6 +31,7 @@ import { liveInterestService } from '../services/liveInterestService';
 import { audienceIntelligenceService } from '../services/AudienceIntelligenceService';
 import { profileService } from '../services/ProfileService';
 import { venueService } from '../services/VenueService';
+import { eventEnvironmentService } from '../services/EventEnvironmentService';
 import { Session } from '@supabase/supabase-js';
 
 const { width } = Dimensions.get('window');
@@ -92,6 +93,7 @@ interface CreatorContext {
   postTypes: string[];
   // Events
   createdEvents: { title: string; date: string; location: string | null; category: string | null; attendees: number }[];
+  upcomingEventConditions: { title: string; date: string; weather: string; road: string; rail: string }[];
   // Services
   isServiceProvider: boolean;
   serviceCategories: string[];
@@ -249,7 +251,7 @@ async function fetchCreatorContext(userId: string, session: Session): Promise<Cr
       .is('deleted_at', null),
     supabase
       .from('events')
-      .select('id, title, event_date, location, category, current_attendees, max_attendees')
+      .select('id, title, event_date, location, category, current_attendees, max_attendees, latitude, longitude, country')
       .eq('creator_id', userId)
       .order('event_date', { ascending: false })
       .limit(10),
@@ -388,6 +390,41 @@ async function fetchCreatorContext(userId: string, session: Session): Promise<Cr
     attendees: e.current_attendees ?? 0,
   }));
 
+  // Weather/road/rail conditions for the nearest upcoming events with coordinates —
+  // reuses the exact EventEnvironmentService already built for Events Insights, no
+  // new fetching logic. Nearest 2 events within 30 days only, to keep prompt size
+  // and external-API calls in check.
+  const eventWindowStart = new Date();
+  const eventWindowEnd = new Date(eventWindowStart.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const upcomingWithCoords = events
+    .filter((e: any) => {
+      if (e.latitude == null || e.longitude == null) return false;
+      const d = new Date(e.event_date);
+      return d >= eventWindowStart && d <= eventWindowEnd;
+    })
+    .sort((a: any, b: any) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime())
+    .slice(0, 2);
+
+  const upcomingEventConditionsRaw = await Promise.all(
+    upcomingWithCoords.map(async (e: any) => {
+      const env = await eventEnvironmentService
+        .getForEvent(e.id, e.latitude, e.longitude, e.country ?? null, e.event_date, session)
+        .catch(() => null);
+      if (!env) return null;
+      const weather = env.weather.available
+        ? [env.weather.tempC != null ? `${env.weather.tempC}°C` : null, env.weather.condition].filter(Boolean).join(', ') || 'no detail available'
+        : env.weather.reason === 'too_far_out' ? 'forecast not available yet (too far out)' : 'not available';
+      const road = env.road.available
+        ? (env.road.incidents.length > 0 ? env.road.incidents.slice(0, 2).join('; ') : 'no significant disruptions reported')
+        : 'not available';
+      const rail = env.rail.available
+        ? (env.rail.messages.length > 0 ? env.rail.messages.slice(0, 2).join('; ') : `no disruptions reported near ${env.rail.stationName ?? 'nearest station'}`)
+        : env.rail.reason === 'outside_coverage' ? 'not available (outside rail coverage)' : 'not available';
+      return { title: e.title ?? 'Untitled', date: e.event_date ?? '', weather, road, rail };
+    })
+  );
+  const upcomingEventConditions = upcomingEventConditionsRaw.filter(Boolean) as CreatorContext['upcomingEventConditions'];
+
   return {
     displayName,
     firstName,
@@ -412,6 +449,7 @@ async function fetchCreatorContext(userId: string, session: Session): Promise<Cr
     totalPosts:           posts.length,
     postTypes,
     createdEvents,
+    upcomingEventConditions,
     isServiceProvider:    !!spProfile,
     serviceCategories:    spProfile?.categories ?? [],
     topFanCities: fanCities.map(f => ({ city: f.city, country: f.country, fanCount: f.fanCount, totalSpent: f.totalSpent })),
@@ -589,6 +627,11 @@ HARD CONSTRAINT on paid advertising — never deviate: never suggest paid advert
 
 PLATFORM GROWTH TONE: if platform size or growth comes up, speak about SoundBridge's own growth confidently and forward-looking — e.g. "SoundBridge is growing steadily, and that growth directly increases your own reach over time" — never apologetic, never "please be patient," never framing current limitations as something to excuse. No real user-count or growth figures are provided in this data, so never invent a specific number — keep it qualitative, consistent with the never-invent-data rule.
 
+UPCOMING EVENT CONDITIONS — weather/road/rail, only when event-related, e.g. in chat about a specific event or the collaboration card if directly relevant:
+- Use "Upcoming event conditions" below only when it has entries. Reference it as a suggestion/consideration only — "worth noting there's rain forecast for your event date," "worth checking, there's a reported rail disruption near your venue that day" — never a directive like "you should reschedule" or "you should choose a different venue."
+- If it says "no upcoming events with a set date/location within range," or a specific event's weather/road/rail reads "not available" / "forecast not available yet", say so plainly if asked rather than guessing or implying data exists. Same honesty pattern as the Timing card.
+- Same IP protection as elsewhere: describe this only as "general public information about weather, timing, and location trends" if asked how it's obtained — never name a specific weather, traffic, or rail data provider.
+
 Output format:
 {
   "intro": "One warm opening sentence in second person. No name. Translate what the overall data means in plain language before anything else.",
@@ -646,6 +689,7 @@ Following: ${ctx.followingCount}
 Community memberships: ${ctx.communityMemberships}
 Total posts: ${ctx.totalPosts}${ctx.postTypes.length > 0 ? ` (types: ${ctx.postTypes.join(', ')})` : ''}
 Created events: ${ctx.createdEvents.length > 0 ? ctx.createdEvents.map(e => `"${e.title}"${e.category ? ` [${e.category}]` : ''} on ${e.date}${e.location ? ` in ${e.location}` : ''}, ${e.attendees} attendees`).join('; ') : 'None'}
+Upcoming event conditions: ${ctx.upcomingEventConditions.length > 0 ? ctx.upcomingEventConditions.map(e => `"${e.title}" on ${e.date} — weather: ${e.weather}, road: ${e.road}, rail: ${e.rail}`).join('; ') : 'No upcoming events with a set date/location within range'}
 Service provider: ${ctx.isServiceProvider ? `Yes (categories: ${ctx.serviceCategories.join(', ') || 'not listed'})` : 'No'}
 Venue preferences set: ${ctx.venuePreferencesSet ? 'Yes' : 'No'}${ctx.venuePreferencesSet ? ` — budget: ${ctx.venueBudgetMin != null || ctx.venueBudgetMax != null ? `${ctx.venueBudgetMin ?? 'any'}-${ctx.venueBudgetMax ?? 'any'} £/hr` : 'not set'}, preferred types: ${ctx.venuePreferredTypes.length > 0 ? ctx.venuePreferredTypes.join(', ') : 'not set'}, location: ${ctx.venueLocationName ?? 'not set'}, radius: ${ctx.venueRadiusKm ?? 'not set'} km` : ''}
 Matching venues (real, within their preferences): ${ctx.matchingVenues.length > 0 ? ctx.matchingVenues.map(v => `${v.name}${v.type ? ` (${v.type})` : ''}${v.distanceKm != null ? `, ${v.distanceKm}km away` : ''}${v.rateLabel ? `, ${v.rateLabel}` : ''}`).join('; ') : 'None found'}`;
@@ -718,6 +762,7 @@ RULES — non-negotiable:
 16. New creator / new city playbook — priority order: (a) if Tracks is 0, the primary guidance is always to upload something first, framed as the essential first step, e.g. "the first thing that helps here is having something for people to discover, even one track or clip" — don't lead with growth tactics before this exists; (b) else if content exists but genres/location are missing, flag this explicitly as a discovery blocker, e.g. "your location isn't set, which is why people near you may not be finding you yet"; (c) regardless of follower count, actively surface the Tip Room/QR code as an immediate, low-barrier earning opportunity that needs no large audience or formal gig, e.g. "the fastest way to start earning here is using your Tip Room the very next time you're in front of even a few people in person."
 17. Never suggest paid advertising (Instagram ads, boosted posts, etc.) as a default or primary suggestion — only ever as an explicit, clearly-labelled last resort. Default guidance always routes through SoundBridge's own free mechanics first: uploads, correct profile setup, Tip Room, event promotion.
 18. If platform size/growth comes up, speak about it confidently and forward-looking, e.g. "SoundBridge is growing steadily, and that growth directly increases your own reach over time" — never apologetic, never "please be patient." No real growth figures are provided here, so never invent a specific number, keep it qualitative.
+19. If asked about an upcoming event, reference "Upcoming event conditions" below where relevant — weather/road/rail — as a suggestion only ("worth noting there's rain forecast for your event date"), never a directive ("you should reschedule"). If it's empty or says "not available", say so plainly rather than guessing. If asked how this is obtained, describe it only as "general public information about weather, timing, and location trends" — never name a specific weather, traffic, or rail provider.
 
 Creator data:
 Profile photo: ${ctx.hasAvatar ? 'present' : 'missing'}
@@ -739,6 +784,7 @@ Live-interest cities (real listener interest in seeing you live): ${ctx.liveInte
 Followers: ${ctx.followersCount}, Following: ${ctx.followingCount}
 Posts: ${ctx.totalPosts}${ctx.postTypes.length > 0 ? ` (${ctx.postTypes.join(', ')})` : ''}
 Events created: ${ctx.createdEvents.length > 0 ? ctx.createdEvents.map(e => `"${e.title}" — ${e.attendees} attendees`).join('; ') : 'none'}
+Upcoming event conditions: ${ctx.upcomingEventConditions.length > 0 ? ctx.upcomingEventConditions.map(e => `"${e.title}" on ${e.date} — weather: ${e.weather}, road: ${e.road}, rail: ${e.rail}`).join('; ') : 'none within range'}
 Service provider: ${ctx.isServiceProvider ? `Yes (${ctx.serviceCategories.join(', ') || 'categories not listed'})` : 'No'}
 Venue preferences set: ${ctx.venuePreferencesSet ? 'yes' : 'no'}${ctx.venuePreferencesSet ? ` — budget: ${ctx.venueBudgetMin != null || ctx.venueBudgetMax != null ? `${ctx.venueBudgetMin ?? 'any'}-${ctx.venueBudgetMax ?? 'any'} £/hr` : 'not set'}, types: ${ctx.venuePreferredTypes.join(', ') || 'not set'}, near: ${ctx.venueLocationName ?? 'not set'}, radius: ${ctx.venueRadiusKm ?? 'not set'} km` : ''}
 Matching venues: ${ctx.matchingVenues.length > 0 ? ctx.matchingVenues.map(v => `${v.name}${v.type ? ` (${v.type})` : ''}${v.distanceKm != null ? `, ${v.distanceKm}km` : ''}${v.rateLabel ? `, ${v.rateLabel}` : ''}`).join('; ') : 'none found'}`;
