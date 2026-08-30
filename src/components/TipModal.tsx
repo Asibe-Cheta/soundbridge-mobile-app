@@ -21,6 +21,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useStripe } from '@stripe/stripe-react-native';
 import { createTip, confirmTip } from '../services/TipService';
+import { giftBundleService } from '../services/GiftBundleService';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 // Fixed heights for non-scrollable zones
@@ -51,6 +52,8 @@ export default function TipModal({ visible, creatorId, creatorName, onClose, onT
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [loading, setLoading] = useState(false);
   const [processingMessage, setProcessingMessage] = useState<string | null>(null);
+  const [giftBundleBalance, setGiftBundleBalance] = useState(0);
+  const [payFromGiftBundle, setPayFromGiftBundle] = useState(false);
 
   const presetAmounts = [1, 3, 5, 10, 20];
   const isDark = theme.isDark;
@@ -73,14 +76,16 @@ export default function TipModal({ visible, creatorId, creatorName, onClose, onT
         setSelectedAmount(initialAmount);
         setCustomAmount('');
       }
+      giftBundleService.getBalance(session).then(b => setGiftBundleBalance(b.balance));
     } else {
       setSelectedAmount(5);
       setCustomAmount('');
       setTipMessage('');
       setIsAnonymous(false);
       setProcessingMessage(null);
+      setPayFromGiftBundle(false);
     }
-  }, [visible, initialAmount]);
+  }, [visible, initialAmount, session]);
 
   const getFinalAmount = () => {
     const amountInput = customAmount ? parseFloat(customAmount) : selectedAmount;
@@ -121,7 +126,7 @@ export default function TipModal({ visible, creatorId, creatorName, onClose, onT
     setProcessingMessage('Processing payment...');
 
     try {
-      if (!stripeConfigured) {
+      if (!stripeConfigured && !payFromGiftBundle) {
         const amountInCents = Math.round(amount * 100);
         Alert.alert(
           'Tip Sent (Simulation Mode)',
@@ -139,11 +144,28 @@ export default function TipModal({ visible, creatorId, creatorName, onClose, onT
         message: tipMessage.trim() || undefined,
         isAnonymous,
         userTier,
-        paymentMethod: 'card',
+        paymentMethod: payFromGiftBundle ? 'gift_bundle' : 'card',
         trackId,
       });
 
-      if (!createResponse?.success || !createResponse.clientSecret) {
+      if (!createResponse?.success) {
+        throw new Error(createResponse?.message || 'Unable to start tip payment.');
+      }
+
+      // Gift Bundle tips are already complete server-side — no Stripe PaymentIntent
+      // was created, skip initPaymentSheet/presentPaymentSheet/confirmTip entirely.
+      if (createResponse.paidFromGiftBundle) {
+        const amountInCents = Math.round(amount * 100);
+        const creatorEarnings = typeof createResponse.creatorEarnings === 'number' ? createResponse.creatorEarnings : getCreatorEarnings(amount);
+        Alert.alert(
+          'Tip Sent! 🎉',
+          `$${amount.toFixed(2)} to ${creatorName} from your Gift Bundle. Creator receives $${creatorEarnings.toFixed(2)}.`,
+          [{ text: 'OK', onPress: () => { onTipSuccess(amountInCents, tipMessage); onClose(); } }]
+        );
+        return;
+      }
+
+      if (!createResponse.clientSecret) {
         throw new Error(createResponse?.message || 'Unable to start tip payment.');
       }
 
@@ -155,7 +177,7 @@ export default function TipModal({ visible, creatorId, creatorName, onClose, onT
           ? { customerId: createResponse.customer_id, customerEphemeralKeySecret: createResponse.ephemeral_key_secret }
           : {}),
         defaultBillingDetails: {
-          name: user?.display_name || user?.email || undefined,
+          name: userProfile?.display_name || user?.email || undefined,
           email: user?.email || undefined,
         },
       });
@@ -294,6 +316,31 @@ export default function TipModal({ visible, creatorId, creatorName, onClose, onT
                 keyboardType="numeric"
               />
 
+              {/* Pay from Gift Bundle — only shown if the fan has a balance to spend */}
+              {giftBundleBalance > 0 && (
+                <TouchableOpacity
+                  style={[
+                    styles.giftBundleToggle,
+                    {
+                      backgroundColor: payFromGiftBundle ? theme.colors.primary + '18' : theme.colors.surface,
+                      borderColor: payFromGiftBundle ? theme.colors.primary : theme.colors.border,
+                    },
+                  ]}
+                  onPress={() => setPayFromGiftBundle(!payFromGiftBundle)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={payFromGiftBundle ? 'checkbox' : 'checkbox-outline'}
+                    size={20}
+                    color={theme.colors.primary}
+                  />
+                  <Ionicons name="gift-outline" size={16} color={theme.colors.primary} />
+                  <Text style={[styles.giftBundleToggleText, { color: theme.colors.text }]}>
+                    Pay from Gift Bundle (${giftBundleBalance.toFixed(2)} available)
+                  </Text>
+                </TouchableOpacity>
+              )}
+
               {/* Message */}
               <TextInput
                 style={[
@@ -353,7 +400,7 @@ export default function TipModal({ visible, creatorId, creatorName, onClose, onT
                   },
                 ]}
                 onPress={handleSendTip}
-                disabled={finalAmount <= 0 || loading || !session}
+                disabled={finalAmount <= 0 || loading || !session || (payFromGiftBundle && finalAmount > giftBundleBalance)}
                 activeOpacity={0.85}
               >
                 {loading ? (
@@ -362,7 +409,9 @@ export default function TipModal({ visible, creatorId, creatorName, onClose, onT
                   <>
                     <Ionicons name="heart" size={18} color="#FFFFFF" />
                     <Text style={styles.sendButtonText}>
-                      Send ${finalAmount.toFixed(2)} Tip
+                      {payFromGiftBundle && finalAmount > giftBundleBalance
+                        ? 'Insufficient Gift Bundle balance'
+                        : `Send $${finalAmount.toFixed(2)} Tip`}
                     </Text>
                   </>
                 )}
@@ -440,6 +489,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
+  },
+  giftBundleToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  giftBundleToggleText: {
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
   },
   messageInput: {
     borderWidth: 1,

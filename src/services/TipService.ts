@@ -1,7 +1,7 @@
 import { Session } from '@supabase/supabase-js';
 import { apiFetch } from '../lib/apiClient';
 
-export type TipPaymentMethod = 'card' | 'apple_pay' | 'google_pay';
+export type TipPaymentMethod = 'card' | 'apple_pay' | 'google_pay' | 'gift_bundle';
 
 export interface CreateTipRequest {
   creatorId: string;
@@ -28,6 +28,11 @@ export interface CreateTipResponse {
   message?: string;
   customer_id?: string;
   ephemeral_key_secret?: string;
+  /** When paymentMethod was 'gift_bundle': the tip is already complete, backend never
+   * created a Stripe PaymentIntent, so paymentIntentId/clientSecret are empty — skip
+   * initPaymentSheet/presentPaymentSheet/confirmTip entirely and treat this as final. */
+  paidFromGiftBundle?: boolean;
+  newGiftBundleBalance?: number;
 }
 
 export interface ConfirmTipResponse {

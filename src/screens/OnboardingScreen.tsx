@@ -31,6 +31,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { useNetwork } from '../hooks/useNetwork';
 import CountrySelector from '../components/CountrySelector';
+import GiftBundleModal from '../components/GiftBundleModal';
 import { supabase } from '../lib/supabase';
 import { config } from '../config/environment';
 import { deepLinkingService } from '../services/DeepLinkingService';
@@ -132,7 +133,8 @@ export default function OnboardingScreen() {
   const [selectedTier, setSelectedTier] = useState<'free' | 'pro' | null>(null);
   const [transitionDirection, setTransitionDirection] = useState<'forward' | 'back'>('forward');
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
-  
+  const [showGiftBundleModal, setShowGiftBundleModal] = useState(false);
+
   // Path routing helpers
   const getPathFirstStep = (type: UserType): OnboardingStep | null => {
     switch (type) {
@@ -6120,8 +6122,40 @@ export default function OnboardingScreen() {
               </Text>
             </LinearGradient>
           </TouchableOpacity>
+
+          {/* Gift Bundle — optional, non-blocking secondary CTA (GIFT_BUNDLE.MD, Item 36) */}
+          <TouchableOpacity
+            style={{
+              marginTop: 16,
+              borderRadius: 16,
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.14)',
+              backgroundColor: 'rgba(255,255,255,0.05)',
+              padding: 16,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 12,
+            }}
+            onPress={() => setShowGiftBundleModal(true)}
+            activeOpacity={0.85}
+          >
+            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(236,72,153,0.18)', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="gift-outline" size={20} color="#EC4899" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600', marginBottom: 2 }}>
+                Get a head start with a Gift Bundle
+              </Text>
+              <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, lineHeight: 17 }}>
+                Credit an amount of your choice now, spend it on tips whenever you find an artist worth supporting.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.35)" />
+          </TouchableOpacity>
         </Animated.View>
       </ScrollView>
+
+      <GiftBundleModal visible={showGiftBundleModal} onClose={() => setShowGiftBundleModal(false)} />
     </View>
   );
 
