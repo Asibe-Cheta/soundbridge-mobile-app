@@ -58,6 +58,7 @@ import ReportContentModal from '../modals/ReportContentModal';
 import { blockService } from '../services/api/blockService';
 import LiveBadge from '../components/LiveBadge';
 import { liveStreamService } from '../services/liveStreamService';
+import { soundDivisionService, TrackSoundTags } from '../services/SoundDivisionService';
 import { deepLinkingService } from '../services/DeepLinkingService';
 import { followService } from '../services/FollowService';
 import { communityService } from '../services/CommunityService';
@@ -176,6 +177,7 @@ export default function CreatorProfileScreen() {
 
   const [creator, setCreator] = useState<Creator | null>(initialCreator || null);
   const [tracks, setTracks] = useState<Track[]>([]);
+  const [trackSoundTags, setTrackSoundTags] = useState<Map<string, TrackSoundTags>>(new Map());
   const [loading, setLoading] = useState(!initialCreator);
   const [refreshing, setRefreshing] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -609,6 +611,10 @@ export default function CreatorProfileScreen() {
       setTracks(data || []);
       console.log('✅ Creator tracks loaded:', data?.length || 0);
       console.log('🎵 Track details:', data?.map(t => ({ id: t.id, title: t.title, creator_id: creatorId })) || []);
+
+      // Additive display only — Sound Division tags (NSO_STAGE1.MD), never blocks
+      // or alters the track list itself if it fails.
+      soundDivisionService.getForCreator(creatorId).then(setTrackSoundTags);
     } catch (error) {
       console.error('❌ Error loading creator tracks:', error);
     }
@@ -1778,6 +1784,13 @@ export default function CreatorProfileScreen() {
                   <Text style={[styles.trackTitle, { color: theme.colors.text }]} numberOfLines={1}>
                     {track.title}
                   </Text>
+                  {trackSoundTags.get(track.id) && (
+                    <View style={styles.soundDivisionBadge}>
+                      <Text style={styles.soundDivisionBadgeText} numberOfLines={1}>
+                        {trackSoundTags.get(track.id)!.movementName} · {trackSoundTags.get(track.id)!.divisionNames.join(', ')}
+                      </Text>
+                    </View>
+                  )}
                 <View style={styles.trackStats}>
                     <Ionicons name="play" size={12} color={theme.colors.textSecondary} />
                     <Text style={[styles.trackStatText, { color: theme.colors.textSecondary }]}>
@@ -3264,6 +3277,21 @@ const styles = StyleSheet.create({
   trackStats: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  soundDivisionBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(168,85,247,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(168,85,247,0.3)',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginBottom: 4,
+  },
+  soundDivisionBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#a855f7',
   },
   trackStatText: {
     fontFamily: Typography.body.fontFamily,
