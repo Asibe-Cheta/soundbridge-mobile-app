@@ -43,6 +43,10 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'ai';
   text: string;
+  /** Confidence signal for 'ai' messages, same concept as cards' dataBacked —
+   * null when the model's reply didn't include the expected tag (fails silent,
+   * no badge shown, rather than guessing). Not applicable to 'user' messages. */
+  dataBacked?: boolean | null;
 }
 
 interface InsightCardData {
@@ -178,12 +182,45 @@ const TIER_LIMITS = {
   unlimited: { analyses: 20, chats: 15, freeDemo: 0 },
 };
 
-const PROMPT_CHIPS = [
-  'Why this city?',
-  'How do I grow faster?',
-  'What should I post today?',
-  'Explain my earnings',
-];
+/** Chips reflect the creator's actual state instead of always showing the same
+ * four — a new creator with no uploads shouldn't see "Explain my earnings", and
+ * a card the Advisor itself flagged as ungrounded (dataBacked: false) is a more
+ * useful nudge than a generic question. Falls back to sensible defaults when
+ * context isn't available yet (e.g. right after loading a past analysis, which
+ * only restores the cards, not the full CreatorContext). */
+function getPromptChips(ctx: CreatorContext | null, cards: InsightCardData[]): string[] {
+  const chips: string[] = [];
+  const cardById = (id: string) => cards.find(c => c.id === id);
+
+  if (ctx && ctx.totalTracks === 0) {
+    chips.push('What should I upload first?');
+    chips.push('How do I set up my profile right?');
+  } else {
+    const locationCard = cardById('location');
+    chips.push(locationCard?.dataBacked === false ? 'How can people near me find me?' : 'Why this city?');
+
+    if (ctx && ctx.totalEarned === 0) {
+      chips.push('How do I start earning?');
+    } else {
+      chips.push('Explain my earnings');
+    }
+  }
+
+  if (ctx && !ctx.venuePreferencesSet) {
+    chips.push('How do I find the right venue?');
+  } else if (ctx && ctx.matchingVenues.length > 0) {
+    chips.push('Which venue fits me best?');
+  }
+
+  if (ctx && ctx.upcomingEventConditions.length > 0) {
+    chips.push('What should I know about my upcoming event?');
+  }
+
+  chips.push('How do I grow faster?');
+  chips.push('What should I post today?');
+
+  return Array.from(new Set(chips)).slice(0, 4);
+}
 
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
@@ -733,7 +770,7 @@ async function callGeminiChat(
   history: ChatMessage[],
   newMessage: string,
   analysisCards: InsightCardData[]
-): Promise<string> {
+): Promise<{ reply: string; dataBacked: boolean | null }> {
   if (!GEMINI_API_KEY) throw new Error('Gemini API key not configured.');
 
   const chatSymbol = ctx.earningsCurrency === 'GBP' ? '£' : ctx.earningsCurrency === 'EUR' ? '€' : '$';
@@ -763,6 +800,7 @@ RULES — non-negotiable:
 17. Never suggest paid advertising (Instagram ads, boosted posts, etc.) as a default or primary suggestion — only ever as an explicit, clearly-labelled last resort. Default guidance always routes through SoundBridge's own free mechanics first: uploads, correct profile setup, Tip Room, event promotion.
 18. If platform size/growth comes up, speak about it confidently and forward-looking, e.g. "SoundBridge is growing steadily, and that growth directly increases your own reach over time" — never apologetic, never "please be patient." No real growth figures are provided here, so never invent a specific number, keep it qualitative.
 19. If asked about an upcoming event, reference "Upcoming event conditions" below where relevant — weather/road/rail — as a suggestion only ("worth noting there's rain forecast for your event date"), never a directive ("you should reschedule"). If it's empty or says "not available", say so plainly rather than guessing. If asked how this is obtained, describe it only as "general public information about weather, timing, and location trends" — never name a specific weather, traffic, or rail provider.
+20. Data transparency tag — non-negotiable, every single reply: your response must start with exactly one of these two tags alone on the first line, nothing else on that line — [[DATA_BACKED]] if this specific reply is genuinely grounded in real data from "Creator data" below, or [[GENERAL_GUIDANCE]] if it's general best-practice advice because the relevant data doesn't exist or isn't enough to personalise (same standard as the cards' dataBacked field). Leave one blank line, then write your actual reply starting fresh — never mention the tag itself inside your reply text.
 
 Creator data:
 Profile photo: ${ctx.hasAvatar ? 'present' : 'missing'}
@@ -809,7 +847,13 @@ Matching venues: ${ctx.matchingVenues.length > 0 ? ctx.matchingVenues.map(v => `
   }
 
   const json = await res.json();
-  return json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? 'Sorry, I could not generate a response right now.';
+  const raw: string = json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? 'Sorry, I could not generate a response right now.';
+
+  const tagMatch = raw.match(/^\[\[(DATA_BACKED|GENERAL_GUIDANCE)\]\]\s*\n*/);
+  const dataBacked = tagMatch ? tagMatch[1] === 'DATA_BACKED' : null;
+  const reply = tagMatch ? raw.slice(tagMatch[0].length).trim() : raw;
+
+  return { reply, dataBacked };
 }
 
 // ─── Typing indicator ─────────────────────────────────────────────────────────
@@ -1230,8 +1274,8 @@ export default function AICareerAdvisorScreen() {
       const ctx = creatorCtxRef.current ?? await fetchCreatorContext(user.id, session!);
       creatorCtxRef.current = ctx;
 
-      const reply = await callGeminiChat(ctx, chatMessages, text.trim(), analysisCardsRef.current);
-      const newAiMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'ai', text: reply };
+      const { reply, dataBacked } = await callGeminiChat(ctx, chatMessages, text.trim(), analysisCardsRef.current);
+      const newAiMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'ai', text: reply, dataBacked };
       const fullHistory = [...updatedHistory, newAiMsg];
       setIsTyping(false);
       setChatMessages(fullHistory);
@@ -1797,6 +1841,21 @@ export default function AICareerAdvisorScreen() {
                         <View key={msg.id} style={styles.chatAiRow}>
                           <AiBadge size={30} radius={9} fontSize={10} />
                           <View style={styles.chatBubbleAi}>
+                            {msg.dataBacked != null && (
+                              <View
+                                style={[
+                                  styles.confidenceBadge,
+                                  { alignSelf: 'flex-start', marginBottom: 6 },
+                                  msg.dataBacked
+                                    ? { backgroundColor: 'rgba(16,185,129,0.14)', borderColor: 'rgba(16,185,129,0.3)' }
+                                    : { backgroundColor: 'rgba(148,163,184,0.14)', borderColor: 'rgba(148,163,184,0.3)' },
+                                ]}
+                              >
+                                <Text style={[styles.confidenceBadgeText, { color: msg.dataBacked ? '#10b981' : '#94a3b8' }]}>
+                                  {msg.dataBacked ? 'Based on your data' : 'General guidance'}
+                                </Text>
+                              </View>
+                            )}
                             <Text style={styles.chatBubbleText}>{msg.text}</Text>
                           </View>
                         </View>
@@ -1822,7 +1881,7 @@ export default function AICareerAdvisorScreen() {
 
                   {/* Prompt chips */}
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chipsContent}>
-                    {PROMPT_CHIPS.map(chip => (
+                    {getPromptChips(creatorCtxRef.current, dynamicCards).map(chip => (
                       <TouchableOpacity
                         key={chip}
                         style={styles.chip}
