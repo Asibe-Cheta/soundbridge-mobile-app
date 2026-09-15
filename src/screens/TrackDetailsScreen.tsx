@@ -82,6 +82,12 @@ export default function TrackDetailsScreen() {
   const { play, currentTrack, isPlaying, pause, resume, updateCurrentTrack } = useAudioPlayer();
   const { showToast } = useToast();
 
+  // Matches DiscoverScreen's dark-mode gradient exactly, for UI consistency across screens.
+  const darkGradientColors: [string, string, string] = ['#130722', '#240c3e', '#2e1065'];
+  const gradientColors = theme.isDark
+    ? darkGradientColors
+    : [theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end];
+
   const { trackId, track: initialTrack } = route.params as { trackId: string; track?: Track };
 
   const [track, setTrack] = useState<Track | null>(initialTrack || null);
@@ -489,7 +495,7 @@ export default function TrackDetailsScreen() {
     return (
       <View style={styles.container}>
         <LinearGradient
-          colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+          colors={gradientColors as any}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           locations={[0, 0.5, 1]}
@@ -510,7 +516,7 @@ export default function TrackDetailsScreen() {
     return (
       <View style={styles.container}>
         <LinearGradient
-          colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+          colors={gradientColors as any}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           locations={[0, 0.5, 1]}
@@ -550,13 +556,16 @@ export default function TrackDetailsScreen() {
         <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
         
         {/* Header */}
-        <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+        <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }, theme.isDark && styles.headerDark]}>
         <BackButton style={styles.headerButton} onPress={() => navigation.goBack()} />
-        <Text style={[styles.headerTitle, { color: theme.colors.text }]} numberOfLines={1}>
-          {track.title}
-        </Text>
+        {!theme.isDark && (
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]} numberOfLines={1}>
+            {track.title}
+          </Text>
+        )}
+        {theme.isDark && <View style={{ flex: 1 }} />}
         <TouchableOpacity style={styles.headerButton} onPress={handleShare}>
-          <Ionicons name="share-outline" size={24} color={theme.colors.text} />
+          <Ionicons name="share-outline" size={24} color={theme.isDark ? 'rgba(255,255,255,0.7)' : theme.colors.text} />
         </TouchableOpacity>
       </View>
 
@@ -581,8 +590,8 @@ export default function TrackDetailsScreen() {
 
         <View style={styles.contentContainer}>
           {/* Track Info */}
-          <View style={styles.trackInfo}>
-            <Text style={[styles.trackTitle, { color: theme.colors.text }]}>{track.title}</Text>
+          <View style={[styles.trackInfo, theme.isDark && styles.trackInfoDark]}>
+            <Text style={[styles.trackTitle, { color: theme.colors.text }, theme.isDark && styles.trackTitleDark]}>{track.title}</Text>
             
             {track.creator && (
               <TouchableOpacity style={styles.creatorRow} onPress={handleCreatorPress}>
@@ -713,7 +722,7 @@ export default function TrackDetailsScreen() {
           {/* Description */}
           {track.description && (
             <View style={styles.descriptionSection}>
-              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Description</Text>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text }, theme.isDark && styles.sectionTitleDark]}>Description</Text>
               <Text style={[styles.description, { color: theme.colors.textSecondary }]}>
                 {track.description}
               </Text>
@@ -730,10 +739,10 @@ export default function TrackDetailsScreen() {
 
           {/* ISRC Information (Owner Only) */}
           {user && track.creator_id === user.id && track.isrc_code && (
-            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, theme.isDark && styles.moderationSectionDark]}>
               <View style={styles.moderationHeader}>
                 <Ionicons name="barcode-outline" size={20} color={theme.colors.primary} />
-                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }]}>ISRC</Text>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }, theme.isDark && styles.sectionTitleDark]}>ISRC</Text>
               </View>
 
               <TouchableOpacity
@@ -775,7 +784,7 @@ export default function TrackDetailsScreen() {
               activeOpacity={0.85}
             >
               <View style={styles.distributionNudgeLeft}>
-                <Text style={[styles.distributionNudgeTitle, { color: theme.colors.text }]}>
+                <Text style={[styles.distributionNudgeTitle, { color: theme.colors.text }, theme.isDark && styles.distributionNudgeTitleDark]}>
                   Get this track on Spotify and major platforms.
                 </Text>
                 <Text style={[styles.distributionNudgeSub, { color: theme.colors.textSecondary }]}>
@@ -791,10 +800,10 @@ export default function TrackDetailsScreen() {
 
           {/* Sound Division self-service tagging (owner + recognised movement artist only) */}
           {user && track.creator_id === user.id && recognisedMovement && (
-            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, theme.isDark && styles.moderationSectionDark]}>
               <View style={styles.moderationHeader}>
                 <Ionicons name="pricetags-outline" size={20} color={theme.colors.primary} />
-                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }]}>Sound Division</Text>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }, theme.isDark && styles.sectionTitleDark]}>Sound Division</Text>
               </View>
               <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary, marginBottom: 10 }]}>
                 {recognisedMovement.movementName} — separate from genre.
@@ -824,10 +833,10 @@ export default function TrackDetailsScreen() {
 
           {/* Moderation Information (Owner Only) */}
           {user && track.creator_id === user.id && track.moderation_status && (
-            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, theme.isDark && styles.moderationSectionDark]}>
               <View style={styles.moderationHeader}>
                 <Ionicons name="shield-checkmark" size={20} color={theme.colors.primary} />
-                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }]}>Content Moderation</Text>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }, theme.isDark && styles.sectionTitleDark]}>Content Moderation</Text>
               </View>
 
               {/* Status Badge */}
@@ -960,10 +969,10 @@ export default function TrackDetailsScreen() {
 
           {/* Pricing Section — Creator Only */}
           {user && track.creator_id === user.id && (
-            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, theme.isDark && styles.moderationSectionDark]}>
               <View style={styles.moderationHeader}>
                 <Ionicons name="pricetag-outline" size={20} color={theme.colors.primary} />
-                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }]}>Sell This Track</Text>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }, theme.isDark && styles.sectionTitleDark]}>Sell This Track</Text>
               </View>
               {track.is_paid ? (
                 <View>
@@ -1003,12 +1012,12 @@ export default function TrackDetailsScreen() {
 
           {/* Live Interest Setting — Creator Only, music tracks */}
           {user && track.creator_id === user.id && !track.is_paid && (
-            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, theme.isDark && styles.moderationSectionDark]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <View style={{ flex: 1, marginRight: 12 }}>
                   <View style={[styles.moderationHeader, { marginBottom: 4 }]}>
                     <Ionicons name="radio-outline" size={18} color={theme.colors.primary} />
-                    <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }]}>Live Interest</Text>
+                    <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }, theme.isDark && styles.sectionTitleDark]}>Live Interest</Text>
                   </View>
                   <Text style={[styles.moderationInfoText, { color: theme.colors.textSecondary, marginBottom: 0 }]}>
                     {track.live_interest_enabled
@@ -1189,6 +1198,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
   },
+  headerDark: {
+    backgroundColor: 'transparent',
+    borderBottomWidth: 0,
+  },
   headerButton: {
     padding: 8,
   },
@@ -1226,11 +1239,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
   },
+  trackInfoDark: {
+    alignItems: 'flex-start',
+  },
   trackTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 12,
+  },
+  trackTitleDark: {
+    fontSize: 32,
+    fontWeight: '300',
+    textAlign: 'left',
+    letterSpacing: -0.8,
+    lineHeight: 38,
+    marginBottom: 8,
   },
   creatorRow: {
     flexDirection: 'row',
@@ -1327,6 +1351,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 12,
   },
+  sectionTitleDark: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.8,
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.35)',
+  },
   description: {
     fontSize: 14,
     lineHeight: 22,
@@ -1349,6 +1380,10 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     borderWidth: 1,
+  },
+  moderationSectionDark: {
+    borderRadius: 20,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   moderationHeader: {
     flexDirection: 'row',
@@ -1503,6 +1538,7 @@ const styles = StyleSheet.create({
   },
   distributionNudgeLeft: { flex: 1, gap: 3 },
   distributionNudgeTitle: { fontSize: 14, fontWeight: '700' },
+  distributionNudgeTitleDark: { color: 'rgba(255,255,255,0.92)' },
   distributionNudgeSub: { fontSize: 12, lineHeight: 18 },
   distributionNudgeBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
