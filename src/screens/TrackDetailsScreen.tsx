@@ -31,6 +31,7 @@ import { contentPurchaseService } from '../services/ContentPurchaseService';
 import { deepLinkingService } from '../services/DeepLinkingService';
 import { soundDivisionService, RecognisedMovement } from '../services/SoundDivisionService';
 import SoundDivisionPickerModal from '../components/SoundDivisionPickerModal';
+import { useToast } from '../contexts/ToastContext';
 
 interface Track {
   id: string;
@@ -79,6 +80,7 @@ export default function TrackDetailsScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
   const { play, currentTrack, isPlaying, pause, resume, updateCurrentTrack } = useAudioPlayer();
+  const { showToast } = useToast();
 
   const { trackId, track: initialTrack } = route.params as { trackId: string; track?: Track };
 
@@ -239,6 +241,7 @@ export default function TrackDetailsScreen() {
     const ok = await soundDivisionService.setDivisionsForTrack(track.id, divisionIds);
     if (ok) {
       setTrackDivisionIds(divisionIds);
+      showToast('Sound Divisions updated', 'success', 2500);
     } else {
       Alert.alert('Error', 'Failed to update Sound Divisions. Please try again.');
     }
