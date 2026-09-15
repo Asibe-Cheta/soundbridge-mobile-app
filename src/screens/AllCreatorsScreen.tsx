@@ -102,20 +102,33 @@ export default function AllCreatorsScreen() {
       
       setError(null);
       console.log('🔄 Loading all creators from Supabase...');
-      
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, username, display_name, bio, avatar_url, location, genre, role, institution_badge, created_at')
-        .eq('role', 'creator')
-        .order('created_at', { ascending: false });
-      
-      if (error) {
-        console.error('❌ Error loading creators:', error);
-        throw error;
+
+      // Supabase/PostgREST caps a single request at 1000 rows regardless of how many
+      // rows actually match — paginate with .range() until a page comes back short,
+      // otherwise the header count silently freezes at 1000 forever.
+      const PAGE_SIZE = 1000;
+      let allCreators: any[] = [];
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, username, display_name, bio, avatar_url, location, genre, role, institution_badge, created_at')
+          .eq('role', 'creator')
+          .order('created_at', { ascending: false })
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (error) {
+          console.error('❌ Error loading creators:', error);
+          throw error;
+        }
+
+        allCreators = allCreators.concat(data || []);
+        if (!data || data.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
       }
-      
-      console.log('✅ Creators loaded:', data?.length || 0);
-      setCreators(data || []);
+
+      console.log('✅ Creators loaded:', allCreators.length);
+      setCreators(allCreators);
       
     } catch (error: any) {
       console.error('❌ Error loading creators:', error);
