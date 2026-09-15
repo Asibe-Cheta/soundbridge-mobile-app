@@ -1786,6 +1786,7 @@ export default function CreatorProfileScreen() {
                   </Text>
                   {trackSoundTags.get(track.id) && (
                     <View style={styles.soundDivisionBadge}>
+                      <Image source={require('../../assets/images/NSO_GOLD.png')} style={styles.soundDivisionBadgeIcon} resizeMode="contain" />
                       <Text style={styles.soundDivisionBadgeText} numberOfLines={1}>
                         {trackSoundTags.get(track.id)!.movementName} · {trackSoundTags.get(track.id)!.divisionNames.join(', ')}
                       </Text>
@@ -3279,6 +3280,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   soundDivisionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     alignSelf: 'flex-start',
     backgroundColor: 'rgba(168,85,247,0.14)',
     borderWidth: 1,
@@ -3287,6 +3290,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     marginBottom: 4,
+  },
+  soundDivisionBadgeIcon: {
+    width: 12,
+    height: 12,
+    marginRight: 4,
   },
   soundDivisionBadgeText: {
     fontSize: 10,
