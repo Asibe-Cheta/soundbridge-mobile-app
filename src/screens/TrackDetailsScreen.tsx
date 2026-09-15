@@ -29,6 +29,8 @@ import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { supabase } from '../lib/supabase';
 import { contentPurchaseService } from '../services/ContentPurchaseService';
 import { deepLinkingService } from '../services/DeepLinkingService';
+import { soundDivisionService, RecognisedMovement } from '../services/SoundDivisionService';
+import SoundDivisionPickerModal from '../components/SoundDivisionPickerModal';
 
 interface Track {
   id: string;
@@ -94,11 +96,26 @@ export default function TrackDetailsScreen() {
   const [pricingPrice, setPricingPrice] = useState('');
   const [pricingCurrency, setPricingCurrency] = useState<'USD' | 'GBP' | 'EUR'>('USD');
   const [savingPricing, setSavingPricing] = useState(false);
+  const [recognisedMovement, setRecognisedMovement] = useState<RecognisedMovement | null>(null);
+  const [trackDivisionIds, setTrackDivisionIds] = useState<string[]>([]);
+  const [showSoundDivisionModal, setShowSoundDivisionModal] = useState(false);
 
   useEffect(() => {
     loadTrackDetails();
     checkLikeStatus();
   }, [trackId]);
+
+  // Self-service Sound Division tagging (NSO_1B.MD) — gated to owners recognised
+  // as belonging to a movement. Most creators aren't, so this resolves to null
+  // and the section below never renders.
+  useEffect(() => {
+    if (!user || !track || track.creator_id !== user.id) {
+      setRecognisedMovement(null);
+      return;
+    }
+    soundDivisionService.getRecognisedMovementForArtist(user.id).then(setRecognisedMovement);
+    soundDivisionService.getDivisionIdsForTrack(track.id).then(setTrackDivisionIds);
+  }, [user?.id, track?.id, track?.creator_id]);
 
   useEffect(() => {
     checkContentOwnership();
@@ -215,6 +232,17 @@ export default function TrackDetailsScreen() {
     } finally {
       setSavingPricing(false);
     }
+  };
+
+  const handleSaveSoundDivisions = async (divisionIds: string[]): Promise<boolean> => {
+    if (!track) return false;
+    const ok = await soundDivisionService.setDivisionsForTrack(track.id, divisionIds);
+    if (ok) {
+      setTrackDivisionIds(divisionIds);
+    } else {
+      Alert.alert('Error', 'Failed to update Sound Divisions. Please try again.');
+    }
+    return ok;
   };
 
   const checkLikeStatus = async () => {
@@ -758,6 +786,39 @@ export default function TrackDetailsScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Sound Division self-service tagging (owner + recognised movement artist only) */}
+          {user && track.creator_id === user.id && recognisedMovement && (
+            <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <View style={styles.moderationHeader}>
+                <Ionicons name="pricetags-outline" size={20} color={theme.colors.primary} />
+                <Text style={[styles.sectionTitle, { color: theme.colors.text, marginLeft: 8 }]}>Sound Division</Text>
+              </View>
+              <Text style={[styles.moderationLabel, { color: theme.colors.textSecondary, marginBottom: 10 }]}>
+                {recognisedMovement.movementName} — separate from genre.
+              </Text>
+              {trackDivisionIds.length > 0 ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                  {recognisedMovement.divisions
+                    .filter((d) => trackDivisionIds.includes(d.id))
+                    .map((d) => (
+                      <View key={d.id} style={[styles.genreTag, { backgroundColor: theme.colors.primary + '20' }]}>
+                        <Text style={[styles.genreText, { color: theme.colors.primary }]}>{d.name}</Text>
+                      </View>
+                    ))}
+                </View>
+              ) : null}
+              <TouchableOpacity
+                style={[styles.distributionNudgeBtn, { backgroundColor: theme.colors.primary, alignSelf: 'flex-start' }]}
+                onPress={() => setShowSoundDivisionModal(true)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.distributionNudgeBtnText}>
+                  {trackDivisionIds.length > 0 ? 'Edit Sound Divisions' : 'Tag Sound Divisions'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* Moderation Information (Owner Only) */}
           {user && track.creator_id === user.id && track.moderation_status && (
             <View style={[styles.moderationSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
@@ -1060,6 +1121,18 @@ export default function TrackDetailsScreen() {
           price={track.price || 0}
           currency={track.currency || 'USD'}
           coverImageUrl={track.cover_art_url}
+        />
+      )}
+
+      {/* Sound Division Picker */}
+      {recognisedMovement && (
+        <SoundDivisionPickerModal
+          visible={showSoundDivisionModal}
+          movementName={recognisedMovement.movementName}
+          divisions={recognisedMovement.divisions}
+          initialSelectedIds={trackDivisionIds}
+          onSave={handleSaveSoundDivisions}
+          onClose={() => setShowSoundDivisionModal(false)}
         />
       )}
       </SafeAreaView>

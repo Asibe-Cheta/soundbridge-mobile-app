@@ -11,7 +11,86 @@ export interface TrackSoundTags {
   divisionNames: string[];
 }
 
+export interface RecognisedMovement {
+  movementId: string;
+  movementName: string;
+  divisions: { id: string; slug: string; name: string }[];
+}
+
 class SoundDivisionService {
+  /**
+   * NSO_1B.MD access gating: is this artist the founding/recognised artist of
+   * a movement with divisions defined? Returns null for the overwhelming
+   * majority of creators, who aren't part of any movement — the self-service
+   * tagging UI should render nothing in that case.
+   */
+  async getRecognisedMovementForArtist(artistId: string): Promise<RecognisedMovement | null> {
+    try {
+      const { data: movement, error: movementError } = await supabase
+        .from('sound_movements')
+        .select('id, name')
+        .eq('founding_artist_id', artistId)
+        .maybeSingle();
+
+      if (movementError || !movement) return null;
+
+      const { data: divisions, error: divisionsError } = await supabase
+        .from('sound_divisions')
+        .select('id, slug, name')
+        .eq('movement_id', movement.id)
+        .order('display_order', { ascending: true });
+
+      if (divisionsError || !divisions || divisions.length === 0) return null;
+
+      return { movementId: movement.id, movementName: movement.name, divisions };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Currently-assigned division ids for one track, for pre-checking the picker. */
+  async getDivisionIdsForTrack(trackId: string): Promise<string[]> {
+    try {
+      const { data, error } = await supabase
+        .from('track_sound_divisions')
+        .select('division_id')
+        .eq('track_id', trackId);
+      if (error || !data) return [];
+      return data.map((row: any) => row.division_id);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Replaces a track's division tags with exactly the given set. */
+  async setDivisionsForTrack(trackId: string, divisionIds: string[]): Promise<boolean> {
+    try {
+      const current = await this.getDivisionIdsForTrack(trackId);
+      const toAdd = divisionIds.filter((id) => !current.includes(id));
+      const toRemove = current.filter((id) => !divisionIds.includes(id));
+
+      if (toAdd.length > 0) {
+        const { error } = await supabase
+          .from('track_sound_divisions')
+          .insert(toAdd.map((division_id) => ({ track_id: trackId, division_id })));
+        if (error) return false;
+      }
+
+      if (toRemove.length > 0) {
+        const { error } = await supabase
+          .from('track_sound_divisions')
+          .delete()
+          .eq('track_id', trackId)
+          .in('division_id', toRemove);
+        if (error) return false;
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** One query for a creator's whole track list, not one per track. */
   async getForCreator(creatorId: string): Promise<Map<string, TrackSoundTags>> {
     const map = new Map<string, TrackSoundTags>();
