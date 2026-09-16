@@ -1036,7 +1036,10 @@ export default function AICareerAdvisorScreen() {
       setUsageData(usage);
       setUsageLoading(false);
 
-      // Restore last conversation
+      // Restore last conversation — and, if it exists, the analysis it belongs to,
+      // so returning to the screen lands back on the results+chat view instead of
+      // silently holding restored messages that stay invisible until a new scan or
+      // a manual Past Analyses pick (chat only renders inside phase 'results').
       try {
         const { data } = await supabase
           .from('ai_adviser_conversations')
@@ -1048,6 +1051,17 @@ export default function AICareerAdvisorScreen() {
         if (data?.messages?.length) {
           setConversationId(data.id);
           setChatMessages(data.messages as ChatMessage[]);
+
+          const { data: lastAnalysis } = await supabase
+            .from('ai_adviser_analyses')
+            .select('id, analysis_json')
+            .eq('creator_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (lastAnalysis && applySavedAnalysis(lastAnalysis.id, lastAnalysis.analysis_json)) {
+            setPhase('results');
+          }
         }
       } catch {}
     })();
@@ -1136,6 +1150,23 @@ export default function AICareerAdvisorScreen() {
     setAnalysisHistoryLoading(false);
   };
 
+  // Applies a saved analysis row (cards + intro) into screen state. Returns true if
+  // the row had usable cards, so callers can decide whether it's safe to also flip
+  // phase to 'results' (never do that with no real cards to show).
+  const applySavedAnalysis = (id: string, analysisJson: any): boolean => {
+    const savedCards = analysisJson?.cards as InsightCardData[] | undefined;
+    if (!savedCards?.length) return false;
+    const merged = CARD_CONFIGS.map(cfg => {
+      const card = savedCards.find(c => c.id === cfg.id);
+      return card ? { ...cfg, ...card } : { ...cfg, title: 'Analysis unavailable', stat: '—', statUnit: '', statLabel: '', detail: '', dataBasis: '', dataBacked: false };
+    });
+    setDynamicCards(merged);
+    analysisCardsRef.current = merged;
+    if (analysisJson?.intro) setChatIntro(analysisJson.intro);
+    setActiveAnalysisId(id);
+    return true;
+  };
+
   const loadAnalysisFromHistory = async (id: string) => {
     try {
       const { data } = await supabase
@@ -1143,16 +1174,7 @@ export default function AICareerAdvisorScreen() {
         .select('id, analysis_json')
         .eq('id', id)
         .single();
-      const savedCards = data?.analysis_json?.cards as InsightCardData[] | undefined;
-      if (savedCards?.length) {
-        const merged = CARD_CONFIGS.map(cfg => {
-          const card = savedCards.find(c => c.id === cfg.id);
-          return card ? { ...cfg, ...card } : { ...cfg, title: 'Analysis unavailable', stat: '—', statUnit: '', statLabel: '', detail: '', dataBasis: '', dataBacked: false };
-        });
-        setDynamicCards(merged);
-        analysisCardsRef.current = merged;
-        if (data?.analysis_json?.intro) setChatIntro(data.analysis_json.intro);
-        setActiveAnalysisId(id);
+      if (data && applySavedAnalysis(data.id, data.analysis_json)) {
         setPhase('results');
       }
     } catch {}
