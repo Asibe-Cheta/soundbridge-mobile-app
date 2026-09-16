@@ -274,6 +274,10 @@ export default function TestUploadScreen() {
   // Quota / upload
   const [uploadQuota, setUploadQuota] = useState<UploadQuota | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  // Disables the Publish button from the very first tap, covering the gap before
+  // isUploading/fingerprinting state actually turns on (e.g. during the agreement
+  // modal and early validation checks) — see isSubmittingRef below.
+  const [isSubmittingUI, setIsSubmittingUI] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
   const [acrcloudStatus, setAcrcloudStatus] = useState<AcrcloudStatus>('idle');
@@ -290,6 +294,10 @@ export default function TestUploadScreen() {
   useScrollToTop(scrollRef);
   const isrcVerificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const durationCheckBypassed = useRef(false);
+  // Synchronous guard against rapid double-taps on Publish, before isUploading state
+  // has a chance to update — a ref is used (not state) since state updates aren't
+  // synchronous and a second tap can fire before the first re-render lands.
+  const isSubmittingRef = useRef(false);
 
   const resetAcrAndIsrcState = () => {
     setAcrcloudStatus('idle');
@@ -484,6 +492,18 @@ export default function TestUploadScreen() {
   const handleUpgradePress = () => navigation.navigate('Upgrade' as never);
 
   const handleUpload = async () => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    setIsSubmittingUI(true);
+    try {
+      await handleUploadInner();
+    } finally {
+      isSubmittingRef.current = false;
+      setIsSubmittingUI(false);
+    }
+  };
+
+  const handleUploadInner = async () => {
     if (uploadMode === 'album') {
       Alert.alert('Album Upload', 'Album uploads are not available on this screen yet. Please select Single Track.');
       return;
@@ -1287,7 +1307,7 @@ export default function TestUploadScreen() {
           <Pressable
             style={s.uploadBtn}
             onPress={handleUpload}
-            disabled={isUploading || fingerprinting}
+            disabled={isUploading || fingerprinting || isSubmittingUI}
             android_ripple={{ color: 'rgba(255, 255, 255, 0.2)' }}
             accessibilityRole="button"
             accessibilityLabel="Publish track"
