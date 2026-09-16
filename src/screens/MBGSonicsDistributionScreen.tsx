@@ -49,6 +49,12 @@ interface SuccessData {
 
 const MIN_COVER_SIZE = 1400; // Apple Music minimum (strictest major platform)
 
+// SOCIAL_VALIDATION.MD (gospel-only distribution gate): only the "Gospel" genre value
+// from the upload picker (TestUploadScreen.tsx GENRES) is currently distributable via
+// MBG Sonics. Defensive trim/case-insensitive compare since genre is free text with no
+// DB constraint, not a strict enum.
+const isGospelEligible = (genre?: string | null) => (genre ?? '').trim().toLowerCase() === 'gospel';
+
 export default function MBGSonicsDistributionScreen() {
   const navigation = useNavigation();
   const route = useRoute<RouteProp<{ params: { preSelectedTrackId?: string } }, 'params'>>();
@@ -294,6 +300,41 @@ export default function MBGSonicsDistributionScreen() {
       )}
     </View>
   );
+
+  const renderNotEligible = () => {
+    const genreLabel = selectedTrack?.genre?.trim() || 'this genre';
+    return (
+      <View style={styles.emptyWrap}>
+        <Ionicons name="time-outline" size={44} color={theme.colors.textSecondary} />
+        <Text style={[styles.stepTitle, { color: theme.colors.text, marginTop: 16, textAlign: 'center' }]}>
+          Not available yet for {genreLabel}
+        </Text>
+        <Text style={[styles.emptyText, { color: theme.colors.textSecondary, marginTop: 8 }]}>
+          Distribution for {genreLabel} isn't available just yet — we currently distribute gospel
+          music only, through our partner MBG Sonics. We're actively working on partnerships to
+          bring distribution to every genre soon, at the same one-time fee. We'll let you know the
+          moment it's ready for your genre.
+        </Text>
+        {!preSelectedTrackId ? (
+          <TouchableOpacity
+            style={[styles.primaryBtn, { backgroundColor: theme.colors.primary, marginTop: 24 }]}
+            onPress={() => { setSelectedTrack(null); setStep('select_track'); }}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.primaryBtnText}>Choose a different track</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={[styles.primaryBtn, { backgroundColor: theme.colors.primary, marginTop: 24 }]}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.primaryBtnText}>Go back</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
 
   const renderCoverArt = () => (
     <View>
@@ -604,11 +645,17 @@ export default function MBGSonicsDistributionScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {step === 'select_track' && renderSelectTrack()}
-          {step === 'cover_art'    && renderCoverArt()}
-          {step === 'form'         && renderForm()}
-          {step === 'payment'      && renderPayment()}
-          {step === 'success'      && renderSuccess()}
+          {selectedTrack && !isGospelEligible(selectedTrack.genre) && step !== 'success' ? (
+            renderNotEligible()
+          ) : (
+            <>
+              {step === 'select_track' && renderSelectTrack()}
+              {step === 'cover_art'    && renderCoverArt()}
+              {step === 'form'         && renderForm()}
+              {step === 'payment'      && renderPayment()}
+              {step === 'success'      && renderSuccess()}
+            </>
+          )}
         </ScrollView>
       </SafeAreaView>
     </View>
