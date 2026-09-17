@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Polygon, Defs, LinearGradient as SvgGradient, Stop } from 'react-native-svg';
+import Svg, { Polygon, Circle, Defs, LinearGradient as SvgGradient, RadialGradient, Stop } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
@@ -904,11 +904,13 @@ function AiBadge({ size = 28, radius = 8, fontSize = 10 }: { size?: number; radi
 }
 
 // ─── Bridge Star Button (AI_INTRO.MD) ──────────────────────────────────────────
-// PLACEHOLDER — the five-pointed star Polygon below is a stand-in shape. Once
-// Justice's Canva asset is ready, swap only the <Svg>...</Svg> contents (or replace
-// it with an <Image>) for the final artwork. The spin-and-stop loop lives on the
-// wrapping Animated.View, not on the shape itself, so the asset swap needs zero
-// animation-logic changes.
+// This star is a real, finished shape (precise 5-point geometry, gradient fill,
+// soft glow, crisp stroke) — not a rough stand-in — since it's a generic geometric
+// mark, not brand artwork. The one thing still pending is Justice's actual Bridge
+// logo mark from Canva, which only a designer can produce; when that's ready, swap
+// the <Svg>...</Svg> contents (or replace it with an <Image>) for it. The
+// spin-and-stop loop lives on the wrapping Animated.View, not on the shape itself,
+// so that swap needs zero animation-logic changes.
 function BridgeStarButton({ onPress }: { onPress: () => void }) {
   const spin = useRef(new Animated.Value(0)).current;
 
@@ -928,19 +930,27 @@ function BridgeStarButton({ onPress }: { onPress: () => void }) {
 
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={starButtonStyles.wrap}>
-      <Animated.View style={{ transform: [{ rotate }] }}>
-        {/* PLACEHOLDER shape — swap for the final star asset here */}
-        <Svg width={72} height={72} viewBox="0 0 100 100">
+      <Animated.View style={[{ transform: [{ rotate }] }, starButtonStyles.shadow]}>
+        <Svg width={96} height={96} viewBox="0 0 120 120">
           <Defs>
-            <SvgGradient id="starGrad" x1="0" y1="0" x2="1" y2="0">
+            <SvgGradient id="starGrad" x1="0" y1="0" x2="1" y2="1">
               {AI_GRADIENT.map((c, i) => (
                 <Stop key={c} offset={i / (AI_GRADIENT.length - 1)} stopColor={c} />
               ))}
             </SvgGradient>
+            <RadialGradient id="starGlow" cx="50%" cy="50%" r="50%">
+              <Stop offset="0" stopColor="#ec4899" stopOpacity={0.45} />
+              <Stop offset="0.6" stopColor="#a855f7" stopOpacity={0.18} />
+              <Stop offset="1" stopColor="#a855f7" stopOpacity={0} />
+            </RadialGradient>
           </Defs>
+          <Circle cx={60} cy={60} r={58} fill="url(#starGlow)" />
           <Polygon
-            points="50,4 61,37 96,37 68,58 79,91 50,70 21,91 32,58 4,37 39,37"
+            points="60,20 68.98,47.64 98.04,47.64 74.54,64.72 83.51,92.36 60,75.28 36.49,92.36 45.46,64.72 21.96,47.64 51.02,47.64"
             fill="url(#starGrad)"
+            stroke="rgba(255,255,255,0.5)"
+            strokeWidth={1.2}
+            strokeLinejoin="round"
           />
         </Svg>
       </Animated.View>
@@ -951,6 +961,10 @@ function BridgeStarButton({ onPress }: { onPress: () => void }) {
 
 const starButtonStyles = StyleSheet.create({
   wrap: { alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 16 },
+  shadow: {
+    shadowColor: '#a855f7', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5, shadowRadius: 14, elevation: 8,
+  },
   label: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600', letterSpacing: -0.1 },
 });
 
