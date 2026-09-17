@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { Polygon, Defs, LinearGradient as SvgGradient, Stop } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
@@ -37,7 +38,7 @@ import { Session } from '@supabase/supabase-js';
 const { width } = Dimensions.get('window');
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-type Phase = 'idle' | 'scanning' | 'results';
+type Phase = 'intro' | 'idle' | 'scanning' | 'results';
 
 interface ChatMessage {
   id: string;
@@ -902,19 +903,78 @@ function AiBadge({ size = 28, radius = 8, fontSize = 10 }: { size?: number; radi
   );
 }
 
+// ─── Bridge Star Button (AI_INTRO.MD) ──────────────────────────────────────────
+// PLACEHOLDER — the five-pointed star Polygon below is a stand-in shape. Once
+// Justice's Canva asset is ready, swap only the <Svg>...</Svg> contents (or replace
+// it with an <Image>) for the final artwork. The spin-and-stop loop lives on the
+// wrapping Animated.View, not on the shape itself, so the asset swap needs zero
+// animation-logic changes.
+function BridgeStarButton({ onPress }: { onPress: () => void }) {
+  const spin = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(spin, { toValue: 1, duration: 1000, useNativeDriver: true }),
+        Animated.timing(spin, { toValue: 0, duration: 0, useNativeDriver: true }),
+        Animated.delay(1800),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={starButtonStyles.wrap}>
+      <Animated.View style={{ transform: [{ rotate }] }}>
+        {/* PLACEHOLDER shape — swap for the final star asset here */}
+        <Svg width={72} height={72} viewBox="0 0 100 100">
+          <Defs>
+            <SvgGradient id="starGrad" x1="0" y1="0" x2="1" y2="0">
+              {AI_GRADIENT.map((c, i) => (
+                <Stop key={c} offset={i / (AI_GRADIENT.length - 1)} stopColor={c} />
+              ))}
+            </SvgGradient>
+          </Defs>
+          <Polygon
+            points="50,4 61,37 96,37 68,58 79,91 50,70 21,91 32,58 4,37 39,37"
+            fill="url(#starGrad)"
+          />
+        </Svg>
+      </Animated.View>
+      <Text style={starButtonStyles.label}>Tap to start your career analysis</Text>
+    </TouchableOpacity>
+  );
+}
+
+const starButtonStyles = StyleSheet.create({
+  wrap: { alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 16 },
+  label: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600', letterSpacing: -0.1 },
+});
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export default function AICareerAdvisorScreen() {
   const navigation = useNavigation();
   const route = useRoute<any>();
   const { theme } = useTheme();
-  const { user, userProfile, session } = useAuth();
+  const { user, userProfile, session, updateUserProfile } = useAuth();
 
   const effectiveTier: 'free' | 'premium' | 'unlimited' =
     config.bypassRevenueCat && !config.useProfileTier
       ? (config.developmentTier ?? 'free')
       : ((userProfile?.subscription_tier as 'free' | 'premium' | 'unlimited') ?? 'free');
 
-  const [phase, setPhase] = useState<Phase>('idle');
+  const [phase, setPhase] = useState<Phase>(userProfile?.bridge_intro_seen ? 'idle' : 'intro');
+  const introFade = useRef(new Animated.Value(0)).current;
+  const introSlide = useRef(new Animated.Value(40)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(introFade, { toValue: 1, duration: 500, delay: 250, useNativeDriver: true }),
+      Animated.timing(introSlide, { toValue: 0, duration: 400, delay: 250, useNativeDriver: true }),
+    ]).start();
+  }, []);
   const [visibleLines, setVisibleLines] = useState(0);
   const progressAnim = useRef(new Animated.Value(0)).current;
   const cardAnims = useRef(CARD_CONFIGS.map(() => new Animated.Value(0))).current;
@@ -1215,6 +1275,15 @@ export default function AICareerAdvisorScreen() {
     ? effectiveTier === 'free' ? 0 : Math.max(0, usageData.maxChats - usageData.chatsUsed)
     : null;
 
+  // ── Bridge first-time intro ─────────────────────────────────────────────────
+  // Optimistic: proceed immediately rather than block a first-impression screen on a
+  // network round trip. Worst case on write failure is seeing the intro again next
+  // time, which is a safe degrade, not a correctness bug.
+  const handleContinueFromIntro = () => {
+    setPhase('idle');
+    updateUserProfile({ bridge_intro_seen: true }).catch(() => {});
+  };
+
   // ── Start scan ────────────────────────────────────────────────────────────
   const startScan = useCallback(async () => {
     if (!user?.id) return;
@@ -1470,6 +1539,25 @@ export default function AICareerAdvisorScreen() {
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
         >
+          {phase === 'intro' ? (
+            <View style={styles.introContainer}>
+              <Animated.View style={{ opacity: introFade, transform: [{ translateY: introSlide }], alignItems: 'center' }}>
+                {/* PLACEHOLDER — swap for Justice's Canva logo asset here */}
+                <View style={styles.introLogoPlaceholder}>
+                  <AiBadge size={64} radius={20} fontSize={22} />
+                </View>
+
+                <Text style={styles.introHeadline}>Your career will never be the same again</Text>
+
+                <TouchableOpacity style={styles.introContinueBtn} onPress={handleContinueFromIntro} activeOpacity={0.85}>
+                  <LinearGradient colors={AI_GRADIENT} {...AI_GRADIENT_H} style={styles.introContinueBtnGrad}>
+                    <Text style={styles.introContinueBtnText}>Continue</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </Animated.View>
+            </View>
+          ) : (
+          <>
           {/* ── Greeting hero ── */}
           <View style={styles.greetingSection}>
             <View style={styles.greetingBadgeRow}>
@@ -1648,12 +1736,7 @@ export default function AICareerAdvisorScreen() {
                       ))}
                     </View>
 
-                    <TouchableOpacity style={styles.ctaBtn} onPress={startScan} activeOpacity={0.85}>
-                      <LinearGradient colors={AI_GRADIENT} {...AI_GRADIENT_H} style={styles.ctaBtnGrad}>
-                        <Ionicons name="sparkles" size={18} color="#fff" />
-                        <Text style={styles.ctaBtnText}>Analyse My Career</Text>
-                      </LinearGradient>
-                    </TouchableOpacity>
+                    <BridgeStarButton onPress={startScan} />
 
                     <Text style={styles.idleFootnote}>
                       Uses your real SoundBridge data · Updates with each analysis
@@ -1946,6 +2029,8 @@ export default function AICareerAdvisorScreen() {
               </Text>
             </>
           )}
+          </>
+          )}
         </ScrollView>
       </SafeAreaView>
 
@@ -2116,6 +2201,21 @@ const styles = StyleSheet.create({
   greetingBadgeText: { fontSize: 10, fontWeight: '700', color: '#a855f7', letterSpacing: 1 },
   greetName: { fontSize: 28, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.6, marginBottom: 8 },
   greetSub: { fontSize: 14, color: 'rgba(255,255,255,0.5)', lineHeight: 21, fontWeight: '400' },
+
+  // ── Bridge first-time intro (AI_INTRO.MD) ──
+  introContainer: { flex: 1, minHeight: 560, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
+  introLogoPlaceholder: {
+    width: 120, height: 120, borderRadius: 28, borderWidth: 2, borderStyle: 'dashed',
+    borderColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center',
+    marginBottom: 28,
+  },
+  introHeadline: {
+    fontSize: 30, fontWeight: '700', color: '#FFFFFF', textAlign: 'center',
+    letterSpacing: -0.6, lineHeight: 38, marginBottom: 36,
+  },
+  introContinueBtn: { borderRadius: 16, overflow: 'hidden', alignSelf: 'stretch' },
+  introContinueBtnGrad: { paddingVertical: 17, alignItems: 'center', justifyContent: 'center' },
+  introContinueBtnText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: -0.2 },
 
   sectionLabel: {
     fontSize: 11, fontWeight: '700', letterSpacing: 1.4,

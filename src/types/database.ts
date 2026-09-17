@@ -73,6 +73,7 @@ export interface Database {
           creator_agreement_version: string | null
           creator_upgraded_at: string | null
           talent_category_prompted: boolean | null
+          bridge_intro_seen: boolean | null
           created_at: string
           updated_at: string | null
         }
@@ -117,6 +118,7 @@ export interface Database {
           creator_agreement_version?: string | null
           creator_upgraded_at?: string | null
           talent_category_prompted?: boolean | null
+          bridge_intro_seen?: boolean | null
           created_at?: string
           updated_at?: string | null
         }
@@ -178,6 +180,7 @@ export interface Database {
           creator_agreement_version?: string | null
           creator_upgraded_at?: string | null
           talent_category_prompted?: boolean | null
+          bridge_intro_seen?: boolean | null
           created_at?: string
           updated_at?: string | null
         }

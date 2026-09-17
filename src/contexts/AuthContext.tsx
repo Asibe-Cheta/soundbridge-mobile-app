@@ -49,6 +49,7 @@ interface UserProfile {
   fan_link_shared?: boolean;
   fan_link_shared_at?: string | null;
   fan_link_share_method?: 'link' | 'card' | null;
+  bridge_intro_seen?: boolean;
   app_launch_count?: number;
   teaser_last_shown_at_launch?: number;
   calendar_nudge_shown_count?: number;
