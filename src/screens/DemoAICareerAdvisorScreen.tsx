@@ -137,7 +137,7 @@ export default function DemoAICareerAdvisorScreen() {
 
           <View style={styles.headerCenter}>
             <AiBadge size={30} radius={9} fontSize={11} />
-            <Text style={styles.headerTitle}>Career Advisor</Text>
+            <Text style={styles.headerTitle}>Bridge</Text>
           </View>
 
           <View style={{ width: 60 }} />
@@ -153,9 +153,9 @@ export default function DemoAICareerAdvisorScreen() {
                 <Text style={styles.greetingBadgeText}>PERSONALISED ANALYSIS</Text>
               </View>
             </View>
-            <Text style={styles.greetName}>Good evening, Alex</Text>
+            <Text style={styles.greetName}>Good evening</Text>
             <Text style={styles.greetSub}>
-              Your personal AI career analyst — trained on SoundBridge data from thousands of creators.
+              Your personal career analyst, built from your real activity here, how your fans engage with you, and real-world information like timing and location trends.
             </Text>
           </View>
 

@@ -914,8 +914,6 @@ export default function AICareerAdvisorScreen() {
       ? (config.developmentTier ?? 'free')
       : ((userProfile?.subscription_tier as 'free' | 'premium' | 'unlimited') ?? 'free');
 
-  const firstName = userProfile?.display_name?.split(' ')[0] ?? 'Creator';
-
   const [phase, setPhase] = useState<Phase>('idle');
   const [visibleLines, setVisibleLines] = useState(0);
   const progressAnim = useRef(new Animated.Value(0)).current;
@@ -1480,9 +1478,9 @@ export default function AICareerAdvisorScreen() {
                 <Text style={styles.greetingBadgeText}>PERSONALISED ANALYSIS</Text>
               </View>
             </View>
-            <Text style={styles.greetName}>Good evening, {firstName}</Text>
+            <Text style={styles.greetName}>Good evening</Text>
             <Text style={styles.greetSub}>
-              Your personal AI career analyst — trained on SoundBridge data from thousands of creators.
+              Your personal career analyst, built from your real activity here, how your fans engage with you, and real-world information like timing and location trends.
             </Text>
           </View>
 
@@ -1635,7 +1633,7 @@ export default function AICareerAdvisorScreen() {
 
                     <View style={styles.idleFeatures}>
                       {[
-                        { icon: 'trending-up', label: 'Performance vs peers', color: '#60a5fa' },
+                        { icon: 'trending-up', label: 'Your plays & growth trends', color: '#60a5fa' },
                         { icon: 'cash', label: 'Earnings opportunities', color: '#10b981' },
                         { icon: 'location', label: 'Best cities for your music', color: '#a855f7' },
                         { icon: 'people', label: 'Collaboration patterns', color: '#ec4899' },
