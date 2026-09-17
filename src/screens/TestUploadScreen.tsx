@@ -28,6 +28,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useNavigation, useFocusEffect, useScrollToTop } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { getUploadQuota, invalidateQuotaCache, UploadQuota } from '../services/UploadQuotaService';
 import { useCreatorAgreement } from '../hooks/useCreatorAgreement';
 import CreatorAgreementModal from '../components/CreatorAgreementModal';
@@ -216,6 +217,7 @@ function Checkbox({ checked, onPress, label }: { checked: boolean; onPress: () =
 export default function TestUploadScreen() {
   const navigation = useNavigation();
   const { user, session } = useAuth();
+  const { showToast } = useToast();
   const insets = useSafeAreaInsets();
   const { requestAgreement, agreementVisible, agreementSubmitting, onAgreed, onDismiss } = useCreatorAgreement();
 
@@ -753,6 +755,14 @@ export default function TestUploadScreen() {
             <TouchableOpacity
               style={[s.modeCard, uploadMode === 'album' && { ...s.modeCardActive, borderColor: 'rgba(139,92,246,0.6)' }]}
               onPress={() => {
+                // uploadQuota starts null and is always force-refreshed on focus (never
+                // cached here), so tier briefly defaults to 'free' while that fetch is
+                // still in flight. Tapping Album in that window must not show a false
+                // "Upgrade Required" for an already-premium/unlimited user.
+                if (!uploadQuota) {
+                  showToast('Checking your plan…', 'info', 1500);
+                  return;
+                }
                 if (tier === 'free') {
                   Alert.alert('Upgrade Required', 'Albums are available for Premium and Unlimited users.', [
                     { text: 'Not now', style: 'cancel' },
