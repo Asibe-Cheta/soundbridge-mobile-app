@@ -14,6 +14,7 @@ import {
   Alert,
   Modal,
   FlatList,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -905,12 +906,14 @@ function AiBadge({ size = 28, radius = 8, fontSize = 10 }: { size?: number; radi
 
 // ─── Bridge Star Button (AI_INTRO.MD) ──────────────────────────────────────────
 // This star is a real, finished shape (precise 5-point geometry, gradient fill,
-// soft glow, crisp stroke) — not a rough stand-in — since it's a generic geometric
-// mark, not brand artwork. The one thing still pending is Justice's actual Bridge
-// logo mark from Canva, which only a designer can produce; when that's ready, swap
-// the <Svg>...</Svg> contents (or replace it with an <Image>) for it. The
-// spin-and-stop loop lives on the wrapping Animated.View, not on the shape itself,
-// so that swap needs zero animation-logic changes.
+// soft glow, crisp stroke) — not a rough stand-in. assets/images/bridge.png (the
+// official Bridge logo, now wired into the intro screen above) contains its own
+// 4-point sparkle mark; if that exact mark should replace this hand-drawn star for
+// brand consistency, it needs to be supplied as its own cropped asset (cropping it
+// out of the full logo file blind, without known pixel bounds, risks a misaligned
+// result) — flagged for Justice to decide, not assumed here. The spin-and-stop loop
+// lives on the wrapping Animated.View, not on the shape itself, so any future swap
+// needs zero animation-logic changes.
 function BridgeStarButton({ onPress }: { onPress: () => void }) {
   const spin = useRef(new Animated.Value(0)).current;
 
@@ -1556,10 +1559,11 @@ export default function AICareerAdvisorScreen() {
           {phase === 'intro' ? (
             <View style={styles.introContainer}>
               <Animated.View style={{ opacity: introFade, transform: [{ translateY: introSlide }], alignItems: 'center' }}>
-                {/* PLACEHOLDER — swap for Justice's Canva logo asset here */}
-                <View style={styles.introLogoPlaceholder}>
-                  <AiBadge size={64} radius={20} fontSize={22} />
-                </View>
+                <Image
+                  source={require('../../assets/images/bridge.png')}
+                  style={styles.introLogo}
+                  resizeMode="contain"
+                />
 
                 <Text style={styles.introHeadline}>Your career will never be the same again</Text>
 
@@ -2218,10 +2222,8 @@ const styles = StyleSheet.create({
 
   // ── Bridge first-time intro (AI_INTRO.MD) ──
   introContainer: { flex: 1, minHeight: 560, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
-  introLogoPlaceholder: {
-    width: 120, height: 120, borderRadius: 28, borderWidth: 2, borderStyle: 'dashed',
-    borderColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center',
-    marginBottom: 28,
+  introLogo: {
+    width: 260, height: 260, marginBottom: 4,
   },
   introHeadline: {
     fontSize: 30, fontWeight: '700', color: '#FFFFFF', textAlign: 'center',
