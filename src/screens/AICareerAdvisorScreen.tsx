@@ -1499,7 +1499,6 @@ export default function AICareerAdvisorScreen() {
           </TouchableOpacity>
 
           <View style={styles.headerCenter}>
-            <AiBadge size={30} radius={9} fontSize={11} />
             <Text style={styles.headerTitle}>Bridge</Text>
           </View>
 
