@@ -196,6 +196,9 @@ export default function ProfileScreen() {
   const [fanEngagementStats, setFanEngagementStats] = useState<{ tipCount: number; tipTotal: number } | null>(null);
   const [fanEngagementLoading, setFanEngagementLoading] = useState(false);
   const [editingProfile, setEditingProfile] = useState<Partial<UserProfile>>({});
+  // ── Username change (post-onboarding) ──────────────────────────────────────
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [checkingUsername, setCheckingUsername] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [becomingServiceProvider, setBecomingServiceProvider] = useState(false);
   const [showBecomeCreatorModal, setShowBecomeCreatorModal] = useState(false);
@@ -1178,6 +1181,8 @@ export default function ProfileScreen() {
 
   const handleEditProfile = () => {
     setIsEditing(true);
+    setUsernameAvailable(null);
+    setCheckingUsername(false);
     setEditingProfile({
       display_name: profile?.display_name || '',
       first_name: profile?.first_name || '',
@@ -1191,8 +1196,54 @@ export default function ProfileScreen() {
     });
   };
 
+  // Reuses the same onboarding check-username endpoint — it's a plain uniqueness
+  // lookup with no onboarding-specific side effects. Skips the network call
+  // entirely when the typed value matches the user's own current username, so
+  // there's no need for the endpoint to special-case "exclude the current user".
+  const checkUsernameAvailability = async (usernameToCheck: string) => {
+    if (!usernameToCheck || usernameToCheck.length < 3) {
+      setUsernameAvailable(null);
+      return;
+    }
+    if (usernameToCheck === profile?.username) {
+      setUsernameAvailable(null);
+      return;
+    }
+    setCheckingUsername(true);
+    try {
+      const data = await apiFetch<{ available?: boolean }>('/api/onboarding/check-username', {
+        method: 'POST',
+        session,
+        body: JSON.stringify({ username: usernameToCheck }),
+      });
+      setUsernameAvailable(data?.available ?? false);
+    } catch (error) {
+      console.error('❌ Error checking username:', error);
+      setUsernameAvailable(null);
+    } finally {
+      setCheckingUsername(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isEditing) return;
+    const candidate = editingProfile.username;
+    if (!candidate || candidate.length < 3 || candidate === profile?.username) {
+      setUsernameAvailable(null);
+      return;
+    }
+    const debounceTimer = setTimeout(() => {
+      checkUsernameAvailability(candidate);
+    }, 500);
+    return () => clearTimeout(debounceTimer);
+  }, [editingProfile.username, isEditing]);
+
   const handleSaveProfile = async () => {
     if (!user?.id || !editingProfile || !session) return;
+    if (usernameAvailable === false) {
+      Alert.alert('Username Taken', 'Please choose a different username before saving.');
+      return;
+    }
     
     try {
       console.log('🔧 Saving profile changes...');
@@ -2719,6 +2770,23 @@ export default function ProfileScreen() {
                       placeholder="Display Name"
                       placeholderTextColor="rgba(255, 255, 255, 0.7)"
                     />
+                    <TextInput
+                      style={[styles.editInputOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)', color: '#FFFFFF' }]}
+                      value={editingProfile.username ?? ''}
+                      onChangeText={(text) => setEditingProfile(prev => ({ ...prev, username: text.toLowerCase().replace(/[^a-z0-9_]/g, '') }))}
+                      placeholder="Username"
+                      placeholderTextColor="rgba(255, 255, 255, 0.7)"
+                      autoCapitalize="none"
+                    />
+                    {checkingUsername ? (
+                      <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: -6, marginBottom: 8 }}>Checking...</Text>
+                    ) : usernameAvailable === true ? (
+                      <Text style={{ color: '#10B981', fontSize: 12, marginTop: -6, marginBottom: 8 }}>✓ Available</Text>
+                    ) : usernameAvailable === false ? (
+                      <Text style={{ color: '#EF4444', fontSize: 12, marginTop: -6, marginBottom: 8 }}>✗ Already taken</Text>
+                    ) : (editingProfile.username?.length ?? 0) > 0 && (editingProfile.username?.length ?? 0) < 3 ? (
+                      <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: -6, marginBottom: 8 }}>Minimum 3 characters</Text>
+                    ) : null}
                     <TextInput
                       style={[styles.editInputOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)', color: '#FFFFFF' }]}
                       value={editingProfile.first_name ?? ''}
