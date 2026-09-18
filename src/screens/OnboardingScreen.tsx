@@ -245,6 +245,8 @@ export default function OnboardingScreen() {
 
   // Profile data
   const [displayName, setDisplayName] = useState(userProfile?.display_name || user?.user_metadata?.display_name || '');
+  const [firstName, setFirstName] = useState(userProfile?.first_name || '');
+  const [lastName, setLastName] = useState(userProfile?.last_name || '');
   const [username, setUsername] = useState(userProfile?.username || user?.user_metadata?.username || '');
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
   const [checkingUsername, setCheckingUsername] = useState(false);
@@ -820,6 +822,8 @@ export default function OnboardingScreen() {
         body: JSON.stringify({
           role: userType === 'music_lover' ? 'listener' : 'creator',
           display_name: displayName,
+          first_name: firstName || undefined,
+          last_name: lastName || undefined,
           username: username,
           country: country,
           location: location,
@@ -1654,6 +1658,8 @@ export default function OnboardingScreen() {
               body: JSON.stringify({
                 role: userType === 'music_lover' ? 'listener' : 'creator',
                 display_name: displayName,
+                first_name: firstName || undefined,
+                last_name: lastName || undefined,
                 username: username,
                 country: country,
                 location: location,
@@ -2553,6 +2559,36 @@ export default function OnboardingScreen() {
             </View>
 
             <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>First Name (optional)</Text>
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text
+                }]}
+                value={firstName}
+                onChangeText={setFirstName}
+                placeholder="First name"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Last Name (optional)</Text>
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text
+                }]}
+                value={lastName}
+                onChangeText={setLastName}
+                placeholder="Last name"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
               <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Username</Text>
               <View style={styles.usernameContainer}>
                 <Text style={[styles.usernamePrefix, { color: theme.colors.textSecondary }]}>@</Text>
@@ -3236,6 +3272,36 @@ export default function OnboardingScreen() {
                 value={displayName}
                 onChangeText={setDisplayName}
                 placeholder="How should people call you?"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>First Name (optional)</Text>
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text
+                }]}
+                value={firstName}
+                onChangeText={setFirstName}
+                placeholder="First name"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Last Name (optional)</Text>
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text
+                }]}
+                value={lastName}
+                onChangeText={setLastName}
+                placeholder="Last name"
                 placeholderTextColor={theme.colors.textSecondary}
               />
             </View>
@@ -3933,6 +3999,36 @@ export default function OnboardingScreen() {
             </View>
 
             <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>First Name (optional)</Text>
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text
+                }]}
+                value={firstName}
+                onChangeText={setFirstName}
+                placeholder="First name"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Last Name (optional)</Text>
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text
+                }]}
+                value={lastName}
+                onChangeText={setLastName}
+                placeholder="Last name"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
               <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Username</Text>
               <View style={styles.usernameContainer}>
                 <Text style={[styles.usernamePrefix, { color: theme.colors.textSecondary }]}>@</Text>
@@ -4608,6 +4704,36 @@ export default function OnboardingScreen() {
                 value={displayName}
                 onChangeText={setDisplayName}
                 placeholder="How should people call you?"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>First Name (optional)</Text>
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text
+                }]}
+                value={firstName}
+                onChangeText={setFirstName}
+                placeholder="First name"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Last Name (optional)</Text>
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text
+                }]}
+                value={lastName}
+                onChangeText={setLastName}
+                placeholder="Last name"
                 placeholderTextColor={theme.colors.textSecondary}
               />
             </View>
@@ -5437,6 +5563,36 @@ export default function OnboardingScreen() {
                 value={displayName}
                 onChangeText={setDisplayName}
                 placeholder="Your name or organisation name"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>First Name (optional)</Text>
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text
+                }]}
+                value={firstName}
+                onChangeText={setFirstName}
+                placeholder="First name"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Last Name (optional)</Text>
+              <TextInput
+                style={[styles.textInput, {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text
+                }]}
+                value={lastName}
+                onChangeText={setLastName}
+                placeholder="Last name"
                 placeholderTextColor={theme.colors.textSecondary}
               />
             </View>

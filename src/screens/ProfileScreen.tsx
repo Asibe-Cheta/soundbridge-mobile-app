@@ -87,6 +87,8 @@ interface UserProfile {
   id: string;
   username: string;
   display_name: string;
+  first_name?: string | null;
+  last_name?: string | null;
   bio?: string;
   avatar_url?: string;
   banner_url?: string;
@@ -1178,6 +1180,8 @@ export default function ProfileScreen() {
     setIsEditing(true);
     setEditingProfile({
       display_name: profile?.display_name || '',
+      first_name: profile?.first_name || '',
+      last_name: profile?.last_name || '',
       bio: profile?.bio || '',
       username: profile?.username || '',
       professional_headline: profile?.professional_headline || '',
@@ -2713,6 +2717,20 @@ export default function ProfileScreen() {
                       value={editingProfile.display_name}
                       onChangeText={(text) => setEditingProfile(prev => ({ ...prev, display_name: text }))}
                       placeholder="Display Name"
+                      placeholderTextColor="rgba(255, 255, 255, 0.7)"
+                    />
+                    <TextInput
+                      style={[styles.editInputOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)', color: '#FFFFFF' }]}
+                      value={editingProfile.first_name ?? ''}
+                      onChangeText={(text) => setEditingProfile(prev => ({ ...prev, first_name: text }))}
+                      placeholder="First Name (optional)"
+                      placeholderTextColor="rgba(255, 255, 255, 0.7)"
+                    />
+                    <TextInput
+                      style={[styles.editInputOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)', color: '#FFFFFF' }]}
+                      value={editingProfile.last_name ?? ''}
+                      onChangeText={(text) => setEditingProfile(prev => ({ ...prev, last_name: text }))}
+                      placeholder="Last Name (optional)"
                       placeholderTextColor="rgba(255, 255, 255, 0.7)"
                     />
                     <TextInput

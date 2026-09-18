@@ -23,6 +23,8 @@ interface UserProfile {
   email: string;
   username?: string;
   display_name?: string;
+  first_name?: string | null;
+  last_name?: string | null;
   avatar_url?: string;
   role?: 'creator' | 'listener';
   is_creator?: boolean;
