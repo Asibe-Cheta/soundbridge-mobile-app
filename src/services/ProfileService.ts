@@ -51,9 +51,16 @@ class ProfileService {
       console.log(`📡 ProfileService Response (${response.status}):`, responseText);
       
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${responseText}`);
+        // Surface the server's own clean error message (e.g. "Username is
+        // already taken") instead of dumping the raw HTTP status/body.
+        let message = `Request failed (${response.status})`;
+        try {
+          const parsed = JSON.parse(responseText);
+          if (parsed?.error) message = parsed.error;
+        } catch {}
+        throw new Error(message);
       }
-      
+
       return JSON.parse(responseText);
     } catch (error) {
       console.error(`❌ ProfileService Error for ${url}:`, error);

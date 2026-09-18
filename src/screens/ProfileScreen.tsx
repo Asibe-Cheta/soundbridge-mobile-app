@@ -1263,9 +1263,9 @@ export default function ProfileScreen() {
         console.error('Failed to update profile:', result.error);
         Alert.alert('Error', result.error || 'Failed to update profile. Please try again.');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating profile:', error);
-      Alert.alert('Error', 'Failed to update profile. Please try again.');
+      Alert.alert('Error', error?.message || 'Failed to update profile. Please try again.');
     }
   };
 
