@@ -159,6 +159,7 @@ interface ProactiveSignal {
 const AI_GRADIENT = ['#ef4444', '#ec4899', '#a855f7', '#60a5fa'] as const;
 const AI_GRADIENT_H = { start: { x: 0, y: 0 }, end: { x: 1, y: 0 } };
 const AI_GRADIENT_D = { start: { x: 0, y: 0 }, end: { x: 1, y: 1 } };
+const INTRO_HEADLINE = "See your future. It's already here.";
 
 const SCAN_LINES = [
   'Connecting to SoundBridge...',
@@ -963,14 +964,40 @@ export default function AICareerAdvisorScreen() {
       : ((userProfile?.subscription_tier as 'free' | 'premium' | 'unlimited') ?? 'free');
 
   const [phase, setPhase] = useState<Phase>(userProfile?.bridge_intro_seen ? 'idle' : 'intro');
+  // Real typewriter reveal for the intro headline — a single interval (not nested
+  // timers) so cleanup is a single clearInterval. Continue button fades in only
+  // once typing finishes, via the same introFade value repurposed for that.
+  const [typedHeadline, setTypedHeadline] = useState('');
+  const [typingDone, setTypingDone] = useState(false);
+  const [cursorVisible, setCursorVisible] = useState(true);
   const introFade = useRef(new Animated.Value(0)).current;
-  const introSlide = useRef(new Animated.Value(40)).current;
+
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(introFade, { toValue: 1, duration: 500, delay: 250, useNativeDriver: true }),
-      Animated.timing(introSlide, { toValue: 0, duration: 400, delay: 250, useNativeDriver: true }),
-    ]).start();
+    let charIndex = 0;
+    let elapsedDelay = 0;
+    const CHAR_MS = 40;
+    const START_DELAY_MS = 300;
+    const timer = setInterval(() => {
+      if (elapsedDelay < START_DELAY_MS) {
+        elapsedDelay += CHAR_MS;
+        return;
+      }
+      charIndex += 1;
+      setTypedHeadline(INTRO_HEADLINE.slice(0, charIndex));
+      if (charIndex >= INTRO_HEADLINE.length) {
+        clearInterval(timer);
+        setTypingDone(true);
+        Animated.timing(introFade, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+      }
+    }, CHAR_MS);
+    return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (typingDone) return;
+    const blink = setInterval(() => setCursorVisible(v => !v), 450);
+    return () => clearInterval(blink);
+  }, [typingDone]);
   const [visibleLines, setVisibleLines] = useState(0);
   const progressAnim = useRef(new Animated.Value(0)).current;
   const cardAnims = useRef(CARD_CONFIGS.map(() => new Animated.Value(0))).current;
@@ -1536,15 +1563,22 @@ export default function AICareerAdvisorScreen() {
         >
           {phase === 'intro' ? (
             <View style={styles.introContainer}>
-              <Animated.View style={{ opacity: introFade, transform: [{ translateY: introSlide }], alignItems: 'center' }}>
-                <Image
-                  source={require('../../assets/images/bridge.png')}
-                  style={styles.introLogo}
-                  resizeMode="contain"
-                />
+              {/* Renders immediately, no entrance delay — previously this was inside
+                  the same fade-in wrapper as the headline, which made the logo itself
+                  appear to "load late" even though it's a bundled local asset with
+                  nothing to fetch. */}
+              <Image
+                source={require('../../assets/images/bridge.png')}
+                style={styles.introLogo}
+                resizeMode="contain"
+              />
 
-                <Text style={styles.introHeadline}>Your career will never be the same again</Text>
+              <Text style={styles.introHeadline}>
+                {typedHeadline}
+                {!typingDone && <Text style={{ opacity: cursorVisible ? 1 : 0 }}>|</Text>}
+              </Text>
 
+              <Animated.View style={{ opacity: introFade, alignSelf: 'stretch' }}>
                 <TouchableOpacity style={styles.introContinueBtn} onPress={handleContinueFromIntro} activeOpacity={0.85}>
                   <LinearGradient colors={AI_GRADIENT} {...AI_GRADIENT_H} style={styles.introContinueBtnGrad}>
                     <Text style={styles.introContinueBtnText}>Continue</Text>
