@@ -23,11 +23,13 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Post } from '../types/feed.types';
-import { Connection } from '../types/network.types';
 import { useComments } from '../hooks/useComments';
 import CommentCard from '../components/CommentCard';
-import { networkService } from '../services/api/networkService';
 import { uploadImage } from '../services/UploadService';
+import { MentionTextInput } from '../components/MentionTextInput';
+import { MentionSuggestions } from '../components/MentionSuggestions';
+import { useMentions } from '../hooks/useMentions';
+import type { MentionUser } from '../hooks/useMentions';
 import * as Haptics from 'expo-haptics';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -83,10 +85,23 @@ export default function CommentsModal({
   const [imageAttachment, setImageAttachment] = useState<{ uri: string } | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
 
-  // @ mentions
-  const [showMentionsList, setShowMentionsList] = useState(false);
-  const [connections, setConnections] = useState<Connection[]>([]);
-  const [loadingConnections, setLoadingConnections] = useState(false);
+  // @ mentions — inline, searches all platform users as you type (same
+  // hook/components CreatePostModal uses), not just existing connections.
+  const {
+    suggestions: mentionSuggestions,
+    loading: mentionLoading,
+    selectedIndex: mentionSelectedIndex,
+    confirmedMentions,
+    isDropdownVisible: isMentionDropdownVisible,
+    handleSelectionChange: mentionOnSelectionChange,
+    handleTextChange: mentionOnTextChange,
+    selectMention,
+    dismissSuggestions,
+    moveSelectionUp,
+    moveSelectionDown,
+  } = useMentions();
+  const enterInterceptedRef = useRef(false);
+  const pendingContentRef = useRef<string | null>(null);
 
   // slideAnim drives translateY only — native driver is safe here
   const slideAnim = useRef(new Animated.Value(SHEET_INITIAL_H)).current;
@@ -110,7 +125,7 @@ export default function CommentsModal({
       setReplyingTo(null);
       setReplyingToName('');
       setImageAttachment(null);
-      setShowMentionsList(false);
+      dismissSuggestions();
     }
   }, [visible]);
 
@@ -162,34 +177,53 @@ export default function CommentsModal({
   };
 
   // ── @ mentions ────────────────────────────────────────────────────────────
-  const handleAtPress = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (showMentionsList) {
-      setShowMentionsList(false);
+  const handleCommentTextChange = (text: string) => {
+    if (enterInterceptedRef.current) {
+      // Hardware-keyboard Enter was intercepted to select a mention; the native
+      // TextInput still fires onChangeText with the newline appended, so discard
+      // it and apply the pre-computed mention content instead.
+      enterInterceptedRef.current = false;
+      const resolved = pendingContentRef.current ?? text.replace(/\n$/, '');
+      pendingContentRef.current = null;
+      setNewComment(resolved);
+      mentionOnTextChange(resolved);
       return;
     }
-    setShowMentionsList(true);
-    if (connections.length === 0) {
-      setLoadingConnections(true);
-      try {
-        const { connections: conns } = await networkService.getConnections(1, 50);
-        setConnections(conns);
-      } catch {
-        // silent fail — list stays empty
-      } finally {
-        setLoadingConnections(false);
-      }
-    }
+    setNewComment(text);
+    mentionOnTextChange(text);
   };
 
-  const handleMentionSelect = (conn: Connection) => {
+  const handleCommentSelectionChange = ({ nativeEvent: { selection } }: any) => {
+    mentionOnSelectionChange(selection, newComment);
+  };
+
+  const handleCommentKeyPress = ({ nativeEvent: { key } }: any) => {
+    if (!isMentionDropdownVisible) return;
+    if (key === '\n' && mentionSuggestions.length > 0) {
+      enterInterceptedRef.current = true;
+      pendingContentRef.current = selectMention(mentionSuggestions[mentionSelectedIndex], newComment);
+      return;
+    }
+    if (key === 'Escape') { dismissSuggestions(); return; }
+    if (key === 'ArrowUp') { moveSelectionUp(); return; }
+    if (key === 'ArrowDown') { moveSelectionDown(mentionSuggestions.length); return; }
+  };
+
+  const handleMentionSelect = (mentionUser: MentionUser) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const handle = conn.user.username || conn.user.display_name;
-    setNewComment((prev) => {
-      const trimmed = prev.trimEnd();
-      return trimmed ? `${trimmed} @${handle} ` : `@${handle} `;
-    });
-    setShowMentionsList(false);
+    const newContent = selectMention(mentionUser, newComment);
+    setNewComment(newContent);
+    inputRef.current?.focus();
+  };
+
+  // Toolbar "@" button — inserts "@" at the end and lets the normal inline
+  // detection above pick it up, same as if the user had typed it.
+  const handleAtPress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const trimmed = newComment.trimEnd();
+    const withAt = trimmed ? `${trimmed} @` : '@';
+    setNewComment(withAt);
+    mentionOnTextChange(withAt);
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
@@ -339,61 +373,8 @@ export default function CommentsModal({
           <Ionicons name="chevron-down" size={15} color={theme.colors.textSecondary} style={{ marginLeft: 4 }} />
         </TouchableOpacity>
 
-        {/* Main content: comments list OR mentions list */}
-        {showMentionsList ? (
-          /* ── Connections / mentions list ── */
-          <FlatList
-            style={styles.list}
-            data={connections}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.listContent}
-            keyboardShouldPersistTaps="always"
-            ListEmptyComponent={
-              loadingConnections ? (
-                <View style={styles.emptyState}>
-                  <ActivityIndicator size="small" color={theme.colors.primary} />
-                  <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>
-                    Loading connections...
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.emptyState}>
-                  <Ionicons name="people-outline" size={36} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>
-                    No connections found
-                  </Text>
-                </View>
-              )
-            }
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[styles.mentionRow, { borderBottomColor: theme.colors.border }]}
-                onPress={() => handleMentionSelect(item)}
-                activeOpacity={0.7}
-              >
-                {item.user.avatar_url ? (
-                  <Image source={{ uri: item.user.avatar_url }} style={styles.mentionAvatar} />
-                ) : (
-                  <View style={[styles.mentionAvatar, styles.mentionAvatarFallback, { backgroundColor: theme.colors.card }]}>
-                    <Ionicons name="person" size={18} color={theme.colors.textSecondary} />
-                  </View>
-                )}
-                <View style={styles.mentionInfo}>
-                  <Text style={[styles.mentionName, { color: theme.colors.text }]}>
-                    {item.user.display_name}
-                  </Text>
-                  {item.user.headline ? (
-                    <Text style={[styles.mentionHeadline, { color: theme.colors.textSecondary }]} numberOfLines={1}>
-                      {item.user.headline}
-                    </Text>
-                  ) : null}
-                </View>
-              </TouchableOpacity>
-            )}
-          />
-        ) : (
-          /* ── Comments list ── */
-          <FlatList
+        {/* Comments list */}
+        <FlatList
             style={styles.list}
             data={comments.filter((item) => item && item.id && !item.parent_comment_id)}
             keyExtractor={(item, i) => item?.id || `comment-${i}`}
@@ -455,7 +436,6 @@ export default function CommentsModal({
               ) : null
             }
           />
-        )}
 
         {/* Input section — sits at sheet bottom, above keyboard (sheet already moved) */}
         <View
@@ -490,15 +470,21 @@ export default function CommentsModal({
               </View>
             )}
             <View style={[styles.inputBubble, { backgroundColor: theme.colors.card }]}>
-              <TextInput
+              <MentionTextInput
                 ref={inputRef}
                 style={[styles.textInput, { color: theme.colors.text }]}
+                sharedTextStyle={{ color: theme.colors.text }}
                 placeholder="Leave your thoughts here..."
                 placeholderTextColor={theme.colors.textSecondary}
                 value={newComment}
-                onChangeText={setNewComment}
+                onChangeText={handleCommentTextChange}
+                onSelectionChange={handleCommentSelectionChange}
+                onKeyPress={handleCommentKeyPress}
+                onBlur={dismissSuggestions}
                 maxLength={500}
                 multiline
+                mentionUsernames={confirmedMentions.map(m => m.username)}
+                mentionColor={theme.colors.primary}
               />
               {/* Image preview inside bubble */}
               {imageAttachment && (
@@ -521,6 +507,17 @@ export default function CommentsModal({
             </View>
           </View>
 
+          {/* @mention suggestions dropdown — appears inline just above the toolbar */}
+          {isMentionDropdownVisible && (
+            <MentionSuggestions
+              suggestions={mentionSuggestions}
+              loading={mentionLoading}
+              selectedIndex={mentionSelectedIndex}
+              onSelect={handleMentionSelect}
+              onDismiss={dismissSuggestions}
+            />
+          )}
+
           {/* Row 2: Toolbar */}
           <View style={styles.toolbarRow}>
             <TouchableOpacity
@@ -533,12 +530,12 @@ export default function CommentsModal({
             <TouchableOpacity
               style={[
                 styles.toolbarBtn,
-                showMentionsList && { backgroundColor: theme.colors.primary + '22' },
+                isMentionDropdownVisible && { backgroundColor: theme.colors.primary + '22' },
               ]}
               onPress={handleAtPress}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Text style={[styles.atSign, { color: showMentionsList ? theme.colors.primary : theme.colors.textSecondary }]}>@</Text>
+              <Text style={[styles.atSign, { color: isMentionDropdownVisible ? theme.colors.primary : theme.colors.textSecondary }]}>@</Text>
             </TouchableOpacity>
             <View style={{ flex: 1 }} />
             <TouchableOpacity

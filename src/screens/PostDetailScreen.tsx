@@ -28,6 +28,10 @@ import { supabase } from '../lib/supabase';
 import { useComments } from '../hooks/useComments';
 import type { Post } from '../types/feed.types';
 import { useToast } from '../contexts/ToastContext';
+import { MentionTextInput } from '../components/MentionTextInput';
+import { MentionSuggestions } from '../components/MentionSuggestions';
+import { useMentions } from '../hooks/useMentions';
+import type { MentionUser } from '../hooks/useMentions';
 import { SystemTypography as Typography } from '../constants/Typography';
 import * as Haptics from 'expo-haptics';
 
@@ -67,6 +71,59 @@ export default function PostDetailScreen() {
   const [replyingToName, setReplyingToName] = useState('');
   const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set());
   const namesAnim = useRef(new Animated.Value(0)).current;
+
+  // @ mentions — inline, searches all platform users as you type
+  const {
+    suggestions: mentionSuggestions,
+    loading: mentionLoading,
+    selectedIndex: mentionSelectedIndex,
+    confirmedMentions,
+    isDropdownVisible: isMentionDropdownVisible,
+    handleSelectionChange: mentionOnSelectionChange,
+    handleTextChange: mentionOnTextChange,
+    selectMention,
+    dismissSuggestions,
+    moveSelectionUp,
+    moveSelectionDown,
+  } = useMentions();
+  const enterInterceptedRef = useRef(false);
+  const pendingContentRef = useRef<string | null>(null);
+
+  const handleCommentTextChange = (text: string) => {
+    if (enterInterceptedRef.current) {
+      enterInterceptedRef.current = false;
+      const resolved = pendingContentRef.current ?? text.replace(/\n$/, '');
+      pendingContentRef.current = null;
+      setCommentText(resolved);
+      mentionOnTextChange(resolved);
+      return;
+    }
+    setCommentText(text);
+    mentionOnTextChange(text);
+  };
+
+  const handleCommentSelectionChange = ({ nativeEvent: { selection } }: any) => {
+    mentionOnSelectionChange(selection, commentText);
+  };
+
+  const handleCommentKeyPress = ({ nativeEvent: { key } }: any) => {
+    if (!isMentionDropdownVisible) return;
+    if (key === '\n' && mentionSuggestions.length > 0) {
+      enterInterceptedRef.current = true;
+      pendingContentRef.current = selectMention(mentionSuggestions[mentionSelectedIndex], commentText);
+      return;
+    }
+    if (key === 'Escape') { dismissSuggestions(); return; }
+    if (key === 'ArrowUp') { moveSelectionUp(); return; }
+    if (key === 'ArrowDown') { moveSelectionDown(mentionSuggestions.length); return; }
+  };
+
+  const handleMentionSelect = (mentionUser: MentionUser) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const newContent = selectMention(mentionUser, commentText);
+    setCommentText(newContent);
+    inputRef.current?.focus();
+  };
   const inputRef = useRef<TextInput>(null);
 
   const {
@@ -530,6 +587,17 @@ export default function PostDetailScreen() {
             </View>
           )}
 
+          {/* @mention suggestions dropdown — appears directly above the input bar */}
+          {isMentionDropdownVisible && (
+            <MentionSuggestions
+              suggestions={mentionSuggestions}
+              loading={mentionLoading}
+              selectedIndex={mentionSelectedIndex}
+              onSelect={handleMentionSelect}
+              onDismiss={dismissSuggestions}
+            />
+          )}
+
           {/* Comment input bar */}
           <View
             style={[
@@ -559,15 +627,21 @@ export default function PostDetailScreen() {
               )}
             </View>
 
-            <TextInput
+            <MentionTextInput
               ref={inputRef}
               style={[styles.commentInput, { color: theme.colors.text }]}
+              sharedTextStyle={{ color: theme.colors.text }}
               placeholder="Add a comment..."
               placeholderTextColor={theme.colors.textSecondary}
               value={commentText}
-              onChangeText={setCommentText}
+              onChangeText={handleCommentTextChange}
+              onSelectionChange={handleCommentSelectionChange}
+              onKeyPress={handleCommentKeyPress}
+              onBlur={dismissSuggestions}
               multiline
               maxLength={500}
+              mentionUsernames={confirmedMentions.map(m => m.username)}
+              mentionColor={theme.colors.primary}
             />
 
             <TouchableOpacity
