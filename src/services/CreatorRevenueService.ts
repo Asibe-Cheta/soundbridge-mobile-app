@@ -232,7 +232,7 @@ class CreatorRevenueService {
           .from('purchased_event_tickets')
           .select('amount_paid, purchase_date')
           .in('event_id', eventIds)
-          .eq('status', 'confirmed')
+          .in('status', ['active', 'used'])
           .gte('purchase_date', startDate || new Date(0).toISOString())
           .lte('purchase_date', endDate || new Date().toISOString());
 
@@ -356,7 +356,7 @@ class CreatorRevenueService {
           .from('purchased_event_tickets')
           .select('amount_paid, purchase_date')
           .in('event_id', eventIds)
-          .eq('status', 'confirmed')
+          .in('status', ['active', 'used'])
           .gte('purchase_date', startDate.toISOString());
 
         ticketsData = data || [];
@@ -461,7 +461,7 @@ class CreatorRevenueService {
           .from('purchased_event_tickets')
           .select('event_id, amount_paid')
           .in('event_id', eventIds)
-          .eq('status', 'confirmed')
+          .in('status', ['active', 'used'])
           .gte('purchase_date', startDate || new Date(0).toISOString())
           .lte('purchase_date', endDate || new Date().toISOString());
 
@@ -629,7 +629,7 @@ class CreatorRevenueService {
           .from('purchased_event_tickets')
           .select('user_id, amount_paid, profiles!purchased_event_tickets_user_id_fkey(city, country)')
           .in('event_id', eventIds)
-          .eq('status', 'confirmed')
+          .in('status', ['active', 'used'])
           .gte('purchase_date', startDate || new Date(0).toISOString())
           .lte('purchase_date', endDate || new Date().toISOString());
 
@@ -717,7 +717,7 @@ class CreatorRevenueService {
           .from('purchased_event_tickets')
           .select('user_id, amount_paid, profiles!purchased_event_tickets_user_id_fkey(username, avatar_url, city, country)')
           .in('event_id', eventIds)
-          .eq('status', 'confirmed')
+          .in('status', ['active', 'used'])
           .gte('purchase_date', startDate || new Date(0).toISOString())
           .lte('purchase_date', endDate || new Date().toISOString());
 

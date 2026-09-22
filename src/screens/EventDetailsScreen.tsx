@@ -29,6 +29,8 @@ import eventAnalyticsService, { EventAnalytics } from '../services/EventAnalytic
 import { userBehaviourService } from '../services/UserBehaviourService';
 import EventShareSheet from '../components/EventShareSheet';
 import EventAnalyticsCard from '../components/EventAnalyticsCard';
+import WhosComingVisualization from '../components/WhosComingVisualization';
+import eventCheckinService, { EventCheckin, CheckinStatus } from '../services/EventCheckinService';
 
 interface Event {
   id: string;
@@ -84,6 +86,11 @@ export default function EventDetailsScreen() {
   const [analytics, setAnalytics] = useState<EventAnalytics | null>(null);
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
+  // "Who's Coming" arrival check-in (Item 42)
+  const [checkins, setCheckins] = useState<EventCheckin[]>([]);
+  const [myCheckin, setMyCheckin] = useState<EventCheckin | null>(null);
+  const [checkingIn, setCheckingIn] = useState(false);
+
   // creator_id is the authoritative ownership field; organizer_id is legacy fallback
   const isOrganizer = user?.id === event?.creator_id || user?.id === event?.organizer_id;
 
@@ -107,6 +114,46 @@ export default function EventDetailsScreen() {
   useEffect(() => {
     if (isOrganizer && event?.id) loadAnalytics();
   }, [isOrganizer, event?.id]);
+
+  // "Who's Coming" — organiser sees everyone's check-ins live; attendee sees their own status
+  useEffect(() => {
+    if (!event?.id) return;
+
+    if (isOrganizer) {
+      eventCheckinService.getCheckins(event.id).then(setCheckins);
+      const unsubscribe = eventCheckinService.subscribeToCheckins(event.id, (updated) => {
+        setCheckins((prev) => {
+          const idx = prev.findIndex((c) => c.id === updated.id);
+          if (idx === -1) return [...prev, updated];
+          const next = [...prev];
+          next[idx] = updated;
+          return next;
+        });
+      });
+      return unsubscribe;
+    } else if (user?.id) {
+      eventCheckinService.getMyCheckin(event.id).then(setMyCheckin);
+    }
+  }, [isOrganizer, event?.id, user?.id]);
+
+  const handleCheckIn = async (status: CheckinStatus) => {
+    if (!event?.id || checkingIn) return;
+    setCheckingIn(true);
+    const ok = await eventCheckinService.checkIn(event.id, status);
+    if (ok) {
+      setMyCheckin((prev) => ({
+        id: prev?.id || `${event.id}-${user?.id}`,
+        event_id: event.id,
+        user_id: user!.id,
+        status,
+        created_at: prev?.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }));
+    } else {
+      Alert.alert('Error', 'Failed to check in. Please try again.');
+    }
+    setCheckingIn(false);
+  };
 
   const loadEventDetails = async () => {
     if (initialEvent) return; // Skip if we already have event data
@@ -755,6 +802,17 @@ export default function EventDetailsScreen() {
             />
           )}
 
+          {/* Who's Coming — organiser-only arrival visualization */}
+          {isOrganizer && (
+            <View style={styles.descriptionSection}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Who's Coming</Text>
+              <WhosComingVisualization
+                checkins={checkins}
+                centerLabel={event.venue || event.location || event.title}
+              />
+            </View>
+          )}
+
           {/* Action Buttons */}
           <View style={styles.actionSection}>
             {userTickets.length > 0 ? (
@@ -819,6 +877,51 @@ export default function EventDetailsScreen() {
               <Text style={[styles.shareButtonText, { color: theme.colors.text }]}>Share</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Arrival check-in — attendees only */}
+          {userTickets.length > 0 && (
+            <View style={styles.descriptionSection}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Checking In</Text>
+              {myCheckin ? (
+                <View
+                  style={[
+                    styles.checkinConfirmedContainer,
+                    { backgroundColor: theme.colors.surface, borderColor: theme.colors.primary },
+                  ]}
+                >
+                  <Ionicons
+                    name={myCheckin.status === 'difficulty' ? 'alert-circle' : 'checkmark-circle'}
+                    size={20}
+                    color={myCheckin.status === 'difficulty' ? theme.colors.error : theme.colors.success}
+                  />
+                  <Text style={[styles.checkinConfirmedText, { color: theme.colors.text }]}>
+                    {myCheckin.status === 'difficulty'
+                      ? "You've let the organiser know you're having difficulty"
+                      : "You've checked in as close by"}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.checkinButtonsRow}>
+                  <TouchableOpacity
+                    style={[styles.checkinButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.success }]}
+                    onPress={() => handleCheckIn('close')}
+                    disabled={checkingIn}
+                  >
+                    <Ionicons name="walk-outline" size={18} color={theme.colors.success} />
+                    <Text style={[styles.checkinButtonText, { color: theme.colors.success }]}>I'm close</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.checkinButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.error }]}
+                    onPress={() => handleCheckIn('difficulty')}
+                    disabled={checkingIn}
+                  >
+                    <Ionicons name="alert-circle-outline" size={18} color={theme.colors.error} />
+                    <Text style={[styles.checkinButtonText, { color: theme.colors.error }]}>I'm having difficulty</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
         </View>
       </ScrollView>
       </SafeAreaView>
@@ -1038,6 +1141,38 @@ const styles = StyleSheet.create({
   ticketPurchasedText: {
     fontSize: 16,
     fontWeight: '700',
+  },
+  checkinButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  checkinButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 2,
+    gap: 6,
+  },
+  checkinButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  checkinConfirmedContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 2,
+    gap: 10,
+  },
+  checkinConfirmedText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
   },
   buyTicketButton: {
     flex: 1,
