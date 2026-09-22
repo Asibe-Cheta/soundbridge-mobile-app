@@ -32,6 +32,8 @@ import { useToast } from '../contexts/ToastContext';
 import { getUploadQuota, invalidateQuotaCache, UploadQuota } from '../services/UploadQuotaService';
 import { useCreatorAgreement } from '../hooks/useCreatorAgreement';
 import CreatorAgreementModal from '../components/CreatorAgreementModal';
+import { dbHelpers } from '../lib/supabase';
+import { uploadAudioFile, uploadImage, createAudioTrack } from '../services/UploadService';
 import {
   AcrcloudStatus,
   buildQuotaBlockMessage,
@@ -52,6 +54,19 @@ const { width: SCREEN_W } = Dimensions.get('window');
 type ContentType = 'music' | 'podcast' | 'mixtape' | 'audio_book';
 type UploadMode  = 'single' | 'album';
 type Privacy     = 'public' | 'followers' | 'private';
+
+interface AlbumTrackDraft {
+  id: string;
+  trackNumber: number;
+  title: string;
+  audioFile: { uri: string; name: string; type: string; size?: number };
+  duration: number;
+}
+
+// Mirrors src/lib/supabase.ts dbHelpers.checkTrackLimitForAlbum's tier table — that
+// function needs an existing album's id to count against, but a client-side check
+// against the in-progress track list is needed before the album exists yet.
+const ALBUM_TRACK_LIMITS: Record<string, number> = { free: 0, premium: 7, unlimited: -1 };
 
 const GENRES = [
   'Gospel', 'Afrobeats', 'UK Drill', 'Hip Hop', 'R&B', 'Pop',
@@ -224,6 +239,15 @@ export default function TestUploadScreen() {
   // Mode / type
   const [uploadMode,   setUploadMode]   = useState<UploadMode>('single');
   const [contentType,  setContentType]  = useState<ContentType>('music');
+
+  // Album/EP (multi-track) — separate from the single-track fields below, only used
+  // when uploadMode === 'album'
+  const [albumTitle, setAlbumTitle] = useState('');
+  const [albumDescription, setAlbumDescription] = useState('');
+  const [albumGenre, setAlbumGenre] = useState('');
+  const [albumCover, setAlbumCover] = useState<{ uri: string; name: string; type: string } | null>(null);
+  const [albumStatus, setAlbumStatus] = useState<'draft' | 'published'>('published');
+  const [albumTracks, setAlbumTracks] = useState<AlbumTrackDraft[]>([]);
 
   // Files
   const [audioFile,   setAudioFile]   = useState<{ uri: string; name: string; type?: string; size?: number } | null>(null);
@@ -450,6 +474,227 @@ export default function TestUploadScreen() {
     } catch { Alert.alert('Error', 'Failed to pick image.'); }
   };
 
+  // ── Album/EP (multi-track) ──────────────────────────────────────────────
+  const pickAlbumCover = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('Permission Required', 'Camera roll permission needed.'); return; }
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.8 });
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        const ext = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
+        setAlbumCover({
+          uri: asset.uri,
+          name: asset.fileName || `album_cover_${Date.now()}.${ext}`,
+          type: ext === 'png' ? 'image/png' : 'image/jpeg',
+        });
+      }
+    } catch { Alert.alert('Error', 'Failed to pick image.'); }
+  };
+
+  const addAlbumTrack = async () => {
+    const tier = (uploadQuota?.tier || 'free').toLowerCase();
+    const limit = ALBUM_TRACK_LIMITS[tier] ?? 0;
+    if (limit !== -1 && albumTracks.length >= limit) {
+      Alert.alert(
+        'Track Limit Reached',
+        tier === 'free'
+          ? 'Free accounts can\'t add tracks to an album. Upgrade to Premium or Unlimited.'
+          : `Your plan allows up to ${limit} tracks per album. Upgrade to Unlimited for more.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'View Plans', onPress: handleUpgradePress },
+        ],
+      );
+      return;
+    }
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: 'audio/*', copyToCacheDirectory: true });
+      if (result.canceled || !result.assets[0]) return;
+      const asset = result.assets[0];
+      const validation = validateAudioFile({
+        name: asset.name || 'audio_file',
+        size: asset.size,
+        mimeType: asset.mimeType,
+      }, 'music');
+      if (!validation.isValid) {
+        Alert.alert('Invalid File', validation.errors.join('\n'));
+        return;
+      }
+      const trackAudioFile = {
+        uri: asset.uri,
+        name: asset.name || `track_${Date.now()}.mp3`,
+        type: asset.mimeType || 'audio/mpeg',
+        size: asset.size,
+      };
+      const id = `${Date.now()}_${albumTracks.length}`;
+      const fileName = (asset.name || 'audio_file').replace(/\.[^/.]+$/, '');
+      setAlbumTracks(prev => [
+        ...prev,
+        { id, trackNumber: prev.length + 1, title: fileName, audioFile: trackAudioFile, duration: 0 },
+      ]);
+      extractAudioDuration(trackAudioFile.uri).then(duration => {
+        setAlbumTracks(prev => prev.map(t => (t.id === id ? { ...t, duration } : t)));
+      });
+    } catch {
+      Alert.alert('Error', 'Failed to pick audio file.');
+    }
+  };
+
+  const removeAlbumTrack = (id: string) => {
+    setAlbumTracks(prev =>
+      prev.filter(t => t.id !== id).map((t, index) => ({ ...t, trackNumber: index + 1 }))
+    );
+  };
+
+  const updateAlbumTrackTitle = (id: string, title: string) => {
+    setAlbumTracks(prev => prev.map(t => (t.id === id ? { ...t, title } : t)));
+  };
+
+  const moveAlbumTrack = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= albumTracks.length) return;
+    setAlbumTracks(prev => {
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next.map((t, i) => ({ ...t, trackNumber: i + 1 }));
+    });
+  };
+
+  const validateAlbumForm = (): { isValid: boolean; errors: string[] } => {
+    const errors: string[] = [];
+    if (!albumTitle.trim()) errors.push('Album title is required');
+    if (albumTitle.length > 200) errors.push('Album title must be less than 200 characters');
+    if (!albumGenre) errors.push('Album genre is required');
+    if (!albumCover) errors.push('Album cover image is required');
+    if (albumTracks.length === 0) errors.push('Please add at least one track to the album');
+    albumTracks.forEach((track, index) => {
+      if (!track.title.trim()) errors.push(`Track ${index + 1}: Title is required`);
+      if (!track.audioFile) errors.push(`Track ${index + 1}: Audio file is required`);
+    });
+    return { isValid: errors.length === 0, errors };
+  };
+
+  const resetAlbumForm = () => {
+    setAlbumTitle('');
+    setAlbumDescription('');
+    setAlbumGenre('');
+    setAlbumCover(null);
+    setAlbumStatus('published');
+    setAlbumTracks([]);
+    setUploadMode('single');
+  };
+
+  const handleAlbumUpload = async () => {
+    const validation = validateAlbumForm();
+    if (!validation.isValid) {
+      Alert.alert('Validation Error', validation.errors.join('\n'));
+      return;
+    }
+    if (!user?.id) {
+      Alert.alert('Error', 'You must be logged in to upload albums.');
+      return;
+    }
+
+    try {
+      setIsUploading(true);
+      setUploadProgress(0);
+
+      const { data: limitCheck, error: limitError } = await dbHelpers.checkAlbumLimit(user.id);
+      if (limitError || !limitCheck) {
+        throw new Error('Failed to check album limit');
+      }
+      if (!limitCheck.canCreate) {
+        const tier = limitCheck.tier || 'free';
+        const message = tier === 'free'
+          ? 'Albums are only available for Premium and Unlimited users. Upgrade now to create albums!'
+          : `You've reached your album limit (${limitCheck.limit} albums). Upgrade to Unlimited for unlimited albums!`;
+        Alert.alert('Album Limit Reached', message, [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'View Plans', onPress: handleUpgradePress },
+        ]);
+        setIsUploading(false);
+        return;
+      }
+
+      setUploadProgress(10);
+      let albumCoverUrl: string | null = null;
+      if (albumCover) {
+        const imageUploadResult = await uploadImage(user.id, albumCover, 'album-covers');
+        if (imageUploadResult.success) {
+          albumCoverUrl = imageUploadResult.data?.url ?? null;
+        }
+      }
+
+      setUploadProgress(20);
+      const { data: album, error: albumError } = await dbHelpers.createAlbum({
+        creator_id: user.id,
+        title: albumTitle,
+        description: albumDescription,
+        genre: albumGenre,
+        cover_image_url: albumCoverUrl,
+        status: albumStatus,
+        is_public: albumStatus === 'published',
+      });
+      if (albumError || !album) {
+        throw new Error('Failed to create album: ' + (albumError as any)?.message);
+      }
+
+      const totalTracks = albumTracks.length;
+      const progressPerTrack = 60 / totalTracks;
+      for (let i = 0; i < albumTracks.length; i++) {
+        const track = albumTracks[i];
+
+        const audioUploadResult = await uploadAudioFile(user.id, track.audioFile);
+        if (!audioUploadResult.success) {
+          throw new Error(`Failed to upload track ${i + 1}: ${audioUploadResult.error?.message}`);
+        }
+
+        const trackResult = await createAudioTrack(user.id, {
+          title: track.title,
+          description: '',
+          genre: albumGenre,
+          file_url: audioUploadResult.data?.url || '',
+          duration: track.duration || 0,
+          file_size: track.audioFile.size || 0,
+          is_public: albumStatus === 'published',
+          content_type: 'music',
+          tags: '',
+        });
+        if (!trackResult.success || !trackResult.data) {
+          throw new Error(`Failed to create track ${i + 1}: ${trackResult.error?.message}`);
+        }
+
+        const { error: addTrackError } = await dbHelpers.addTrackToAlbum(
+          album.id,
+          trackResult.data.id,
+          track.trackNumber,
+        );
+        if (addTrackError) {
+          throw new Error(`Failed to add track ${i + 1} to album: ${(addTrackError as any)?.message}`);
+        }
+
+        setUploadProgress(30 + (i + 1) * progressPerTrack);
+      }
+
+      setUploadProgress(100);
+      showToast(
+        `Album "${albumTitle}" ${albumStatus === 'published' ? 'published' : 'saved as draft'}!`,
+        'success',
+        2500,
+      );
+      const newAlbumId = album.id;
+      resetAlbumForm();
+      await loadQuota();
+      (navigation as any).navigate('AlbumDetails', { albumId: newAlbumId });
+    } catch (error: any) {
+      Alert.alert('Upload Failed', error?.message || 'An unexpected error occurred.');
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
+  };
+
   const toggleMood = (mood: string) => {
     if (moodTags.includes(mood)) setMoodTags(p => p.filter(m => m !== mood));
     else if (moodTags.length < 3) setMoodTags(p => [...p, mood]);
@@ -506,16 +751,16 @@ export default function TestUploadScreen() {
   };
 
   const handleUploadInner = async () => {
-    if (uploadMode === 'album') {
-      Alert.alert('Album Upload', 'Album uploads are not available on this screen yet. Please select Single Track.');
-      return;
-    }
-
     const agreed = await requestAgreement();
     if (!agreed) return;
 
     if (!user?.id || !session) {
       Alert.alert('Error', 'You must be logged in to upload content.');
+      return;
+    }
+
+    if (uploadMode === 'album') {
+      await handleAlbumUpload();
       return;
     }
 
@@ -785,6 +1030,8 @@ export default function TestUploadScreen() {
             </TouchableOpacity>
           </View>
 
+          {uploadMode === 'single' && (
+          <>
           {/* ══════════════════════════════════════════════════
               CONTENT TYPE — Screen 02 text tabs
             ══════════════════════════════════════════════════ */}
@@ -1312,6 +1559,127 @@ export default function TestUploadScreen() {
               )}
             </View>
           </View>
+          </>
+          )}
+
+          {uploadMode === 'album' && (
+          <>
+          {/* ══════════════════════════════════════════════════
+              ALBUM INFO
+            ══════════════════════════════════════════════════ */}
+          <View style={s.formSection}>
+            <FieldLabel text="Album Info" />
+
+            <View style={s.inputGroup}>
+              <Text style={s.inputLabel}>Album Title *</Text>
+              <StyledInput value={albumTitle} onChangeText={setAlbumTitle} placeholder="e.g. PAGES II" />
+            </View>
+
+            <View style={s.inputGroup}>
+              <Text style={s.inputLabel}>Description</Text>
+              <StyledInput value={albumDescription} onChangeText={setAlbumDescription} placeholder="Tell listeners about this release…" multiline numberOfLines={3} />
+            </View>
+
+            <View style={s.inputGroup}>
+              <Text style={s.inputLabel}>Genre *</Text>
+              <ChipRow options={GENRES} selected={albumGenre} onSelect={g => setAlbumGenre(g === albumGenre ? '' : g)} color="#DC2626" />
+            </View>
+          </View>
+
+          <View style={s.formSection}>
+            <FieldLabel text="Album Cover *" />
+            {albumCover ? (
+              <View style={s.coverPreviewRow}>
+                <Image source={{ uri: albumCover.uri }} style={s.coverThumb} />
+                <Text style={[s.fileChosenName, { flex: 1 }]} numberOfLines={1}>{albumCover.name}</Text>
+                <TouchableOpacity onPress={() => setAlbumCover(null)}><Ionicons name="close-circle" size={20} color="rgba(255,255,255,0.4)" /></TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity style={[s.uploadZone, { height: 90 }]} onPress={pickAlbumCover} activeOpacity={0.82}>
+                <LinearGradient colors={['rgba(255,255,255,0.04)', 'rgba(255,255,255,0.02)']} style={StyleSheet.absoluteFillObject} />
+                <Ionicons name="camera-outline" size={26} color="rgba(255,255,255,0.2)" />
+                <Text style={s.uploadZoneSub}>JPG, PNG (Max 5MB)</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <View style={s.formSection}>
+            <FieldLabel text="Release Status" />
+            <View style={s.privacyGroup}>
+              {([
+                { value: 'published' as const, label: 'Publish now',   desc: 'Live immediately after upload', icon: 'rocket-outline' },
+                { value: 'draft'     as const, label: 'Save as draft', desc: 'Finish and publish later',      icon: 'document-outline' },
+              ]).map(opt => (
+                <TouchableOpacity key={opt.value} style={[s.privacyOption, albumStatus === opt.value && s.privacyOptionActive]} onPress={() => setAlbumStatus(opt.value)} activeOpacity={0.82}>
+                  <LinearGradient colors={['rgba(255,255,255,0.04)', 'rgba(255,255,255,0.02)']} style={StyleSheet.absoluteFillObject} />
+                  <Ionicons name={opt.icon as any} size={18} color={albumStatus === opt.value ? '#DC2626' : 'rgba(255,255,255,0.4)'} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.privacyLabel, albumStatus === opt.value && { color: '#fff' }]}>{opt.label}</Text>
+                    <Text style={s.privacyDesc}>{opt.desc}</Text>
+                  </View>
+                  {albumStatus === opt.value && <Ionicons name="checkmark-circle" size={18} color="#22C55E" />}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* ══════════════════════════════════════════════════
+              TRACKS
+            ══════════════════════════════════════════════════ */}
+          <View style={s.formSection}>
+            <FieldLabel text={`Tracks (${albumTracks.length})`} />
+
+            {albumTracks.length === 0 ? (
+              <View style={s.emptyTracksBox}>
+                <Ionicons name="musical-notes-outline" size={40} color="rgba(255,255,255,0.3)" />
+                <Text style={s.emptyTracksText}>No tracks added yet</Text>
+              </View>
+            ) : (
+              albumTracks.map((track, index) => (
+                <View key={track.id} style={s.trackRow}>
+                  <View style={s.trackReorderCol}>
+                    <TouchableOpacity onPress={() => moveAlbumTrack(index, -1)} disabled={index === 0} style={{ opacity: index === 0 ? 0.3 : 1 }}>
+                      <Ionicons name="chevron-up" size={16} color="rgba(255,255,255,0.6)" />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => moveAlbumTrack(index, 1)} disabled={index === albumTracks.length - 1} style={{ opacity: index === albumTracks.length - 1 ? 0.3 : 1 }}>
+                      <Ionicons name="chevron-down" size={16} color="rgba(255,255,255,0.6)" />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={s.trackNumberText}>{track.trackNumber}</Text>
+                  <View style={s.trackRowInfo}>
+                    <TextInput
+                      style={s.trackRowTitleInput}
+                      value={track.title}
+                      onChangeText={(text) => updateAlbumTrackTitle(track.id, text)}
+                      placeholder="Track title"
+                      placeholderTextColor="rgba(255,255,255,0.3)"
+                    />
+                    <Text style={s.fileChosenName} numberOfLines={1}>{track.audioFile.name}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => removeAlbumTrack(track.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+
+            <TouchableOpacity style={s.addTrackBtn} onPress={addAlbumTrack} activeOpacity={0.82}>
+              <Ionicons name="add-circle-outline" size={20} color="#DC2626" />
+              <Text style={s.addTrackBtnText}>Add Track</Text>
+            </TouchableOpacity>
+
+            {(() => {
+              const tier = (uploadQuota?.tier || 'free').toLowerCase();
+              const limit = ALBUM_TRACK_LIMITS[tier] ?? 0;
+              return limit !== -1 ? (
+                <Text style={s.limitInfo}>
+                  {tier === 'free' ? 'Free' : 'Premium'}: {albumTracks.length}/{limit} tracks
+                </Text>
+              ) : null;
+            })()}
+          </View>
+          </>
+          )}
 
           {/* ── Upload button ── */}
           <Pressable
@@ -1464,6 +1832,17 @@ const s = StyleSheet.create({
   fileChosenName: { flex: 1, fontSize: 13, color: 'rgba(255,255,255,0.7)' },
   coverPreviewRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
   coverThumb: { width: 48, height: 48, borderRadius: 8 },
+  // Album/EP track list
+  emptyTracksBox: { alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 32, borderRadius: 14, borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(255,255,255,0.12)' },
+  emptyTracksText: { fontSize: 13, color: 'rgba(255,255,255,0.4)' },
+  trackRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', marginBottom: 8 },
+  trackReorderCol: { alignItems: 'center', gap: 2 },
+  trackNumberText: { width: 20, textAlign: 'center', fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.4)' },
+  trackRowInfo: { flex: 1, minWidth: 0 },
+  trackRowTitleInput: { fontSize: 14, color: '#fff', padding: 0, marginBottom: 2 },
+  addTrackBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(220,38,38,0.4)', marginTop: 4 },
+  addTrackBtnText: { fontSize: 14, fontWeight: '600', color: '#DC2626' },
+  limitInfo: { fontSize: 12, color: 'rgba(255,255,255,0.4)', textAlign: 'center', marginTop: 8 },
 
   // Inputs
   inputGroup: { marginBottom: 18 },
