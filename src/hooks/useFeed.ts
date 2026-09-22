@@ -54,9 +54,16 @@ export const useFeed = () => {
         }
       }
 
-      // No cache or force refresh - fetch from API
-      // Only show loading spinner if it's a manual refresh (pull-to-refresh)
-      if (!isInitialLoad && !backgroundRefreshRef.current) {
+      // No cache or force refresh - fetch from API.
+      // Show the loading state (drives the SkeletonFeed placeholder) whenever
+      // there's nothing on screen yet, UNLESS this is the silent background
+      // refresh that follows a successful cache hit (backgroundRefreshRef) —
+      // that one must stay silent since cached posts are already visible.
+      // Previously this also excluded isInitialLoad, which meant a genuine
+      // cold start with no cache (nothing shown yet) never set loading=true,
+      // so the skeleton was structurally unreachable — confirmed via user
+      // report ("never once seen a skeleton") and by tracing the guard.
+      if (!backgroundRefreshRef.current) {
         setLoading(isFirstPage && !refreshing);
       }
       
