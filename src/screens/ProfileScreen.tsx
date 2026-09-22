@@ -513,8 +513,13 @@ export default function ProfileScreen() {
       }
     }
     
-    // Only show loading if we don't have cached data
-    if (!profile || forceRefresh) {
+    // Only show the full-screen skeleton when there's genuinely nothing to show
+    // yet. Both the silent background refresh (line ~511) and pull-to-refresh
+    // (onRefresh) call this with forceRefresh=true while profile is already
+    // populated — including forceRefresh here would re-trigger the full-screen
+    // skeleton over already-visible content on every refresh, not just the
+    // true first load.
+    if (!profile) {
       console.log('👤 ProfileScreen: Loading profile data...');
       loadingManager.setLoading('profile', true, 10000);
       setLoading(true);
