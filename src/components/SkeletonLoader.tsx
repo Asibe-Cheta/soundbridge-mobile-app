@@ -102,6 +102,40 @@ export function SkeletonPostCard() {
   );
 }
 
+// Profile screen initial-load skeleton — banner, avatar, name/username bars,
+// stats row, and a couple of content-card placeholders below.
+export function SkeletonProfileHeader() {
+  return (
+    <View>
+      <SkeletonBox width="100%" height={160} borderRadius={0} />
+      <View style={{ paddingHorizontal: 20, marginTop: -40 }}>
+        <SkeletonBox width={90} height={90} borderRadius={45} style={{ borderWidth: 3, borderColor: 'rgba(0,0,0,0.3)' }} />
+        <SkeletonBox width={160} height={20} borderRadius={4} style={{ marginTop: 16 }} />
+        <SkeletonBox width={100} height={13} borderRadius={4} style={{ marginTop: 8 }} />
+        <SkeletonBox width="90%" height={12} borderRadius={4} style={{ marginTop: 12 }} />
+        <SkeletonBox width="60%" height={12} borderRadius={4} style={{ marginTop: 6 }} />
+
+        <View style={{ flexDirection: 'row', gap: 24, marginTop: 20 }}>
+          {Array.from({ length: 3 }).map((_, i) => (
+            <View key={i} style={{ alignItems: 'center' }}>
+              <SkeletonBox width={36} height={16} borderRadius={4} />
+              <SkeletonBox width={52} height={11} borderRadius={4} style={{ marginTop: 6 }} />
+            </View>
+          ))}
+        </View>
+
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+          <SkeletonBox width="100%" height={44} borderRadius={12} style={{ flex: 1 }} />
+        </View>
+      </View>
+
+      <View style={{ marginTop: 28 }}>
+        <SkeletonRowCards count={3} />
+      </View>
+    </View>
+  );
+}
+
 // Three stacked post skeletons for the feed empty state
 export function SkeletonFeed() {
   return (

@@ -42,6 +42,7 @@ import { contentCacheService } from '../services/contentCacheService';
 import * as ImagePicker from 'expo-image-picker';
 // Removed FileSystem import - using FormData for Cloudinary upload
 import { useTheme } from '../contexts/ThemeContext';
+import { SkeletonProfileHeader } from '../components/SkeletonLoader';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { becomeServiceProvider } from '../services/creatorExpansionService';
 import * as BiometricAuth from '../services/biometricAuth';
@@ -2607,8 +2608,8 @@ export default function ProfileScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: theme.colors.background }]}>
-        <Text style={[styles.loadingText, { color: theme.colors.text }]}>Loading profile...</Text>
+      <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+        <SkeletonProfileHeader />
       </View>
     );
   }
