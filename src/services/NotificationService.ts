@@ -85,6 +85,8 @@ export interface NotificationData {
   
   // Type-specific data
   eventId?: string;
+  notificationId?: string; // event_notifications.id — present on event-promotion pushes, used to report opens
+  notification_id?: string; // snake_case variant, same meaning
   trackId?: string;
   creatorId?: string;
   conversationId?: string;
@@ -1151,6 +1153,15 @@ class NotificationService {
     try {
       console.log('🔗 Handling deep link:', data);
 
+      // Event-promotion pushes carry data.notificationId = the event_notifications.id row
+      // this tap came from — report the open so delivery/engagement tracking (Item 50) has
+      // real data. Fire-and-forget, gated on both IDs being present so this only fires for
+      // actual event-promotion notifications, not every deep link.
+      const notificationId = data.notificationId || data.notification_id;
+      if (data.eventId && notificationId) {
+        this.reportEventNotificationOpen(data.eventId, notificationId);
+      }
+
       // Determine the deep link URL from various possible fields
       // Backend may send: url (top-level), data.deepLink, data.url, or we construct from type+id
       let deepLinkUrl = data.deepLink || data.url;
@@ -1444,6 +1455,27 @@ class NotificationService {
       await this.updateBadgeCount();
     } catch (error) {
       console.error('❌ Error marking notification as read:', error);
+    }
+  }
+
+  // Reports that an event-promotion push notification was tapped/opened, so
+  // event_notifications.clicked/clicked_at get set server-side (Item 50 engagement
+  // tracking). Fire-and-forget — never blocks navigation on this.
+  private async reportEventNotificationOpen(eventId: string, notificationId: string): Promise<void> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+
+      await fetch(`${config.apiUrl}/events/notification-open`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ eventId, notificationId }),
+      });
+    } catch (error) {
+      console.warn('⚠️ Failed to report event notification open:', error);
     }
   }
 
