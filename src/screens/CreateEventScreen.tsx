@@ -500,8 +500,15 @@ export default function CreateEventScreen() {
     }
     if (event.type === 'set' && date) {
       setSelectedDate(date);
-      // Format as YYYY-MM-DD
-      const formattedDate = date.toISOString().split('T')[0];
+      // Format as YYYY-MM-DD using LOCAL date components — toISOString() converts to
+      // UTC first, which silently rolls the date back a day for anyone in a positive
+      // UTC-offset timezone (e.g. WAT/UTC+1) once the picker's local-midnight time
+      // component crosses the UTC day boundary. Confirmed via user report: picking
+      // "11 Oct" in Nigeria required spinning to "12 Oct" to actually save as the 11th.
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const formattedDate = `${year}-${month}-${day}`;
       handleInputChange('event_date', formattedDate);
     }
   };
@@ -832,6 +839,12 @@ export default function CreateEventScreen() {
       // The address is already captured in the 'location' field as a string
       // Country is stored separately in 'country' field
 
+      // Backend validates this synchronously at creation time (confirmed against
+      // apps/web/app/api/events/route.ts) — must be sent in the initial payload,
+      // not as a follow-up update, or POST /api/events rejects the whole request.
+      eventData.creator_event_disclaimer_accepted = true;
+      eventData.creator_event_disclaimer_accepted_at = new Date().toISOString();
+
       console.log('📤 Sending event data:', JSON.stringify(eventData, null, 2));
 
       // Call API endpoint using apiFetch for proper authentication
@@ -847,14 +860,6 @@ export default function CreateEventScreen() {
         const errorMessage = result.error || result.message || 'Failed to create event';
         console.error('❌ API error response:', result);
         throw new Error(errorMessage);
-      }
-
-      // Store disclaimer acceptance per event (best-effort — columns added by web app migration)
-      if (result.event?.id) {
-        supabase.from('events').update({
-          creator_event_disclaimer_accepted: true,
-          creator_event_disclaimer_accepted_at: new Date().toISOString(),
-        }).eq('id', result.event.id).then(() => {}).catch(() => {});
       }
 
       // Queue push notifications to nearby genre-matched users (fire-and-forget)
