@@ -801,16 +801,10 @@ export default function CreateEventScreen() {
         }).catch((err) => console.warn('⚠️ Failed to queue event notifications:', err));
       }
 
-      Alert.alert(
-        'Success!',
-        'Your event has been created successfully!',
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.goBack(),
-          },
-        ]
-      );
+      (navigation as any).replace('EventCreatedSuccess', {
+        eventId: result.event?.id,
+        eventTitle: formData.title.trim(),
+      });
     } catch (error: any) {
       console.error('❌ Error creating event:', error);
       const errorMessage = error?.message || 'Failed to create event. Please try again.';

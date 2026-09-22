@@ -171,6 +171,7 @@ import SoundBridgeErrorBoundary from './src/components/SoundBridgeErrorBoundary'
 import ScreenCaptureBanner from './src/components/ScreenCaptureBanner';
 import { useAudioPlayer } from './src/contexts/AudioPlayerContext';
 import CreateEventScreen from './src/screens/CreateEventScreen';
+import EventCreatedSuccessScreen from './src/screens/EventCreatedSuccessScreen';
 import EventPollSetupScreen from './src/screens/EventPollSetupScreen';
 import PollResultsScreen from './src/screens/PollResultsScreen';
 import CreatePlaylistScreen from './src/screens/CreatePlaylistScreen';
@@ -1361,6 +1362,7 @@ function AppNavigator() {
             <Stack.Screen name="TicketConfirmation" component={TicketConfirmationScreen} options={{ headerShown: false, gestureEnabled: false }} />
             <Stack.Screen name="TicketWallet" component={TicketWalletScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CreateEvent" component={CreateEventScreen} />
+            <Stack.Screen name="EventCreatedSuccess" component={EventCreatedSuccessScreen} options={{ headerShown: false, gestureEnabled: false }} />
             <Stack.Screen name="EventPollSetup" component={EventPollSetupScreen} options={{ headerShown: false }} />
             <Stack.Screen name="PollResults" component={PollResultsScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CreatePlaylist" component={CreatePlaylistScreen} />
