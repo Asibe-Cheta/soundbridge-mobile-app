@@ -1572,7 +1572,7 @@ export default function TestUploadScreen() {
 
             <View style={s.inputGroup}>
               <Text style={s.inputLabel}>Album Title *</Text>
-              <StyledInput value={albumTitle} onChangeText={setAlbumTitle} placeholder="e.g. PAGES II" />
+              <StyledInput value={albumTitle} onChangeText={setAlbumTitle} placeholder="Enter album or EP title" />
             </View>
 
             <View style={s.inputGroup}>
