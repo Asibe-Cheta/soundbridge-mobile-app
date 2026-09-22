@@ -10,7 +10,7 @@ export default function EventCreatedSuccessScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { theme } = useTheme();
-  const { eventTitle } = (route.params as { eventId?: string; eventTitle?: string }) || {};
+  const { eventId, eventTitle } = (route.params as { eventId?: string; eventTitle?: string }) || {};
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
@@ -35,7 +35,7 @@ export default function EventCreatedSuccessScreen() {
           <TouchableOpacity
             style={styles.primaryBtn}
             activeOpacity={0.85}
-            onPress={() => (navigation as any).replace('EventsAnalyticsOverview')}
+            onPress={() => (navigation as any).replace('EventPromotionReach', { eventId, eventTitle })}
           >
             <LinearGradient
               colors={[theme.colors.gradientPrimary.start, theme.colors.gradientPrimary.end]}

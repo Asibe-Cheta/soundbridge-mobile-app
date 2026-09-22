@@ -172,6 +172,7 @@ import ScreenCaptureBanner from './src/components/ScreenCaptureBanner';
 import { useAudioPlayer } from './src/contexts/AudioPlayerContext';
 import CreateEventScreen from './src/screens/CreateEventScreen';
 import EventCreatedSuccessScreen from './src/screens/EventCreatedSuccessScreen';
+import EventPromotionReachScreen from './src/screens/EventPromotionReachScreen';
 import EventPollSetupScreen from './src/screens/EventPollSetupScreen';
 import PollResultsScreen from './src/screens/PollResultsScreen';
 import CreatePlaylistScreen from './src/screens/CreatePlaylistScreen';
@@ -1386,6 +1387,7 @@ function AppNavigator() {
             <Stack.Screen name="CreatorEarningsDashboard" component={CreatorEarningsDashboardScreen} />
             <Stack.Screen name="CreatorInsightsDashboard" component={CreatorInsightsDashboardScreen} />
             <Stack.Screen name="EventsAnalyticsOverview" component={EventsAnalyticsOverviewScreen} />
+            <Stack.Screen name="EventPromotionReach" component={EventPromotionReachScreen} />
             <Stack.Screen name="BrandingCustomization" component={BrandingCustomizationScreen} />
             <Stack.Screen name="TracksList" component={TracksListScreen} />
             <Stack.Screen name="FollowersList" component={FollowersListScreen} />

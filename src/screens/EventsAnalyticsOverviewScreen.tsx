@@ -441,6 +441,19 @@ export default function EventsAnalyticsOverviewScreen({ navigation }: any) {
           renderLockedMetrics()
         )}
 
+        {!analyticsError && isPremium && (
+          <TouchableOpacity
+            style={[styles.reachRow, { borderTopColor: theme.colors.border }]}
+            onPress={() =>
+              navigation.navigate('EventPromotionReach', { eventId: event.id, eventTitle: event.title })
+            }
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.reachText, { color: theme.colors.text }]}>View Promotion Reach</Text>
+            <Ionicons name="chevron-forward" size={14} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        )}
+
         {status !== 'past' && (
           <EventEnvironmentSection event={event} session={session} theme={theme} />
         )}
@@ -683,6 +696,20 @@ const styles = StyleSheet.create({
   lockedText: {
     flex: 1,
     fontSize: 12,
+  },
+
+  // Promotion reach row
+  reachRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  reachText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
 
   // Error row
