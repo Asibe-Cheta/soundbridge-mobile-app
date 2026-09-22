@@ -133,8 +133,16 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
         }
       }
 
+      // Prefer the backend's own error message when it gave us one — far more
+      // useful for diagnosing e.g. a validation failure than a generic fallback.
+      let backendMessage: string | undefined;
+      if (typeof errorBody === 'object' && errorBody !== null) {
+        const errorObj = errorBody as any;
+        backendMessage = errorObj.error || errorObj.message || errorObj.error?.message;
+      }
+
       // Provide more specific error messages for common status codes
-      let errorMessage = 'API request failed';
+      let errorMessage = backendMessage || 'API request failed';
       if (response.status === 401) {
         errorMessage = 'Authentication failed. Your session may have expired. Please sign in again.';
         console.error(`🔐 Auth issue - Token present: ${!!token}, Token length: ${token?.length || 0}`);
