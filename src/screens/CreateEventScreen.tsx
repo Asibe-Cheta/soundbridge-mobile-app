@@ -38,6 +38,10 @@ import UpgradeForPaidEventsModal from '../components/UpgradeForPaidEventsModal';
 import { useCreatorAgreement } from '../hooks/useCreatorAgreement';
 import CreatorAgreementModal from '../components/CreatorAgreementModal';
 import { SubscriptionStatusService } from '../services/SubscriptionStatusService';
+import { MentionTextInput } from '../components/MentionTextInput';
+import { MentionSuggestions } from '../components/MentionSuggestions';
+import { useMentions } from '../hooks/useMentions';
+import type { MentionUser } from '../hooks/useMentions';
 
 // Country-specific address field configurations
 interface AddressFieldConfig {
@@ -265,6 +269,27 @@ export default function CreateEventScreen() {
   const [eventDisclaimerAccepted, setEventDisclaimerAccepted] = useState(false);
   const [becomeCreatorLoading, setBecomeCreatorLoading] = useState(false);
 
+  // ── Co-organiser tagging (Item 43) — reuses the exact @mention search pattern
+  // already proven in CreatePostModal.tsx / CommentsModal.tsx, applied to a
+  // dedicated field instead of a caption. confirmedMentions IS the tagged list.
+  const [coOrganiserText, setCoOrganiserText] = useState('');
+  const coOrganiserInputRef = useRef<TextInput>(null);
+  const coOrganiserEnterInterceptedRef = useRef(false);
+  const coOrganiserPendingContentRef = useRef<string | null>(null);
+  const {
+    suggestions: coOrganiserSuggestions,
+    loading: coOrganiserSearchLoading,
+    selectedIndex: coOrganiserSelectedIndex,
+    confirmedMentions: confirmedCoOrganisers,
+    isDropdownVisible: isCoOrganiserDropdownVisible,
+    handleSelectionChange: coOrganiserOnSelectionChange,
+    handleTextChange: coOrganiserOnTextChange,
+    selectMention: selectCoOrganiserMention,
+    dismissSuggestions: dismissCoOrganiserSuggestions,
+    moveSelectionUp: moveCoOrganiserSelectionUp,
+    moveSelectionDown: moveCoOrganiserSelectionDown,
+  } = useMentions();
+
   // User role and subscription state
   const [userRole, setUserRole] = useState<string | null>(null);
   const [subscriptionTier, setSubscriptionTier] = useState<'free' | 'premium' | 'unlimited'>('free');
@@ -387,6 +412,45 @@ export default function CreateEventScreen() {
 
   const handleInputChange = (field: keyof EventFormData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  // ── Co-organiser @mention handlers — mirrors CreatePostModal's exact pattern ──
+  const handleCoOrganiserTextChange = (text: string) => {
+    if (coOrganiserEnterInterceptedRef.current) {
+      coOrganiserEnterInterceptedRef.current = false;
+      const resolved = coOrganiserPendingContentRef.current ?? text.replace(/\n$/, '');
+      coOrganiserPendingContentRef.current = null;
+      setCoOrganiserText(resolved);
+      coOrganiserOnTextChange(resolved);
+      return;
+    }
+    setCoOrganiserText(text);
+    coOrganiserOnTextChange(text);
+  };
+
+  const handleCoOrganiserSelectionChange = ({ nativeEvent: { selection } }: any) => {
+    coOrganiserOnSelectionChange(selection, coOrganiserText);
+  };
+
+  const handleCoOrganiserKeyPress = ({ nativeEvent: { key } }: any) => {
+    if (!isCoOrganiserDropdownVisible) return;
+    if (key === '\n' && coOrganiserSuggestions.length > 0) {
+      coOrganiserEnterInterceptedRef.current = true;
+      coOrganiserPendingContentRef.current = selectCoOrganiserMention(
+        coOrganiserSuggestions[coOrganiserSelectedIndex],
+        coOrganiserText
+      );
+      return;
+    }
+    if (key === 'Escape') { dismissCoOrganiserSuggestions(); return; }
+    if (key === 'ArrowUp') { moveCoOrganiserSelectionUp(); return; }
+    if (key === 'ArrowDown') { moveCoOrganiserSelectionDown(coOrganiserSuggestions.length); return; }
+  };
+
+  const handleCoOrganiserSelect = (user: MentionUser) => {
+    const newText = selectCoOrganiserMention(user, coOrganiserText);
+    setCoOrganiserText(newText);
+    coOrganiserInputRef.current?.focus();
   };
 
   // Handle toggling paid event - all tiers can create paid events
@@ -799,6 +863,19 @@ export default function CreateEventScreen() {
           method: 'POST',
           session,
         }).catch((err) => console.warn('⚠️ Failed to queue event notifications:', err));
+      }
+
+      // Store tagged co-organisers (fire-and-forget — best-effort, matches disclaimer pattern above)
+      if (result.event?.id && confirmedCoOrganisers.length > 0 && user?.id) {
+        const rows = confirmedCoOrganisers.map(m => ({
+          event_id: result.event.id,
+          user_id: m.userId,
+          tagged_by: user.id,
+        }));
+        supabase.from('event_co_organizers').insert(rows).then(
+          () => {},
+          (err: any) => console.warn('⚠️ Failed to save co-organisers:', err)
+        );
       }
 
       (navigation as any).replace('EventCreatedSuccess', {
@@ -1543,6 +1620,35 @@ export default function CreateEventScreen() {
                 onChangeText={(value) => handleInputChange('max_attendees', value)}
                 keyboardType="numeric"
               />
+            </View>
+
+            {/* Co-organisers */}
+            <View style={styles.inputSection}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Co-organisers (Optional)</Text>
+              <MentionTextInput
+                ref={coOrganiserInputRef}
+                style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                placeholder="Type @ to tag a co-organiser"
+                placeholderTextColor={theme.colors.textSecondary}
+                value={coOrganiserText}
+                onChangeText={handleCoOrganiserTextChange}
+                onSelectionChange={handleCoOrganiserSelectionChange}
+                onKeyPress={handleCoOrganiserKeyPress}
+                mentionUsernames={confirmedCoOrganisers.map(m => m.username)}
+                mentionColor={theme.colors.primary}
+              />
+              {isCoOrganiserDropdownVisible && (
+                <MentionSuggestions
+                  suggestions={coOrganiserSuggestions}
+                  loading={coOrganiserSearchLoading}
+                  selectedIndex={coOrganiserSelectedIndex}
+                  onSelect={handleCoOrganiserSelect}
+                  onDismiss={dismissCoOrganiserSuggestions}
+                />
+              )}
+              <Text style={[styles.helperText, { color: theme.colors.textSecondary }]}>
+                Only registered SoundBridge users can be tagged. They'll be listed as co-organisers on this event.
+              </Text>
             </View>
           </View>
           {/* ── Event Responsibility Disclaimer ── */}
