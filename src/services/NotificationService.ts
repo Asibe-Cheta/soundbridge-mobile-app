@@ -152,6 +152,7 @@ export interface NotificationPreferences {
 export interface UserLocation {
   state: string;
   country: string;
+  city?: string;
   source: 'gps' | 'onboarding';
   coordinates?: {
     latitude: number;
@@ -692,6 +693,13 @@ class NotificationService {
 
         // Also send to new POST endpoint for event notifications
         await locationUpdateService.onLocationPermissionGranted();
+
+        // Keep profiles.city fresh too — this is the column event-promotion
+        // proximity matching (find_nearby_users_for_event) actually reads, but
+        // it was previously only ever set once at onboarding and never revisited.
+        // Runs on every app init alongside the rest of this GPS refresh, so a
+        // user's matched city naturally stays current as they actually move.
+        await this.updateProfileCity(location.city);
       } else {
         // Fallback to onboarding location
         await this.loadLocationFromBackend();
@@ -760,6 +768,7 @@ class NotificationService {
           const result = {
             state: place.region || place.city || 'Unknown',
             country: place.country || 'Unknown',
+            city: place.city || undefined,
             source: 'gps',
             coordinates: {
               latitude: location.coords.latitude,
@@ -838,6 +847,18 @@ class NotificationService {
       }
     } catch (error) {
       console.error('❌ Error updating location:', error);
+    }
+  }
+
+  private async updateProfileCity(city: string | undefined): Promise<void> {
+    if (!city) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.id) return;
+      const { error } = await supabase.from('profiles').update({ city }).eq('id', user.id);
+      if (error) console.warn('⚠️ Failed to update profile city:', error.message);
+    } catch (error) {
+      console.error('❌ Error updating profile city:', error);
     }
   }
 
