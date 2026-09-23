@@ -297,6 +297,19 @@ GRANT EXECUTE ON FUNCTION get_personalized_events(UUID, INTEGER, INTEGER) TO ser
 -- ============================================================================
 -- PART 7: CREATE FUNCTION TO FIND NEARBY USERS FOR NOTIFICATIONS
 -- ============================================================================
+--
+-- !!! DO NOT RE-RUN THIS FUNCTION DEFINITION AGAINST PROD !!!
+-- The definition below is BROKEN — it declares RETURNS TABLE with text columns
+-- but profiles.username/display_name/city are varchar(50), and PL/pgSQL's
+-- RETURN QUERY requires an exact type match (unlike a plain SELECT). This threw
+-- a hard Postgres error (42804) on EVERY call, for EVERY event, platform-wide,
+-- silently zeroing out event-promotion notifications entirely until fixed on
+-- 2026-09-23. The corrected version (explicit ::TEXT casts) lives in web's
+-- supabase/migrations/20260923100000_fix_find_nearby_users_for_event_varchar_cast.sql
+-- and is what's actually live in prod. Re-running this file's CREATE OR REPLACE
+-- would silently overwrite that fix and reintroduce the exact same outage.
+-- This file is kept for historical/CREATE TABLE reference only — its function
+-- bodies are stale.
 
 CREATE OR REPLACE FUNCTION find_nearby_users_for_event(
   p_event_id UUID,
