@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
+import { SystemTypography as Typography } from '../constants/Typography';
 
 export default function EventCreatedSuccessScreen() {
   const navigation = useNavigation();
@@ -14,6 +15,14 @@ export default function EventCreatedSuccessScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <LinearGradient
+        colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        locations={[0, 0.5, 1]}
+        style={styles.mainGradient}
+      />
+
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <View style={styles.content}>
           <View
@@ -60,6 +69,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  mainGradient: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+  },
   safeArea: {
     flex: 1,
   },
@@ -79,15 +93,13 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   title: {
-    fontSize: 22,
-    fontWeight: '700',
-    letterSpacing: -0.3,
+    ...Typography.headerMedium,
     marginBottom: 12,
     textAlign: 'center',
   },
   message: {
+    ...Typography.body,
     fontSize: 15,
-    lineHeight: 22,
     textAlign: 'center',
     marginBottom: 36,
   },
@@ -102,16 +114,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryBtnText: {
+    ...Typography.button,
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
   },
   doneBtn: {
     marginTop: 20,
     paddingVertical: 10,
   },
   doneBtnText: {
-    fontSize: 14,
+    ...Typography.label,
     fontWeight: '600',
   },
 });

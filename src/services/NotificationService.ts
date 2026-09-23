@@ -1566,7 +1566,16 @@ class NotificationService {
           priority: Notifications.AndroidNotificationPriority.HIGH,
           ...(Platform.OS === 'android' && { channelId: channel }),
         },
-        trigger: scheduledDate ? { date: scheduledDate } : null,
+        // expo-notifications ~0.32 requires a discriminated trigger shape
+        // ({ type: SchedulableTriggerInputTypes.DATE, date }) — the old bare
+        // { date: scheduledDate } shape isn't a recognized trigger, and the native
+        // side was firing those notifications immediately instead of at the
+        // scheduled time (confirmed via a real user report: a "your event has
+        // ended" notification scheduled for weeks in the future fired the moment
+        // the event was created).
+        trigger: scheduledDate
+          ? { type: Notifications.SchedulableTriggerInputTypes.DATE, date: scheduledDate }
+          : null,
       });
 
       console.log('✅ Local notification scheduled:', notificationId);
