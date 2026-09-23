@@ -14,6 +14,7 @@ import {
   RefreshControl,
   Alert,
   StatusBar,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,6 +29,7 @@ import EventCategoryPromptModal from '../components/EventCategoryPromptModal';
 import { config } from '../config/environment';
 import { apiFetch } from '../lib/apiClient';
 import eventBookmarkService from '../services/EventBookmarkService';
+import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 interface Event {
   id: string;
@@ -74,6 +76,8 @@ export default function AllEventsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
+  const swipeableRefs = useRef<Map<string, Swipeable | null>>(new Map());
 
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('date');
@@ -263,6 +267,76 @@ export default function AllEventsScreen() {
     navigation.navigate('EventDetails' as never, { eventId: event.id, event: event } as never);
   };
 
+  // Swipe-to-delete for "Created Events" only — reuses the exact same DELETE
+  // /api/events/{id} call EventDetailsScreen.tsx's trash-icon flow already uses.
+  const handleSwipeDelete = (event: Event) => {
+    Alert.alert(
+      'Delete Event',
+      `Are you sure you want to delete "${event.title}"? This action cannot be undone.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+          onPress: () => swipeableRefs.current.get(event.id)?.close(),
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setDeletingEventId(event.id);
+              const { data: { session } } = await supabase.auth.getSession();
+              if (!session?.access_token) throw new Error('Not authenticated');
+
+              const result = await apiFetch<{ success?: boolean; error?: string }>(
+                `/api/events/${event.id}`,
+                { method: 'DELETE', session }
+              );
+              if (result && result.success === false) {
+                throw new Error(result.error || 'Failed to delete event');
+              }
+
+              swipeableRefs.current.delete(event.id);
+              setEvents(prev => prev.filter(e => e.id !== event.id));
+            } catch (error: any) {
+              console.error('❌ Error deleting event:', error);
+              Alert.alert('Error', error.message || 'Failed to delete event. Please try again.');
+              swipeableRefs.current.get(event.id)?.close();
+            } finally {
+              setDeletingEventId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const renderDeleteAction = (event: Event, progress: Animated.AnimatedInterpolation<number>) => {
+    const translateX = progress.interpolate({
+      inputRange: [0, 1],
+      outputRange: [80, 0],
+    });
+    return (
+      <TouchableOpacity
+        style={styles.deleteAction}
+        activeOpacity={0.85}
+        disabled={deletingEventId === event.id}
+        onPress={() => handleSwipeDelete(event)}
+      >
+        <Animated.View style={[styles.deleteActionInner, { transform: [{ translateX }] }]}>
+          {deletingEventId === event.id ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <>
+              <Ionicons name="trash" size={22} color="#FFFFFF" />
+              <Text style={styles.deleteActionText}>Delete</Text>
+            </>
+          )}
+        </Animated.View>
+      </TouchableOpacity>
+    );
+  };
+
   // Diagnostic function to check why events aren't showing
   const checkEventDiscoveryHealth = async () => {
     try {
@@ -433,9 +507,9 @@ export default function AllEventsScreen() {
     return `${symbol}${formattedAmount}`;
   };
 
-  const renderEventCard = (event: Event) => (
+  const renderEventCard = (event: Event) => {
+    const card = (
     <TouchableOpacity
-      key={event.id}
       style={[styles.eventCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
       onPress={() => handleEventPress(event)}
     >
@@ -512,7 +586,24 @@ export default function AllEventsScreen() {
         </View>
       </View>
     </TouchableOpacity>
-  );
+    );
+
+    if (mode === 'created') {
+      return (
+        <Swipeable
+          key={event.id}
+          ref={ref => { swipeableRefs.current.set(event.id, ref); }}
+          renderRightActions={(progress) => renderDeleteAction(event, progress)}
+          overshootRight={false}
+          friction={2}
+        >
+          {card}
+        </Swipeable>
+      );
+    }
+
+    return <View key={event.id}>{card}</View>;
+  };
 
   if (loading) {
     return (
@@ -844,6 +935,24 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+  },
+  deleteAction: {
+    width: 80,
+    marginBottom: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#DC2626',
+  },
+  deleteActionInner: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  deleteActionText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   eventHeader: {
     flexDirection: 'row',
