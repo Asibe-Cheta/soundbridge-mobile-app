@@ -69,7 +69,7 @@ export default function EventDetailsScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
 
   const { eventId, event: initialEvent } = route.params as { eventId: string; event?: Event };
 
@@ -798,7 +798,7 @@ export default function EventDetailsScreen() {
           {isOrganizer && (
             <EventAnalyticsCard
               analytics={analytics}
-              tier={user?.subscription_tier as any}
+              tier={userProfile?.subscription_tier as any}
             />
           )}
 
