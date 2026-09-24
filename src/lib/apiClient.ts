@@ -162,7 +162,12 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
           }
         }
       } else if (response.status >= 500) {
-        errorMessage = 'Server error. Please try again later.';
+        // Prefer the backend's own message when it sent one — a 500 in this codebase
+        // often carries a real, specific cause (e.g. a payment/business-logic failure
+        // surfaced as an uncaught exception), not just infra downtime. Masking that
+        // behind a generic "Server error" made a real money-involving bug harder to
+        // diagnose. Only fall back to the generic message when the backend gave nothing.
+        errorMessage = backendMessage || 'Server error. Please try again later.';
       }
 
       const error = new Error(errorMessage);
