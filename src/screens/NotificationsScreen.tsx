@@ -41,6 +41,7 @@ interface Notification {
     | 'live_session'
     | 'new_follower'
     | 'content_purchase'
+    | 'ticket_sold'
     | 'reaction'
     | 'like'
     | 'comment'
@@ -318,6 +319,15 @@ export default function NotificationsScreen() {
         navigation.navigate('Wallet' as never, { tab: 'tips', tipId: data?.tipId || data?.entityId } as never);
         break;
 
+      // Ticket sold notifications — organiser sees who bought a ticket to their event
+      case 'ticket_sold': {
+        const ticketEventId = data?.eventId || data?.entityId;
+        if (ticketEventId) {
+          navigation.navigate('EventDetails' as never, { eventId: ticketEventId } as never);
+        }
+        break;
+      }
+
       // Withdrawal notifications
       case 'withdrawal':
         navigation.navigate('Wallet' as never, { tab: 'withdrawals', withdrawalId: data?.withdrawalId || data?.entityId } as never);
@@ -530,6 +540,8 @@ export default function NotificationsScreen() {
         return 'person-add';
       case 'content_purchase':
         return 'cart';
+      case 'ticket_sold':
+        return 'ticket';
       case 'reaction':
       case 'like':
       case 'post_reaction':
@@ -548,6 +560,7 @@ export default function NotificationsScreen() {
         return '#3B82F6';
       case 'tip':
       case 'content_purchase':
+      case 'ticket_sold':
         return '#10B981';
       case 'message':
         return '#8B5CF6';
