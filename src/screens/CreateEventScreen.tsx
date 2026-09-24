@@ -841,7 +841,25 @@ export default function CreateEventScreen() {
     return true;
   };
 
+  // Synchronous guard against rapid double-taps on Create/Save, before `loading` state has
+  // a chance to update — a ref is used (not state) since state updates aren't synchronous
+  // and a second tap can fire before the first re-render lands. Same pattern already proven
+  // for TestUploadScreen's Publish button (isSubmittingRef there) — confirmed via a real
+  // user report: two identical events created 603ms apart from a single tap, each
+  // independently notifying the same nearby users.
+  const isSubmittingRef = useRef(false);
+
   const handleSubmit = async () => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    try {
+      await handleSubmitInner();
+    } finally {
+      isSubmittingRef.current = false;
+    }
+  };
+
+  const handleSubmitInner = async () => {
     if (!validateForm()) return;
 
     // Creator agreement gate — first creative action only
