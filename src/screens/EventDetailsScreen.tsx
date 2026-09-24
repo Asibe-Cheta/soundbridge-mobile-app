@@ -646,6 +646,14 @@ export default function EventDetailsScreen() {
             {isOrganizer && (
               <TouchableOpacity
                 style={styles.headerButton}
+                onPress={() => (navigation as any).navigate('CreateEvent', { eventToEdit: event })}
+              >
+                <Ionicons name="create-outline" size={24} color={theme.colors.text} />
+              </TouchableOpacity>
+            )}
+            {isOrganizer && (
+              <TouchableOpacity
+                style={styles.headerButton}
                 onPress={handleDeleteEvent}
                 disabled={deleting}
               >

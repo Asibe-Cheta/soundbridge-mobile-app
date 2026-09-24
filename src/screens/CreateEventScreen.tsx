@@ -20,7 +20,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -249,11 +249,85 @@ const EVENT_CATEGORIES = [
   'Other'
 ];
 
+// Reverse of the backend's friendly-label -> DB-enum categoryMap (confirmed verbatim with the
+// web team), used only to best-guess which chip to pre-select when editing an existing event —
+// the forward map is many-to-one so this is NOT always exact. Where a raw enum value could have
+// come from multiple friendly labels (Secular, Other, Carnival), this picks the label that maps
+// back to the same word as a reasonable canonical default. Enum values with no friendly label at
+// all (Christian, Hip-Hop, Afrobeat, Rock, Pop — only reachable via non-mobile event creation)
+// fall back to 'Other'; saving without touching category would reassign those to 'Other', a known
+// accepted limitation rather than something worth more complexity for right now.
+const CATEGORY_ENUM_TO_LABEL: Record<string, string> = {
+  Secular: 'Music Concert',
+  Other: 'Other',
+  Carnival: 'Carnival',
+  Gospel: 'Gospel Concert',
+  Classical: 'Instrumental',
+  Jazz: 'Jazz Room',
+  Conference: 'Conference',
+  Christian: 'Other',
+  'Hip-Hop': 'Other',
+  Afrobeat: 'Other',
+  Rock: 'Other',
+  Pop: 'Other',
+};
+
+const PRICE_CURRENCY_KEYS = ['GBP', 'NGN', 'USD', 'EUR', 'CAD', 'AUD', 'INR', 'JPY', 'BRL', 'MXN'];
+
+// Builds the edit form's initial state from a fetched event row (select('*') shape, looser than
+// the EventFormData/Event interfaces since it carries every raw column). Date/time are split
+// using LOCAL date components, matching the date-picker fix elsewhere in this file — event_date
+// is stored as a UTC timestamp, and re-deriving via toISOString() would reintroduce the same
+// day-rollback bug for positive-UTC-offset timezones.
+function buildFormDataFromEvent(event: any): EventFormData {
+  const eventDate = event?.event_date ? new Date(event.event_date) : null;
+  const dateStr = eventDate
+    ? `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, '0')}-${String(eventDate.getDate()).padStart(2, '0')}`
+    : '';
+  const timeStr = eventDate
+    ? `${String(eventDate.getHours()).padStart(2, '0')}:${String(eventDate.getMinutes()).padStart(2, '0')}`
+    : '';
+
+  const prices: Record<string, string> = {};
+  PRICE_CURRENCY_KEYS.forEach((currency) => {
+    const value = event?.[`price_${currency.toLowerCase()}`];
+    if (value !== null && value !== undefined && Number(value) > 0) {
+      prices[currency] = String(value);
+    }
+  });
+
+  return {
+    title: event?.title || '',
+    description: event?.description || '',
+    event_date: dateStr,
+    event_time: timeStr,
+    venue: event?.venue || '',
+    category: CATEGORY_ENUM_TO_LABEL[event?.category] || event?.category || '',
+    max_attendees: event?.max_attendees ? String(event.max_attendees) : '',
+    image_url: event?.image_url || event?.cover_image_url || '',
+    latitude: event?.latitude ?? null,
+    longitude: event?.longitude ?? null,
+    country: event?.country || 'GB',
+    // Seeded with a single synthetic key holding the existing location string, so the
+    // Object.entries(...).join(', ') logic that builds the final location reproduces it
+    // unchanged if the organiser doesn't touch the address picker.
+    addressFields: event?.location ? { location: event.location } : {},
+    isFree: event?.is_free ?? Object.keys(prices).length === 0,
+    prices,
+  };
+}
+
 export default function CreateEventScreen() {
   const navigation = useNavigation();
+  const route = useRoute();
   const { theme } = useTheme();
   const { user, userProfile, updateUserProfile, refreshUser, session } = useAuth();
   const { requestAgreement, agreementVisible, agreementSubmitting, onAgreed, onDismiss } = useCreatorAgreement();
+
+  // Edit mode — present when navigated here from EventDetailsScreen's edit button.
+  // The raw event row (select('*')), not the narrowed EventFormData shape.
+  const eventToEdit = (route.params as { eventToEdit?: any } | undefined)?.eventToEdit;
+  const isEditMode = !!eventToEdit;
 
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -265,8 +339,10 @@ export default function CreateEventScreen() {
   const [showBecomeCreatorModal, setShowBecomeCreatorModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
-  // Event responsibility disclaimer — must be ticked before publishing
-  const [eventDisclaimerAccepted, setEventDisclaimerAccepted] = useState(false);
+  // Event responsibility disclaimer — must be ticked before publishing. Already accepted once at
+  // creation when editing (PUT has no disclaimer logic at all, per the web team) — pre-satisfied
+  // so it's not re-litigated on every edit; the checkbox itself is hidden in edit mode below.
+  const [eventDisclaimerAccepted, setEventDisclaimerAccepted] = useState(isEditMode);
   const [becomeCreatorLoading, setBecomeCreatorLoading] = useState(false);
 
   // ── Co-organiser tagging (Item 43) — reuses the exact @mention search pattern
@@ -378,34 +454,48 @@ export default function CreateEventScreen() {
   // Date/Time picker state
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [selectedTime, setSelectedTime] = useState<Date>(new Date());
-
-  const [formData, setFormData] = useState<EventFormData>({
-    title: '',
-    description: '',
-    event_date: '',
-    event_time: '',
-    venue: '',
-    category: '',
-    max_attendees: '',
-    image_url: '',
-    latitude: null,
-    longitude: null,
-    country: 'GB', // Default to UK
-    addressFields: {},
-    isFree: true,
-    prices: {},
-  });
-
-  const [selectedCountryConfig, setSelectedCountryConfig] = useState<CountryAddressConfig>(
-    COUNTRY_ADDRESS_CONFIGS.find(c => c.countryCode === 'GB') || DEFAULT_ADDRESS_CONFIG
+  const [selectedDate, setSelectedDate] = useState<Date>(
+    eventToEdit?.event_date ? new Date(eventToEdit.event_date) : new Date()
+  );
+  const [selectedTime, setSelectedTime] = useState<Date>(
+    eventToEdit?.event_date ? new Date(eventToEdit.event_date) : new Date()
   );
 
-  // Update country config when country changes
+  const [formData, setFormData] = useState<EventFormData>(
+    isEditMode ? buildFormDataFromEvent(eventToEdit) : {
+      title: '',
+      description: '',
+      event_date: '',
+      event_time: '',
+      venue: '',
+      category: '',
+      max_attendees: '',
+      image_url: '',
+      latitude: null,
+      longitude: null,
+      country: 'GB', // Default to UK
+      addressFields: {},
+      isFree: true,
+      prices: {},
+    }
+  );
+
+  const [selectedCountryConfig, setSelectedCountryConfig] = useState<CountryAddressConfig>(
+    COUNTRY_ADDRESS_CONFIGS.find(c => c.countryCode === (isEditMode ? formData.country : 'GB')) || DEFAULT_ADDRESS_CONFIG
+  );
+
+  // Update country config when country changes. Skips clearing addressFields on the very first
+  // run so edit mode's pre-filled location (seeded into addressFields above) survives mount —
+  // this effect still fires once immediately regardless, it just shouldn't wipe data that was
+  // just loaded in for editing.
+  const isFirstCountryEffectRun = useRef(true);
   useEffect(() => {
     const config = COUNTRY_ADDRESS_CONFIGS.find(c => c.countryCode === formData.country);
     setSelectedCountryConfig(config || DEFAULT_ADDRESS_CONFIG);
+    if (isFirstCountryEffectRun.current) {
+      isFirstCountryEffectRun.current = false;
+      return;
+    }
     // Reset address fields when country changes
     setFormData(prev => ({ ...prev, addressFields: {} }));
   }, [formData.country]);
@@ -758,7 +848,7 @@ export default function CreateEventScreen() {
     const agreed = await requestAgreement();
     if (!agreed) return;
 
-    if (!eventDisclaimerAccepted) {
+    if (!isEditMode && !eventDisclaimerAccepted) {
       Alert.alert('Confirmation Required', 'Please confirm that you accept responsibility for this event before publishing.');
       return;
     }
@@ -839,27 +929,50 @@ export default function CreateEventScreen() {
       // The address is already captured in the 'location' field as a string
       // Country is stored separately in 'country' field
 
-      // Backend validates this synchronously at creation time (confirmed against
-      // apps/web/app/api/events/route.ts) — must be sent in the initial payload,
-      // not as a follow-up update, or POST /api/events rejects the whole request.
-      eventData.creator_event_disclaimer_accepted = true;
-      eventData.creator_event_disclaimer_accepted_at = new Date().toISOString();
+      if (!isEditMode) {
+        // Backend validates this synchronously at creation time (confirmed against
+        // apps/web/app/api/events/route.ts) — must be sent in the initial payload,
+        // not as a follow-up update, or POST /api/events rejects the whole request.
+        // PUT has no disclaimer logic at all (confirmed with the web team), so this
+        // is create-only.
+        eventData.creator_event_disclaimer_accepted = true;
+        eventData.creator_event_disclaimer_accepted_at = new Date().toISOString();
+      }
 
       console.log('📤 Sending event data:', JSON.stringify(eventData, null, 2));
 
-      // Call API endpoint using apiFetch for proper authentication
-      const result = await apiFetch<{ success: boolean; event?: any; error?: string; message?: string }>('/api/events', {
-        method: 'POST',
-        session,
-        body: JSON.stringify(eventData),
-      });
+      // Call API endpoint using apiFetch for proper authentication. PUT /api/events/{id}
+      // spreads its body straight into a DB update with no field-mapping layer of its
+      // own (confirmed with the web team) — same eventData shape as POST works for both,
+      // since it already uses real column names (price_gbp, etc.) throughout.
+      const result = isEditMode
+        ? await apiFetch<{ success?: boolean; event?: any; error?: string; message?: string }>(
+            `/api/events/${eventToEdit.id}`,
+            { method: 'PUT', session, body: JSON.stringify(eventData) }
+          )
+        : await apiFetch<{ success: boolean; event?: any; error?: string; message?: string }>(
+            '/api/events',
+            { method: 'POST', session, body: JSON.stringify(eventData) }
+          );
 
       console.log('📥 API result:', result);
 
-      if (!result.success) {
-        const errorMessage = result.error || result.message || 'Failed to create event';
+      // apiFetch already throws on a non-2xx response — only treat an explicit
+      // success:false as a failure here, don't require success:true (PUT's response
+      // shape isn't guaranteed to include that flag the way POST's does).
+      if (result && (result as any).success === false) {
+        const errorMessage = result.error || result.message || (isEditMode ? 'Failed to save changes' : 'Failed to create event');
         console.error('❌ API error response:', result);
         throw new Error(errorMessage);
+      }
+
+      if (isEditMode) {
+        // Editing isn't a "your event is now being promoted" moment — no notification
+        // queueing, no co-organiser insert (out of scope for this pass, see above).
+        // Navigate back without a stale `event` param so EventDetailsScreen re-fetches
+        // the just-saved changes instead of showing the pre-edit data.
+        (navigation as any).replace('EventDetails', { eventId: eventToEdit.id });
+        return;
       }
 
       // Queue push notifications to nearby genre-matched users (fire-and-forget)
@@ -888,8 +1001,8 @@ export default function CreateEventScreen() {
         eventTitle: formData.title.trim(),
       });
     } catch (error: any) {
-      console.error('❌ Error creating event:', error);
-      const errorMessage = error?.message || 'Failed to create event. Please try again.';
+      console.error(isEditMode ? '❌ Error saving event:' : '❌ Error creating event:', error);
+      const errorMessage = error?.message || (isEditMode ? 'Failed to save changes. Please try again.' : 'Failed to create event. Please try again.');
       Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
@@ -972,14 +1085,14 @@ export default function CreateEventScreen() {
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border}]}>
           <BackButton onPress={() => navigation.goBack()} style={styles.headerButton} />
-          <Text style={[styles.headerTitle, { color: theme.colors.text}]}>Create Event</Text>
+          <Text style={[styles.headerTitle, { color: theme.colors.text}]}>{isEditMode ? 'Edit Event' : 'Create Event'}</Text>
           <TouchableOpacity
             style={[styles.headerButton, { opacity: loading ? 0.5 : 1}]}
             onPress={handleSubmit}
             disabled={loading}
           >
             <Text style={[styles.headerButtonText, { color: theme.colors.primary}]}>
-              {loading ? 'Creating...' : 'Create'}
+              {loading ? (isEditMode ? 'Saving...' : 'Creating...') : (isEditMode ? 'Save' : 'Create')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1627,54 +1740,60 @@ export default function CreateEventScreen() {
               />
             </View>
 
-            {/* Co-organisers */}
-            <View style={styles.inputSection}>
-              <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Co-organisers (Optional)</Text>
-              <MentionTextInput
-                ref={coOrganiserInputRef}
-                style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
-                placeholder="Type @ to tag a co-organiser"
-                placeholderTextColor={theme.colors.textSecondary}
-                value={coOrganiserText}
-                onChangeText={handleCoOrganiserTextChange}
-                onSelectionChange={handleCoOrganiserSelectionChange}
-                onKeyPress={handleCoOrganiserKeyPress}
-                mentionUsernames={confirmedCoOrganisers.map(m => m.username)}
-                mentionColor={theme.colors.primary}
-              />
-              {isCoOrganiserDropdownVisible && (
-                <MentionSuggestions
-                  suggestions={coOrganiserSuggestions}
-                  loading={coOrganiserSearchLoading}
-                  selectedIndex={coOrganiserSelectedIndex}
-                  onSelect={handleCoOrganiserSelect}
-                  onDismiss={dismissCoOrganiserSuggestions}
+            {/* Co-organisers — not editable here yet; editing an existing event's tagged
+                co-organisers needs its own diff-against-existing-rows logic, out of scope for
+                this pass. Section is hidden entirely in edit mode rather than silently broken. */}
+            {!isEditMode && (
+              <View style={styles.inputSection}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Co-organisers (Optional)</Text>
+                <MentionTextInput
+                  ref={coOrganiserInputRef}
+                  style={[styles.textInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                  placeholder="Type @ to tag a co-organiser"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  value={coOrganiserText}
+                  onChangeText={handleCoOrganiserTextChange}
+                  onSelectionChange={handleCoOrganiserSelectionChange}
+                  onKeyPress={handleCoOrganiserKeyPress}
+                  mentionUsernames={confirmedCoOrganisers.map(m => m.username)}
+                  mentionColor={theme.colors.primary}
                 />
-              )}
-              <Text style={[styles.helperText, { color: theme.colors.textSecondary }]}>
-                Only registered SoundBridge users can be tagged. They'll be listed as co-organisers on this event.
-              </Text>
-            </View>
+                {isCoOrganiserDropdownVisible && (
+                  <MentionSuggestions
+                    suggestions={coOrganiserSuggestions}
+                    loading={coOrganiserSearchLoading}
+                    selectedIndex={coOrganiserSelectedIndex}
+                    onSelect={handleCoOrganiserSelect}
+                    onDismiss={dismissCoOrganiserSuggestions}
+                  />
+                )}
+                <Text style={[styles.helperText, { color: theme.colors.textSecondary }]}>
+                  Only registered SoundBridge users can be tagged. They'll be listed as co-organisers on this event.
+                </Text>
+              </View>
+            )}
           </View>
-          {/* ── Event Responsibility Disclaimer ── */}
-          <TouchableOpacity
-            style={styles.disclaimerRow}
-            onPress={() => setEventDisclaimerAccepted(v => !v)}
-            activeOpacity={0.7}
-          >
-            <View style={[
-              styles.disclaimerCheckbox,
-              { borderColor: eventDisclaimerAccepted ? theme.colors.primary : theme.colors.border },
-              eventDisclaimerAccepted && { backgroundColor: theme.colors.primary },
-            ]}>
-              {eventDisclaimerAccepted && (
-                <Ionicons name="checkmark" size={13} color="#fff" />
-              )}
-            </View>
-            <Text style={[styles.disclaimerText, { color: theme.colors.textSecondary }]}>
-              By publishing this event I confirm I am solely responsible for its organisation, safety and delivery. SoundBridge promotes events on my behalf but bears no liability for any aspect of the event itself.
-            </Text>
-          </TouchableOpacity>
+          {/* ── Event Responsibility Disclaimer — creation-only, PUT has no disclaimer logic ── */}
+          {!isEditMode && (
+            <TouchableOpacity
+              style={styles.disclaimerRow}
+              onPress={() => setEventDisclaimerAccepted(v => !v)}
+              activeOpacity={0.7}
+            >
+              <View style={[
+                styles.disclaimerCheckbox,
+                { borderColor: eventDisclaimerAccepted ? theme.colors.primary : theme.colors.border },
+                eventDisclaimerAccepted && { backgroundColor: theme.colors.primary },
+              ]}>
+                {eventDisclaimerAccepted && (
+                  <Ionicons name="checkmark" size={13} color="#fff" />
+                )}
+              </View>
+              <Text style={[styles.disclaimerText, { color: theme.colors.textSecondary }]}>
+                By publishing this event I confirm I am solely responsible for its organisation, safety and delivery. SoundBridge promotes events on my behalf but bears no liability for any aspect of the event itself.
+              </Text>
+            </TouchableOpacity>
+          )}
 
           {/* Preview — see how the event page will look before publishing */}
           <TouchableOpacity
