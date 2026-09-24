@@ -203,9 +203,11 @@ export default function CreatorProfileScreen() {
   const [externalLinks, setExternalLinks] = useState<ExternalLink[]>([]);
 
   // Tab and posts state
-  const [activeTab, setActiveTab] = useState<'drops' | 'tracks' | 'albums' | 'about' | 'photos'>('drops');
+  const [activeTab, setActiveTab] = useState<'drops' | 'tracks' | 'albums' | 'events' | 'about' | 'photos'>('drops');
   const [albums, setAlbums] = useState<{ id: string; title: string; cover_image_url?: string; tracks_count?: number; total_plays?: number; created_at: string }[]>([]);
   const [loadingAlbums, setLoadingAlbums] = useState(false);
+  const [creatorEvents, setCreatorEvents] = useState<{ id: string; title: string; event_date: string; location: string; venue?: string; image_url?: string; is_free?: boolean; price_gbp?: number; price_ngn?: number }[]>([]);
+  const [loadingCreatorEvents, setLoadingCreatorEvents] = useState(false);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [postsPage, setPostsPage] = useState(1);
@@ -310,6 +312,7 @@ export default function CreatorProfileScreen() {
     loadCreatorProfile();
     loadCreatorTracks();
     loadAlbums();
+    loadCreatorEvents();
     checkFollowStatus();
     checkMembershipStatus();
     loadBookingStatus();
@@ -635,6 +638,24 @@ export default function CreatorProfileScreen() {
       console.error('❌ Error loading albums:', error);
     } finally {
       setLoadingAlbums(false);
+    }
+  };
+
+  const loadCreatorEvents = async () => {
+    try {
+      setLoadingCreatorEvents(true);
+      const { data, error } = await supabase
+        .from('events')
+        .select('id, title, event_date, location, venue, image_url, is_free, price_gbp, price_ngn')
+        .eq('creator_id', creatorId)
+        .order('event_date', { ascending: true })
+        .limit(50);
+      if (error) throw error;
+      setCreatorEvents(data || []);
+    } catch (error) {
+      console.error('❌ Error loading creator events:', error);
+    } finally {
+      setLoadingCreatorEvents(false);
     }
   };
 
@@ -1687,6 +1708,22 @@ export default function CreatorProfileScreen() {
           <TouchableOpacity
             style={[
               styles.tab,
+              activeTab === 'events' && styles.activeTab,
+              activeTab === 'events' && { borderBottomColor: theme.colors.primary }
+            ]}
+            onPress={() => setActiveTab('events')}
+          >
+            <Text style={[
+              styles.tabText,
+              { color: activeTab === 'events' ? theme.colors.primary : theme.colors.textSecondary }
+            ]}>
+              Events
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.tab,
               activeTab === 'photos' && styles.activeTab,
               activeTab === 'photos' && { borderBottomColor: theme.colors.primary }
             ]}
@@ -1875,6 +1912,62 @@ export default function CreatorProfileScreen() {
                 <Ionicons name="disc-outline" size={64} color={theme.colors.textSecondary} />
                 <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
                   No albums yet
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Events Tab */}
+        {activeTab === 'events' && (
+          <View style={styles.tabContent}>
+            {loadingCreatorEvents ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={theme.colors.primary} />
+                <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading events...</Text>
+              </View>
+            ) : creatorEvents.length > 0 ? (
+              <View style={{ padding: 12, gap: 12 }}>
+                {creatorEvents.map((ev) => {
+                  const price = ev.price_gbp ? `£${ev.price_gbp}` : ev.price_ngn ? `₦${ev.price_ngn}` : null;
+                  return (
+                    <TouchableOpacity
+                      key={ev.id}
+                      style={{ flexDirection: 'row', borderRadius: 12, overflow: 'hidden', backgroundColor: theme.colors.surface }}
+                      onPress={() => (navigation as any).navigate('EventDetails', { eventId: ev.id })}
+                    >
+                      <View style={{ width: 84, height: 84, backgroundColor: theme.colors.card }}>
+                        {ev.image_url ? (
+                          <Image source={{ uri: ev.image_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                        ) : (
+                          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                            <Ionicons name="calendar-outline" size={28} color={theme.colors.textSecondary} />
+                          </View>
+                        )}
+                      </View>
+                      <View style={{ flex: 1, padding: 10, justifyContent: 'center' }}>
+                        <Text style={[{ fontWeight: '600', fontSize: 14 }, { color: theme.colors.text }]} numberOfLines={1}>
+                          {ev.title}
+                        </Text>
+                        <Text style={[{ fontSize: 12, marginTop: 3 }, { color: theme.colors.primary }]}>
+                          {new Date(ev.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </Text>
+                        <Text style={[{ fontSize: 12, marginTop: 2 }, { color: theme.colors.textSecondary }]} numberOfLines={1}>
+                          {ev.venue || ev.location}
+                        </Text>
+                        <Text style={[{ fontSize: 11, marginTop: 4, fontWeight: '600' }, { color: theme.colors.textSecondary }]}>
+                          {ev.is_free || !price ? 'Free' : price}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <Ionicons name="calendar-outline" size={64} color={theme.colors.textSecondary} />
+                <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
+                  No events yet
                 </Text>
               </View>
             )}
