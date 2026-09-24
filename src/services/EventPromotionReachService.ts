@@ -58,11 +58,15 @@ class EventPromotionReachService {
   }
 
   private async getBookedCount(eventId: string): Promise<number> {
+    // Real status vocabulary is IN ('active','used','refunded','cancelled') — 'confirmed'
+    // is never a real value (confirmed with the web team earlier this session, same fix
+    // already applied to CreatorRevenueService.ts). This file predated that finding, so it
+    // still had the same always-zero bug CreatorRevenueService.ts had.
     const { data, error } = await supabase
       .from('purchased_event_tickets')
       .select('quantity')
       .eq('event_id', eventId)
-      .eq('status', 'confirmed');
+      .in('status', ['active', 'used']);
 
     if (error) {
       console.error('EventPromotionReachService.getBookedCount:', error.message);
