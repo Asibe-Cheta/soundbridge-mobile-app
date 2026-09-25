@@ -13,22 +13,25 @@ import { useTheme } from '../contexts/ThemeContext';
 import PromotionReachVisualization from '../components/PromotionReachVisualization';
 
 const MOCK_EVENT_TITLE = "Port Harcourt, We're Outside!";
-const MOCK_CENTER_LABEL = 'Port Harcourt';
+const MOCK_CENTER_LABEL = 'GRA Phase 3';
 
+// Real Port Harcourt neighbourhoods within ~20km of GRA Phase 3 (the actual event venue) —
+// event promotion targets nearby areas within the same city, not other cities across the
+// region. Roughly ordered near -> far from the venue, with counts trending down at distance.
 const MOCK_AREAS = [
-  { city: 'Yenagoa', count: 342 },
-  { city: 'Aba', count: 218 },
-  { city: 'Owerri', count: 176 },
-  { city: 'Uyo', count: 134 },
-  { city: 'Warri', count: 98 },
-  { city: 'Calabar', count: 61 },
+  { city: 'GRA Phase 2', count: 298 },
+  { city: 'D-Line', count: 241 },
+  { city: 'Trans-Amadi', count: 187 },
+  { city: 'Woji', count: 156 },
+  { city: 'Rumuomasi', count: 112 },
+  { city: 'Eliozu', count: 68 },
 ];
 
 const MOCK_FUNNEL = {
-  sent: 1029,
-  reached: 872,
-  opened: 391,
-  booked: 84,
+  sent: 1062,
+  reached: 903,
+  opened: 406,
+  booked: 87,
 };
 
 interface FunnelCardProps {
