@@ -1950,6 +1950,17 @@ export default function ProfileScreen() {
             <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Promotion Reach Demo (Ad)</Text>
             <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
+          {/* TEMPORARY — ad demo entry point, remove alongside WhosComingDemoScreen.tsx */}
+          <TouchableOpacity
+            style={styles.groupedRow}
+            onPress={() => navigation.navigate('WhosComingDemo' as never)}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(239,68,68,0.12)' }]}>
+              <Ionicons name="megaphone" size={18} color="#EF4444" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Who's Coming Demo (Ad)</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
         </View>
       </View>
     </View>
