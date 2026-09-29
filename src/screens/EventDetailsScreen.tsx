@@ -22,7 +22,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { apiFetch } from '../lib/apiClient';
 import { useStripe } from '@stripe/stripe-react-native';
-import EventTicketService, { EventTicket } from '../services/EventTicketService';
+import EventTicketService, { EventTicket, EventTicketTier } from '../services/EventTicketService';
 import { deepLinkingService } from '../services/DeepLinkingService';
 import eventBookmarkService from '../services/EventBookmarkService';
 import eventAnalyticsService, { EventAnalytics } from '../services/EventAnalyticsService';
@@ -79,6 +79,8 @@ export default function EventDetailsScreen() {
   const [isAttending, setIsAttending] = useState(false);
   const [purchasingTicket, setPurchasingTicket] = useState(false);
   const [userTickets, setUserTickets] = useState<EventTicket[]>([]);
+  const [ticketTiers, setTicketTiers] = useState<EventTicketTier[]>([]);
+  const [purchasingTierId, setPurchasingTierId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [bookmarkLoading, setBookmarkLoading] = useState(false);
@@ -98,6 +100,7 @@ export default function EventDetailsScreen() {
     loadEventDetails();
     checkAttendanceStatus();
     loadUserTickets();
+    loadTicketTiers();
     if (user?.id) checkBookmarkStatus();
     trackPageView();
   }, [eventId]);
@@ -241,6 +244,12 @@ export default function EventDetailsScreen() {
     }
   };
 
+  const loadTicketTiers = async () => {
+    if (!eventId) return;
+    const tiers = await EventTicketService.getTicketTiers(eventId);
+    setTicketTiers(tiers);
+  };
+
   const handleAttendance = async () => {
     if (!user?.id) {
       Alert.alert('Login Required', 'Please log in to attend events');
@@ -287,7 +296,7 @@ export default function EventDetailsScreen() {
     }
   };
 
-  const handleBuyTicket = async () => {
+  const handleBuyTicket = async (tier?: EventTicketTier) => {
     if (!user?.id) {
       Alert.alert('Login Required', 'Please log in to purchase tickets');
       return;
@@ -297,8 +306,24 @@ export default function EventDetailsScreen() {
 
     // Determine currency and price
     const priceInfo = getEventPrice(event);
-    const amount = priceInfo?.amount || 0;
+    let amount = priceInfo?.amount || 0;
     const currency = priceInfo?.currency || 'GBP';
+
+    // A selected tier overrides the base event price — currency stays the event's own
+    // (tiers are created in that same currency), but the effective (discount-aware) price
+    // comes straight from the tier, already computed server-side.
+    if (tier) {
+      const tierCurrencyInfo = currency === 'NGN' ? tier.ngn : tier.gbp;
+      if (!tierCurrencyInfo) {
+        Alert.alert('Unavailable', 'This ticket tier is not available in this currency.');
+        return;
+      }
+      if (tierCurrencyInfo.soldOut) {
+        Alert.alert('Sold Out', `"${tier.name}" is sold out.`);
+        return;
+      }
+      amount = tierCurrencyInfo.effectivePrice;
+    }
 
     if (amount === 0) {
       Alert.alert('Free Event', 'This event is free. Just tap "Attend Event" to register.');
@@ -315,7 +340,7 @@ export default function EventDetailsScreen() {
 
     try {
       setPurchasingTicket(true);
-      console.log('🎟️ Starting ticket purchase:', { eventId: event.id, amount, currency });
+      console.log('🎟️ Starting ticket purchase:', { eventId: event.id, amount, currency, tierId: tier?.id });
 
       // Create payment intent
       const { clientSecret, paymentIntentId, customerId, customerEphemeralKeySecret } = await EventTicketService.createTicketPaymentIntent({
@@ -324,6 +349,7 @@ export default function EventDetailsScreen() {
         priceGbp: event.price_gbp,
         priceNgn: event.price_ngn,
         currency,
+        tierId: tier?.id,
       });
 
       console.log('✅ Payment intent created:', paymentIntentId);
@@ -831,11 +857,78 @@ export default function EventDetailsScreen() {
                   Ticket Purchased ({userTickets.length})
                 </Text>
               </View>
+            ) : ticketTiers.length > 0 ? (
+              // Paid event with ticket tiers — a card per tier, cheapest first
+              <View style={styles.tierListContainer}>
+                {[...ticketTiers]
+                  .sort((a, b) => {
+                    const priceA = a.gbp?.effectivePrice ?? a.ngn?.effectivePrice ?? 0;
+                    const priceB = b.gbp?.effectivePrice ?? b.ngn?.effectivePrice ?? 0;
+                    return priceA - priceB;
+                  })
+                  .map((tier) => {
+                    const currencyInfo = tier.gbp || tier.ngn;
+                    const symbol = tier.gbp ? '£' : '₦';
+                    const soldOut = !!currencyInfo?.soldOut;
+                    const purchasingThis = purchasingTierId === tier.id;
+                    return (
+                      <TouchableOpacity
+                        key={tier.id}
+                        style={[
+                          styles.tierPurchaseCard,
+                          { backgroundColor: theme.colors.surface, borderColor: soldOut ? theme.colors.border : theme.colors.primary },
+                          soldOut && { opacity: 0.5 },
+                        ]}
+                        onPress={async () => {
+                          if (soldOut || purchasingTicket) return;
+                          setPurchasingTierId(tier.id);
+                          try {
+                            await handleBuyTicket(tier);
+                          } finally {
+                            setPurchasingTierId(null);
+                          }
+                        }}
+                        disabled={soldOut || purchasingTicket}
+                        activeOpacity={0.8}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.tierPurchaseCardName, { color: theme.colors.text }]}>{tier.name}</Text>
+                          {soldOut ? (
+                            <Text style={[styles.tierPurchaseCardSoldOut, { color: theme.colors.error }]}>Sold Out</Text>
+                          ) : (
+                            <View style={styles.tierPurchaseCardMetaRow}>
+                              <Text style={[styles.tierPurchaseCardPrice, { color: theme.colors.primary }]}>
+                                {symbol}{currencyInfo?.effectivePrice.toFixed(2)}
+                              </Text>
+                              {currencyInfo?.discountActive && (
+                                <View style={[styles.tierDiscountBadge, { backgroundColor: theme.colors.success + '20' }]}>
+                                  <Text style={[styles.tierDiscountBadgeText, { color: theme.colors.success }]}>
+                                    {tier.discount_percent}% off
+                                  </Text>
+                                </View>
+                              )}
+                              {currencyInfo?.remaining !== null && currencyInfo?.remaining !== undefined && (
+                                <Text style={[styles.tierPurchaseCardRemaining, { color: theme.colors.textSecondary }]}>
+                                  {currencyInfo.remaining} left
+                                </Text>
+                              )}
+                            </View>
+                          )}
+                        </View>
+                        {purchasingThis ? (
+                          <ActivityIndicator size="small" color={theme.colors.primary} />
+                        ) : !soldOut ? (
+                          <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
+                        ) : null}
+                      </TouchableOpacity>
+                    );
+                  })}
+              </View>
             ) : getEventPrice(event)?.amount ? (
               // Paid event - show buy ticket button
               <TouchableOpacity
                 style={[styles.buyTicketButton, { backgroundColor: theme.colors.primary }]}
-                onPress={handleBuyTicket}
+                onPress={() => handleBuyTicket()}
                 disabled={purchasingTicket}
               >
                 {purchasingTicket ? (
@@ -1148,6 +1241,51 @@ const styles = StyleSheet.create({
   },
   ticketPurchasedText: {
     fontSize: 16,
+    fontWeight: '700',
+  },
+  tierListContainer: {
+    flex: 1,
+    gap: 10,
+  },
+  tierPurchaseCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 2,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  tierPurchaseCardName: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  tierPurchaseCardMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  tierPurchaseCardPrice: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  tierPurchaseCardRemaining: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  tierPurchaseCardSoldOut: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  tierDiscountBadge: {
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  tierDiscountBadgeText: {
+    fontSize: 11,
     fontWeight: '700',
   },
   checkinButtonsRow: {

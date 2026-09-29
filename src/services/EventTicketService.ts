@@ -21,6 +21,32 @@ export interface PurchaseTicketParams {
   priceGbp?: number;
   priceNgn?: number;
   currency: 'GBP' | 'NGN';
+  tierId?: string;
+}
+
+export interface EventTicketTierCurrencyInfo {
+  standardPrice: number;
+  effectivePrice: number;
+  discountActive: boolean;
+  discountRemaining: number | null;
+  soldOut: boolean;
+  remaining: number | null;
+}
+
+export interface EventTicketTier {
+  id: string;
+  name: string;
+  description?: string;
+  price_gbp?: number;
+  price_ngn?: number;
+  quantity_available?: number;
+  quantity_sold?: number;
+  discount_percent?: number;
+  discount_quantity_limit?: number;
+  discount_quantity_used?: number;
+  display_order?: number;
+  gbp?: EventTicketTierCurrencyInfo;
+  ngn?: EventTicketTierCurrencyInfo;
 }
 
 export interface EventTicket {
@@ -90,6 +116,23 @@ export const EventTicketService = {
     } catch (error) {
       console.error('❌ Error creating ticket payment intent:', error);
       throw error;
+    }
+  },
+
+  /**
+   * Get an event's ticket tiers, if it has any. Public endpoint, no auth required — an
+   * empty array means the event has no tiers and uses its own flat price fields as usual.
+   */
+  async getTicketTiers(eventId: string): Promise<EventTicketTier[]> {
+    try {
+      const response = await apiFetch<{ tiers?: EventTicketTier[] }>(
+        `/api/events/${eventId}/ticket-tiers`,
+        { method: 'GET' }
+      );
+      return response?.tiers || [];
+    } catch (error) {
+      console.error('❌ Error fetching ticket tiers:', error);
+      return [];
     }
   },
 

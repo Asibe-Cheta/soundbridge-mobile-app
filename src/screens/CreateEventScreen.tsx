@@ -212,6 +212,16 @@ const DEFAULT_ADDRESS_CONFIG: CountryAddressConfig = {
   ]
 };
 
+interface TicketTierDraft {
+  id: string;
+  name: string;
+  price: string; // in whichever currency the organiser's main pricing section uses
+  quantityAvailable: string; // blank = unlimited
+  discountEnabled: boolean;
+  discountPercent: string;
+  discountQuantityLimit: string;
+}
+
 interface EventFormData {
   title: string;
   description: string;
@@ -484,6 +494,8 @@ export default function CreateEventScreen() {
     COUNTRY_ADDRESS_CONFIGS.find(c => c.countryCode === (isEditMode ? formData.country : 'GB')) || DEFAULT_ADDRESS_CONFIG
   );
 
+  const [ticketTiers, setTicketTiers] = useState<TicketTierDraft[]>([]);
+
   // Update country config when country changes. Skips clearing addressFields on the very first
   // run so edit mode's pre-filled location (seeded into addressFields above) survives mount —
   // this effect still fires once immediately regardless, it just shouldn't wipe data that was
@@ -657,6 +669,34 @@ export default function CreateEventScreen() {
         [currency]: value,
       }
     }));
+  };
+
+  // ── Ticket tiers (VIP/Early Bird/GA + limited-quantity discounts) ──────────
+  // Not supported in edit mode yet — same scoping call as co-organisers above:
+  // tiers are created via a dedicated POST right after event creation, and
+  // properly supporting edit (diffing against already-sold tiers) is a distinct
+  // problem for its own pass later.
+  const addTicketTier = () => {
+    setTicketTiers(prev => [
+      ...prev,
+      {
+        id: `tier-${Date.now()}-${prev.length}`,
+        name: '',
+        price: '',
+        quantityAvailable: '',
+        discountEnabled: false,
+        discountPercent: '',
+        discountQuantityLimit: '',
+      },
+    ]);
+  };
+
+  const removeTicketTier = (id: string) => {
+    setTicketTiers(prev => prev.filter(t => t.id !== id));
+  };
+
+  const updateTicketTier = (id: string, field: keyof TicketTierDraft, value: any) => {
+    setTicketTiers(prev => prev.map(t => (t.id === id ? { ...t, [field]: value } : t)));
   };
 
   const geocodeLocation = async () => {
@@ -862,6 +902,28 @@ export default function CreateEventScreen() {
   const handleSubmitInner = async () => {
     if (!validateForm()) return;
 
+    if (!formData.isFree && !isEditMode && ticketTiers.length > 0) {
+      for (const tier of ticketTiers) {
+        if (!tier.name.trim()) {
+          Alert.alert('Incomplete Ticket Tier', 'Every ticket tier needs a name.');
+          return;
+        }
+        const price = parseFloat(tier.price);
+        if (isNaN(price) || price <= 0) {
+          Alert.alert('Incomplete Ticket Tier', `"${tier.name.trim() || 'Untitled tier'}" needs a valid price.`);
+          return;
+        }
+        if (tier.discountEnabled) {
+          const pct = parseInt(tier.discountPercent, 10);
+          const limit = parseInt(tier.discountQuantityLimit, 10);
+          if (isNaN(pct) || pct <= 0 || pct > 100 || isNaN(limit) || limit <= 0) {
+            Alert.alert('Incomplete Discount', `"${tier.name.trim()}" has a discount enabled but needs both a valid percentage (1-100) and a quantity limit.`);
+            return;
+          }
+        }
+      }
+    }
+
     // Creator agreement gate — first creative action only
     const agreed = await requestAgreement();
     if (!agreed) return;
@@ -1012,6 +1074,49 @@ export default function CreateEventScreen() {
           () => {},
           (err: any) => console.warn('⚠️ Failed to save co-organisers:', err)
         );
+      }
+
+      // Create ticket tiers (awaited, not fire-and-forget like the two above — pricing
+      // structure matters enough that the organiser should know immediately if it failed,
+      // rather than discovering silently later that tiers never got set up).
+      if (result.event?.id && ticketTiers.length > 0) {
+        const tierCurrency = ['GBP', 'NGN'].includes(selectedCountryConfig.currency)
+          ? selectedCountryConfig.currency
+          : 'GBP';
+        const tierPayload = ticketTiers.map((t) => {
+          const tier: any = { name: t.name.trim() };
+          const price = parseFloat(t.price);
+          if (!isNaN(price) && price > 0) {
+            tier[tierCurrency === 'NGN' ? 'price_ngn' : 'price_gbp'] = price;
+          }
+          const qty = parseInt(t.quantityAvailable, 10);
+          if (!isNaN(qty) && qty > 0) tier.quantity_available = qty;
+          if (t.discountEnabled) {
+            const pct = parseInt(t.discountPercent, 10);
+            const limit = parseInt(t.discountQuantityLimit, 10);
+            if (!isNaN(pct) && pct > 0 && !isNaN(limit) && limit > 0) {
+              tier.discount_percent = pct;
+              tier.discount_quantity_limit = limit;
+            }
+          }
+          return tier;
+        });
+
+        try {
+          const tierResult = await apiFetch<{ success?: boolean; error?: string }>(
+            `/api/events/${result.event.id}/ticket-tiers`,
+            { method: 'POST', session, body: JSON.stringify({ tiers: tierPayload }) }
+          );
+          if (tierResult && (tierResult as any).success === false) {
+            throw new Error(tierResult.error || 'Failed to save ticket tiers');
+          }
+        } catch (tierError: any) {
+          console.error('❌ Error saving ticket tiers:', tierError);
+          Alert.alert(
+            'Event Created, But Ticket Tiers Failed',
+            `Your event was created successfully, but the ticket tiers couldn't be saved: ${tierError?.message || 'Unknown error'}. You can add them later.`
+          );
+        }
       }
 
       (navigation as any).replace('EventCreatedSuccess', {
@@ -1745,6 +1850,108 @@ export default function CreateEventScreen() {
               )}
             </View>
 
+            {/* Ticket Tiers — optional, paid events only, not supported in edit mode yet */}
+            {!formData.isFree && !isEditMode && (
+              <View style={styles.inputSection}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Ticket Tiers (Optional)</Text>
+                <Text style={[styles.helperText, { color: theme.colors.textSecondary, marginBottom: 12}]}>
+                  Add VIP/Early Bird/General Admission tiers, or a single limited-time discount. Leave empty to sell one ticket type at the price above.
+                </Text>
+
+                {ticketTiers.map((tier, index) => (
+                  <View
+                    key={tier.id}
+                    style={[styles.tierCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                  >
+                    <View style={styles.tierCardHeader}>
+                      <Text style={[styles.tierCardTitle, { color: theme.colors.textSecondary }]}>Tier {index + 1}</Text>
+                      <TouchableOpacity onPress={() => removeTicketTier(tier.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                        <Ionicons name="trash-outline" size={18} color={theme.colors.error} />
+                      </TouchableOpacity>
+                    </View>
+
+                    <TextInput
+                      style={[styles.textInput, { backgroundColor: theme.colors.background, color: theme.colors.text, borderColor: theme.colors.border, marginBottom: 10 }]}
+                      placeholder="Tier name (e.g. Early Bird, VIP)"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={tier.name}
+                      onChangeText={(v) => updateTicketTier(tier.id, 'name', v)}
+                    />
+
+                    <View style={styles.priceRow}>
+                      <Text style={[styles.currencyLabel, { color: theme.colors.text}]}>
+                        {selectedCountryConfig.currency} ({selectedCountryConfig.currencySymbol})
+                      </Text>
+                      <TextInput
+                        style={[styles.priceInput, { backgroundColor: theme.colors.background, color: theme.colors.text, borderColor: theme.colors.border}]}
+                        placeholder="0.00"
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={tier.price}
+                        onChangeText={(v) => updateTicketTier(tier.id, 'price', v)}
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+
+                    <TextInput
+                      style={[styles.textInput, { backgroundColor: theme.colors.background, color: theme.colors.text, borderColor: theme.colors.border, marginTop: 10 }]}
+                      placeholder="Quantity available (leave empty for unlimited)"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={tier.quantityAvailable}
+                      onChangeText={(v) => updateTicketTier(tier.id, 'quantityAvailable', v)}
+                      keyboardType="number-pad"
+                    />
+
+                    <TouchableOpacity
+                      style={styles.tierDiscountToggleRow}
+                      onPress={() => updateTicketTier(tier.id, 'discountEnabled', !tier.discountEnabled)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[
+                        styles.disclaimerCheckbox,
+                        { borderColor: tier.discountEnabled ? theme.colors.primary : theme.colors.border },
+                        tier.discountEnabled && { backgroundColor: theme.colors.primary },
+                      ]}>
+                        {tier.discountEnabled && <Ionicons name="checkmark" size={13} color="#fff" />}
+                      </View>
+                      <Text style={[styles.tierDiscountToggleText, { color: theme.colors.text }]}>
+                        Add a limited-quantity discount
+                      </Text>
+                    </TouchableOpacity>
+
+                    {tier.discountEnabled && (
+                      <View style={styles.tierDiscountRow}>
+                        <TextInput
+                          style={[styles.textInput, { flex: 1, backgroundColor: theme.colors.background, color: theme.colors.text, borderColor: theme.colors.border }]}
+                          placeholder="% off (e.g. 30)"
+                          placeholderTextColor={theme.colors.textSecondary}
+                          value={tier.discountPercent}
+                          onChangeText={(v) => updateTicketTier(tier.id, 'discountPercent', v)}
+                          keyboardType="number-pad"
+                        />
+                        <TextInput
+                          style={[styles.textInput, { flex: 1, backgroundColor: theme.colors.background, color: theme.colors.text, borderColor: theme.colors.border }]}
+                          placeholder="For first N tickets"
+                          placeholderTextColor={theme.colors.textSecondary}
+                          value={tier.discountQuantityLimit}
+                          onChangeText={(v) => updateTicketTier(tier.id, 'discountQuantityLimit', v)}
+                          keyboardType="number-pad"
+                        />
+                      </View>
+                    )}
+                  </View>
+                ))}
+
+                <TouchableOpacity
+                  style={[styles.addTierBtn, { borderColor: theme.colors.primary }]}
+                  onPress={addTicketTier}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="add" size={18} color={theme.colors.primary} />
+                  <Text style={[styles.addTierBtnText, { color: theme.colors.primary }]}>Add Tier</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* Max Attendees */}
             <View style={styles.inputSection}>
               <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Max Attendees (Optional)</Text>
@@ -2276,6 +2483,53 @@ const styles = StyleSheet.create({
     ...Typography.body,
     fontSize: 16,
     lineHeight: 22,
+  },
+  tierCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+  },
+  tierCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  tierCardTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  tierDiscountToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 12,
+  },
+  tierDiscountToggleText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  tierDiscountRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+  addTierBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: 10,
+    paddingVertical: 12,
+  },
+  addTierBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   helperText: {
     ...Typography.label,
