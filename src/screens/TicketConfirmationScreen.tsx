@@ -26,6 +26,15 @@ import { Asset } from 'expo-asset';
 
 const LOGO_MODULE = require('../../assets/images/logos/logo-trans-lockup.png');
 
+function currencySymbol(currency: string | undefined): string {
+  switch ((currency || '').toUpperCase()) {
+    case 'GBP': return '£';
+    case 'NGN': return '₦';
+    case 'GHS': return 'GH₵';
+    default: return '$';
+  }
+}
+
 async function getLogoDataUri(): Promise<string> {
   try {
     const asset = Asset.fromModule(LOGO_MODULE);
@@ -111,7 +120,7 @@ export default function TicketConfirmationScreen() {
   const shareTicketReceipt = async () => {
     try {
       const purchaseDate = new Date(ticket.purchase_date || Date.now());
-      const sym = ticket.currency === 'GBP' ? '£' : ticket.currency === 'NGN' ? '₦' : '$';
+      const sym = currencySymbol(ticket.currency);
       const logoUri = await getLogoDataUri();
       const refShort = ticket.ticket_code;
       const css = `
@@ -386,7 +395,7 @@ export default function TicketConfirmationScreen() {
                         Paid
                       </Text>
                       <Text style={[styles.ticketDetailValue, { color: theme.colors.text }]}>
-                        {ticket.currency === 'GBP' ? '£' : '₦'}
+                        {currencySymbol(ticket.currency)}
                         {ticket.amount_paid}
                       </Text>
                     </View>

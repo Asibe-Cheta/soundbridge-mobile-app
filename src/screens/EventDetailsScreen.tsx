@@ -343,7 +343,7 @@ export default function EventDetailsScreen() {
       console.log('🎟️ Starting ticket purchase:', { eventId: event.id, amount, currency, tierId: tier?.id });
 
       // Create payment intent
-      const { clientSecret, paymentIntentId, customerId, customerEphemeralKeySecret, displayAmount, displayCurrency } = await EventTicketService.createTicketPaymentIntent({
+      const { clientSecret, paymentIntentId, customerId, customerEphemeralKeySecret } = await EventTicketService.createTicketPaymentIntent({
         eventId: event.id,
         quantity: 1,
         priceGbp: event.price_gbp,
@@ -387,15 +387,15 @@ export default function EventDetailsScreen() {
 
       console.log('✅ Payment confirmed, confirming purchase...');
 
-      // Confirm purchase — for GHS, the ticket record should reflect the GHS price the
-      // organizer actually set (displayAmount/displayCurrency), not the USD amount Stripe
-      // charged under the hood.
+      // Confirm purchase — the server derives the real ticket amount/currency from the
+      // PaymentIntent itself (including GHS display values via its metadata), ignoring
+      // whatever is sent here, so these are just the USD-charge values for logging/back-compat.
       const ticket = await EventTicketService.confirmTicketPurchase(
         paymentIntentId,
         event.id,
         1,
-        displayCurrency === 'GHS' ? (displayAmount ?? amount) : amount,
-        displayCurrency === 'GHS' ? displayCurrency : currency
+        amount,
+        currency
       );
 
       console.log('🎟️ Ticket purchased:', ticket.ticket_code);
