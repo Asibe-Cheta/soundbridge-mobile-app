@@ -671,6 +671,20 @@ export default function CreateEventScreen() {
     }));
   };
 
+  // Ticket tiers must be priced in whichever currency the organiser actually set a base
+  // price in, not just whatever the selected country implies — the pricing section lets
+  // several currency fields show at once, so this mirrors the exact GBP-then-NGN precedence
+  // EventDetailsScreen.getEventPrice already uses when reading a saved event back, rather
+  // than introducing a second, potentially-inconsistent rule. Ticket purchases (and tiers)
+  // only support GBP/NGN today — null means neither is set yet.
+  const getActiveTicketCurrency = (): 'GBP' | 'NGN' | null => {
+    const gbp = parseFloat(formData.prices['GBP']);
+    if (!isNaN(gbp) && gbp > 0) return 'GBP';
+    const ngn = parseFloat(formData.prices['NGN']);
+    if (!isNaN(ngn) && ngn > 0) return 'NGN';
+    return null;
+  };
+
   // ── Ticket tiers (VIP/Early Bird/GA + limited-quantity discounts) ──────────
   // Not supported in edit mode yet — same scoping call as co-organisers above:
   // tiers are created via a dedicated POST right after event creation, and
@@ -1080,9 +1094,7 @@ export default function CreateEventScreen() {
       // structure matters enough that the organiser should know immediately if it failed,
       // rather than discovering silently later that tiers never got set up).
       if (result.event?.id && ticketTiers.length > 0) {
-        const tierCurrency = ['GBP', 'NGN'].includes(selectedCountryConfig.currency)
-          ? selectedCountryConfig.currency
-          : 'GBP';
+        const tierCurrency = getActiveTicketCurrency() || 'GBP';
         const tierPayload = ticketTiers.map((t) => {
           const tier: any = { name: t.name.trim() };
           const price = parseFloat(t.price);
@@ -1850,14 +1862,26 @@ export default function CreateEventScreen() {
               )}
             </View>
 
-            {/* Ticket Tiers — optional, paid events only, not supported in edit mode yet */}
-            {!formData.isFree && !isEditMode && (
+            {/* Ticket Tiers — optional, paid events only, not supported in edit mode yet.
+                Priced in whichever of GBP/NGN the organiser actually set above — tiers
+                can't have their own independent currency, so entry is blocked (with a
+                clear reason) until a supported base price exists to mirror. */}
+            {!formData.isFree && !isEditMode && (() => {
+              const activeTicketCurrency = getActiveTicketCurrency();
+              const currencySymbol = activeTicketCurrency === 'NGN' ? '₦' : '£';
+              return (
               <View style={styles.inputSection}>
                 <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Ticket Tiers (Optional)</Text>
                 <Text style={[styles.helperText, { color: theme.colors.textSecondary, marginBottom: 12}]}>
                   Add VIP/Early Bird/General Admission tiers, or a single limited-time discount. Leave empty to sell one ticket type at the price above.
                 </Text>
 
+                {!activeTicketCurrency ? (
+                  <Text style={[styles.helperText, { color: theme.colors.error }]}>
+                    Set a GBP or NGN price above first — ticket tiers are priced in the same currency as your event, and tickets currently only support GBP or NGN.
+                  </Text>
+                ) : (
+                <>
                 {ticketTiers.map((tier, index) => (
                   <View
                     key={tier.id}
@@ -1880,7 +1904,7 @@ export default function CreateEventScreen() {
 
                     <View style={styles.priceRow}>
                       <Text style={[styles.currencyLabel, { color: theme.colors.text}]}>
-                        {selectedCountryConfig.currency} ({selectedCountryConfig.currencySymbol})
+                        {activeTicketCurrency} ({currencySymbol})
                       </Text>
                       <TextInput
                         style={[styles.priceInput, { backgroundColor: theme.colors.background, color: theme.colors.text, borderColor: theme.colors.border}]}
@@ -1949,8 +1973,11 @@ export default function CreateEventScreen() {
                   <Ionicons name="add" size={18} color={theme.colors.primary} />
                   <Text style={[styles.addTierBtnText, { color: theme.colors.primary }]}>Add Tier</Text>
                 </TouchableOpacity>
+                </>
+                )}
               </View>
-            )}
+              );
+            })()}
 
             {/* Max Attendees */}
             <View style={styles.inputSection}>
