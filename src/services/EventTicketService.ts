@@ -9,8 +9,12 @@ import { apiFetch } from '../lib/apiClient';
 export interface TicketPaymentIntent {
   clientSecret: string;
   paymentIntentId: string;
-  amount: number;
+  amount: number; // what Stripe actually charges (USD for GHS purchases, same as currency otherwise)
   currency: string;
+  // Only present for GHS purchases — the GHS amount/currency to show the buyer, since Stripe
+  // itself never sees GHS (converted to USD server-side before the PaymentIntent is created).
+  displayAmount?: number;
+  displayCurrency?: string;
   customerId?: string;
   customerEphemeralKeySecret?: string;
 }
@@ -20,7 +24,7 @@ export interface PurchaseTicketParams {
   quantity: number;
   priceGbp?: number;
   priceNgn?: number;
-  currency: 'GBP' | 'NGN';
+  currency: 'GBP' | 'NGN' | 'GHS';
   tierId?: string;
 }
 
@@ -45,8 +49,10 @@ export interface EventTicketTier {
   discount_quantity_limit?: number;
   discount_quantity_used?: number;
   display_order?: number;
+  price_ghs?: number;
   gbp?: EventTicketTierCurrencyInfo;
   ngn?: EventTicketTierCurrencyInfo;
+  ghs?: EventTicketTierCurrencyInfo;
 }
 
 export interface EventTicket {
@@ -84,6 +90,8 @@ export const EventTicketService = {
         paymentIntentId?: string;
         amount?: number;
         currency?: string;
+        displayAmount?: number;
+        displayCurrency?: string;
         customer_id?: string;
         ephemeral_key_secret?: string;
       }>('/api/events/create-ticket-payment-intent', {
@@ -110,6 +118,8 @@ export const EventTicketService = {
         paymentIntentId: payload.paymentIntentId,
         amount: payload.amount || 0,
         currency: payload.currency || params.currency,
+        displayAmount: (payload as any).displayAmount ?? (response as any).displayAmount,
+        displayCurrency: (payload as any).displayCurrency ?? (response as any).displayCurrency,
         customerId: (payload as any).customer_id || rootCustomerId || undefined,
         customerEphemeralKeySecret: (payload as any).ephemeral_key_secret || rootEphemeralKey || undefined,
       };

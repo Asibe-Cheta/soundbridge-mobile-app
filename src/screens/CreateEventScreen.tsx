@@ -673,15 +673,20 @@ export default function CreateEventScreen() {
 
   // Ticket tiers must be priced in whichever currency the organiser actually set a base
   // price in, not just whatever the selected country implies — the pricing section lets
-  // several currency fields show at once, so this mirrors the exact GBP-then-NGN precedence
-  // EventDetailsScreen.getEventPrice already uses when reading a saved event back, rather
+  // several currency fields show at once, so this mirrors the exact GBP-then-NGN-then-GHS
+  // precedence EventDetailsScreen.getEventPrice uses when reading a saved event back, rather
   // than introducing a second, potentially-inconsistent rule. Ticket purchases (and tiers)
-  // only support GBP/NGN today — null means neither is set yet.
-  const getActiveTicketCurrency = (): 'GBP' | 'NGN' | null => {
+  // only support GBP/NGN/GHS today — null means none of those is set yet. GHS purchases are
+  // charged via Stripe in USD server-side (GHS itself is never sent to Stripe) and payable out
+  // to the organiser via their existing Fincra wallet path — see WEB_TEAM handoff for the full
+  // contract; nothing about that conversion needs to happen on mobile.
+  const getActiveTicketCurrency = (): 'GBP' | 'NGN' | 'GHS' | null => {
     const gbp = parseFloat(formData.prices['GBP']);
     if (!isNaN(gbp) && gbp > 0) return 'GBP';
     const ngn = parseFloat(formData.prices['NGN']);
     if (!isNaN(ngn) && ngn > 0) return 'NGN';
+    const ghs = parseFloat(formData.prices['GHS']);
+    if (!isNaN(ghs) && ghs > 0) return 'GHS';
     return null;
   };
 
@@ -876,8 +881,8 @@ export default function CreateEventScreen() {
         return false;
       }
 
-      // Ticket purchases currently support GBP/NGN only
-      const hasSupportedPrice = ['GBP', 'NGN'].some((currency) => {
+      // Ticket purchases currently support GBP/NGN/GHS only
+      const hasSupportedPrice = ['GBP', 'NGN', 'GHS'].some((currency) => {
         const value = formData.prices[currency];
         const numPrice = parseFloat(value);
         return !isNaN(numPrice) && numPrice > 0;
@@ -886,7 +891,7 @@ export default function CreateEventScreen() {
       if (!hasSupportedPrice) {
         Alert.alert(
           'Unsupported Currency',
-          'Ticket purchases currently support GBP or NGN. Please set at least one of those prices.'
+          'Ticket purchases currently support GBP, NGN or GHS. Please set at least one of those prices.'
         );
         return false;
       }
@@ -1099,7 +1104,8 @@ export default function CreateEventScreen() {
           const tier: any = { name: t.name.trim() };
           const price = parseFloat(t.price);
           if (!isNaN(price) && price > 0) {
-            tier[tierCurrency === 'NGN' ? 'price_ngn' : 'price_gbp'] = price;
+            const priceField = tierCurrency === 'NGN' ? 'price_ngn' : tierCurrency === 'GHS' ? 'price_ghs' : 'price_gbp';
+            tier[priceField] = price;
           }
           const qty = parseInt(t.quantityAvailable, 10);
           if (!isNaN(qty) && qty > 0) tier.quantity_available = qty;
@@ -1858,6 +1864,20 @@ export default function CreateEventScreen() {
                       />
                     </View>
                   )}
+
+                  {selectedCountryConfig.currency !== 'GHS' && (
+                    <View style={styles.priceRow}>
+                      <Text style={[styles.currencyLabel, { color: theme.colors.text}]}>GHS (GH₵)</Text>
+                      <TextInput
+                        style={[styles.priceInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border}]}
+                        placeholder="0.00"
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={formData.prices['GHS'] || ''}
+                        onChangeText={(value) => handlePriceChange('GHS', value)}
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                  )}
                 </View>
               )}
             </View>
@@ -1868,7 +1888,7 @@ export default function CreateEventScreen() {
                 clear reason) until a supported base price exists to mirror. */}
             {!formData.isFree && !isEditMode && (() => {
               const activeTicketCurrency = getActiveTicketCurrency();
-              const currencySymbol = activeTicketCurrency === 'NGN' ? '₦' : '£';
+              const currencySymbol = activeTicketCurrency === 'NGN' ? '₦' : activeTicketCurrency === 'GHS' ? 'GH₵' : '£';
               return (
               <View style={styles.inputSection}>
                 <Text style={[styles.sectionTitle, { color: theme.colors.text}]}>Ticket Tiers (Optional)</Text>
@@ -1878,7 +1898,7 @@ export default function CreateEventScreen() {
 
                 {!activeTicketCurrency ? (
                   <Text style={[styles.helperText, { color: theme.colors.error }]}>
-                    Set a GBP or NGN price above first — ticket tiers are priced in the same currency as your event, and tickets currently only support GBP or NGN.
+                    Set a GBP, NGN or GHS price above first — ticket tiers are priced in the same currency as your event.
                   </Text>
                 ) : (
                 <>

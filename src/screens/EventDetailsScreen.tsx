@@ -313,7 +313,7 @@ export default function EventDetailsScreen() {
     // (tiers are created in that same currency), but the effective (discount-aware) price
     // comes straight from the tier, already computed server-side.
     if (tier) {
-      const tierCurrencyInfo = currency === 'NGN' ? tier.ngn : tier.gbp;
+      const tierCurrencyInfo = currency === 'NGN' ? tier.ngn : currency === 'GHS' ? tier.ghs : tier.gbp;
       if (!tierCurrencyInfo) {
         Alert.alert('Unavailable', 'This ticket tier is not available in this currency.');
         return;
@@ -330,7 +330,7 @@ export default function EventDetailsScreen() {
       return;
     }
 
-    if (currency !== 'GBP' && currency !== 'NGN') {
+    if (currency !== 'GBP' && currency !== 'NGN' && currency !== 'GHS') {
       Alert.alert(
         'Unsupported Currency',
         `Ticket purchase is not available for ${currency} yet. Please check back later.`
@@ -343,12 +343,12 @@ export default function EventDetailsScreen() {
       console.log('🎟️ Starting ticket purchase:', { eventId: event.id, amount, currency, tierId: tier?.id });
 
       // Create payment intent
-      const { clientSecret, paymentIntentId, customerId, customerEphemeralKeySecret } = await EventTicketService.createTicketPaymentIntent({
+      const { clientSecret, paymentIntentId, customerId, customerEphemeralKeySecret, displayAmount, displayCurrency } = await EventTicketService.createTicketPaymentIntent({
         eventId: event.id,
         quantity: 1,
         priceGbp: event.price_gbp,
         priceNgn: event.price_ngn,
-        currency,
+        currency: currency as 'GBP' | 'NGN' | 'GHS',
         tierId: tier?.id,
       });
 
@@ -387,13 +387,15 @@ export default function EventDetailsScreen() {
 
       console.log('✅ Payment confirmed, confirming purchase...');
 
-      // Confirm purchase
+      // Confirm purchase — for GHS, the ticket record should reflect the GHS price the
+      // organizer actually set (displayAmount/displayCurrency), not the USD amount Stripe
+      // charged under the hood.
       const ticket = await EventTicketService.confirmTicketPurchase(
         paymentIntentId,
         event.id,
         1,
-        amount,
-        currency
+        displayCurrency === 'GHS' ? (displayAmount ?? amount) : amount,
+        displayCurrency === 'GHS' ? displayCurrency : currency
       );
 
       console.log('🎟️ Ticket purchased:', ticket.ticket_code);
@@ -554,6 +556,7 @@ export default function EventDetailsScreen() {
     const currencyOrder = [
       'GBP',
       'NGN',
+      'GHS',
       'USD',
       'EUR',
       'CAD',
@@ -583,6 +586,7 @@ export default function EventDetailsScreen() {
     const symbols: Record<string, string> = {
       GBP: '£',
       NGN: '₦',
+      GHS: 'GH₵',
       USD: '$',
       EUR: '€',
       CAD: '$',
@@ -862,13 +866,13 @@ export default function EventDetailsScreen() {
               <View style={styles.tierListContainer}>
                 {[...ticketTiers]
                   .sort((a, b) => {
-                    const priceA = a.gbp?.effectivePrice ?? a.ngn?.effectivePrice ?? 0;
-                    const priceB = b.gbp?.effectivePrice ?? b.ngn?.effectivePrice ?? 0;
+                    const priceA = a.gbp?.effectivePrice ?? a.ngn?.effectivePrice ?? a.ghs?.effectivePrice ?? 0;
+                    const priceB = b.gbp?.effectivePrice ?? b.ngn?.effectivePrice ?? b.ghs?.effectivePrice ?? 0;
                     return priceA - priceB;
                   })
                   .map((tier) => {
-                    const currencyInfo = tier.gbp || tier.ngn;
-                    const symbol = tier.gbp ? '£' : '₦';
+                    const currencyInfo = tier.gbp || tier.ngn || tier.ghs;
+                    const symbol = tier.gbp ? '£' : tier.ngn ? '₦' : 'GH₵';
                     const soldOut = !!currencyInfo?.soldOut;
                     const purchasingThis = purchasingTierId === tier.id;
                     return (
