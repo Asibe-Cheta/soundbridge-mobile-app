@@ -50,20 +50,24 @@ export default function EventShareSheet({ visible, onClose, event }: Props) {
 
   const handleShareLink = async () => {
     onClose();
-    try {
-      await Share.share({
-        message: Platform.OS === 'android'
-          ? `${shareMessage}\n${eventUrl}`
-          : shareMessage,
-        url: eventUrl,
-        title: event.title,
-      });
-      await eventAnalyticsService.trackAction(event.id, 'share_link');
-    } catch (err: any) {
-      if (err.message !== 'User did not share') {
-        Alert.alert('Error', 'Could not open share sheet.');
+    // Presenting the native share sheet on the same tick as closing this Modal silently
+    // no-ops on iOS — the previous modal is still mid-dismiss. Wait for it to finish.
+    setTimeout(async () => {
+      try {
+        await Share.share({
+          message: Platform.OS === 'android'
+            ? `${shareMessage}\n${eventUrl}`
+            : shareMessage,
+          url: eventUrl,
+          title: event.title,
+        });
+        await eventAnalyticsService.trackAction(event.id, 'share_link');
+      } catch (err: any) {
+        if (err.message !== 'User did not share') {
+          Alert.alert('Error', 'Could not open share sheet.');
+        }
       }
-    }
+    }, 400);
   };
 
   const handleShareCard = async () => {
@@ -86,20 +90,27 @@ export default function EventShareSheet({ visible, onClose, event }: Props) {
       });
 
       onClose();
-
-      await Share.share({
-        url: uri,
-        title: event.title,
-        message: shareMessage,
-      });
-
-      await eventAnalyticsService.trackAction(event.id, 'share_card');
-    } catch (err: any) {
-      if (err.message !== 'User did not share') {
-        Alert.alert('Error', 'Could not generate share card.');
-      }
-    } finally {
       setCapturingCard(false);
+
+      // Same as handleShareLink — wait for this Modal's dismiss animation to finish
+      // before presenting the native share sheet, or iOS silently drops it.
+      setTimeout(async () => {
+        try {
+          await Share.share({
+            url: uri,
+            title: event.title,
+            message: shareMessage,
+          });
+          await eventAnalyticsService.trackAction(event.id, 'share_card');
+        } catch (err: any) {
+          if (err.message !== 'User did not share') {
+            Alert.alert('Error', 'Could not generate share card.');
+          }
+        }
+      }, 400);
+    } catch (err: any) {
+      setCapturingCard(false);
+      Alert.alert('Error', 'Could not generate share card.');
     }
   };
 
@@ -114,7 +125,7 @@ export default function EventShareSheet({ visible, onClose, event }: Props) {
         <View style={styles.overlay} />
       </TouchableWithoutFeedback>
 
-      <View style={[styles.sheet, { backgroundColor: theme.colors.surface }]}>
+      <View style={[styles.sheet, { backgroundColor: theme.colors.background }]}>
         {/* Handle */}
         <View style={[styles.handle, { backgroundColor: theme.colors.border }]} />
 
