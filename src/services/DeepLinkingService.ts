@@ -199,6 +199,7 @@ class DeepLinkingService {
           return this.parsePlaylistUrl(rest, urlObj.searchParams);
 
         case 'event':
+        case 'events':
           return this.parseEventUrl(rest, urlObj.searchParams);
 
         case 'post':
@@ -851,7 +852,7 @@ class DeepLinkingService {
   }
 
   generateEventLink(eventId: string): string {
-    return `https://soundbridge.live/event/${eventId}`;
+    return `https://soundbridge.live/events/${eventId}`;
   }
 
   generateCampaignUrl(slug: string): string {
