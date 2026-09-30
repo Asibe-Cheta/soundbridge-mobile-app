@@ -21,6 +21,9 @@ export interface WeatherForecast {
   condition?: string;
   icon?: string;
   daysOut?: number;
+  /** Probability of precipitation, 0-1 — One Call's `pop` field, already in the same
+   * response this service fetches, just not previously surfaced. */
+  pop?: number;
 }
 
 export interface RoadDisruptions {
@@ -97,6 +100,53 @@ class EventEnvironmentService {
     return result;
   }
 
+  /** Live weather+road+rail for an event still being drafted (no eventId yet, so this
+   * skips the per-event AsyncStorage cache getForEvent uses — the same three sources,
+   * always fetched fresh, since the organiser may be actively changing the date/location
+   * while this is showing. Used by CreateEventScreen's post-entry weather/transport check. */
+  async getDraftEnvironment(
+    lat: number,
+    lng: number,
+    country: string | null,
+    eventDateISO: string,
+    session: Session | null
+  ): Promise<EventEnvironmentData> {
+    const [weather, road, rail] = await Promise.all([
+      this.fetchWeather(lat, lng, eventDateISO).catch(
+        (): WeatherForecast => ({ available: false, reason: 'error' })
+      ),
+      this.fetchRoad(lat, lng).catch(
+        (): RoadDisruptions => ({ available: false, reason: 'error', incidents: [] })
+      ),
+      this.fetchRail(lat, lng, country, session).catch(
+        (): RailDisruptions => ({ available: false, reason: 'error', messages: [] })
+      ),
+    ]);
+    return { weather, road, rail, fetchedAt: new Date().toISOString() };
+  }
+
+  /** Weather-only forecast for a handful of nearby dates, so a "nearby date looks better"
+   * suggestion can be made during event creation. Road/rail come from live-incident feeds,
+   * not a forecast, so they aren't meaningfully comparable across a future date the way a
+   * weather forecast is — deliberately weather-only. */
+  async getNearbyWeatherAlternatives(
+    lat: number,
+    lng: number,
+    baseDateISO: string,
+    offsetsDays: number[] = [-3, -2, -1, 1, 2, 3]
+  ): Promise<{ dateISO: string; weather: WeatherForecast }[]> {
+    const base = new Date(baseDateISO);
+    return Promise.all(
+      offsetsDays.map(async (offset) => {
+        const altISO = new Date(base.getTime() + offset * 86400000).toISOString();
+        const weather = await this.fetchWeather(lat, lng, altISO).catch(
+          (): WeatherForecast => ({ available: false, reason: 'error' })
+        );
+        return { dateISO: altISO, weather };
+      })
+    );
+  }
+
   /** OpenWeatherMap One Call 3.0 — free tier covers ~8 days of daily forecast, which is
    * also roughly the point past which any provider's forecast stops being meaningful. */
   private async fetchWeather(lat: number, lng: number, eventDateISO: string): Promise<WeatherForecast> {
@@ -141,6 +191,7 @@ class EventEnvironmentService {
       condition: closest.weather?.[0]?.description ?? undefined,
       icon: closest.weather?.[0]?.icon,
       daysOut,
+      pop: typeof closest.pop === 'number' ? closest.pop : undefined,
     };
   }
 

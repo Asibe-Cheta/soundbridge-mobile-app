@@ -42,6 +42,7 @@ import { MentionTextInput } from '../components/MentionTextInput';
 import { MentionSuggestions } from '../components/MentionSuggestions';
 import { useMentions } from '../hooks/useMentions';
 import type { MentionUser } from '../hooks/useMentions';
+import { eventEnvironmentService, EventEnvironmentData, WeatherForecast } from '../services/EventEnvironmentService';
 
 // Country-specific address field configurations
 interface AddressFieldConfig {
@@ -342,6 +343,16 @@ export default function CreateEventScreen() {
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
+
+  // Post-entry weather/transport check (see WEATHER_IN_EVENTS.MD) — only fires once
+  // date, time and geocoded location are all present, UK-only for now per the existing
+  // rail-disruption coverage limits in EventEnvironmentService.
+  const [envPreview, setEnvPreview] = useState<{
+    current: EventEnvironmentData;
+    alternatives: { dateISO: string; weather: WeatherForecast }[];
+  } | null>(null);
+  const [envLoading, setEnvLoading] = useState(false);
+  const [envDismissed, setEnvDismissed] = useState(false);
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -511,6 +522,101 @@ export default function CreateEventScreen() {
     // Reset address fields when country changes
     setFormData(prev => ({ ...prev, addressFields: {} }));
   }, [formData.country]);
+
+  // Post-entry weather/transport check — only once date, time and a geocoded location
+  // are all present (nothing real to check before that), UK-only per the existing rail
+  // coverage limits. Debounced so it doesn't re-fetch on every keystroke elsewhere in the
+  // form, and any change to these specific fields clears a prior dismissal/result since
+  // they describe a materially different date/place to check.
+  useEffect(() => {
+    setEnvPreview(null);
+    setEnvDismissed(false);
+
+    if (
+      formData.country !== 'GB' ||
+      !formData.event_date ||
+      !formData.event_time ||
+      formData.latitude === null ||
+      formData.longitude === null
+    ) {
+      return;
+    }
+
+    const lat = formData.latitude;
+    const lng = formData.longitude;
+    const eventDateISO = new Date(`${formData.event_date}T${formData.event_time}`).toISOString();
+
+    let active = true;
+    setEnvLoading(true);
+    const timer = setTimeout(() => {
+      Promise.all([
+        eventEnvironmentService.getDraftEnvironment(lat, lng, formData.country, eventDateISO, session),
+        eventEnvironmentService.getNearbyWeatherAlternatives(lat, lng, eventDateISO),
+      ])
+        .then(([current, alternatives]) => {
+          if (active) setEnvPreview({ current, alternatives });
+        })
+        .catch(() => {
+          if (active) setEnvPreview(null);
+        })
+        .finally(() => {
+          if (active) setEnvLoading(false);
+        });
+    }, 800);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      setEnvLoading(false);
+    };
+  }, [formData.event_date, formData.event_time, formData.latitude, formData.longitude, formData.country, session]);
+
+  // Builds the compact notice's copy from the fetched preview — returns null when there's
+  // genuinely nothing worth saying (no data at all), matching the "never fabricate" rule.
+  const weatherNotice = (() => {
+    if (!envPreview) return null;
+    const { current, alternatives } = envPreview;
+    const { weather, road, rail } = current;
+
+    if (!weather.available && !road.available && !rail.available) return null;
+
+    const rainPct = weather.available && weather.pop != null ? Math.round(weather.pop * 100) : null;
+    const weatherPoor = rainPct != null && rainPct >= 50;
+    const roadPoor = road.available && road.incidents.length > 0;
+    const railPoor = rail.available && rail.messages.length > 0;
+    const poor = weatherPoor || roadPoor || railPoor;
+
+    if (!poor) {
+      const bits: string[] = [];
+      if (weather.available) {
+        bits.push(rainPct != null ? `${rainPct}% chance of rain` : (weather.condition || 'clear conditions'));
+      }
+      if (rail.available) bits.push('no rail disruptions reported');
+      if (road.available) bits.push('no road disruptions reported');
+      if (bits.length === 0) return null;
+      return { icon: 'checkmark-circle-outline' as const, tone: 'good' as const, message: `Looks good for this date — ${bits.join(', ')}.` };
+    }
+
+    const parts: string[] = [];
+    if (weatherPoor) parts.push(`${rainPct}% chance of rain`);
+    if (railPoor) parts.push(`reported rail disruption in this area that day (${rail.messages[0]})`);
+    if (roadPoor) parts.push(`reported road disruption nearby (${road.incidents[0]})`);
+    let message = `Worth knowing: ${parts.join('; ')} — you may want to consider adjusting the date.`;
+
+    if (weatherPoor && rainPct != null) {
+      const availableAlts = alternatives.filter(a => a.weather.available && a.weather.pop != null);
+      if (availableAlts.length > 0) {
+        const best = availableAlts.reduce((a, b) => (a.weather.pop! < b.weather.pop! ? a : b));
+        const bestPct = Math.round(best.weather.pop! * 100);
+        if (rainPct - bestPct >= 25 && bestPct < 30) {
+          const label = new Date(best.dateISO).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+          message += ` ${label} shows clearer conditions (${bestPct}% chance of rain), if that's an option.`;
+        }
+      }
+    }
+
+    return { icon: 'alert-circle-outline' as const, tone: 'warn' as const, message };
+  })();
 
   const handleInputChange = (field: keyof EventFormData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -1758,6 +1864,38 @@ export default function CreateEventScreen() {
                   </Text>
                 </View>
               )}
+
+              {/* Post-entry weather/transport check — non-blocking, dismissible, only
+                  once date/time/location are all in and never a directive. */}
+              {!envDismissed && (envLoading || weatherNotice) && (
+                <View style={[styles.weatherNotice, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                  {envLoading ? (
+                    <View style={styles.weatherNoticeRow}>
+                      <ActivityIndicator size="small" color={theme.colors.textSecondary} />
+                      <Text style={[styles.weatherNoticeText, { color: theme.colors.textSecondary, flex: 1 }]}>
+                        Checking weather &amp; transport for this date…
+                      </Text>
+                    </View>
+                  ) : weatherNotice ? (
+                    <View style={styles.weatherNoticeRow}>
+                      <Ionicons
+                        name={weatherNotice.icon}
+                        size={16}
+                        color={weatherNotice.tone === 'warn' ? '#F59E0B' : '#10B981'}
+                      />
+                      <Text style={[styles.weatherNoticeText, { color: theme.colors.text, flex: 1 }]}>
+                        {weatherNotice.message}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => setEnvDismissed(true)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons name="close" size={16} color={theme.colors.textSecondary} />
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
+                </View>
+              )}
             </View>
 
             {/* Venue */}
@@ -2475,6 +2613,22 @@ const styles = StyleSheet.create({
     ...Typography.label,
     fontSize: 12,
     lineHeight: 16,
+  },
+  weatherNotice: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  weatherNoticeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  weatherNoticeText: {
+    ...Typography.label,
+    fontSize: 12,
+    lineHeight: 17,
   },
   pricingHeader: {
     flexDirection: 'row',
