@@ -1,11 +1,12 @@
 import React from 'react';
 import { Image, StyleProp, ImageStyle } from 'react-native';
 
-export type InstitutionBadgeId = 'abbey_road_institute' | 'sound_academy';
+export type InstitutionBadgeId = 'abbey_road_institute' | 'sound_academy' | 'gateway_international';
 
 const BADGE_ASSETS: Record<InstitutionBadgeId, any> = {
   abbey_road_institute: require('../../assets/images/abb-badge.png'),
   sound_academy: require('../../assets/sa-2.png'),
+  gateway_international: require('../../assets/images/GIC.png'),
 };
 
 type Props = {
