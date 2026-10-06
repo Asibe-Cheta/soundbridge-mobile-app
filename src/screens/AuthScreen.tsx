@@ -484,12 +484,11 @@ export default function AuthScreen() {
             ]
           );
         } else {
-          Alert.alert('Success', 'Account created successfully!');
-          setIsSignUp(false);
-          setEmail('');
-          setPassword('');
-          setConfirmPassword('');
-          setTermsAccepted(false);
+          // No verification pending — signUp() already left the user signed in, so the
+          // auth-state listener in AuthContext picks up the new session and the root
+          // navigator (App.tsx) swaps straight to Onboarding. Showing a "Success" alert
+          // and resetting this screen back to the login form here just flashes in and
+          // out underneath that swap, so there's intentionally nothing to do.
         }
       }
     } catch (err) {
