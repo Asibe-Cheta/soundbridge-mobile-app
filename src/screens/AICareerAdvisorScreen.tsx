@@ -33,6 +33,7 @@ import { audienceIntelligenceService } from '../services/AudienceIntelligenceSer
 import { profileService } from '../services/ProfileService';
 import { venueService } from '../services/VenueService';
 import { eventEnvironmentService } from '../services/EventEnvironmentService';
+import GlowActionButton from '../components/GlowActionButton';
 import { Session } from '@supabase/supabase-js';
 
 const { width } = Dimensions.get('window');
@@ -904,53 +905,6 @@ function AiBadge({ size = 28, radius = 8, fontSize = 10 }: { size?: number; radi
   );
 }
 
-// ─── Bridge Star Button (AI_INTRO.MD) ──────────────────────────────────────────
-// Uses the real Bridge sparkle mark — cropped from assets/images/bridge.png's exact
-// pixel bounds (verified programmatically, not eyeballed) into
-// assets/images/bridge_sparkle.png, so it's pixel-perfect brand art, not a guess.
-// The spin-and-stop loop lives on the wrapping Animated.View, not on the image
-// itself, so any future re-export of the sparkle is a pure asset swap.
-function BridgeStarButton({ onPress }: { onPress: () => void }) {
-  const spin = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(spin, { toValue: 1, duration: 1000, useNativeDriver: true }),
-        Animated.timing(spin, { toValue: 0, duration: 0, useNativeDriver: true }),
-        Animated.delay(1800),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, []);
-
-  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
-
-  return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={starButtonStyles.wrap}>
-      <Animated.View style={[{ transform: [{ rotate }] }, starButtonStyles.shadow]}>
-        <Image
-          source={require('../../assets/images/bridge_sparkle.png')}
-          style={starButtonStyles.sparkle}
-          resizeMode="contain"
-        />
-      </Animated.View>
-      <Text style={starButtonStyles.label}>Tap to start your career analysis</Text>
-    </TouchableOpacity>
-  );
-}
-
-const starButtonStyles = StyleSheet.create({
-  wrap: { alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 16 },
-  shadow: {
-    shadowColor: '#a855f7', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5, shadowRadius: 14, elevation: 8,
-  },
-  sparkle: { width: 116, height: 80 },
-  label: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600', letterSpacing: -0.1 },
-});
-
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export default function AICareerAdvisorScreen() {
   const navigation = useNavigation();
@@ -1801,7 +1755,7 @@ export default function AICareerAdvisorScreen() {
                       ))}
                     </View>
 
-                    <BridgeStarButton onPress={startScan} />
+                    <GlowActionButton onPress={startScan} style={{ marginBottom: 16 }} />
 
                     <Text style={styles.idleFootnote}>
                       Uses your real SoundBridge data · Updates with each analysis
