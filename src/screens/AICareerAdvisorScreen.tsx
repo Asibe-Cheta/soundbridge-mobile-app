@@ -972,6 +972,13 @@ export default function AICareerAdvisorScreen() {
   const [cursorVisible, setCursorVisible] = useState(true);
   const introFade = useRef(new Animated.Value(0)).current;
 
+  // Intro → main screen transition: intro content slides/fades out to the left,
+  // then the main screen slides/fades in from the right — sequential, not a
+  // crossfade. Main starts pre-settled (1) for returning users who never see the
+  // intro this session, so it doesn't fade in on every normal open.
+  const introExitAnim = useRef(new Animated.Value(0)).current;
+  const mainEntranceAnim = useRef(new Animated.Value(userProfile?.bridge_intro_seen ? 1 : 0)).current;
+
   useEffect(() => {
     let charIndex = 0;
     let elapsedDelay = 0;
@@ -1303,8 +1310,19 @@ export default function AICareerAdvisorScreen() {
   // network round trip. Worst case on write failure is seeing the intro again next
   // time, which is a safe degrade, not a correctness bug.
   const handleContinueFromIntro = () => {
-    setPhase('idle');
     updateUserProfile({ bridge_intro_seen: true }).catch(() => {});
+    Animated.timing(introExitAnim, {
+      toValue: 1,
+      duration: 260,
+      useNativeDriver: true,
+    }).start(() => {
+      setPhase('idle');
+      Animated.timing(mainEntranceAnim, {
+        toValue: 1,
+        duration: 320,
+        useNativeDriver: true,
+      }).start();
+    });
   };
 
   // ── Start scan ────────────────────────────────────────────────────────────
@@ -1562,7 +1580,17 @@ export default function AICareerAdvisorScreen() {
           keyboardShouldPersistTaps="handled"
         >
           {phase === 'intro' ? (
-            <View style={styles.introContainer}>
+            <Animated.View
+              style={[
+                styles.introContainer,
+                {
+                  opacity: introExitAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+                  transform: [
+                    { translateX: introExitAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -40] }) },
+                  ],
+                },
+              ]}
+            >
               {/* Renders immediately, no entrance delay — previously this was inside
                   the same fade-in wrapper as the headline, which made the logo itself
                   appear to "load late" even though it's a bundled local asset with
@@ -1585,9 +1613,16 @@ export default function AICareerAdvisorScreen() {
                   </LinearGradient>
                 </TouchableOpacity>
               </Animated.View>
-            </View>
+            </Animated.View>
           ) : (
-          <>
+          <Animated.View
+            style={{
+              opacity: mainEntranceAnim,
+              transform: [
+                { translateX: mainEntranceAnim.interpolate({ inputRange: [0, 1], outputRange: [40, 0] }) },
+              ],
+            }}
+          >
           {/* ── Greeting hero ── */}
           <View style={styles.greetingSection}>
             <View style={styles.greetingBadgeRow}>
@@ -2059,7 +2094,7 @@ export default function AICareerAdvisorScreen() {
               </Text>
             </>
           )}
-          </>
+          </Animated.View>
           )}
         </ScrollView>
       </SafeAreaView>

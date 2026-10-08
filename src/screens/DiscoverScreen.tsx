@@ -21,6 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { isCreator } from '../utils/roles';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
+import NetInfo from '@react-native-community/netinfo';
 import { useAuth } from '../contexts/AuthContext';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -172,6 +173,10 @@ interface Playlist {
 }
 
 type TabType = 'Music' | 'Albums' | 'Podcasts' | 'Mixtapes' | 'Audio Books' | 'Artists' | 'Events' | 'Playlists' | 'Services' | 'Venues';
+
+// Shown in place of a section's own "nothing here yet" copy when the device is
+// offline, so a connectivity problem never reads as an honest content-empty state.
+const OFFLINE_EMPTY_MESSAGE = "You're offline — check your connection and try again";
 
 const DISCOVER_MOCK_TRACKS: AudioTrack[] = [
   {
@@ -419,6 +424,19 @@ function DiscoverScreen() {
     setSearchModalVisible(false);
   };
   
+  // Offline detection — empty sections below should say so plainly rather than
+  // reading as "there's genuinely nothing here" when it's actually a connectivity
+  // problem (the mobile equivalent of Apple Music's "No Internet Connection" state,
+  // worded for SoundBridge's cross-platform/iOS+Android audience).
+  const [isOffline, setIsOffline] = useState(false);
+  useEffect(() => {
+    NetInfo.fetch().then(state => setIsOffline(state.isConnected === false));
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsOffline(state.isConnected === false);
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Content states
   const [trendingTracks, setTrendingTracks] = useState<AudioTrack[]>([]);
   const [recentTracks, setRecentTracks] = useState<AudioTrack[]>([]);
@@ -2029,7 +2047,7 @@ function DiscoverScreen() {
                   ItemSeparatorComponent={() => <View style={{ width: 16 }} />}
                 />
         ) : (
-                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>Nothing trending right now</Text>
+                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'Nothing trending right now'}</Text>
         )}
             </View>
 
@@ -2071,7 +2089,7 @@ function DiscoverScreen() {
                   ItemSeparatorComponent={() => <View style={{ width: 16 }} />}
                 />
         ) : (
-                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>No featured artists yet</Text>
+                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'No featured artists yet'}</Text>
               )}
             </View>
 
@@ -2172,7 +2190,7 @@ function DiscoverScreen() {
         ) : (
                 <View style={styles.emptyState}>
                   <Ionicons name="musical-notes" size={48} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>No recent music yet</Text>
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'No recent music yet'}</Text>
                 </View>
               )}
             </View>
@@ -2250,7 +2268,7 @@ function DiscoverScreen() {
                 <View style={styles.emptyState}>
                   <Ionicons name="albums" size={48} color={theme.colors.textSecondary} />
                   <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
-                    No featured albums yet
+                    {isOffline ? OFFLINE_EMPTY_MESSAGE : 'No featured albums yet'}
                   </Text>
                 </View>
               )}
@@ -2328,7 +2346,7 @@ function DiscoverScreen() {
                 <View style={styles.emptyState}>
                   <Ionicons name="albums" size={48} color={theme.colors.textSecondary} />
                   <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
-                    No recent albums yet
+                    {isOffline ? OFFLINE_EMPTY_MESSAGE : 'No recent albums yet'}
                   </Text>
                 </View>
               )}
@@ -2651,7 +2669,7 @@ function DiscoverScreen() {
         ) : (
                 <View style={styles.emptyState}>
                   <Ionicons name="trending-up" size={48} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>No top artists yet</Text>
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'No top artists yet'}</Text>
                 </View>
               )}
       </View>
@@ -2760,7 +2778,7 @@ function DiscoverScreen() {
               ) : (
                 <View style={styles.emptyState}>
                   <Ionicons name="calendar" size={48} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>No events found</Text>
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'No events found'}</Text>
                 </View>
               )}
             </WalkthroughableView>
@@ -2829,7 +2847,7 @@ function DiscoverScreen() {
                   ))}
                 </View>
               ) : (
-                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>No playlists yet</Text>
+                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'No playlists yet'}</Text>
               )}
             </View>
           </>
@@ -2987,7 +3005,7 @@ function DiscoverScreen() {
                     </>
                   ) : (
                     <>
-                      <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>No services listed in your area yet</Text>
+                      <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'No services listed in your area yet'}</Text>
                       <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
                         Be the first to offer your services on SoundBridge.
                       </Text>
