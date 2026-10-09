@@ -1,4 +1,3 @@
-import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '../../lib/supabase';
 import { apiFetch } from '../../lib/apiClient';
@@ -699,7 +698,13 @@ export class FeedService {
   }
 
   /**
-   * Upload image for post
+   * Upload image for post directly to Supabase Storage (post-attachments bucket).
+   * Bypasses the Next.js API route (which has a ~6MB body limit, same constraint
+   * documented on uploadAudio below) by streaming the file straight to the storage
+   * REST endpoint, then writes the attachment record to Supabase. A full-resolution
+   * camera photo routinely exceeds that limit, which is why uploads were failing
+   * with an unhelpful generic "Failed to upload image" — the request never even
+   * reached route code that could explain why.
    * @param uri - File URI to upload
    * @param postId - Optional post ID to associate the image with
    */
@@ -714,94 +719,61 @@ export class FeedService {
         throw new Error('Not authenticated');
       }
 
-      // Create form data - React Native FormData requires specific format
-      const formData = new FormData();
-      const filename = uri.split('/').pop() || 'image.jpg';
-      const match = /\.(\w+)$/.exec(filename);
-      const type = match ? `image/${match[1]}` : 'image/jpeg';
-
-      // React Native FormData format for file uploads
-      // ⚠️ CRITICAL: Field name must be 'file', not 'image'
-      formData.append('file', {
-        uri: Platform.OS === 'ios' ? uri.replace('file://', '') : uri,
-        name: filename,
-        type: type,
-      } as any);
-
-      // Add post_id if provided (creates attachment record automatically)
-      if (postId) {
-        formData.append('post_id', postId);
+      const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // matches UploadService.ts's existing cap
+      const fileInfo = await FileSystem.getInfoAsync(uri);
+      if (fileInfo.exists && fileInfo.size && fileInfo.size > MAX_IMAGE_SIZE) {
+        throw new Error(`Image must be less than ${MAX_IMAGE_SIZE / (1024 * 1024)}MB`);
       }
 
-      // For file uploads, we need to use fetch directly with proper headers
-      const API_BASE_URL = config.apiUrl.replace(/\/api\/?$/, '');
-      const response = await fetch(`${API_BASE_URL}/api/posts/upload-image`, {
-        method: 'POST',
+      const filename = uri.split('/').pop() || 'image.jpg';
+      const ext = (/\.(\w+)$/.exec(filename) || [])[1]?.toLowerCase() || 'jpg';
+      const mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+      const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const storagePath = `${session.user.id}/${Date.now()}_${sanitized}`;
+      const bucket = 'post-attachments';
+
+      const uploadUrl = `${config.supabaseUrl}/storage/v1/object/${bucket}/${storagePath}`;
+      const uploadResp = await FileSystem.uploadAsync(uploadUrl, uri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        mimeType,
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          // Don't set Content-Type - let fetch set it with boundary for FormData
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: config.supabaseAnonKey,
+          'Content-Type': mimeType,
+          'x-upsert': 'false',
+          'cache-control': '3600',
         },
-        body: formData,
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        let error;
+      if (uploadResp.status < 200 || uploadResp.status >= 300) {
+        let errMsg = 'Failed to upload image';
         try {
-          error = JSON.parse(errorText);
-        } catch {
-          error = { error: errorText || 'Failed to upload image' };
-        }
-        throw new Error(error.error || error.message || 'Failed to upload image');
+          const body = JSON.parse(uploadResp.body);
+          errMsg = body.message || body.error || errMsg;
+        } catch (_) {}
+        throw new Error(errMsg);
       }
 
-      const data = await response.json();
-      
-      // Log response for debugging
-      console.log('UploadImage response:', JSON.stringify(data, null, 2));
-      
-      // Response format: { success: true, data: { file_url: "...", ... } }
-      if (data.success && data.data) {
-        const fileUrl = data.data.file_url || data.data.url;
-        if (fileUrl) {
-          console.log('✅ Image uploaded successfully, URL:', fileUrl);
-          return fileUrl;
+      const { data: { publicUrl } } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(storagePath);
+
+      console.log('✅ Image uploaded directly to Supabase Storage:', publicUrl);
+
+      if (postId) {
+        const { error: attachErr } = await supabase
+          .from('post_attachments')
+          .insert({ post_id: postId, attachment_type: 'image', file_url: publicUrl });
+        if (attachErr) {
+          console.warn('FeedService.uploadImage: attachment record failed:', attachErr);
         }
       }
-      
-      // Fallback for various response formats
-      const fileUrl = data.url || data.image_url || data.imageUrl || data.data?.file_url || data.data?.url;
-      if (fileUrl) {
-        console.log('✅ Image uploaded successfully (fallback format), URL:', fileUrl);
-        return fileUrl;
-      }
-      
-      // If success is true but no URL found, the upload likely succeeded
-      // The attachment is linked via post_id, so we can return a success indicator
-      if (data.success === true) {
-        console.log('✅ Image upload succeeded (attachment linked via post_id)');
-        // Return a success indicator - the attachment is already linked to the post
-        return 'uploaded';
-      }
-      
-      // If success is false or missing, extract error message
-      const errorMessage = data.error || data.message || data.details || 'Failed to upload image';
-      console.error('❌ Image upload failed:', errorMessage);
-      throw new Error(errorMessage);
+
+      return publicUrl;
     } catch (error: any) {
       console.error('FeedService.uploadImage:', error);
-      
-      // Don't re-throw if it's already a proper Error with message
-      if (error.message === 'No file provided') {
-        throw error;
-      }
-      
-      // If error has a message, use it; otherwise create a generic one
-      if (error.message && error.message !== 'Failed to upload image') {
-        throw error;
-      }
-      
-      throw new Error(error.message || 'Failed to upload image');
+      throw error;
     }
   }
 
