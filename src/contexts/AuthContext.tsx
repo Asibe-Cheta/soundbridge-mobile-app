@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { Linking, AppState, AppStateStatus, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import type { User, Session } from '@supabase/supabase-js';
@@ -128,6 +130,28 @@ export function AuthProvider({ children }: AuthProviderProps) {
     let timeoutId: NodeJS.Timeout;
     let authSubscription: { unsubscribe: () => void } | null = null;
 
+    // Supabase persists the session under a key shaped sb-<project-ref>-auth-token
+    // (no storageKey override is set in src/lib/supabase.ts, so this is the
+    // default). Found by pattern rather than hardcoding the project ref, so this
+    // doesn't silently break if the Supabase project ever changes.
+    const restoreSessionFromStorage = async (): Promise<Session | null> => {
+      try {
+        const keys = await AsyncStorage.getAllKeys();
+        const authKey = keys.find(k => k.startsWith('sb-') && k.endsWith('-auth-token'));
+        if (!authKey) return null;
+        const raw = await AsyncStorage.getItem(authKey);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (parsed?.access_token && parsed?.user) {
+          return parsed as Session;
+        }
+        return null;
+      } catch (e) {
+        console.warn('⚠️ restoreSessionFromStorage failed:', e);
+        return null;
+      }
+    };
+
     const bootstrapAuth = async () => {
       await loadBgIsolationFlags();
 
@@ -143,6 +167,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
           setUser(session.user);
           setLoading(false);
           loadUserProfile(session.user.id, session);
+        } else {
+          // getSession() came back empty/errored. On a genuinely fresh install
+          // or real sign-out this is correct — but supabase-js has a known,
+          // still-open issue (auth-js#141 / gotrue-js#141) where a token-refresh
+          // attempted during getSession() can wipe out a perfectly good
+          // persisted session if the device is offline at the time. Before
+          // treating this as "logged out," check for exactly that case: no
+          // network, but a session is still sitting in AsyncStorage.
+          const netState = await NetInfo.fetch();
+          if (netState.isConnected === false) {
+            const restored = await restoreSessionFromStorage();
+            if (restored) {
+              console.log('📴 Restored session from local storage (offline cold start)');
+              recordAuthEvent('INITIAL_SESSION_OFFLINE_RESTORE', restored.user.id);
+              setSession(restored);
+              setUser(restored.user);
+              setLoading(false);
+              loadUserProfile(restored.user.id, restored);
+            }
+          }
         }
       } catch (err) {
         console.error('Error getting initial session:', err);
@@ -840,8 +884,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
       
       if (error) {
         console.error('❌ Error loading user profile:', error);
-        // If profile doesn't exist, user needs onboarding
-        setNeedsOnboarding(true);
+        // PGRST116 ("no rows") genuinely means this user has no profile row yet —
+        // only then is onboarding the right call. Any other error (network
+        // failure, timeout, offline cold start) is not evidence the profile is
+        // missing, and incorrectly routing a returning offline user to
+        // onboarding is worse than just leaving their current state untouched
+        // until the profile can actually be checked.
+        if (error.code === 'PGRST116') {
+          setNeedsOnboarding(true);
+        }
         return;
       }
       
@@ -957,7 +1008,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     } catch (err) {
       console.error('❌ Error loading user profile:', err);
-      setNeedsOnboarding(true);
+      // Same reasoning as above — a thrown exception here (network failure,
+      // timeout) is infrastructure trouble, not evidence of a missing profile.
+      // Don't flip needsOnboarding on it.
     }
   };
 

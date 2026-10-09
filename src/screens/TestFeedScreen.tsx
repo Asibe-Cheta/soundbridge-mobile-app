@@ -57,6 +57,7 @@ import GoogleCalendarPrivacyModal from '../components/GoogleCalendarPrivacyModal
 import { calendarNudgeService } from '../services/CalendarNudgeService';
 import { calendarIntegrationService } from '../services/CalendarIntegrationService';
 import { useEventMatchIntelligence } from '../contexts/EventMatchIntelligenceContext';
+import NetInfo from '@react-native-community/netinfo';
 import EventPromotionTrackingService from '../services/EventPromotionTrackingService';
 import EarnMoneyLiveNudge from '../components/EarnMoneyLiveNudge';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -741,6 +742,19 @@ export default function TestFeedScreen() {
     refresh, loadMore, addReaction, deletePost, updatePostLocally,
   } = useFeed();
 
+  // The feed below is already cache-backed (useFeed/feedCacheService) and shows
+  // cached posts instantly on a cold start, offline included — this banner is
+  // the one piece that was actually missing: telling the user that's what
+  // they're looking at, same as LinkedIn's offline bar.
+  const [isOffline, setIsOffline] = useState(false);
+  useEffect(() => {
+    NetInfo.fetch().then(state => setIsOffline(state.isConnected === false));
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsOffline(state.isConnected === false);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const [activeFilter, setActiveFilter] = useState('For You');
 
   // ── Partner card carousel ────────────────────────────────────────────────
@@ -1090,6 +1104,15 @@ export default function TestFeedScreen() {
           backgroundColor="transparent"
           translucent
         />
+
+        {isOffline && (
+          <View style={styles.offlineBanner}>
+            <Ionicons name="remove-circle" size={16} color="#1A1A1A" />
+            <Text style={styles.offlineBannerText}>
+              Network <Text style={styles.offlineBannerTextBold}>offline</Text>.
+            </Text>
+          </View>
+        )}
 
         {/* ── Earn Money Live nudge (creator-only, weekly cadence) ── */}
         <EarnMoneyLiveNudge isCreator={isCreator(userProfile)} />
@@ -1602,6 +1625,21 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   list: { flex: 1 },
   listContent: { paddingBottom: 120 },
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#FBD5DB',
+    paddingVertical: 10,
+  },
+  offlineBannerText: {
+    color: '#1A1A1A',
+    fontSize: 14,
+  },
+  offlineBannerTextBold: {
+    fontWeight: '700',
+  },
 
   // Post card — contained card with radius and border
   postCardWrap: {
