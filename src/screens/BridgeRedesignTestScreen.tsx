@@ -34,7 +34,7 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
-const { width: SCREEN_W } = Dimensions.get('window');
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
 // ─── Entry pill → input bar morph geometry ─────────────────────────────────
 // The same pill element animates between these two states rather than crossfading
@@ -287,7 +287,7 @@ export default function BridgeRedesignTestScreen() {
     const translateY = interpolate(
       morph.value,
       [0, 1],
-      [0, Dimensions.get('window').height - ENTRY_PILL_TOP - BAR_BOTTOM_OFFSET - BAR_HEIGHT - 40],
+      [0, SCREEN_H - ENTRY_PILL_TOP - BAR_BOTTOM_OFFSET - BAR_HEIGHT - 40],
       Extrapolation.CLAMP
     );
     return { width, height, transform: [{ translateY }] };
