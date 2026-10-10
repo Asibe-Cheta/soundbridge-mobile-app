@@ -90,6 +90,9 @@ interface CreatorContext {
   earningsCurrency: string;
   thisMonthEarnings: number;
   tipsByTrack: Record<string, number>;
+  // Real month-over-month trend (revenue + new followers only — play counts aren't
+  // tracked per-month anywhere yet, so this never covers the performance card's plays stat)
+  monthlyGrowth: { month: string; revenue: number; newFollowers: number; revenueChange?: number; followerChange?: number }[];
   // Network
   followersCount: number;
   followingCount: number;
@@ -320,7 +323,7 @@ async function fetchCreatorContext(userId: string, session: Session): Promise<Cr
   const now = new Date().toISOString();
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
   const [
-    allTimeRevenue, thisMonthRevenue,
+    allTimeRevenue, thisMonthRevenue, monthlyGrowthRaw,
     fanCities, topFansRaw,
     liveInterestStats,
     trackQualityRaw, affinityFansRaw,
@@ -329,6 +332,8 @@ async function fetchCreatorContext(userId: string, session: Session): Promise<Cr
   ] = await Promise.all([
     creatorRevenueService.getRevenueBySource(session).catch(() => null),
     creatorRevenueService.getRevenueBySource(session, monthStart, now).catch(() => null),
+    // Real month-over-month trend — same method CreatorInsightsDashboardScreen uses
+    creatorRevenueService.getMonthlyGrowth(session, 3).catch(() => []),
     // Real fan location — where paying fans (tips + ticket buyers) actually are
     creatorRevenueService.getFanDemographics(session, 5).catch(() => []),
     creatorRevenueService.getTopFans(session, 5).catch(() => []),
@@ -483,6 +488,13 @@ async function fetchCreatorContext(userId: string, session: Session): Promise<Cr
     earningsCurrency,
     thisMonthEarnings,
     tipsByTrack,
+    monthlyGrowth: monthlyGrowthRaw.map(m => ({
+      month: m.month,
+      revenue: m.revenue,
+      newFollowers: m.newFollowers,
+      revenueChange: m.revenueChange,
+      followerChange: m.followerChange,
+    })),
     followersCount,
     followingCount,
     communityMemberships: communityCount,
@@ -646,6 +658,12 @@ LOCATION CARD — use real audience geography, not just their home city:
 - If both are empty, say honestly that there isn't enough activity yet to see where the audience is concentrated, and give one concrete step to start generating that signal (e.g. sharing a track where a specific community will see it).
 - Never invent a city that isn't in the data.
 
+MONTHLY TREND DATA — real month-over-month revenue and follower change, use carefully:
+- "Monthly trend" below is real, already-calculated month-over-month data — the percentage changes shown are actual arithmetic on real past months, not estimates for you to compute or guess at.
+- This only ever covers revenue and new-follower counts. It does NOT cover play counts — play history isn't tracked month-by-month anywhere, so never claim a monthly trend in plays or claim the performance card's stat is a month-over-month change. The performance card's stat must stay an all-time total or top-track figure, same as always.
+- Use the revenue trend for the earnings card when at least one month-over-month revenue change is present — this is genuine grounds for dataBacked: true there, e.g. "your earnings grew by X% from last month to this month." If every month shows zero revenue, there's nothing to trend — say so honestly instead.
+- Follower change can support whichever card is about audience/network growth (performance or collaboration, judge by what fits the rest of that card's content) — never force it in if it doesn't fit naturally.
+
 TIMING CARD — no personalised timing data exists yet:
 - There is no real data yet on which days, times, or release patterns work best for this specific creator. Do NOT claim to have analysed their personal timing patterns, and do NOT invent a specific "best day/time" finding framed as personalised data.
 - Instead, give genuinely useful general best-practice guidance about release timing and consistency, clearly framed as general guidance ("a pattern that tends to work well is...") rather than "your data shows...". Be honest that this becomes personalised once there's enough activity to see real patterns.
@@ -719,6 +737,7 @@ Top tracks: ${hasData ? ctx.topTracks.map(t => `"${t.title}" — ${t.plays} play
 Track quality signals (real engagement, not just plays): ${ctx.trackQuality.length > 0 ? ctx.trackQuality.map(t => `"${t.title}" — ${t.uniqueListeners} unique listeners, ${t.repeatListens} repeat listens, ${(t.tipRate * 100).toFixed(0)}% tip rate, ${t.shareCount} shares, ${t.bookmarkCount} bookmarks`).join('; ') : 'Not enough activity yet to compute'}
 Mood tags: ${ctx.moodTags.length > 0 ? ctx.moodTags.join(', ') : 'None tagged'}
 Total earnings (net, wallet): ${tipsDisplay}
+Monthly trend (revenue, new followers — real month-over-month, plays not included): ${ctx.monthlyGrowth.length > 0 ? ctx.monthlyGrowth.map(m => `${m.month}: ${symbol}${m.revenue.toFixed(2)} revenue${m.revenueChange != null ? ` (${m.revenueChange >= 0 ? '+' : ''}${m.revenueChange.toFixed(0)}% vs previous month)` : ''}, ${m.newFollowers} new followers${m.followerChange != null ? ` (${m.followerChange >= 0 ? '+' : ''}${m.followerChange.toFixed(0)}% vs previous month)` : ''}`).join('; ') : 'Not enough history yet'}
 Top fan cities (real paying fans — tips + ticket buyers, NOT the creator's own location): ${ctx.topFanCities.length > 0 ? ctx.topFanCities.map(c => `${c.city}, ${c.country} (${c.fanCount} fans, ${symbol}${c.totalSpent.toFixed(2)} spent)`).join('; ') : 'None yet'}
 Top individual fans: ${ctx.topFans.length > 0 ? ctx.topFans.map(f => `${f.username}${f.city ? ` (${f.city}${f.country ? `, ${f.country}` : ''})` : ''} — ${symbol}${f.totalSpent.toFixed(2)}`).join('; ') : 'None yet'}
 Live-interest cities (listeners who said yes to seeing you live, from the "want to hear them live?" prompt): ${ctx.liveInterestCities.length > 0 ? ctx.liveInterestCities.map(c => `${c.city}, ${c.country} (${c.count})`).join('; ') : 'None yet'}
