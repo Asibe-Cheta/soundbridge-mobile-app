@@ -175,6 +175,7 @@ import EventCreatedSuccessScreen from './src/screens/EventCreatedSuccessScreen';
 import EventPromotionReachScreen from './src/screens/EventPromotionReachScreen';
 import PromotionReachDemoScreen from './src/screens/PromotionReachDemoScreen'; // TEMPORARY — ad demo, see file header
 import WhosComingDemoScreen from './src/screens/WhosComingDemoScreen'; // TEMPORARY — ad demo, see file header
+import BridgeRedesignTestScreen from './src/screens/BridgeRedesignTestScreen'; // TEMPORARY — private preview, see file header
 import EventPollSetupScreen from './src/screens/EventPollSetupScreen';
 import PollResultsScreen from './src/screens/PollResultsScreen';
 import CreatePlaylistScreen from './src/screens/CreatePlaylistScreen';
@@ -1392,6 +1393,7 @@ function AppNavigator() {
             <Stack.Screen name="EventPromotionReach" component={EventPromotionReachScreen} />
             <Stack.Screen name="PromotionReachDemo" component={PromotionReachDemoScreen} options={{ headerShown: false }} />
             <Stack.Screen name="WhosComingDemo" component={WhosComingDemoScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="BridgeRedesignTest" component={BridgeRedesignTestScreen} options={{ headerShown: false }} />
             <Stack.Screen name="BrandingCustomization" component={BrandingCustomizationScreen} />
             <Stack.Screen name="TracksList" component={TracksListScreen} />
             <Stack.Screen name="FollowersList" component={FollowersListScreen} />

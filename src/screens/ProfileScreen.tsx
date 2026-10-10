@@ -1961,6 +1961,17 @@ export default function ProfileScreen() {
             <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Who's Coming Demo (Ad)</Text>
             <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
+          {/* TEMPORARY — private preview entry point, remove alongside BridgeRedesignTestScreen.tsx */}
+          <TouchableOpacity
+            style={styles.groupedRow}
+            onPress={() => navigation.navigate('BridgeRedesignTest' as never)}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
+              <Ionicons name="sparkles" size={18} color="#8B5CF6" />
+            </View>
+            <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Bridge Redesign Preview</Text>
+            <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
         </View>
       </View>
     </View>
