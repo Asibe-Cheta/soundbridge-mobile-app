@@ -30,6 +30,8 @@ import {
   Dimensions,
   ScrollView,
   Easing,
+  Keyboard,
+  Platform,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -60,7 +62,7 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const ENTRY_PILL_WIDTH = Math.round(SCREEN_W * 0.58);
 const ENTRY_PILL_HEIGHT = 58;
 const BAR_WIDTH = SCREEN_W - 40;
-const BAR_HEIGHT = 56;
+const BAR_HEIGHT = 50;
 const BAR_BOTTOM_OFFSET = 18;
 const PILL_SCALE_X = BAR_WIDTH / ENTRY_PILL_WIDTH;
 const PILL_SCALE_Y = BAR_HEIGHT / ENTRY_PILL_HEIGHT;
@@ -104,10 +106,16 @@ function CountUpNumber({ to, suffix = '%', style }: { to: number; suffix?: strin
 // verbatim: translateY 105%→-85%, scale 0.92→1.12, opacity 0→1(20%)→0.8(50%)→0(100%),
 // 6s ease-in-out infinite, all three rings sharing ONE keyframe (no per-ring stagger —
 // the layered look comes from the rings' different starting sizes, not timing offsets).
-// Top/bottom edges fade via overlay gradients standing in for the source's CSS mask,
-// and the whole band sits above the pill's vertical center so it can never reach the
-// bottom input bar. ──────────────────────────────────────────────────────────────────
-const ARC_BAND_HEIGHT = 260;
+// The source's `.recharge-arcs` container is h-48% w-90% of a 790:444 landscape frame —
+// i.e. roughly 3.3x wider than tall. Each ring is `rounded-full` against THAT box, so on
+// a wide-short box a "full circle" renders as a flattened dome/arc, not an actual circle —
+// that's the visual signature in the reference (a glowing dome rising from the pill, not
+// concentric rings). Reproduced here with the same ~3.3:1 width:height ratio rather than
+// equal width/height. Top/bottom edges fade via overlay gradients standing in for the
+// source's CSS mask, and the whole band sits above the pill's vertical center so it can
+// never reach the bottom input bar. ────────────────────────────────────────────────────
+const ARC_BAND_WIDTH = Math.round(SCREEN_W * 0.92);
+const ARC_BAND_HEIGHT = Math.round(ARC_BAND_WIDTH / 3.3);
 
 function RisingArcs({ bottom }: { bottom: number }) {
   const v = useRef(new RNAnimated.Value(0)).current;
@@ -130,7 +138,13 @@ function RisingArcs({ bottom }: { bottom: number }) {
   const scale = v.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.12] });
 
   return (
-    <View style={[styles.arcsContainer, { bottom, height: ARC_BAND_HEIGHT }]} pointerEvents="none">
+    <View
+      style={[
+        styles.arcsContainer,
+        { bottom, left: (SCREEN_W - ARC_BAND_WIDTH) / 2, width: ARC_BAND_WIDTH, height: ARC_BAND_HEIGHT },
+      ]}
+      pointerEvents="none"
+    >
       <Ring sizePct={100} baseOpacity={1} opacity={opacity} translateY={translateY} scale={scale} />
       <Ring sizePct={86} baseOpacity={0.5} opacity={opacity} translateY={translateY} scale={scale} />
       <Ring sizePct={72} baseOpacity={0.3} opacity={opacity} translateY={translateY} scale={scale} />
@@ -384,7 +398,22 @@ export default function BridgeRedesignTestScreen() {
   const [phase, setPhase] = useState<Phase>('entry');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const morph = useSharedValue(0); // 0 = entry pill, 1 = bottom input bar
+
+  // Lifts the input bar + scroll content above the keyboard. Plain React state driving an
+  // ordinary (non-worklet) transform — cheap, infrequent, and doesn't touch the reanimated
+  // morph worklet at all, so it can't reintroduce the layout-relayout crash that removing
+  // KeyboardAvoidingView was fixing in the first place.
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = (e: any) => setKeyboardHeight(e.endCoordinates?.height ?? 0);
+    const onHide = () => setKeyboardHeight(0);
+    const showSub = Keyboard.addListener(showEvt, onShow);
+    const hideSub = Keyboard.addListener(hideEvt, onHide);
+    return () => { showSub.remove(); hideSub.remove(); };
+  }, []);
 
   // Real gate, not just an unlisted route — blocks direct navigation too, not only the
   // hidden ProfileScreen row.
@@ -439,7 +468,7 @@ export default function BridgeRedesignTestScreen() {
     const scaleX = interpolate(morph.value, [0, 1], [1, PILL_SCALE_X], Extrapolation.CLAMP);
     const scaleY = interpolate(morph.value, [0, 1], [1, PILL_SCALE_Y], Extrapolation.CLAMP);
     const translateY = interpolate(morph.value, [0, 1], [0, morphTranslateYTarget], Extrapolation.CLAMP);
-    const shadowOpacity = interpolate(morph.value, [0, 0.35], [0.55, 0], Extrapolation.CLAMP);
+    const shadowOpacity = interpolate(morph.value, [0, 0.35], [0.85, 0], Extrapolation.CLAMP);
     return {
       transform: [{ translateY }, { scaleX }, { scaleY }],
       shadowOpacity,
@@ -481,7 +510,8 @@ export default function BridgeRedesignTestScreen() {
         ) : (
           <ScrollView
             style={styles.chatScroll}
-            contentContainerStyle={styles.chatScrollContent}
+            contentContainerStyle={[styles.chatScrollContent, { paddingBottom: BAR_HEIGHT + BAR_BOTTOM_OFFSET + 24 + keyboardHeight }]}
+            keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
             {messages.map(m => {
@@ -524,36 +554,42 @@ export default function BridgeRedesignTestScreen() {
           </ScrollView>
         )}
 
-        <Animated.View
-          style={[
-            styles.morphPill,
-            { left: (SCREEN_W - ENTRY_PILL_WIDTH) / 2, top: entryPillTop, width: ENTRY_PILL_WIDTH, height: ENTRY_PILL_HEIGHT },
-            pillStyle,
-          ]}
-        >
-          <Animated.View style={[StyleSheet.absoluteFill, entryContentStyle]} pointerEvents={phase === 'entry' ? 'auto' : 'none'}>
-            <TouchableOpacity style={styles.analyseFill} onPress={startMorph} activeOpacity={0.85} disabled={phase !== 'entry'}>
-              <Ionicons name="sparkles" size={16} color="#F4F2FF" />
-              <Text style={styles.analyseFillText}>Analyse my career</Text>
-            </TouchableOpacity>
+        <View style={{ transform: [{ translateY: -keyboardHeight }] }}>
+          {/* Shadow and content-clipping are split across two views — overflow:'hidden'
+              (needed to clip the two content layers to the pill shape) also clips a view's
+              own shadow on iOS, which is why no glow was rendering at all before. */}
+          <Animated.View
+            style={[
+              styles.morphPillShadow,
+              { left: (SCREEN_W - ENTRY_PILL_WIDTH) / 2, top: entryPillTop, width: ENTRY_PILL_WIDTH, height: ENTRY_PILL_HEIGHT },
+              pillStyle,
+            ]}
+          >
+            <View style={styles.morphPillClip}>
+              <Animated.View style={[StyleSheet.absoluteFill, entryContentStyle]} pointerEvents={phase === 'entry' ? 'auto' : 'none'}>
+                <TouchableOpacity style={styles.analyseFill} onPress={startMorph} activeOpacity={0.85} disabled={phase !== 'entry'}>
+                  <Text style={styles.analyseFillText}>Analyse my career</Text>
+                </TouchableOpacity>
+              </Animated.View>
+              <Animated.View style={[StyleSheet.absoluteFill, barContentStyle]} pointerEvents={phase === 'chat' ? 'auto' : 'none'}>
+                <View style={styles.inputFill}>
+                  <TextInput
+                    value={draft}
+                    onChangeText={setDraft}
+                    placeholder="Message"
+                    placeholderTextColor="rgba(255,255,255,0.5)"
+                    style={styles.input}
+                    onSubmitEditing={sendDraft}
+                    returnKeyType="send"
+                  />
+                  <TouchableOpacity onPress={sendDraft} style={styles.sendBtn} disabled={!draft.trim()}>
+                    <Ionicons name="arrow-up" size={16} color={draft.trim() ? '#F4F2FF' : 'rgba(244,242,255,0.3)'} />
+                  </TouchableOpacity>
+                </View>
+              </Animated.View>
+            </View>
           </Animated.View>
-          <Animated.View style={[StyleSheet.absoluteFill, barContentStyle]} pointerEvents={phase === 'chat' ? 'auto' : 'none'}>
-            <BlurView intensity={30} tint="dark" style={styles.inputFill}>
-              <TextInput
-                value={draft}
-                onChangeText={setDraft}
-                placeholder="Message"
-                placeholderTextColor="rgba(244,242,255,0.4)"
-                style={styles.input}
-                onSubmitEditing={sendDraft}
-                returnKeyType="send"
-              />
-              <TouchableOpacity onPress={sendDraft} style={styles.sendBtn} disabled={!draft.trim()}>
-                <Ionicons name="arrow-up" size={16} color={draft.trim() ? '#F4F2FF' : 'rgba(244,242,255,0.3)'} />
-              </TouchableOpacity>
-            </BlurView>
-          </Animated.View>
-        </Animated.View>
+        </View>
       </SafeAreaView>
     </View>
   );
@@ -585,7 +621,6 @@ const styles = StyleSheet.create({
 
   arcsContainer: {
     position: 'absolute',
-    left: '6%', right: '6%',
     alignItems: 'center',
     overflow: 'hidden',
   },
@@ -598,30 +633,33 @@ const styles = StyleSheet.create({
   arcFadeTop: { position: 'absolute', left: 0, right: 0, top: 0, height: '30%' },
   arcFadeBottom: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '18%' },
 
-  morphPill: {
+  morphPillShadow: {
     position: 'absolute',
     borderRadius: 999,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
     shadowColor: '#8560FF',
     shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 24,
+    shadowRadius: 36,
+  },
+  morphPillClip: {
+    flex: 1,
+    borderRadius: 999,
+    overflow: 'hidden',
   },
   analyseFill: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
-  analyseFillText: { color: '#F4F2FF', fontSize: 15, fontWeight: '700' },
+  analyseFillText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
   inputFill: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.15)',
     paddingHorizontal: 16, gap: 10,
   },
-  input: { flex: 1, color: '#F4F2FF', fontSize: 14, paddingVertical: 10 },
+  input: { flex: 1, color: '#FFFFFF', fontSize: 14, paddingVertical: 10 },
   sendBtn: {
-    width: 32, height: 32, borderRadius: 16,
+    width: 30, height: 30, borderRadius: 15,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
 
   chatScroll: { flex: 1 },
