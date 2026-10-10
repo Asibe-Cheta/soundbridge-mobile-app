@@ -45,6 +45,9 @@ import { BlurView } from 'expo-blur';
 import Svg, { G, Path } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { useAuth } from '../contexts/AuthContext';
+
+const ALLOWED_EMAIL = 'asibechetachukwu@gmail.com';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
@@ -376,11 +379,21 @@ function AiBubble({ text }: { text: string }) {
 
 export default function BridgeRedesignTestScreen() {
   const navigation = useNavigation();
+  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState<Phase>('entry');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const morph = useSharedValue(0); // 0 = entry pill, 1 = bottom input bar
+
+  // Real gate, not just an unlisted route — blocks direct navigation too, not only the
+  // hidden ProfileScreen row.
+  useEffect(() => {
+    if (user?.email?.toLowerCase() !== ALLOWED_EMAIL) {
+      navigation.goBack();
+    }
+  }, [user, navigation]);
+  if (user?.email?.toLowerCase() !== ALLOWED_EMAIL) return null;
 
   // SafeAreaView (edges: top+bottom) already excludes the device insets from its own
   // content box, so positioning inside it is computed against that reduced height, not
