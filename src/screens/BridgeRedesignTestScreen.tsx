@@ -4,17 +4,15 @@
 // data (matching the PromotionReachDemoScreen/WhosComingDemoScreen convention), not wired
 // to the real analysis pipeline (fetchCreatorContext/Gemini) yet.
 //
-// Entry screen (background, orbitals, shimmer field, the glowing pill) is a direct port
-// of assets/figma/Phone-screen/src/{App.tsx,index.css} — a complete Figma Make export,
-// not reinterpreted. Colors, sizes, timings, and the exact per-dot shimmer position/delay
-// table are copied from that CSS, not approximated. The only intentional deviations:
+// Entry screen (background, rising arcs, shimmer field, the glowing pill) is a direct,
+// verbatim port of src/bridge/src/App.tsx — a Figma Make export already written in real
+// React Native (Animated/StyleSheet/View, not web CSS), confirmed via SHA-256 against
+// what Figma Make reports for its repo. Not reinterpreted — only two things differ:
 // - The phone-bezel mockup chrome (device border, side buttons, fake status bar, dynamic
-//   island, home indicator) is that export's browser-demo wrapper for showing a phone
-//   inside a webpage — this screen already runs on a real phone with its own real status
-//   bar/home indicator and its own header, so only the `.screen` contents are ported.
-// - CSS has no RN equivalent for radial-gradient, multi-layer box-shadow, or filter:blur()
-//   on an arbitrary shape — those are approximated with stacked LinearGradient/soft Views
-//   using the same colors, not invented differently (noted inline where it matters).
+//   island, home indicator, "Friends" app-header row) is that export's browser-demo
+//   wrapper for showing a phone inside a webpage — this screen already runs on a real
+//   phone with its own real status bar/home indicator and its own header, so only the
+//   `.screen` contents (background, MovingBackground, the prompt button) are ported.
 // - Button label is "Analyse" (not the source's "What's your type?"), the one deliberate
 //   content change, which is all this screen needs beyond the direct port.
 //
@@ -49,7 +47,7 @@ import Animated, {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import Svg, { G, Path, Defs, RadialGradient, LinearGradient as SvgLinearGradient, Stop, Rect, Ellipse } from 'react-native-svg';
+import Svg, { G, Path } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
@@ -64,11 +62,12 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 // purely via transform: scale, not animated width/height, so this never forces a Yoga
 // relayout pass on the UI thread (animating width/height on a container with absolutely
 // positioned descendants is what caused the original crash on this screen).
-// .prompt's literal CSS dimensions (129x40, 9px text) read as too small on device —
-// sized up from the exact source spec per direct feedback, while staying pill-shaped
-// rather than the earlier wide banner-style button.
-const ENTRY_PILL_WIDTH = 176;
-const ENTRY_PILL_HEIGHT = 56;
+// .prompt's exact dimensions: minWidth 129, paddingHorizontal 20, paddingVertical 13,
+// fontSize 9 — ported verbatim, not resized. (Height isn't an explicit prop in the
+// source since the button auto-sizes to padding+content; 40 is that padding+line-height
+// computed out, since this screen's morph animation needs a fixed layout height.)
+const ENTRY_PILL_WIDTH = 129;
+const ENTRY_PILL_HEIGHT = 40;
 const BAR_WIDTH = SCREEN_W - 40;
 const BAR_HEIGHT = 50;
 const BAR_BOTTOM_OFFSET = 18;
@@ -110,295 +109,102 @@ function CountUpNumber({ to, suffix = '%', style }: { to: number; suffix?: strin
   );
 }
 
-// ─── Ambient backdrop — direct port of assets/figma/Phone-screen's `.screen` contents:
-// two radial glows, a diagonal sweep overlay, two large drifting `.orbital` rings, a
-// blurred `.light-sweep` streak, and a 24-dot `.shimmer-field`. Radial glows use
-// react-native-svg's RadialGradient (real smooth falloff, same as CSS radial-gradient) —
-// RN still has no filter:blur() on an arbitrary shape, so the orbital rings' missing blur
-// is compensated with much lower opacity instead (noted inline).
+// ─── Ambient backdrop — direct, verbatim port of src/bridge/src/App.tsx (a confirmed
+// Figma Make React Native export — SHA-256 985af68d..., commit d7c890d). Not
+// reinterpreted: the shimmer position formula, the rising-arc shape/timing/colors, and
+// the background gradient are copied exactly, including the pixel values calibrated for
+// the source's 390x844 reference device. Only the phone-bezel mockup chrome (device
+// border/buttons/status bar/dynamic island/home indicator, "Friends" app-header row) is
+// excluded — Bridge already runs on a real phone with its own header and the device's own
+// real status bar.
+const SHIMMERS = Array.from({ length: 24 }, (_, index) => ({
+  left: `${8 + ((index * 37) % 84)}%`,
+  top: `${7 + ((index * 29) % 86)}%`,
+  delay: (index % 8) * 330,
+  size: index % 5 === 0 ? 3 : index % 3 === 0 ? 1 : 2,
+}));
 
-// `.screen`'s radial-gradient glows (ellipse at 49% 49% / 70% 88% / 44% 40%) — real SVG
-// RadialGradients, not flat-opacity circles. A plain View can only fake a glow with a hard
-// cutoff at its edge (that's what the earlier attempt actually looked like: solid discs
-// with a visible rim, swallowing the button); RadialGradient fades smoothly to transparent
-// like the CSS does, which is the whole visual difference between "glow" and "sticker."
-function ScreenGlows({ contentH }: { contentH: number }) {
-  return (
-    <Svg width={SCREEN_W} height={contentH} style={StyleSheet.absoluteFill} pointerEvents="none">
-      <Defs>
-        <RadialGradient id="glowA" cx="49%" cy="49%" r="38%">
-          <Stop offset="0%" stopColor="#5140E4" stopOpacity={0.34} />
-          <Stop offset="100%" stopColor="#5140E4" stopOpacity={0} />
-        </RadialGradient>
-        <RadialGradient id="glowB" cx="70%" cy="88%" r="40%">
-          <Stop offset="0%" stopColor="#441FD6" stopOpacity={0.38} />
-          <Stop offset="100%" stopColor="#441FD6" stopOpacity={0} />
-        </RadialGradient>
-        <RadialGradient id="glowC" cx="44%" cy="40%" r="38%">
-          <Stop offset="0%" stopColor="#7566FC" stopOpacity={0.22} />
-          <Stop offset="100%" stopColor="#7566FC" stopOpacity={0} />
-        </RadialGradient>
-      </Defs>
-      <Rect x={0} y={0} width="100%" height="100%" fill="url(#glowA)" />
-      <Rect x={0} y={0} width="100%" height="100%" fill="url(#glowB)" />
-      <Rect x={0} y={0} width="100%" height="100%" fill="url(#glowC)" />
-    </Svg>
-  );
-}
-
-// Rising glow arcs — replaces the Phone-screen source's `.orbital` drift rings, which
-// don't match the actual reference (the original Dribbble video of this design shows a
-// soft glowing arc rising from the bottom of the screen like a horizon/sunrise, brightening
-// as it climbs then fading, with another rising right behind it — not large rings drifting
-// sideways in the background). Each arc is a full ellipse clipped to a bottom-anchored,
-// overflow:hidden band, so only its top edge shows as a dome. No crisp border anywhere —
-// each arc is drawn 3 times at decreasing stroke width / increasing opacity, which is what
-// actually fakes a blurred/feathered edge in a renderer with no stroke-blur primitive
-// (a single thin stroke, which is what was used before, reads as a hard line, not a glow).
-// Colour runs through a violet→purple→pink gradient along the arc, matching the
-// "neon, slightly rainbow" look in the reference frames.
-const ARC_COLOR_SETS: [string, string, string][] = [
-  ['#6B5BFF', '#B36BFF', '#FF6FD8'],
-  ['#4F8CFF', '#7B5BFF', '#C76BFF'],
-  ['#36C9FF', '#6B8CFF', '#B36BFF'],
-];
-
-function GlowArc({ fieldWidth, fieldHeight, colors, periodMs, delayMs }: {
-  fieldWidth: number; fieldHeight: number; colors: [string, string, string]; periodMs: number; delayMs: number;
-}) {
-  const v = useRef(new RNAnimated.Value(0)).current;
-  const gradId = useRef(`arcGrad${Math.round(Math.random() * 1e6)}`).current;
+function Shimmer({ left, top, delay, size }: { left: string; top: string; delay: number; size: number }) {
+  const glow = useRef(new RNAnimated.Value(0.12)).current;
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      RNAnimated.loop(
-        RNAnimated.timing(v, { toValue: 1, duration: periodMs, easing: Easing.out(Easing.quad), useNativeDriver: true })
-      ).start();
-    }, delayMs);
-    return () => clearTimeout(timer);
-  }, []);
+    const animation = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.delay(delay),
+        RNAnimated.timing(glow, { toValue: 0.55, duration: 1500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        RNAnimated.timing(glow, { toValue: 0.08, duration: 2100, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [delay, glow]);
 
-  // Rises from just below the field (barely a sliver visible) to well above it, brightening
-  // early then fading out before reaching the top — "like a rising sun," not a static ring.
-  const translateY = v.interpolate({ inputRange: [0, 1], outputRange: [fieldHeight * 0.85, -fieldHeight * 0.9] });
-  const opacity = v.interpolate({ inputRange: [0, 0.12, 0.55, 1], outputRange: [0, 0.95, 0.6, 0] });
-  const scale = v.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1.18] });
-
-  const ellipseW = fieldWidth * 1.3;
-  const ellipseH = fieldHeight * 1.5;
+  const scale = glow.interpolate({ inputRange: [0.08, 0.55], outputRange: [0.65, 1.2] });
 
   return (
     <RNAnimated.View
       pointerEvents="none"
-      style={{
-        position: 'absolute',
-        left: (fieldWidth - ellipseW) / 2, top: fieldHeight - ellipseH / 2,
-        width: ellipseW, height: ellipseH,
-        opacity,
-        transform: [{ translateY }, { scale }],
-      }}
-    >
-      <Svg width="100%" height="100%" viewBox={`0 0 ${ellipseW} ${ellipseH}`}>
-        <Defs>
-          <SvgLinearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
-            <Stop offset="0%" stopColor={colors[0]} stopOpacity={0.9} />
-            <Stop offset="50%" stopColor={colors[1]} stopOpacity={1} />
-            <Stop offset="100%" stopColor={colors[2]} stopOpacity={0.9} />
-          </SvgLinearGradient>
-        </Defs>
-        <Ellipse cx={ellipseW / 2} cy={ellipseH / 2} rx={ellipseW * 0.42} ry={ellipseH * 0.42} fill="none" stroke={`url(#${gradId})`} strokeWidth={ellipseH * 0.16} strokeOpacity={0.16} />
-        <Ellipse cx={ellipseW / 2} cy={ellipseH / 2} rx={ellipseW * 0.42} ry={ellipseH * 0.42} fill="none" stroke={`url(#${gradId})`} strokeWidth={ellipseH * 0.075} strokeOpacity={0.32} />
-        <Ellipse cx={ellipseW / 2} cy={ellipseH / 2} rx={ellipseW * 0.42} ry={ellipseH * 0.42} fill="none" stroke={`url(#${gradId})`} strokeWidth={ellipseH * 0.022} strokeOpacity={0.85} />
-      </Svg>
+      style={[
+        styles.shimmer,
+        { left: left as any, top: top as any, width: size, height: size, opacity: glow, transform: [{ scale }] },
+      ]}
+    />
+  );
+}
+
+function RisingArc({ index }: { index: number }) {
+  const progress = useRef(new RNAnimated.Value(index === 0 ? 0.4 : 0)).current;
+  const phaseDelay = index * 2600;
+
+  useEffect(() => {
+    const animation = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.delay(phaseDelay),
+        RNAnimated.timing(progress, { toValue: 1, duration: 7000, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        RNAnimated.delay((2 - index) * 2600),
+        RNAnimated.timing(progress, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [phaseDelay, progress]);
+
+  const opacity = progress.interpolate({ inputRange: [0, 0.12, 0.32, 0.7, 1], outputRange: [0, 0.12, 0.72, 0.28, 0] });
+  const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [130, -250] });
+
+  return (
+    <RNAnimated.View pointerEvents="none" style={[styles.risingArcTrack, { opacity, transform: [{ translateY }] }]}>
+      <View style={styles.risingGlow} />
+      <View style={styles.risingArc} />
     </RNAnimated.View>
   );
 }
 
-function RisingArcsField({ contentH }: { contentH: number }) {
-  const width = SCREEN_W * 1.1;
-  const height = contentH * 0.46;
+function MovingBackground() {
   return (
-    <View
-      pointerEvents="none"
-      style={{ position: 'absolute', bottom: 0, left: (SCREEN_W - width) / 2, width, height, overflow: 'hidden' }}
-    >
-      <GlowArc fieldWidth={width} fieldHeight={height} colors={ARC_COLOR_SETS[0]} periodMs={5400} delayMs={0} />
-      <GlowArc fieldWidth={width} fieldHeight={height} colors={ARC_COLOR_SETS[1]} periodMs={5400} delayMs={1800} />
-      <GlowArc fieldWidth={width} fieldHeight={height} colors={ARC_COLOR_SETS[2]} periodMs={5400} delayMs={3600} />
-    </View>
+    <>
+      <View style={styles.arcStage} pointerEvents="none">
+        {[0, 1, 2].map(index => <RisingArc index={index} key={index} />)}
+      </View>
+      <View style={styles.shimmerField} pointerEvents="none">
+        {SHIMMERS.map((shimmer, index) => <Shimmer key={index} {...shimmer} />)}
+      </View>
+    </>
   );
 }
 
-// `.light-sweep` — a blurred diagonal light streak, approximated as a 3-stop gradient
-// (its own transparent edges already give it softness without needing true blur).
-function LightSweep({ contentH }: { contentH: number }) {
-  return (
-    <LinearGradient
-      colors={['transparent', 'rgba(159,148,255,0.09)', 'transparent']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 0 }}
-      pointerEvents="none"
-      style={{
-        position: 'absolute',
-        top: -contentH * 0.08, right: SCREEN_W * 0.06,
-        width: SCREEN_W * 0.13, height: contentH * 1.15,
-        transform: [{ rotate: '19deg' }],
-      }}
-    />
-  );
-}
-
-// `.shimmer-field` — 24 twinkling dots, exact per-dot top%/left%/animation-delay from the
-// source CSS (not regenerated or approximated), each animating opacity/scale/translateY
-// via the `shimmer` keyframe (0%,100%: .08/.65x/0 — 45%: .56/1.15x/-2px — 68%: .24/.85x/-1px).
-// Negative CSS animation-delay means "already this far into the cycle at mount" — replicated
-// by starting each dot's value at that offset and running a shortened first lap before the
-// normal loop, instead of just delaying the start (which would look wrong — static — at t=0).
-const SHIMMER_DOTS: { top: number; left: number; delayMs: number }[] = [
-  { top: 10, left: 46, delayMs: -1100 }, { top: 17, left: 61, delayMs: -3400 },
-  { top: 23, left: 27, delayMs: -2300 }, { top: 31, left: 53, delayMs: -600 },
-  { top: 37, left: 72, delayMs: -4100 }, { top: 42, left: 19, delayMs: -1900 },
-  { top: 47, left: 42, delayMs: -3100 }, { top: 51, left: 83, delayMs: -300 },
-  { top: 58, left: 33, delayMs: -2800 }, { top: 62, left: 58, delayMs: -1400 },
-  { top: 69, left: 76, delayMs: -3800 }, { top: 74, left: 12, delayMs: -900 },
-  { top: 79, left: 47, delayMs: -2100 }, { top: 86, left: 66, delayMs: -4500 },
-  { top: 91, left: 31, delayMs: -1600 }, { top: 7,  left: 78, delayMs: -2600 },
-  { top: 28, left: 89, delayMs: -1200 }, { top: 55, left: 7,  delayMs: -4300 },
-  { top: 67, left: 91, delayMs: -2400 }, { top: 95, left: 82, delayMs: -500 },
-  { top: 15, left: 9,  delayMs: -3600 }, { top: 35, left: 37, delayMs: -1700 },
-  { top: 72, left: 39, delayMs: -3000 }, { top: 45, left: 65, delayMs: -800 },
-];
-const SHIMMER_PERIOD_MS = 4800;
-
-function ShimmerDot({ top, left, delayMs, oneBasedIndex }: { top: number; left: number; delayMs: number; oneBasedIndex: number }) {
-  const v = useRef(new RNAnimated.Value(0)).current;
-  const isBig = oneBasedIndex % 5 === 0; // :nth-child(5n) — declared after 3n, wins where both match
-  const isSmall = !isBig && oneBasedIndex % 3 === 0; // :nth-child(3n)
-  // Source opacity (0.38/0.48 base, peaking at 0.56) read as barely-there on device —
-  // boosted so the twinkle is actually visible, per direct feedback.
-  const size = isBig ? 4 : isSmall ? 2 : 3;
-  const dotColor = isBig ? 'rgba(238,232,255,0.8)' : 'rgba(230,225,255,0.9)';
-  const glowColor = isBig ? 'rgba(199,185,255,0.75)' : 'rgba(193,181,255,0.7)';
-
-  useEffect(() => {
-    const offsetMs = ((-delayMs) % SHIMMER_PERIOD_MS + SHIMMER_PERIOD_MS) % SHIMMER_PERIOD_MS;
-    const offsetFraction = offsetMs / SHIMMER_PERIOD_MS;
-    v.setValue(offsetFraction);
-    let loop: ReturnType<typeof RNAnimated.loop> | null = null;
-    const firstLeg = RNAnimated.timing(v, {
-      toValue: 1,
-      duration: SHIMMER_PERIOD_MS * (1 - offsetFraction),
-      easing: Easing.inOut(Easing.ease),
-      useNativeDriver: true,
-    });
-    firstLeg.start(({ finished }) => {
-      if (!finished) return;
-      v.setValue(0);
-      loop = RNAnimated.loop(
-        RNAnimated.timing(v, { toValue: 1, duration: SHIMMER_PERIOD_MS, easing: Easing.inOut(Easing.ease), useNativeDriver: true })
-      );
-      loop.start();
-    });
-    return () => { firstLeg.stop(); loop?.stop(); };
-  }, []);
-
-  const opacity = v.interpolate({ inputRange: [0, 0.45, 0.68, 1], outputRange: [0.25, 1, 0.55, 0.25] });
-  const scale = v.interpolate({ inputRange: [0, 0.45, 0.68, 1], outputRange: [0.65, 1.15, 0.85, 0.65] });
-  const translateY = v.interpolate({ inputRange: [0, 0.45, 0.68, 1], outputRange: [0, -2, -1, 0] });
-
-  return (
-    <RNAnimated.View
-      pointerEvents="none"
-      style={{
-        position: 'absolute',
-        top: `${top}%`, left: `${left}%`,
-        width: size, height: size, borderRadius: size / 2,
-        backgroundColor: dotColor,
-        opacity,
-        transform: [{ scale }, { translateY }],
-        shadowColor: glowColor, shadowOpacity: 1, shadowRadius: isBig ? 8 : 5, shadowOffset: { width: 0, height: 0 },
-      }}
-    />
-  );
-}
-
-function ShimmerField({ contentH }: { contentH: number }) {
-  return (
-    <View
-      pointerEvents="none"
-      style={{ position: 'absolute', top: contentH * 0.34, left: SCREEN_W * 0.22, width: SCREEN_W * 0.58, height: contentH * 0.24 }}
-    >
-      {SHIMMER_DOTS.map((d, i) => (
-        <ShimmerDot key={i} top={d.top} left={d.left} delayMs={d.delayMs} oneBasedIndex={i + 1} />
-      ))}
-    </View>
-  );
-}
-
-// `.screen`'s own base background — opaque, so during the entry phase this fully covers
-// the persistent root gradient underneath (which keeps the existing, unchanged chat-phase
-// backdrop); as this fades out with the rest of entryContentStyle during the morph, the
-// root gradient is what's left showing for the chat screen, same as before this change.
-function ScreenBaseGradient() {
-  return (
-    <LinearGradient
-      colors={['#170f82', '#17128e', '#181289', '#15106e', '#100a4d']}
-      locations={[0, 0.18, 0.42, 0.70, 1]}
-      start={{ x: 0.35, y: 0 }}
-      end={{ x: 0.65, y: 1 }}
-      style={StyleSheet.absoluteFill}
-    />
-  );
-}
-
-function AmbientBackdrop({ contentH }: { contentH: number }) {
+function AmbientBackdrop() {
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <ScreenBaseGradient />
-      <ScreenGlows contentH={contentH} />
-      {/* .screen::before's diagonal sweep component (the radial half moved into ScreenGlows above) */}
       <LinearGradient
-        colors={['transparent', 'rgba(99,78,246,0.2)', 'transparent']}
-        locations={[0.08, 0.39, 0.55]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0.3 }}
+        colors={['#241797', '#1a1383', '#17116f', '#100a4d']}
+        locations={[0, 0.34, 0.70, 1]}
+        start={{ x: 0.35, y: 0 }}
+        end={{ x: 0.65, y: 1 }}
         style={StyleSheet.absoluteFill}
-        pointerEvents="none"
       />
-      <LightSweep contentH={contentH} />
-      <ShimmerField contentH={contentH} />
-      <RisingArcsField contentH={contentH} />
-      {/* .screen::after — very subtle diagonal glass sheen on top of everything */}
-      <LinearGradient
-        colors={['rgba(255,255,255,0.035)', 'transparent', 'rgba(0,0,0,0.12)']}
-        locations={[0, 0.4, 1]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0.2 }}
-        style={StyleSheet.absoluteFill}
-        pointerEvents="none"
-      />
+      <MovingBackground />
     </View>
-  );
-}
-
-// `.prompt`'s box-shadow glow (3 outer layers + 1 inset) as a single soft radial halo —
-// a real RadialGradient instead of flat oversized blobs, same hard-edge problem as
-// ScreenGlows above. The inset highlight still has no RN equivalent and stays dropped.
-function PromptGlow() {
-  const pad = 90;
-  const w = ENTRY_PILL_WIDTH + pad * 2;
-  const h = ENTRY_PILL_HEIGHT + pad * 2;
-  return (
-    <Svg width={w} height={h} style={{ position: 'absolute', left: -pad, top: -pad }} pointerEvents="none">
-      <Defs>
-        <RadialGradient id="promptGlow" cx="50%" cy="50%" r="50%">
-          <Stop offset="0%" stopColor="#8A72FF" stopOpacity={0.5} />
-          <Stop offset="45%" stopColor="#7A51FF" stopOpacity={0.2} />
-          <Stop offset="100%" stopColor="#5740FF" stopOpacity={0} />
-        </RadialGradient>
-      </Defs>
-      <Rect x={0} y={0} width="100%" height="100%" fill="url(#promptGlow)" />
-    </Svg>
   );
 }
 
@@ -651,7 +457,9 @@ export default function BridgeRedesignTestScreen() {
   // content box, so positioning inside it is computed against that reduced height, not
   // the raw window height — using the raw height here would overshoot past the safe area.
   const contentH = SCREEN_H - insets.top - insets.bottom;
-  const entryPillTop = Math.round(contentH * 0.34) - ENTRY_PILL_HEIGHT / 2;
+  // promptWrap in the source is inset:0 + alignItems/justifyContent:'center' — the button
+  // sits at the true center of the screen, not a fixed ratio down from the top.
+  const entryPillTop = Math.round(contentH / 2) - ENTRY_PILL_HEIGHT / 2;
   const targetCenterY = contentH - BAR_BOTTOM_OFFSET - BAR_HEIGHT / 2;
   const originalCenterY = entryPillTop + ENTRY_PILL_HEIGHT / 2;
   const morphTranslateYTarget = targetCenterY - originalCenterY;
@@ -691,7 +499,7 @@ export default function BridgeRedesignTestScreen() {
     const scaleX = interpolate(morph.value, [0, 1], [1, PILL_SCALE_X], Extrapolation.CLAMP);
     const scaleY = interpolate(morph.value, [0, 1], [1, PILL_SCALE_Y], Extrapolation.CLAMP);
     const translateY = interpolate(morph.value, [0, 1], [0, morphTranslateYTarget], Extrapolation.CLAMP);
-    const shadowOpacity = interpolate(morph.value, [0, 0.35], [0.85, 0], Extrapolation.CLAMP);
+    const shadowOpacity = interpolate(morph.value, [0, 0.35], [0.95, 0], Extrapolation.CLAMP);
     return {
       transform: [{ translateY }, { scaleX }, { scaleY }],
       shadowOpacity,
@@ -718,7 +526,7 @@ export default function BridgeRedesignTestScreen() {
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
         {phase !== 'chat' && (
           <Animated.View style={[StyleSheet.absoluteFill, entryContentStyle]} pointerEvents="none">
-            <AmbientBackdrop contentH={contentH} />
+            <AmbientBackdrop />
           </Animated.View>
         )}
 
@@ -790,20 +598,10 @@ export default function BridgeRedesignTestScreen() {
               pillStyle,
             ]}
           >
-            <Animated.View style={entryContentStyle} pointerEvents="none">
-              <PromptGlow />
-            </Animated.View>
             <View style={styles.morphPillClip}>
               <Animated.View style={[StyleSheet.absoluteFill, entryContentStyle]} pointerEvents={phase === 'entry' ? 'auto' : 'none'}>
-                <TouchableOpacity style={StyleSheet.absoluteFill} onPress={startMorph} activeOpacity={0.85} disabled={phase !== 'entry'}>
-                  <LinearGradient
-                    colors={['rgba(110,94,240,0.32)', 'rgba(129,110,248,0.22)']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0.3 }}
-                    style={styles.analyseFill}
-                  >
-                    <Text style={styles.analyseFillText}>Analyse</Text>
-                  </LinearGradient>
+                <TouchableOpacity style={[StyleSheet.absoluteFill, styles.analyseFill]} onPress={startMorph} activeOpacity={0.85} disabled={phase !== 'entry'}>
+                  <Text style={styles.analyseFillText}>Analyse</Text>
                 </TouchableOpacity>
               </Animated.View>
               <Animated.View style={[StyleSheet.absoluteFill, barContentStyle]} pointerEvents={phase === 'chat' ? 'auto' : 'none'}>
@@ -852,17 +650,48 @@ const styles = StyleSheet.create({
   },
   headerBadgeText: { color: '#CAC4F3', fontSize: 11, fontWeight: '700' },
 
+  // Exact port of src/bridge's .arcStage/.risingArcTrack/.risingArc/.risingGlow/
+  // .shimmerField/.shimmer — pixel values are the source's own, calibrated for its
+  // 390x844 reference device, not rescaled.
+  arcStage: {
+    bottom: 0, left: 0, right: 0, height: '58%',
+    position: 'absolute', overflow: 'hidden',
+  },
+  risingArcTrack: {
+    alignSelf: 'center', bottom: -120, height: 170, width: '100%',
+    position: 'absolute', overflow: 'hidden',
+  },
+  risingArc: {
+    position: 'absolute', top: 38, left: -72, width: 520, height: 170,
+    borderTopWidth: 3, borderTopLeftRadius: 260, borderTopRightRadius: 260,
+    borderTopColor: 'rgba(190,174,255,0.82)',
+    shadowColor: '#9b83ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 12,
+  },
+  risingGlow: {
+    position: 'absolute', top: 31, left: -72, width: 520, height: 170,
+    borderTopWidth: 18, borderTopLeftRadius: 260, borderTopRightRadius: 260,
+    borderTopColor: 'rgba(116,88,255,0.28)',
+    shadowColor: '#8065ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 25,
+  },
+  shimmerField: {
+    position: 'absolute', top: '34%', left: '22%', width: '58%', height: '24%',
+  },
+  shimmer: {
+    position: 'absolute', borderRadius: 50,
+    backgroundColor: 'rgba(235,230,255,0.72)',
+    shadowColor: '#c8baff', shadowOpacity: 0.4, shadowRadius: 4,
+  },
+
+  // .prompt's exact border + shadow (a single native shadow is all the source uses —
+  // no multi-layer glow approximation needed here).
   morphPillShadow: {
     position: 'absolute',
-    borderRadius: 999,
+    borderRadius: 9999,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.13)',
-    // .prompt's tightest box-shadow layer (0 0 8px rgba(184,174,255,.8)) — the two wider
-    // layers (24px, 58px) are PromptGlow's SVG radial gradient, since RN only supports
-    // one shadow per view.
-    shadowColor: '#B8AEFF',
+    borderColor: 'rgba(255,255,255,0.15)',
+    shadowColor: '#876fff',
     shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 10,
+    shadowRadius: 25,
   },
   morphPillClip: {
     flex: 1,
@@ -871,10 +700,9 @@ const styles = StyleSheet.create({
   },
   analyseFill: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(111,94,224,0.36)',
   },
-  // Scaled up from .prompt's literal 9px spec to match the larger pill — see
-  // ENTRY_PILL_WIDTH/HEIGHT above.
-  analyseFillText: { color: 'rgba(255,255,255,0.75)', fontSize: 15, fontWeight: '500', letterSpacing: -0.2 },
+  analyseFillText: { color: 'rgba(255,255,255,0.62)', fontSize: 9 },
   inputFill: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.15)',
