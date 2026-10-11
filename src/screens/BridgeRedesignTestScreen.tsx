@@ -49,7 +49,7 @@ import Animated, {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import Svg, { G, Path } from 'react-native-svg';
+import Svg, { G, Path, Defs, RadialGradient, Stop, Rect } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
@@ -112,53 +112,37 @@ function CountUpNumber({ to, suffix = '%', style }: { to: number; suffix?: strin
 
 // ─── Ambient backdrop — direct port of assets/figma/Phone-screen's `.screen` contents:
 // two radial glows, a diagonal sweep overlay, two large drifting `.orbital` rings, a
-// blurred `.light-sweep` streak, and a 24-dot `.shimmer-field`. RN has no radial-gradient
-// or filter:blur(), so soft glows are stacked low-opacity Views instead of true blur —
-// same colors/positions, not a different design.
+// blurred `.light-sweep` streak, and a 24-dot `.shimmer-field`. Radial glows use
+// react-native-svg's RadialGradient (real smooth falloff, same as CSS radial-gradient) —
+// RN still has no filter:blur() on an arbitrary shape, so the orbital rings' missing blur
+// is compensated with much lower opacity instead (noted inline).
 
-// `.screen`'s two radial-gradient glows (ellipse at 49% 49% / 70% 88%), approximated as
-// soft circles since RN's LinearGradient can't do radial.
+// `.screen`'s radial-gradient glows (ellipse at 49% 49% / 70% 88% / 44% 40%) — real SVG
+// RadialGradients, not flat-opacity circles. A plain View can only fake a glow with a hard
+// cutoff at its edge (that's what the earlier attempt actually looked like: solid discs
+// with a visible rim, swallowing the button); RadialGradient fades smoothly to transparent
+// like the CSS does, which is the whole visual difference between "glow" and "sticker."
 function ScreenGlows({ contentH }: { contentH: number }) {
-  const w = SCREEN_W;
   return (
-    <>
-      <View
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          width: w * 0.9, height: w * 0.9, borderRadius: 999,
-          left: w * 0.49 - (w * 0.9) / 2, top: contentH * 0.49 - (w * 0.9) / 2,
-          backgroundColor: 'rgba(81,64,228,0.22)',
-        }}
-      />
-      <View
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          width: w * 0.95, height: w * 0.95, borderRadius: 999,
-          left: w * 0.70 - (w * 0.95) / 2, top: contentH * 0.88 - (w * 0.95) / 2,
-          backgroundColor: 'rgba(68,31,214,0.26)',
-        }}
-      />
-      {/* .screen::before — diagonal sweep + a second, tighter radial glow */}
-      <LinearGradient
-        colors={['transparent', 'rgba(99,78,246,0.2)', 'transparent']}
-        locations={[0.08, 0.39, 0.55]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0.3 }}
-        style={StyleSheet.absoluteFill}
-        pointerEvents="none"
-      />
-      <View
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          width: w * 0.7, height: w * 0.7, borderRadius: 999,
-          left: w * 0.44 - (w * 0.7) / 2, top: contentH * 0.4 - (w * 0.7) / 2,
-          backgroundColor: 'rgba(117,102,252,0.16)',
-        }}
-      />
-    </>
+    <Svg width={SCREEN_W} height={contentH} style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Defs>
+        <RadialGradient id="glowA" cx="49%" cy="49%" r="38%">
+          <Stop offset="0%" stopColor="#5140E4" stopOpacity={0.34} />
+          <Stop offset="100%" stopColor="#5140E4" stopOpacity={0} />
+        </RadialGradient>
+        <RadialGradient id="glowB" cx="70%" cy="88%" r="40%">
+          <Stop offset="0%" stopColor="#441FD6" stopOpacity={0.38} />
+          <Stop offset="100%" stopColor="#441FD6" stopOpacity={0} />
+        </RadialGradient>
+        <RadialGradient id="glowC" cx="44%" cy="40%" r="38%">
+          <Stop offset="0%" stopColor="#7566FC" stopOpacity={0.22} />
+          <Stop offset="100%" stopColor="#7566FC" stopOpacity={0} />
+        </RadialGradient>
+      </Defs>
+      <Rect x={0} y={0} width="100%" height="100%" fill="url(#glowA)" />
+      <Rect x={0} y={0} width="100%" height="100%" fill="url(#glowB)" />
+      <Rect x={0} y={0} width="100%" height="100%" fill="url(#glowC)" />
+    </Svg>
   );
 }
 
@@ -195,7 +179,10 @@ function OrbitalOne({ contentH }: { contentH: number }) {
         position: 'absolute',
         top: contentH * 0.17, left: -size * 0.9,
         width: size, height: size, borderRadius: size / 2,
-        borderWidth: 34, borderColor: 'rgba(83,59,237,0.16)',
+        // CSS blurs this 5px (filter:blur), which RN can't replicate on a border shape —
+        // opacity cut to ~1/3 of the source value to compensate, since without blur the
+        // same opacity reads as a crisp, distracting ring instead of a soft ambient one.
+        borderWidth: 34, borderColor: 'rgba(83,59,237,0.055)',
         transform: [{ translateX }, { translateY }, { rotate }, { scale }],
       }}
     />
@@ -217,7 +204,7 @@ function OrbitalTwo({ contentH }: { contentH: number }) {
         position: 'absolute',
         bottom: -contentH * 0.05, right: -size * 0.78,
         width: size, height: size, borderRadius: size / 2,
-        borderWidth: 24, borderColor: 'rgba(122,92,255,0.18)',
+        borderWidth: 24, borderColor: 'rgba(122,92,255,0.06)',
         transform: [{ translateX }, { translateY }, { rotate }, { scale }],
       }}
     />
@@ -349,6 +336,15 @@ function AmbientBackdrop({ contentH }: { contentH: number }) {
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <ScreenBaseGradient />
       <ScreenGlows contentH={contentH} />
+      {/* .screen::before's diagonal sweep component (the radial half moved into ScreenGlows above) */}
+      <LinearGradient
+        colors={['transparent', 'rgba(99,78,246,0.2)', 'transparent']}
+        locations={[0.08, 0.39, 0.55]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0.3 }}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
       <OrbitalOne contentH={contentH} />
       <OrbitalTwo contentH={contentH} />
       <LightSweep contentH={contentH} />
@@ -363,6 +359,27 @@ function AmbientBackdrop({ contentH }: { contentH: number }) {
         pointerEvents="none"
       />
     </View>
+  );
+}
+
+// `.prompt`'s box-shadow glow (3 outer layers + 1 inset) as a single soft radial halo —
+// a real RadialGradient instead of flat oversized blobs, same hard-edge problem as
+// ScreenGlows above. The inset highlight still has no RN equivalent and stays dropped.
+function PromptGlow() {
+  const pad = 90;
+  const w = ENTRY_PILL_WIDTH + pad * 2;
+  const h = ENTRY_PILL_HEIGHT + pad * 2;
+  return (
+    <Svg width={w} height={h} style={{ position: 'absolute', left: -pad, top: -pad }} pointerEvents="none">
+      <Defs>
+        <RadialGradient id="promptGlow" cx="50%" cy="50%" r="50%">
+          <Stop offset="0%" stopColor="#8A72FF" stopOpacity={0.5} />
+          <Stop offset="45%" stopColor="#7A51FF" stopOpacity={0.2} />
+          <Stop offset="100%" stopColor="#5740FF" stopOpacity={0} />
+        </RadialGradient>
+      </Defs>
+      <Rect x={0} y={0} width="100%" height="100%" fill="url(#promptGlow)" />
+    </Svg>
   );
 }
 
@@ -754,8 +771,9 @@ export default function BridgeRedesignTestScreen() {
               pillStyle,
             ]}
           >
-            <Animated.View style={[styles.promptGlowOuter, entryContentStyle]} pointerEvents="none" />
-            <Animated.View style={[styles.promptGlowMid, entryContentStyle]} pointerEvents="none" />
+            <Animated.View style={entryContentStyle} pointerEvents="none">
+              <PromptGlow />
+            </Animated.View>
             <View style={styles.morphPillClip}>
               <Animated.View style={[StyleSheet.absoluteFill, entryContentStyle]} pointerEvents={phase === 'entry' ? 'auto' : 'none'}>
                 <TouchableOpacity style={StyleSheet.absoluteFill} onPress={startMorph} activeOpacity={0.85} disabled={phase !== 'entry'}>
@@ -821,29 +839,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.13)',
     // .prompt's tightest box-shadow layer (0 0 8px rgba(184,174,255,.8)) — the two wider
-    // layers (24px, 58px) are the separate promptGlow* blobs below, since RN only supports
+    // layers (24px, 58px) are PromptGlow's SVG radial gradient, since RN only supports
     // one shadow per view.
     shadowColor: '#B8AEFF',
     shadowOffset: { width: 0, height: 0 },
     shadowRadius: 10,
-  },
-  // Approximate .prompt's 24px and 58px box-shadow glow layers as oversized soft blobs —
-  // opacity deliberately much lower than the CSS values (0.9/0.94), which are calibrated
-  // for an actual blurred render; a flat-color fill at that opacity across this much area
-  // would read as a solid shape, not a glow.
-  promptGlowOuter: {
-    position: 'absolute',
-    left: -70, top: -70,
-    width: ENTRY_PILL_WIDTH + 140, height: ENTRY_PILL_HEIGHT + 140,
-    borderRadius: 999,
-    backgroundColor: 'rgba(87,62,255,0.14)',
-  },
-  promptGlowMid: {
-    position: 'absolute',
-    left: -30, top: -30,
-    width: ENTRY_PILL_WIDTH + 60, height: ENTRY_PILL_HEIGHT + 60,
-    borderRadius: 999,
-    backgroundColor: 'rgba(133,111,255,0.2)',
   },
   morphPillClip: {
     flex: 1,
