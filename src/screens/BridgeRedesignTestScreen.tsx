@@ -28,6 +28,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   Animated as RNAnimated,
   Dimensions,
@@ -595,14 +596,25 @@ export default function BridgeRedesignTestScreen() {
             style={[
               styles.morphPillShadow,
               { left: (SCREEN_W - ENTRY_PILL_WIDTH) / 2, top: entryPillTop, width: ENTRY_PILL_WIDTH, height: ENTRY_PILL_HEIGHT },
+              phase !== 'entry' && styles.morphPillShadowActive,
               pillStyle,
             ]}
           >
             <View style={styles.morphPillClip}>
               <Animated.View style={[StyleSheet.absoluteFill, entryContentStyle]} pointerEvents={phase === 'entry' ? 'auto' : 'none'}>
-                <TouchableOpacity style={[StyleSheet.absoluteFill, styles.analyseFill]} onPress={startMorph} activeOpacity={0.85} disabled={phase !== 'entry'}>
-                  <Text style={styles.analyseFillText}>Analyse</Text>
-                </TouchableOpacity>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={startMorph}
+                  disabled={phase !== 'entry'}
+                  style={({ pressed }) => [
+                    StyleSheet.absoluteFill,
+                    styles.analyseFill,
+                    phase !== 'entry' && styles.analyseFillActive,
+                    pressed && styles.analyseFillPressed,
+                  ]}
+                >
+                  <Text style={[styles.analyseFillText, phase !== 'entry' && styles.analyseFillTextActive]}>Analyse</Text>
+                </Pressable>
               </Animated.View>
               <Animated.View style={[StyleSheet.absoluteFill, barContentStyle]} pointerEvents={phase === 'chat' ? 'auto' : 'none'}>
                 <View style={styles.inputFill}>
@@ -693,6 +705,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     shadowRadius: 25,
   },
+  // .promptActive's shadow half — its backgroundColor half lives on analyseFillActive
+  // below, since this view only carries the shadow (overflow:hidden on morphPillClip
+  // would otherwise clip it, same reason the base/clip split exists at all).
+  morphPillShadowActive: {
+    shadowColor: '#9b86ff',
+    shadowRadius: 36,
+  },
   morphPillClip: {
     flex: 1,
     borderRadius: 999,
@@ -702,7 +721,16 @@ const styles = StyleSheet.create({
     flex: 1, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(111,94,224,0.36)',
   },
+  // .promptActive / .promptPressed / .promptTextActive — ported verbatim, not dropped.
+  analyseFillActive: {
+    backgroundColor: 'rgba(125,108,238,0.46)',
+  },
+  analyseFillPressed: {
+    opacity: 0.82,
+    transform: [{ scale: 0.97 }],
+  },
   analyseFillText: { color: 'rgba(255,255,255,0.62)', fontSize: 9 },
+  analyseFillTextActive: { color: 'rgba(255,255,255,0.92)' },
   inputFill: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.15)',
