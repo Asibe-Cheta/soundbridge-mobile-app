@@ -49,7 +49,7 @@ import Animated, {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import Svg, { G, Path, Defs, RadialGradient, Stop, Rect } from 'react-native-svg';
+import Svg, { G, Path, Defs, RadialGradient, LinearGradient as SvgLinearGradient, Stop, Rect, Ellipse } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
@@ -64,11 +64,11 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 // purely via transform: scale, not animated width/height, so this never forces a Yoga
 // relayout pass on the UI thread (animating width/height on a container with absolutely
 // positioned descendants is what caused the original crash on this screen).
-// Entry size matches .prompt's box-sizing:border-box dimensions exactly: min-width 129px,
-// padding 13px 20px, ~9px text — which floors out to ~129x40 for short labels like
-// "Analyse" (not a wide banner pill).
-const ENTRY_PILL_WIDTH = 129;
-const ENTRY_PILL_HEIGHT = 40;
+// .prompt's literal CSS dimensions (129x40, 9px text) read as too small on device —
+// sized up from the exact source spec per direct feedback, while staying pill-shaped
+// rather than the earlier wide banner-style button.
+const ENTRY_PILL_WIDTH = 176;
+const ENTRY_PILL_HEIGHT = 56;
 const BAR_WIDTH = SCREEN_W - 40;
 const BAR_HEIGHT = 50;
 const BAR_BOTTOM_OFFSET = 18;
@@ -146,68 +146,86 @@ function ScreenGlows({ contentH }: { contentH: number }) {
   );
 }
 
-// `.orbital-one` / `.orbital-two` — huge, mostly off-screen blurred ring shapes that
-// slowly drift via translate+rotate+scale, `animation-direction: alternate` (plays
-// forward then reverses — replicated with a loop(timing 0->1, timing 1->0)).
-function useAlternatingDrift(durationMs: number) {
-  const v = useRef(new RNAnimated.Value(0)).current;
-  useEffect(() => {
-    const loop = RNAnimated.loop(
-      RNAnimated.sequence([
-        RNAnimated.timing(v, { toValue: 1, duration: durationMs, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        RNAnimated.timing(v, { toValue: 0, duration: durationMs, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [v, durationMs]);
-  return v;
-}
+// Rising glow arcs — replaces the Phone-screen source's `.orbital` drift rings, which
+// don't match the actual reference (the original Dribbble video of this design shows a
+// soft glowing arc rising from the bottom of the screen like a horizon/sunrise, brightening
+// as it climbs then fading, with another rising right behind it — not large rings drifting
+// sideways in the background). Each arc is a full ellipse clipped to a bottom-anchored,
+// overflow:hidden band, so only its top edge shows as a dome. No crisp border anywhere —
+// each arc is drawn 3 times at decreasing stroke width / increasing opacity, which is what
+// actually fakes a blurred/feathered edge in a renderer with no stroke-blur primitive
+// (a single thin stroke, which is what was used before, reads as a hard line, not a glow).
+// Colour runs through a violet→purple→pink gradient along the arc, matching the
+// "neon, slightly rainbow" look in the reference frames.
+const ARC_COLOR_SETS: [string, string, string][] = [
+  ['#6B5BFF', '#B36BFF', '#FF6FD8'],
+  ['#4F8CFF', '#7B5BFF', '#C76BFF'],
+  ['#36C9FF', '#6B8CFF', '#B36BFF'],
+];
 
-function OrbitalOne({ contentH }: { contentH: number }) {
-  const size = SCREEN_W * 1.8;
-  const v = useAlternatingDrift(18000);
-  // arc-drift-one: 0%{-2%,1%,-2deg,.98} 55%{4%,-3%,3deg,1.03} 100%{1%,4%,6deg,1}
-  const translateX = v.interpolate({ inputRange: [0, 0.55, 1], outputRange: [-0.02 * size, 0.04 * size, 0.01 * size] });
-  const translateY = v.interpolate({ inputRange: [0, 0.55, 1], outputRange: [0.01 * size, -0.03 * size, 0.04 * size] });
-  const rotate = v.interpolate({ inputRange: [0, 0.55, 1], outputRange: ['-2deg', '3deg', '6deg'] });
-  const scale = v.interpolate({ inputRange: [0, 0.55, 1], outputRange: [0.98, 1.03, 1] });
+function GlowArc({ fieldWidth, fieldHeight, colors, periodMs, delayMs }: {
+  fieldWidth: number; fieldHeight: number; colors: [string, string, string]; periodMs: number; delayMs: number;
+}) {
+  const v = useRef(new RNAnimated.Value(0)).current;
+  const gradId = useRef(`arcGrad${Math.round(Math.random() * 1e6)}`).current;
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      RNAnimated.loop(
+        RNAnimated.timing(v, { toValue: 1, duration: periodMs, easing: Easing.out(Easing.quad), useNativeDriver: true })
+      ).start();
+    }, delayMs);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Rises from just below the field (barely a sliver visible) to well above it, brightening
+  // early then fading out before reaching the top — "like a rising sun," not a static ring.
+  const translateY = v.interpolate({ inputRange: [0, 1], outputRange: [fieldHeight * 0.85, -fieldHeight * 0.9] });
+  const opacity = v.interpolate({ inputRange: [0, 0.12, 0.55, 1], outputRange: [0, 0.95, 0.6, 0] });
+  const scale = v.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1.18] });
+
+  const ellipseW = fieldWidth * 1.3;
+  const ellipseH = fieldHeight * 1.5;
+
   return (
     <RNAnimated.View
       pointerEvents="none"
       style={{
         position: 'absolute',
-        top: contentH * 0.17, left: -size * 0.9,
-        width: size, height: size, borderRadius: size / 2,
-        // CSS blurs this 5px (filter:blur), which RN can't replicate on a border shape —
-        // opacity cut to ~1/3 of the source value to compensate, since without blur the
-        // same opacity reads as a crisp, distracting ring instead of a soft ambient one.
-        borderWidth: 34, borderColor: 'rgba(83,59,237,0.055)',
-        transform: [{ translateX }, { translateY }, { rotate }, { scale }],
+        left: (fieldWidth - ellipseW) / 2, top: fieldHeight - ellipseH / 2,
+        width: ellipseW, height: ellipseH,
+        opacity,
+        transform: [{ translateY }, { scale }],
       }}
-    />
+    >
+      <Svg width="100%" height="100%" viewBox={`0 0 ${ellipseW} ${ellipseH}`}>
+        <Defs>
+          <SvgLinearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
+            <Stop offset="0%" stopColor={colors[0]} stopOpacity={0.9} />
+            <Stop offset="50%" stopColor={colors[1]} stopOpacity={1} />
+            <Stop offset="100%" stopColor={colors[2]} stopOpacity={0.9} />
+          </SvgLinearGradient>
+        </Defs>
+        <Ellipse cx={ellipseW / 2} cy={ellipseH / 2} rx={ellipseW * 0.42} ry={ellipseH * 0.42} fill="none" stroke={`url(#${gradId})`} strokeWidth={ellipseH * 0.16} strokeOpacity={0.16} />
+        <Ellipse cx={ellipseW / 2} cy={ellipseH / 2} rx={ellipseW * 0.42} ry={ellipseH * 0.42} fill="none" stroke={`url(#${gradId})`} strokeWidth={ellipseH * 0.075} strokeOpacity={0.32} />
+        <Ellipse cx={ellipseW / 2} cy={ellipseH / 2} rx={ellipseW * 0.42} ry={ellipseH * 0.42} fill="none" stroke={`url(#${gradId})`} strokeWidth={ellipseH * 0.022} strokeOpacity={0.85} />
+      </Svg>
+    </RNAnimated.View>
   );
 }
 
-function OrbitalTwo({ contentH }: { contentH: number }) {
-  const size = SCREEN_W * 1.48;
-  const v = useAlternatingDrift(22000);
-  // arc-drift-two: 0%{2%,-2%,2deg,1.02} 52%{-5%,2%,-3deg,.97} 100%{-1%,-4%,-6deg,1.04}
-  const translateX = v.interpolate({ inputRange: [0, 0.52, 1], outputRange: [0.02 * size, -0.05 * size, -0.01 * size] });
-  const translateY = v.interpolate({ inputRange: [0, 0.52, 1], outputRange: [-0.02 * size, 0.02 * size, -0.04 * size] });
-  const rotate = v.interpolate({ inputRange: [0, 0.52, 1], outputRange: ['2deg', '-3deg', '-6deg'] });
-  const scale = v.interpolate({ inputRange: [0, 0.52, 1], outputRange: [1.02, 0.97, 1.04] });
+function RisingArcsField({ contentH }: { contentH: number }) {
+  const width = SCREEN_W * 1.1;
+  const height = contentH * 0.46;
   return (
-    <RNAnimated.View
+    <View
       pointerEvents="none"
-      style={{
-        position: 'absolute',
-        bottom: -contentH * 0.05, right: -size * 0.78,
-        width: size, height: size, borderRadius: size / 2,
-        borderWidth: 24, borderColor: 'rgba(122,92,255,0.06)',
-        transform: [{ translateX }, { translateY }, { rotate }, { scale }],
-      }}
-    />
+      style={{ position: 'absolute', bottom: 0, left: (SCREEN_W - width) / 2, width, height, overflow: 'hidden' }}
+    >
+      <GlowArc fieldWidth={width} fieldHeight={height} colors={ARC_COLOR_SETS[0]} periodMs={5400} delayMs={0} />
+      <GlowArc fieldWidth={width} fieldHeight={height} colors={ARC_COLOR_SETS[1]} periodMs={5400} delayMs={1800} />
+      <GlowArc fieldWidth={width} fieldHeight={height} colors={ARC_COLOR_SETS[2]} periodMs={5400} delayMs={3600} />
+    </View>
   );
 }
 
@@ -256,9 +274,11 @@ function ShimmerDot({ top, left, delayMs, oneBasedIndex }: { top: number; left: 
   const v = useRef(new RNAnimated.Value(0)).current;
   const isBig = oneBasedIndex % 5 === 0; // :nth-child(5n) — declared after 3n, wins where both match
   const isSmall = !isBig && oneBasedIndex % 3 === 0; // :nth-child(3n)
-  const size = isBig ? 3 : isSmall ? 1 : 2;
-  const dotColor = isBig ? 'rgba(238,232,255,0.38)' : 'rgba(230,225,255,0.48)';
-  const glowColor = isBig ? 'rgba(199,185,255,0.4)' : 'rgba(193,181,255,0.36)';
+  // Source opacity (0.38/0.48 base, peaking at 0.56) read as barely-there on device —
+  // boosted so the twinkle is actually visible, per direct feedback.
+  const size = isBig ? 4 : isSmall ? 2 : 3;
+  const dotColor = isBig ? 'rgba(238,232,255,0.8)' : 'rgba(230,225,255,0.9)';
+  const glowColor = isBig ? 'rgba(199,185,255,0.75)' : 'rgba(193,181,255,0.7)';
 
   useEffect(() => {
     const offsetMs = ((-delayMs) % SHIMMER_PERIOD_MS + SHIMMER_PERIOD_MS) % SHIMMER_PERIOD_MS;
@@ -282,7 +302,7 @@ function ShimmerDot({ top, left, delayMs, oneBasedIndex }: { top: number; left: 
     return () => { firstLeg.stop(); loop?.stop(); };
   }, []);
 
-  const opacity = v.interpolate({ inputRange: [0, 0.45, 0.68, 1], outputRange: [0.08, 0.56, 0.24, 0.08] });
+  const opacity = v.interpolate({ inputRange: [0, 0.45, 0.68, 1], outputRange: [0.25, 1, 0.55, 0.25] });
   const scale = v.interpolate({ inputRange: [0, 0.45, 0.68, 1], outputRange: [0.65, 1.15, 0.85, 0.65] });
   const translateY = v.interpolate({ inputRange: [0, 0.45, 0.68, 1], outputRange: [0, -2, -1, 0] });
 
@@ -345,10 +365,9 @@ function AmbientBackdrop({ contentH }: { contentH: number }) {
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
       />
-      <OrbitalOne contentH={contentH} />
-      <OrbitalTwo contentH={contentH} />
       <LightSweep contentH={contentH} />
       <ShimmerField contentH={contentH} />
+      <RisingArcsField contentH={contentH} />
       {/* .screen::after — very subtle diagonal glass sheen on top of everything */}
       <LinearGradient
         colors={['rgba(255,255,255,0.035)', 'transparent', 'rgba(0,0,0,0.12)']}
@@ -632,7 +651,7 @@ export default function BridgeRedesignTestScreen() {
   // content box, so positioning inside it is computed against that reduced height, not
   // the raw window height — using the raw height here would overshoot past the safe area.
   const contentH = SCREEN_H - insets.top - insets.bottom;
-  const entryPillTop = Math.round(contentH * 0.42) - ENTRY_PILL_HEIGHT / 2;
+  const entryPillTop = Math.round(contentH * 0.34) - ENTRY_PILL_HEIGHT / 2;
   const targetCenterY = contentH - BAR_BOTTOM_OFFSET - BAR_HEIGHT / 2;
   const originalCenterY = entryPillTop + ENTRY_PILL_HEIGHT / 2;
   const morphTranslateYTarget = targetCenterY - originalCenterY;
@@ -853,10 +872,9 @@ const styles = StyleSheet.create({
   analyseFill: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
   },
-  // .prompt's exact spec: font-size 9px, color rgba(255,255,255,.6), letter-spacing -0.02em.
-  // Small by normal button-text standards, but this source is consistently minimal-type
-  // throughout (status bar 11px, app title 12px) — not scaled up to "fix" it here.
-  analyseFillText: { color: 'rgba(255,255,255,0.6)', fontSize: 9, fontWeight: '400', letterSpacing: -0.2 },
+  // Scaled up from .prompt's literal 9px spec to match the larger pill — see
+  // ENTRY_PILL_WIDTH/HEIGHT above.
+  analyseFillText: { color: 'rgba(255,255,255,0.75)', fontSize: 15, fontWeight: '500', letterSpacing: -0.2 },
   inputFill: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.15)',
