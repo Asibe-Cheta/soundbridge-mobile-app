@@ -181,24 +181,10 @@ function RisingArc({ index }: { index: number }) {
   );
 }
 
-// TEMPORARY DIAGNOSTIC — static, unanimated, pinned at full opacity dead-center of the
-// clipped window, so it's visible on literally every frame. Confirms whether the arc/
-// shadow/clip technique renders at all on-device before debugging the animation timing.
-// Remove once confirmed either way.
-function DebugStaticArc() {
-  return (
-    <View pointerEvents="none" style={[styles.risingArcTrack, { bottom: -35, opacity: 1 }]}>
-      <View style={styles.risingGlow} />
-      <View style={styles.risingArc} />
-    </View>
-  );
-}
-
 function MovingBackground() {
   return (
     <>
       <View style={styles.arcStage} pointerEvents="none">
-        <DebugStaticArc />
         {[0, 1, 2].map(index => <RisingArc index={index} key={index} />)}
       </View>
       <View style={styles.shimmerField} pointerEvents="none">
