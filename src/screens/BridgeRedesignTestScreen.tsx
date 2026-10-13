@@ -57,6 +57,16 @@ const ALLOWED_EMAIL = 'asibechetachukwu@gmail.com';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
+// src/bridge's mockup is a fixed 390x844 reference device, uniformly scaled to fit
+// whatever viewport it's shown in (`scale = Math.min(1, deviceHeight/844, (width-24)/390)`
+// in its own App.tsx) — the dome's fixed-pixel geometry (520 wide, -72 left overhang) was
+// only ever calibrated against that constant 390. Bridge runs at the real device's actual
+// width, which on anything wider than 390pt shrinks the overhang below what the shape
+// needs to clear the screen, exposing the pointed corner that a 260 radius on a 170-tall
+// box produces at its extremes. Scaling by the same ratio Figma's own mockup would have
+// used keeps the geometry proportionally identical on any device width.
+const DOME_SCALE = SCREEN_W / 390;
+
 // ─── Entry pill → input bar morph geometry ─────────────────────────────────
 // The same pill element animates between these two states rather than crossfading two
 // different components. Layout size is FIXED (entry-state size) — the resize is done
@@ -171,7 +181,7 @@ function RisingArc({ index }: { index: number }) {
   }, [phaseDelay, progress]);
 
   const opacity = progress.interpolate({ inputRange: [0, 0.12, 0.32, 0.7, 1], outputRange: [0, 0.12, 0.72, 0.28, 0] });
-  const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [130, -250] });
+  const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [130 * DOME_SCALE, -250 * DOME_SCALE] });
 
   return (
     <RNAnimated.View pointerEvents="none" style={[styles.risingArcTrack, { opacity, transform: [{ translateY }] }]}>
@@ -609,7 +619,6 @@ export default function BridgeRedesignTestScreen() {
                   style={({ pressed }) => [
                     StyleSheet.absoluteFill,
                     styles.analyseFill,
-                    phase !== 'entry' && styles.analyseFillActive,
                     pressed && styles.analyseFillPressed,
                   ]}
                 >
@@ -663,30 +672,33 @@ const styles = StyleSheet.create({
   headerBadgeText: { color: '#CAC4F3', fontSize: 11, fontWeight: '700' },
 
   // Exact port of src/bridge's .arcStage/.risingArcTrack/.risingArc/.risingGlow/
-  // .shimmerField/.shimmer — pixel values are the source's own, calibrated for its
-  // 390x844 reference device, not rescaled.
+  // .shimmerField/.shimmer. arcStage/shimmerField use the source's own percentages, which
+  // already scale correctly with the real device. risingArcTrack/risingArc/risingGlow use
+  // the source's literal pixel values scaled by DOME_SCALE (see its definition above) —
+  // same numbers, evaluated against the real device width instead of the fixed 390 the
+  // source assumes.
   arcStage: {
     bottom: 0, left: 0, right: 0, height: '58%',
     position: 'absolute', overflow: 'hidden',
   },
   risingArcTrack: {
-    alignSelf: 'center', bottom: -120, height: 170, width: '100%',
+    alignSelf: 'center', bottom: -120 * DOME_SCALE, height: 170 * DOME_SCALE, width: '100%',
     position: 'absolute', overflow: 'hidden',
   },
-  // shadowRadius boosted ~2x here too (12->24, 25->50) — same platform-gap compensation
-  // as morphPillShadow above, same reason: iOS native shadow reads dimmer than the
-  // browser box-shadow Figma Make's own preview renders from the identical radius.
+  // All pixel values scaled by DOME_SCALE (see its definition above) — same literal
+  // source numbers (520/-72/170/38/31/260/3/18/12/25), just evaluated against the real
+  // device width instead of the fixed 390 the source was calibrated for.
   risingArc: {
-    position: 'absolute', top: 38, left: -72, width: 520, height: 170,
-    borderTopWidth: 3, borderTopLeftRadius: 260, borderTopRightRadius: 260,
+    position: 'absolute', top: 38 * DOME_SCALE, left: -72 * DOME_SCALE, width: 520 * DOME_SCALE, height: 170 * DOME_SCALE,
+    borderTopWidth: 3 * DOME_SCALE, borderTopLeftRadius: 260 * DOME_SCALE, borderTopRightRadius: 260 * DOME_SCALE,
     borderTopColor: 'rgba(190,174,255,0.82)',
-    shadowColor: '#9b83ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 24,
+    shadowColor: '#9b83ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 12 * DOME_SCALE,
   },
   risingGlow: {
-    position: 'absolute', top: 31, left: -72, width: 520, height: 170,
-    borderTopWidth: 18, borderTopLeftRadius: 260, borderTopRightRadius: 260,
+    position: 'absolute', top: 31 * DOME_SCALE, left: -72 * DOME_SCALE, width: 520 * DOME_SCALE, height: 170 * DOME_SCALE,
+    borderTopWidth: 18 * DOME_SCALE, borderTopLeftRadius: 260 * DOME_SCALE, borderTopRightRadius: 260 * DOME_SCALE,
     borderTopColor: 'rgba(116,88,255,0.28)',
-    shadowColor: '#8065ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 50,
+    shadowColor: '#8065ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 25 * DOME_SCALE,
   },
   shimmerField: {
     position: 'absolute', top: '34%', left: '22%', width: '58%', height: '24%',
@@ -697,28 +709,34 @@ const styles = StyleSheet.create({
     shadowColor: '#c8baff', shadowOpacity: 0.4, shadowRadius: 4,
   },
 
-  // .prompt's border + shadow. shadowColor/shadowOffset are the source's literal values;
-  // shadowRadius is boosted ~2x (25->50, 36->65) to compensate for a confirmed platform
-  // gap — iOS's native CALayer shadow renders visibly dimmer/tighter than a browser's CSS
-  // box-shadow from the identical radius, which is what Figma Make's own preview renders
-  // (it's a real DOM element in an actual browser). Same two properties, tuned to match
-  // the reference's actual appearance rather than its literal number.
+  // .prompt's exact background + border + shadow, all on ONE layer (matching the source,
+  // which puts them all on the single Pressable) — background moved here from the inner
+  // clipped layer, since a view's shadow on iOS is cast from its OWN content, not its
+  // children's. With the fill living only in a child, the shadow had almost nothing to
+  // trace a shape from. shadowRadius restored to the literal source values (25/36) — the
+  // earlier boost was compensating for the wrong problem.
   morphPillShadow: {
     position: 'absolute',
     borderRadius: 9999,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(111,94,224,0.36)',
     shadowColor: '#876fff',
     shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 50,
+    shadowRadius: 25,
   },
-  // .promptActive's shadow half — its backgroundColor half lives on analyseFillActive
-  // below, since this view only carries the shadow (overflow:hidden on morphPillClip
-  // would otherwise clip it, same reason the base/clip split exists at all).
+  // .promptActive — background AND shadow both move with the active state now, matching
+  // the source (both are on the same element there too).
   morphPillShadowActive: {
+    backgroundColor: 'rgba(125,108,238,0.46)',
     shadowColor: '#9b86ff',
-    shadowRadius: 65,
+    shadowRadius: 36,
   },
+  // overflow:hidden still needed here to clip the crossfading entry/bar content to the
+  // pill's rounded shape — kept separate from morphPillShadow for the reason above (an
+  // overflow:hidden view also clips its own shadow on iOS, so shadow and clip can never
+  // live on the same layer). No background here anymore — morphPillShadow underneath
+  // provides it.
   morphPillClip: {
     flex: 1,
     borderRadius: 999,
@@ -726,11 +744,6 @@ const styles = StyleSheet.create({
   },
   analyseFill: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(111,94,224,0.36)',
-  },
-  // .promptActive / .promptPressed / .promptTextActive — ported verbatim, not dropped.
-  analyseFillActive: {
-    backgroundColor: 'rgba(125,108,238,0.46)',
   },
   analyseFillPressed: {
     opacity: 0.82,
