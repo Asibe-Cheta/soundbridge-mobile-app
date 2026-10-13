@@ -673,17 +673,20 @@ const styles = StyleSheet.create({
     alignSelf: 'center', bottom: -120, height: 170, width: '100%',
     position: 'absolute', overflow: 'hidden',
   },
+  // shadowRadius boosted ~2x here too (12->24, 25->50) — same platform-gap compensation
+  // as morphPillShadow above, same reason: iOS native shadow reads dimmer than the
+  // browser box-shadow Figma Make's own preview renders from the identical radius.
   risingArc: {
     position: 'absolute', top: 38, left: -72, width: 520, height: 170,
     borderTopWidth: 3, borderTopLeftRadius: 260, borderTopRightRadius: 260,
     borderTopColor: 'rgba(190,174,255,0.82)',
-    shadowColor: '#9b83ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 12,
+    shadowColor: '#9b83ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 24,
   },
   risingGlow: {
     position: 'absolute', top: 31, left: -72, width: 520, height: 170,
     borderTopWidth: 18, borderTopLeftRadius: 260, borderTopRightRadius: 260,
     borderTopColor: 'rgba(116,88,255,0.28)',
-    shadowColor: '#8065ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 25,
+    shadowColor: '#8065ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 50,
   },
   shimmerField: {
     position: 'absolute', top: '34%', left: '22%', width: '58%', height: '24%',
@@ -694,8 +697,12 @@ const styles = StyleSheet.create({
     shadowColor: '#c8baff', shadowOpacity: 0.4, shadowRadius: 4,
   },
 
-  // .prompt's exact border + shadow (a single native shadow is all the source uses —
-  // no multi-layer glow approximation needed here).
+  // .prompt's border + shadow. shadowColor/shadowOffset are the source's literal values;
+  // shadowRadius is boosted ~2x (25->50, 36->65) to compensate for a confirmed platform
+  // gap — iOS's native CALayer shadow renders visibly dimmer/tighter than a browser's CSS
+  // box-shadow from the identical radius, which is what Figma Make's own preview renders
+  // (it's a real DOM element in an actual browser). Same two properties, tuned to match
+  // the reference's actual appearance rather than its literal number.
   morphPillShadow: {
     position: 'absolute',
     borderRadius: 9999,
@@ -703,14 +710,14 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.15)',
     shadowColor: '#876fff',
     shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 25,
+    shadowRadius: 50,
   },
   // .promptActive's shadow half — its backgroundColor half lives on analyseFillActive
   // below, since this view only carries the shadow (overflow:hidden on morphPillClip
   // would otherwise clip it, same reason the base/clip split exists at all).
   morphPillShadowActive: {
     shadowColor: '#9b86ff',
-    shadowRadius: 36,
+    shadowRadius: 65,
   },
   morphPillClip: {
     flex: 1,
