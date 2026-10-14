@@ -1961,13 +1961,13 @@ export default function ProfileScreen() {
             <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Who's Coming Demo (Ad)</Text>
             <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
-          {/* TEMPORARY — private preview entry point, remove alongside BridgeRedesignTestScreen.tsx.
+          {/* TEMPORARY — private preview entry point, remove alongside BridgeRedesignTestScreenV2.tsx.
               Actually gated (unlike the two demo rows above) — only renders for Justice's own
-              account, not just unlisted. */}
+              account, not just unlisted. Points at the V2 (fresh file) screen. */}
           {user?.email?.toLowerCase() === 'asibechetachukwu@gmail.com' && (
             <TouchableOpacity
               style={styles.groupedRow}
-              onPress={() => navigation.navigate('BridgeRedesignTest' as never)}
+              onPress={() => navigation.navigate('BridgeRedesignTestV2' as never)}
             >
               <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
                 <Ionicons name="sparkles" size={18} color="#8B5CF6" />
