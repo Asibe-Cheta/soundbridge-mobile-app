@@ -1,28 +1,39 @@
-// Dependencies: expo-linear-gradient, react-native-svg, @expo/vector-icons, expo-blur
+// Dependencies: expo-linear-gradient, react-native-svg, @expo/vector-icons, expo-blur,
+// @expo-google-fonts/inter, react-native-reanimated
 import React, { useState } from 'react';
 import {
   Image,
+  Pressable,
   SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
-  TouchableOpacity,
   TouchableWithoutFeedback,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import Animated, {
+  Easing,
+  Extrapolation,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { Feather } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
+import { useFonts, Inter_400Regular, Inter_500Medium } from '@expo-google-fonts/inter';
 import Svg, {
-  Circle,
   Defs,
   LinearGradient as SvgGradient,
   Path,
   RadialGradient,
+  Rect,
   Stop,
 } from 'react-native-svg';
 
-type Phase = 'entry' | 'response';
+type Phase = 'entry' | 'morphing' | 'response';
 
 const entryStars = [
   { left: '23%', top: '33.5%', size: 3, opacity: 0.35 },
@@ -37,50 +48,134 @@ const entryStars = [
   { left: '65%', top: '41.5%', size: 2, opacity: 0.1 },
 ] as const;
 
-// Points of light for the 'response' phase — different positions/colors from entryStars,
-// ported from the second Aura screen's own star field.
+// Response-phase star field — ported from Aura's own RN conversion (pixel-position pairs,
+// not percentage strings, and a single shared dot style rather than per-star opacity).
 const responseStars = [
-  { left: '55%', top: '69%', size: 3, opacity: 0.5 },
-  { left: '53%', top: '70%', size: 2, opacity: 0.4 },
-  { left: '50%', top: '72%', size: 3, opacity: 0.5 },
-  { left: '46%', top: '72.2%', size: 3, opacity: 0.4 },
-  { left: '41%', top: '71.8%', size: 3, opacity: 0.4 },
-  { left: '35%', top: '73%', size: 3, opacity: 0.4 },
-  { left: '45%', top: '75%', size: 3, opacity: 0.6 },
-  { left: '48%', top: '74.4%', size: 2, opacity: 0.5 },
-  { left: '53%', top: '74%', size: 3, opacity: 0.4 },
-  { left: '30%', top: '76.5%', size: 3, opacity: 0.5 },
-  { left: '23%', top: '79%', size: 3, opacity: 0.3 },
-  { left: '30%', top: '86%', size: 3, opacity: 0.4 },
-  { left: '27%', top: '88%', size: 3, opacity: 0.3 },
-  { left: '76%', top: '85%', size: 3, opacity: 0.6 },
-  { left: '78%', top: '85.3%', size: 3, opacity: 0.5 },
-  { left: '80%', top: '84.8%', size: 2, opacity: 0.5 },
-  { left: '76%', top: '90%', size: 3, opacity: 0.5 },
-  { left: '80%', top: '90.2%', size: 3, opacity: 0.5 },
+  [55, 69], [53, 70], [50, 72], [46, 72.2], [41, 71.8],
+  [35, 73], [45, 75], [48, 74.4], [53, 74], [30, 76.5],
+  [23, 79], [30, 86], [27, 88], [76, 85], [78, 85.3],
+  [80, 84.8], [76, 90], [80, 90.2],
 ] as const;
 
 export default function App() {
+  const { width, height } = useWindowDimensions();
+  const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium });
   const [menuOpen, setMenuOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>('entry');
+  const morph = useSharedValue(0);
 
-  const stars = phase === 'entry' ? entryStars : responseStars;
+  if (!fontsLoaded) return <View style={styles.screen} />;
+
+  // Morph target geometry: the entry pill (148x45, centered ~49.3% down) traveling and
+  // shrinking into the orb's resting spot (61x61 circle, bottom:34, centered). Only
+  // transform (translateY/scaleX/scaleY) is animated here — never width/height/borderRadius
+  // directly — animating layout props on this screen's absolutely-positioned descendants is
+  // what caused a crash on an earlier Bridge screen; transform is paint-only and safe.
+  const entryCenterY = height * 0.493;
+  const orbCenterY = height - 34 - 30.5;
+  const morphTranslateY = orbCenterY - entryCenterY;
+  const scaleXTarget = 61 / 148;
+  const scaleYTarget = 61 / 45;
+
+  const startMorph = () => {
+    setPhase('morphing');
+    morph.value = withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) });
+    setTimeout(() => setPhase('response'), 680);
+  };
+
+  const morphProxyStyle = useAnimatedStyle(() => {
+    const scaleX = interpolate(morph.value, [0, 1], [1, scaleXTarget], Extrapolation.CLAMP);
+    const scaleY = interpolate(morph.value, [0, 1], [1, scaleYTarget], Extrapolation.CLAMP);
+    const translateY = interpolate(morph.value, [0, 1], [0, morphTranslateY], Extrapolation.CLAMP);
+    return { transform: [{ translateY }, { scaleX }, { scaleY }] } as any;
+  });
+  const morphTextStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(morph.value, [0, 0.3], [1, 0], Extrapolation.CLAMP),
+  }));
+  const orbRevealStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(morph.value, [0.6, 1], [0, 1], Extrapolation.CLAMP),
+  }));
+  const entryFadeStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(morph.value, [0, 0.35], [1, 0], Extrapolation.CLAMP),
+  }));
+  const responseFadeStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(morph.value, [0.6, 1], [0, 1], Extrapolation.CLAMP),
+  }));
 
   return (
     <TouchableWithoutFeedback onPress={() => setMenuOpen(false)} accessible={false}>
       <View style={styles.screen}>
-        <StatusBar barStyle="light-content" backgroundColor={phase === 'entry' ? '#28168e' : '#9b00ef'} />
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-        {phase === 'entry' ? (
-          <LinearGradient
-            colors={['#28168e', '#21137e', '#1b126e', '#160e55']}
-            locations={[0, 0.29, 0.58, 1]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0.65, y: 1 }}
-            style={StyleSheet.absoluteFill}
-          />
-        ) : (
-          <>
+        {phase !== 'response' && (
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, entryFadeStyle]}
+          >
+            <LinearGradient
+              colors={['#28168e', '#21137e', '#1b126e', '#160e55']}
+              locations={[0, 0.29, 0.58, 1]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0.65, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
+            {entryStars.map((star, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.star,
+                  { left: star.left, top: star.top, width: star.size, height: star.size, opacity: star.opacity },
+                ]}
+              />
+            ))}
+            <View pointerEvents="none" style={styles.horizon}>
+              <Svg width="100%" height="100%" viewBox="0 0 393 265" preserveAspectRatio="none">
+                <Defs>
+                  <SvgGradient id="horizon-fill" x1="0" y1="0" x2="0" y2="1">
+                    <Stop offset="0" stopColor="#2d2085" stopOpacity={0.2} />
+                    <Stop offset="1" stopColor="#100c48" stopOpacity={0.05} />
+                  </SvgGradient>
+                </Defs>
+                <Path
+                  d="M-30 64 Q196 -26 423 64 L423 265 L-30 265Z"
+                  fill="url(#horizon-fill)"
+                  stroke="#43309b"
+                  strokeOpacity={0.08}
+                  strokeWidth={2}
+                />
+                <Path
+                  d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225"
+                  fill="none"
+                  stroke="#8e71ff"
+                  strokeOpacity={0.12}
+                  strokeWidth={18}
+                />
+                <Path
+                  d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225 L419 265 L-25 265Z"
+                  fill="#110c49"
+                  fillOpacity={0.6}
+                />
+                <Path
+                  d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225"
+                  fill="none"
+                  stroke="#8d74dd"
+                  strokeOpacity={0.5}
+                  strokeWidth={3}
+                />
+                <Path
+                  d="M-25 232 Q26 191 89 191 L304 191 Q369 192 419 233"
+                  fill="none"
+                  stroke="#493095"
+                  strokeOpacity={0.35}
+                  strokeWidth={5}
+                />
+              </Svg>
+            </View>
+          </Animated.View>
+        )}
+
+        {phase !== 'entry' && (
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, responseFadeStyle]}>
             <LinearGradient
               colors={['#9b00ef', '#6610df', '#2218a5', '#070924', '#050717']}
               locations={[0, 0.19, 0.36, 0.59, 1]}
@@ -88,212 +183,126 @@ export default function App() {
               end={{ x: 0.5, y: 1 }}
               style={StyleSheet.absoluteFill}
             />
-            <View pointerEvents="none" style={styles.responseGlowBlob} />
-          </>
-        )}
-
-        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-          {stars.map((star, index) => (
+            {responseStars.map(([x, y], index) => (
+              <View
+                key={index}
+                style={[styles.responseStar, { left: (width * x) / 100, top: (height * y) / 100 }]}
+              />
+            ))}
             <View
-              key={index}
               style={[
-                styles.star,
+                styles.responseHorizon,
                 {
-                  left: star.left,
-                  top: star.top,
-                  width: star.size,
-                  height: star.size,
-                  opacity: star.opacity,
+                  width: width * 1.5,
+                  height: height * 0.65,
+                  borderRadius: width,
+                  left: -width * 0.25,
+                  top: height * 0.63,
                 },
               ]}
             />
-          ))}
-        </View>
+          </Animated.View>
+        )}
 
         <SafeAreaView style={styles.safeArea}>
           <View style={styles.header}>
             <View style={styles.headerPill}>
-              <TouchableOpacity
+              <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="More options"
                 accessibilityState={{ expanded: menuOpen }}
                 onPress={() => setMenuOpen(!menuOpen)}
+                hitSlop={8}
                 style={styles.headerDotsButton}
-                hitSlop={10}
               >
-                <Feather name="grid" size={18} color="#d2acff" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel="Your profile"
-                style={styles.headerAvatarButton}
-                hitSlop={10}
-              >
+                <Ionicons name="grid" size={20} color="#d2acff" />
+              </Pressable>
+              <View accessible accessibilityLabel="Your profile" style={styles.headerAvatarButton}>
                 <Image
                   source={{ uri: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&h=100&fit=crop&crop=faces' }}
                   style={styles.headerAvatarImage as any}
                 />
-              </TouchableOpacity>
+              </View>
             </View>
-            {phase === 'response' && (
-              <Text style={styles.headline}>Tell me more about{'\n'}my peer comparison</Text>
+            {phase !== 'entry' && (
+              <Animated.Text style={[styles.headline, responseFadeStyle]}>
+                {'Tell me more about\nmy peer comparison'}
+              </Animated.Text>
             )}
           </View>
 
           {menuOpen && (
             <View style={styles.menu}>
-              <TouchableOpacity
+              <Pressable
                 accessibilityRole="button"
                 onPress={() => setMenuOpen(false)}
                 style={styles.menuItem}
               >
                 <Text style={styles.menuText}>Back to friends</Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
           )}
         </SafeAreaView>
 
-        {phase === 'entry' ? (
-          <View style={styles.invitation}>
-            <View pointerEvents="none" style={styles.glow} />
-            <TouchableOpacity
+        {phase !== 'response' && (
+          <Animated.View style={[styles.morphProxy, morphProxyStyle]}>
+            <Svg pointerEvents="none" style={styles.morphGlow} width="100%" height="100%">
+              <Defs>
+                <RadialGradient id="entryGlow" cx="50%" cy="50%" r="50%">
+                  <Stop offset="0%" stopColor="#7960ff" stopOpacity={0.6} />
+                  <Stop offset="60%" stopColor="#7960ff" stopOpacity={0.25} />
+                  <Stop offset="100%" stopColor="#7960ff" stopOpacity={0} />
+                </RadialGradient>
+              </Defs>
+              <Rect x="0" y="0" width="100%" height="100%" rx={999} fill="url(#entryGlow)" />
+            </Svg>
+            <Pressable
               accessibilityRole="button"
-              onPress={() => setPhase('response')}
-              activeOpacity={0.8}
-              style={styles.typeButtonShadow}
+              onPress={startMorph}
+              disabled={phase !== 'entry'}
+              style={styles.morphProxyShadow}
             >
-              <BlurView intensity={15} tint="dark" style={styles.typeButton}>
-                <Text style={styles.typeText}>What's your type?</Text>
+              <BlurView intensity={15} tint="dark" style={styles.morphProxyInner}>
+                <Animated.Text style={[styles.typeText, morphTextStyle]}>What's your type?</Animated.Text>
               </BlurView>
-            </TouchableOpacity>
-            <View pointerEvents="none" style={styles.nearStar} />
-          </View>
-        ) : (
-          <View pointerEvents="none" style={styles.responseInvitation}>
-            <View pointerEvents="none" style={styles.responseGlow} />
-            <BlurView intensity={10} tint="dark" style={styles.responseButton}>
-              <Text style={styles.responseText}>Generating responses</Text>
-            </BlurView>
-          </View>
+            </Pressable>
+          </Animated.View>
         )}
 
-        <View pointerEvents="none" style={[styles.horizon, phase === 'response' && styles.horizonResponse]}>
-          {phase === 'entry' ? (
-            <Svg width="100%" height="100%" viewBox="0 0 393 265" preserveAspectRatio="none">
-              <Defs>
-                <SvgGradient id="horizon-fill" x1="0" y1="0" x2="0" y2="1">
-                  <Stop offset="0" stopColor="#2d2085" stopOpacity={0.2} />
-                  <Stop offset="1" stopColor="#100c48" stopOpacity={0.05} />
-                </SvgGradient>
-              </Defs>
-              <Path
-                d="M-30 64 Q196 -26 423 64 L423 265 L-30 265Z"
-                fill="url(#horizon-fill)"
-                stroke="#43309b"
-                strokeOpacity={0.08}
-                strokeWidth={2}
-              />
-              <Path
-                d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225"
-                fill="none"
-                stroke="#8e71ff"
-                strokeOpacity={0.12}
-                strokeWidth={18}
-              />
-              <Path
-                d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225 L419 265 L-25 265Z"
-                fill="#110c49"
-                fillOpacity={0.6}
-              />
-              <Path
-                d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225"
-                fill="none"
-                stroke="#8d74dd"
-                strokeOpacity={0.5}
-                strokeWidth={3}
-              />
-              <Path
-                d="M-25 232 Q26 191 89 191 L304 191 Q369 192 419 233"
-                fill="none"
-                stroke="#493095"
-                strokeOpacity={0.35}
-                strokeWidth={5}
-              />
-            </Svg>
-          ) : (
-            <Svg width="100%" height="100%" viewBox="0 0 393 265" preserveAspectRatio="none">
-              <Defs>
-                <SvgGradient id="horizon-fill-response" x1="0" y1="0" x2="0" y2="1">
-                  <Stop offset="0" stopColor="#0b1649" stopOpacity={0.5} />
-                  <Stop offset="1" stopColor="#100c48" stopOpacity={0.05} />
-                </SvgGradient>
-              </Defs>
-              <Path
-                d="M-25 85 Q196 -65 418 85 L418 265 L-25 265Z"
-                fill="url(#horizon-fill-response)"
-                stroke="#43309b"
-                strokeOpacity={0.08}
-                strokeWidth={2}
-              />
-              <Path
-                d="M-25 85 Q196 -65 418 85"
-                fill="none"
-                stroke="#387eff"
-                strokeOpacity={0.45}
-                strokeWidth={5}
-              />
-              <Path
-                d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225 L419 265 L-25 265Z"
-                fill="#110c49"
-                fillOpacity={0}
-              />
-              <Path
-                d="M-25 85 Q196 -65 418 85"
-                fill="none"
-                stroke="#549aff"
-                strokeOpacity={0.5}
-                strokeWidth={2}
-              />
-              <Path
-                d="M-25 232 Q26 191 89 191 L304 191 Q369 192 419 233"
-                fill="none"
-                stroke="#493095"
-                strokeOpacity={0}
-                strokeWidth={5}
-              />
-            </Svg>
-          )}
-        </View>
+        {phase !== 'entry' && (
+          <Animated.View
+            pointerEvents={phase === 'response' ? 'auto' : 'none'}
+            style={[styles.invitation, { top: height * 0.81 - 25.5 }, responseFadeStyle]}
+          >
+            <Pressable
+              disabled
+              accessibilityRole="button"
+              accessibilityState={{ disabled: true, busy: true }}
+              style={styles.generatingButton}
+            >
+              <Text accessibilityLiveRegion="polite" style={styles.generatingText}>
+                Generating responses
+              </Text>
+            </Pressable>
+          </Animated.View>
+        )}
 
-        {phase === 'response' && (
-          <View pointerEvents="none" style={styles.sendBubbleShadow}>
-            <View style={styles.sendBubbleClip}>
-              <Svg width={61} height={61} style={StyleSheet.absoluteFill}>
-                <Defs>
-                  <RadialGradient id="sendBubbleGrad" cx="35%" cy="65%" r="75%">
-                    <Stop offset="0%" stopColor="#bd43d4" />
-                    <Stop offset="28%" stopColor="#6237c3" />
-                    <Stop offset="57%" stopColor="#17216e" />
-                    <Stop offset="75%" stopColor="#0b123d" />
-                  </RadialGradient>
-                </Defs>
-                <Circle cx={30.5} cy={30.5} r={30.5} fill="url(#sendBubbleGrad)" />
-              </Svg>
-              <View style={styles.sendBubbleHighlight} />
-              <View style={styles.sendBubbleIconWrap}>
-                <Svg width={32} height={32} viewBox="0 0 32 32">
-                  <Path
-                    d="m23 7-14 9 11 4-8 6"
-                    stroke="#e7e2ff"
-                    strokeWidth={4}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    fill="none"
-                  />
-                </Svg>
-              </View>
-            </View>
-          </View>
+        {phase !== 'entry' && (
+          <Animated.View
+            pointerEvents="none"
+            accessible
+            accessibilityLabel="Generating response"
+            style={[styles.orb, orbRevealStyle]}
+          >
+            <LinearGradient
+              colors={['#17216e', '#6237c3', '#bd43d4']}
+              start={{ x: 0.8, y: 0 }}
+              end={{ x: 0.2, y: 1 }}
+              style={styles.orbGradient}
+            >
+              <Ionicons name="flash" size={30} color="#e7e2ff" />
+            </LinearGradient>
+          </Animated.View>
         )}
       </View>
     </TouchableWithoutFeedback>
@@ -301,18 +310,8 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#1b126e' },
+  screen: { flex: 1, backgroundColor: '#050719', overflow: 'hidden' },
   safeArea: { zIndex: 20 },
-  responseGlowBlob: {
-    position: 'absolute',
-    left: '-45%',
-    top: '8%',
-    height: '45%',
-    width: '120%',
-    borderRadius: 9999,
-    backgroundColor: 'rgba(49,36,240,0.4)',
-    filter: [{ blur: 55 }],
-  } as any,
   header: {
     paddingHorizontal: 24,
     paddingTop: 16,
@@ -324,7 +323,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     height: 47,
     width: 103,
-    borderRadius: 999,
+    borderRadius: 24,
     borderWidth: 2,
     borderColor: 'rgba(191,128,255,0.5)',
     paddingHorizontal: 8,
@@ -344,8 +343,8 @@ const styles = StyleSheet.create({
   headerAvatarImage: { width: '100%', height: '100%' },
   headline: {
     marginTop: 20,
+    fontFamily: 'Inter_400Regular',
     fontSize: 20,
-    fontWeight: '400',
     lineHeight: 25,
     color: '#ded1ff',
   },
@@ -363,10 +362,32 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 8,
   },
-  menuItem: { paddingHorizontal: 16, paddingVertical: 10 },
-  menuText: { fontSize: 14, color: '#ede9fe' },
+  menuItem: { paddingHorizontal: 16, paddingVertical: 12 },
+  menuText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#ede9fe' },
   star: { position: 'absolute', borderRadius: 4, backgroundColor: '#ad9bff' },
-  invitation: {
+  responseStar: {
+    position: 'absolute',
+    width: 3,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(224,242,254,0.45)',
+  },
+  horizon: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '31%' },
+  responseHorizon: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: 'rgba(84,154,255,0.25)',
+    backgroundColor: 'rgba(11,22,73,0.18)',
+    shadowColor: '#387eff',
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  // Shrinks/travels via transform only (see startMorph's comment) from the entry pill's
+  // geometry down into the orb's resting spot — never a real circle mid-transition since
+  // borderRadius stays a flat 9999 throughout, same tradeoff the original pill-to-bar morph
+  // on the other Bridge screen accepted.
+  morphProxy: {
     position: 'absolute',
     top: '49.3%',
     left: '50%',
@@ -375,120 +396,54 @@ const styles = StyleSheet.create({
     transform: [{ translateX: -74 }, { translateY: -22.5 }],
     zIndex: 10,
   },
-  // Ported from the actual CSS: the halo is a `::before` with `filter: blur(18px)`, not a
-  // box-shadow — box-shadow only casts a blurred copy OUTSIDE a shape while the shape's own
-  // fill edge stays sharp. `filter: blur()` blurs the element's own pixels in place.
-  glow: {
+  morphGlow: {
     position: 'absolute',
     top: -12,
     bottom: -12,
     left: -20,
     right: -20,
-    borderRadius: 999,
-    backgroundColor: 'rgba(121,96,255,0.5)',
-    filter: [{ blur: 18 }],
-  } as any,
-  typeButtonShadow: {
-    width: 148,
-    height: 45,
-    borderRadius: 24,
+  },
+  morphProxyShadow: {
+    flex: 1,
+    borderRadius: 9999,
     shadowColor: '#7f60ff',
     shadowOpacity: 0.35,
     shadowRadius: 22,
     shadowOffset: { width: 0, height: 0 },
   },
-  typeButton: {
+  morphProxyInner: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 24,
+    borderRadius: 9999,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(163,145,255,0.3)',
     backgroundColor: 'rgba(104,81,204,0.35)',
   },
   typeText: { fontSize: 12, fontWeight: '500', color: '#c1b1ff' },
-  nearStar: {
-    position: 'absolute',
-    left: 2,
-    top: 34,
-    width: 3,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: 'rgba(184,166,255,0.5)',
-  },
-  // 'response' phase's disabled "Generating responses" pill — replaces .invitation/.glow/
-  // .typeButton above when phase === 'response'.
-  responseInvitation: {
-    position: 'absolute',
-    top: '81%',
-    left: '50%',
+  invitation: { position: 'absolute', alignSelf: 'center', zIndex: 1 },
+  generatingButton: {
     width: 200,
     height: 51,
-    transform: [{ translateX: -100 }, { translateY: -25.5 }],
-    zIndex: 10,
-  },
-  responseGlow: {
-    position: 'absolute',
-    top: -8,
-    bottom: -8,
-    left: -12,
-    right: -12,
-    borderRadius: 999,
-    backgroundColor: 'rgba(100,127,162,0.1)',
-    filter: [{ blur: 14 }],
-  } as any,
-  responseButton: {
-    flex: 1,
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 999,
-    overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.05)',
     backgroundColor: 'rgba(37,44,64,0.9)',
   },
-  responseText: { fontSize: 16, fontWeight: '500', color: '#d4d9e3' },
-  horizon: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '31%' },
-  horizonResponse: { height: '40%' },
-  // Circular send/compose bubble — 'response' phase only. Shadow split from the clipped
-  // gradient+icon layer for the same iOS reason as elsewhere in this screen (overflow:hidden
-  // and shadow can't share one view).
-  sendBubbleShadow: {
+  generatingText: { fontFamily: 'Inter_500Medium', fontSize: 16, color: '#d4d9e3' },
+  orb: {
     position: 'absolute',
-    bottom: 22,
-    left: '50%',
+    bottom: 34,
+    alignSelf: 'center',
     width: 61,
     height: 61,
-    transform: [{ translateX: -30.5 }],
-    borderRadius: 30.5,
-    shadowColor: '#523db4',
-    shadowOpacity: 0.3,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 0 },
-    zIndex: 10,
-  },
-  sendBubbleClip: {
-    flex: 1,
-    borderRadius: 30.5,
-    overflow: 'hidden',
+    borderRadius: 31,
     borderWidth: 2,
     borderColor: 'rgba(122,116,217,0.6)',
+    overflow: 'hidden',
   },
-  sendBubbleHighlight: {
-    position: 'absolute',
-    left: 12,
-    top: 8,
-    width: 32,
-    height: 12,
-    borderRadius: 999,
-    backgroundColor: 'rgba(173,157,255,0.3)',
-    transform: [{ rotate: '-12deg' }],
-    filter: [{ blur: 3 }],
-  } as any,
-  sendBubbleIconWrap: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  orbGradient: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
