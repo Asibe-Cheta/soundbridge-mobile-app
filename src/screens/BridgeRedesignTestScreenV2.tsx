@@ -67,6 +67,13 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 // used keeps the geometry proportionally identical on any device width.
 const DOME_SCALE = SCREEN_W / 390;
 
+// Confirmed via Figma Make's own computed CSS: the dome/button box-shadow blur-radius
+// values (12/25/25/36px) are already byte-identical to what's ported below — not a
+// copying error. iOS's native shadowRadius (CALayer) renders a visibly tighter/weaker
+// blur than CSS box-shadow at the same numeric value, which is why the glow looked
+// almost invisible despite matching numbers. This compensates for that platform gap.
+const NATIVE_BLUR_BOOST = 2;
+
 // ─── Entry pill → input bar morph geometry ─────────────────────────────────
 // The same pill element animates between these two states rather than crossfading two
 // different components. Layout size is FIXED (entry-state size) — the resize is done
@@ -551,11 +558,6 @@ export default function BridgeRedesignTestScreenV2() {
           </View>
         </View>
 
-        {/* TEMPORARY — delivery proof marker, delete once build-reaches-device is confirmed */}
-        <View style={{ backgroundColor: '#FF0000', paddingVertical: 10, alignItems: 'center' }}>
-          <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '900' }}>BUILD MARKER — V2.0016</Text>
-        </View>
-
         {phase === 'chat' && (
           <ScrollView
             style={styles.chatScroll}
@@ -702,14 +704,14 @@ const styles = StyleSheet.create({
     // almost nothing. This gives iOS real content to compute a proper shadow path
     // from without changing anything visible.
     backgroundColor: 'rgba(0,0,0,0.001)',
-    shadowColor: '#9b83ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 12 * DOME_SCALE,
+    shadowColor: '#9b83ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 12 * DOME_SCALE * NATIVE_BLUR_BOOST,
   },
   risingGlow: {
     position: 'absolute', top: 31 * DOME_SCALE, left: -72 * DOME_SCALE, width: 520 * DOME_SCALE, height: 170 * DOME_SCALE,
     borderTopWidth: 18 * DOME_SCALE, borderTopLeftRadius: 260 * DOME_SCALE, borderTopRightRadius: 260 * DOME_SCALE,
     borderTopColor: 'rgba(116,88,255,0.28)',
     backgroundColor: 'rgba(0,0,0,0.001)',
-    shadowColor: '#8065ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 25 * DOME_SCALE,
+    shadowColor: '#8065ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 25 * DOME_SCALE * NATIVE_BLUR_BOOST,
   },
   shimmerField: {
     position: 'absolute', top: '34%', left: '22%', width: '58%', height: '24%',
@@ -723,9 +725,10 @@ const styles = StyleSheet.create({
   // .prompt's exact background + border + shadow, all on ONE layer (matching the source,
   // which puts them all on the single Pressable) — background moved here from the inner
   // clipped layer, since a view's shadow on iOS is cast from its OWN content, not its
-  // children's. With the fill living only in a child, the shadow had almost nothing to
-  // trace a shape from. shadowRadius restored to the literal source values (25/36) — the
-  // earlier boost was compensating for the wrong problem.
+  // children's. shadowRadius uses NATIVE_BLUR_BOOST (see its definition above) — Figma
+  // Make's own computed CSS confirmed the literal 25/36 values are already byte-identical
+  // to what's ported here, so the weak glow wasn't a values error; iOS's native shadow
+  // blur just renders tighter than CSS box-shadow blur at the same number.
   morphPillShadow: {
     position: 'absolute',
     borderRadius: 9999,
@@ -734,14 +737,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(111,94,224,0.36)',
     shadowColor: '#876fff',
     shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 25,
+    shadowRadius: 25 * NATIVE_BLUR_BOOST,
   },
   // .promptActive — background AND shadow both move with the active state now, matching
   // the source (both are on the same element there too).
   morphPillShadowActive: {
     backgroundColor: 'rgba(125,108,238,0.46)',
     shadowColor: '#9b86ff',
-    shadowRadius: 36,
+    shadowRadius: 36 * NATIVE_BLUR_BOOST,
   },
   // overflow:hidden still needed here to clip the crossfading entry/bar content to the
   // pill's rounded shape — kept separate from morphPillShadow for the reason above (an
