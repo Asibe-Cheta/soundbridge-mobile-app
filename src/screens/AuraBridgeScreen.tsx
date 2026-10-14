@@ -216,10 +216,15 @@ const styles = StyleSheet.create({
     left: -12,
     right: -12,
     borderRadius: 40,
-    backgroundColor: 'rgba(121,96,255,0.12)',
+    // Lower fill alpha so the flat rect's own edge stops being the visible shape — iOS's
+    // native shadow blur renders markedly weaker than the same shadowRadius does in a CSS
+    // preview (confirmed on the other Bridge screens via Aura/Figma's own computed CSS
+    // matching already-ported values exactly), so the blur alone wasn't strong enough to
+    // melt that edge away. Boosting shadowRadius/shadowOpacity compensates.
+    backgroundColor: 'rgba(121,96,255,0.03)',
     shadowColor: '#7960ff',
-    shadowOpacity: 0.8,
-    shadowRadius: 18,
+    shadowOpacity: 1,
+    shadowRadius: 48,
     shadowOffset: { width: 0, height: 0 },
   },
   typeButton: {
