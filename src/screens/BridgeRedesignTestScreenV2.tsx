@@ -518,9 +518,16 @@ export default function BridgeRedesignTestScreenV2() {
     const scaleY = interpolate(morph.value, [0, 1], [1, PILL_SCALE_Y], Extrapolation.CLAMP);
     const translateY = interpolate(morph.value, [0, 1], [0, morphTranslateYTarget], Extrapolation.CLAMP);
     const shadowOpacity = interpolate(morph.value, [0, 0.35], [0.95, 0], Extrapolation.CLAMP);
+    // This view's whole subtree gets visually stretched by scaleX/scaleY (it's a paint-time
+    // transform, not a relayout) — fine while it only holds the Analyse text, which is
+    // already fading out by the time the scale is significant. It fades out entirely before
+    // the real, non-scaled input bar (below) finishes fading in, so nothing stretched is
+    // ever visible together with real content.
+    const opacity = interpolate(morph.value, [0.7, 1], [1, 0], Extrapolation.CLAMP);
     return {
       transform: [{ translateY }, { scaleX }, { scaleY }],
       shadowOpacity,
+      opacity,
     } as any;
   });
 
@@ -632,7 +639,23 @@ export default function BridgeRedesignTestScreenV2() {
                   <Text style={[styles.analyseFillText, phase !== 'entry' && styles.analyseFillTextActive]}>Analyse</Text>
                 </Pressable>
               </Animated.View>
-              <Animated.View style={[StyleSheet.absoluteFill, barContentStyle]} pointerEvents={phase === 'chat' ? 'auto' : 'none'}>
+            </View>
+          </Animated.View>
+
+          {/* Laid out directly at its real final size (not scaled up from the 129x40 entry
+              pill like morphPillShadow above) — a transform:scale on a parent stretches
+              everything painted inside it, which was distorting the TextInput/send button
+              by ~2.7x horizontally right as they faded in. Only opacity is animated here. */}
+          {phase !== 'entry' && (
+            <Animated.View
+              style={[
+                styles.inputBarShadow,
+                { left: 20, top: targetCenterY - BAR_HEIGHT / 2, width: BAR_WIDTH, height: BAR_HEIGHT },
+                barContentStyle,
+              ]}
+              pointerEvents={phase === 'chat' ? 'auto' : 'none'}
+            >
+              <View style={styles.inputBarClip}>
                 <View style={styles.inputFill}>
                   <TextInput
                     value={draft}
@@ -647,9 +670,9 @@ export default function BridgeRedesignTestScreenV2() {
                     <Ionicons name="arrow-up" size={16} color={draft.trim() ? '#F4F2FF' : 'rgba(244,242,255,0.3)'} />
                   </TouchableOpacity>
                 </View>
-              </Animated.View>
-            </View>
-          </Animated.View>
+              </View>
+            </Animated.View>
+          )}
         </View>
       </SafeAreaView>
     </View>
@@ -765,6 +788,26 @@ const styles = StyleSheet.create({
   },
   analyseFillText: { color: 'rgba(255,255,255,0.62)', fontSize: 9 },
   analyseFillTextActive: { color: 'rgba(255,255,255,0.92)' },
+  // Laid out at its real BAR_WIDTH/BAR_HEIGHT size directly (see render) — not produced by
+  // scaling up morphPillShadow, so its content (TextInput/send button) never gets stretched.
+  // Same background/border/shadow as .promptActive, since this is what the pill visually
+  // settles into once the morph finishes.
+  inputBarShadow: {
+    position: 'absolute',
+    borderRadius: 9999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(125,108,238,0.46)',
+    shadowColor: '#9b86ff',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 36 * NATIVE_BLUR_BOOST,
+  },
+  inputBarClip: {
+    flex: 1,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
   inputFill: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.15)',
