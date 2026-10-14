@@ -81,11 +81,20 @@ export default function App() {
     setTimeout(() => setPhase('response'), 680);
   };
 
+  // transform arrays in a style array fully REPLACE each other (not merged key-by-key) —
+  // this style's own transform must carry the constant centering offsets (-74/-22.5) itself,
+  // since listing them separately on styles.morphProxy got silently dropped the moment this
+  // animated style's transform array won out, shifting the button 74pt (half its width) off
+  // center and making the morph land beside the orb instead of on it.
   const morphProxyStyle = useAnimatedStyle(() => {
     const scaleX = interpolate(morph.value, [0, 1], [1, scaleXTarget], Extrapolation.CLAMP);
     const scaleY = interpolate(morph.value, [0, 1], [1, scaleYTarget], Extrapolation.CLAMP);
     const translateY = interpolate(morph.value, [0, 1], [0, morphTranslateY], Extrapolation.CLAMP);
-    return { transform: [{ translateY }, { scaleX }, { scaleY }] } as any;
+    const opacity = interpolate(morph.value, [0.75, 1], [1, 0], Extrapolation.CLAMP);
+    return {
+      transform: [{ translateX: -74 }, { translateY: -22.5 + translateY }, { scaleX }, { scaleY }],
+      opacity,
+    } as any;
   });
   const morphTextStyle = useAnimatedStyle(() => ({
     opacity: interpolate(morph.value, [0, 0.3], [1, 0], Extrapolation.CLAMP),
@@ -193,18 +202,49 @@ export default function App() {
                 style={[styles.responseStar, { left: (width * x) / 100, top: (height * y) / 100 }]}
               />
             ))}
-            <View
-              style={[
-                styles.responseHorizon,
-                {
-                  width: width * 1.5,
-                  height: height * 0.65,
-                  borderRadius: width,
-                  left: -width * 0.25,
-                  top: height * 0.63,
-                },
-              ]}
-            />
+            <View pointerEvents="none" style={styles.responseHorizon}>
+              <Svg width="100%" height="100%" viewBox="0 0 393 265" preserveAspectRatio="none">
+                <Defs>
+                  <SvgGradient id="horizon-fill-response" x1="0" y1="0" x2="0" y2="1">
+                    <Stop offset="0" stopColor="#0b1649" stopOpacity={0.5} />
+                    <Stop offset="1" stopColor="#100c48" stopOpacity={0.05} />
+                  </SvgGradient>
+                </Defs>
+                <Path
+                  d="M-25 85 Q196 -65 418 85 L418 265 L-25 265Z"
+                  fill="url(#horizon-fill-response)"
+                  stroke="#43309b"
+                  strokeOpacity={0.08}
+                  strokeWidth={2}
+                />
+                <Path
+                  d="M-25 85 Q196 -65 418 85"
+                  fill="none"
+                  stroke="#387eff"
+                  strokeOpacity={0.45}
+                  strokeWidth={5}
+                />
+                <Path
+                  d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225 L419 265 L-25 265Z"
+                  fill="#110c49"
+                  fillOpacity={0}
+                />
+                <Path
+                  d="M-25 85 Q196 -65 418 85"
+                  fill="none"
+                  stroke="#549aff"
+                  strokeOpacity={0.5}
+                  strokeWidth={2}
+                />
+                <Path
+                  d="M-25 232 Q26 191 89 191 L304 191 Q369 192 419 233"
+                  fill="none"
+                  stroke="#493095"
+                  strokeOpacity={0}
+                  strokeWidth={5}
+                />
+              </Svg>
+            </View>
           </Animated.View>
         )}
 
@@ -377,16 +417,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(224,242,254,0.45)',
   },
   horizon: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '31%' },
-  responseHorizon: {
-    position: 'absolute',
-    borderWidth: 2,
-    borderColor: 'rgba(84,154,255,0.25)',
-    backgroundColor: 'rgba(11,22,73,0.18)',
-    shadowColor: '#387eff',
-    shadowOpacity: 0.45,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 0 },
-  },
+  // Reverted to the original SVG dome per Justice's request — Aura's plain-view version
+  // (a single huge-borderRadius box) looked worse than this, which was already right.
+  responseHorizon: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '40%' },
   // Shrinks/travels via transform only (see startMorph's comment) from the entry pill's
   // geometry down into the orb's resting spot — never a real circle mid-transition since
   // borderRadius stays a flat 9999 throughout, same tradeoff the original pill-to-bar morph
@@ -397,7 +430,8 @@ const styles = StyleSheet.create({
     left: '50%',
     width: 148,
     height: 45,
-    transform: [{ translateX: -74 }, { translateY: -22.5 }],
+    // No transform here — morphProxyStyle (the animated style) always wins when both are in
+    // the same style array, so the centering offsets live there instead; see its comment.
     zIndex: 10,
   },
   morphGlow: {
