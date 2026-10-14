@@ -1,7 +1,9 @@
 // Dependencies: expo-linear-gradient, react-native-svg, @expo/vector-icons, expo-blur,
 // @expo-google-fonts/inter, react-native-reanimated
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  Animated as RNAnimated,
+  Easing as RNEasing,
   Image,
   Pressable,
   SafeAreaView,
@@ -57,12 +59,94 @@ const responseStars = [
   [80, 84.8], [76, 90], [80, 90.2],
 ] as const;
 
+// For animating an SVG prop (strokeOpacity) that isn't part of RN's native-driver style set.
+const AnimatedPath = RNAnimated.createAnimatedComponent(Path);
+
+// Twinkles (opacity+scale pulse) AND drifts (small position float) at once, per Justice's
+// request — purely additive motion, no change to each dot's base left/top/size/color.
+function Shimmer({
+  left,
+  top,
+  size,
+  baseOpacity,
+  delay,
+  dotStyle,
+}: {
+  left: number | string;
+  top: number | string;
+  size: number;
+  baseOpacity: number;
+  delay: number;
+  dotStyle: any;
+}) {
+  const twinkle = useRef(new RNAnimated.Value(baseOpacity * 0.3)).current;
+  const drift = useRef(new RNAnimated.Value(0)).current;
+
+  useEffect(() => {
+    const twinkleAnim = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.delay(delay),
+        RNAnimated.timing(twinkle, { toValue: baseOpacity, duration: 1500, easing: RNEasing.inOut(RNEasing.ease), useNativeDriver: true }),
+        RNAnimated.timing(twinkle, { toValue: baseOpacity * 0.25, duration: 2100, easing: RNEasing.inOut(RNEasing.ease), useNativeDriver: true }),
+      ]),
+    );
+    const driftAnim = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(drift, { toValue: 1, duration: 4200 + delay, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: true }),
+        RNAnimated.timing(drift, { toValue: 0, duration: 4200 + delay, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: true }),
+      ]),
+    );
+    twinkleAnim.start();
+    driftAnim.start();
+    return () => { twinkleAnim.stop(); driftAnim.stop(); };
+  }, [delay, baseOpacity, twinkle, drift]);
+
+  const translateY = drift.interpolate({ inputRange: [0, 1], outputRange: [0, -6] });
+  const translateX = drift.interpolate({ inputRange: [0, 1], outputRange: [0, 3] });
+  const scale = twinkle.interpolate({ inputRange: [baseOpacity * 0.25, baseOpacity], outputRange: [0.7, 1.2] });
+
+  return (
+    <RNAnimated.View
+      pointerEvents="none"
+      style={[
+        dotStyle,
+        {
+          left,
+          top,
+          width: size,
+          height: size,
+          opacity: twinkle,
+          transform: [{ translateX }, { translateY }, { scale }],
+        },
+      ]}
+    />
+  );
+}
+
 export default function App() {
   const { width, height } = useWindowDimensions();
   const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium });
   const [menuOpen, setMenuOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>('entry');
   const morph = useSharedValue(0);
+
+  // Slow 0→1→0 breathing driver shared by both domes' glow stroke + a subtle vertical bob —
+  // only the dome's existing colored glow stroke pulses, nothing about its shape/position at
+  // rest changes.
+  const domeBreath = useRef(new RNAnimated.Value(0)).current;
+  useEffect(() => {
+    const breathAnim = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(domeBreath, { toValue: 1, duration: 3200, easing: RNEasing.inOut(RNEasing.ease), useNativeDriver: false }),
+        RNAnimated.timing(domeBreath, { toValue: 0, duration: 3200, easing: RNEasing.inOut(RNEasing.ease), useNativeDriver: false }),
+      ]),
+    );
+    breathAnim.start();
+    return () => breathAnim.stop();
+  }, [domeBreath]);
+  const entryGlowOpacity = domeBreath.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.2] });
+  const responseGlowOpacity = domeBreath.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.6] });
+  const domeBob = domeBreath.interpolate({ inputRange: [0, 1], outputRange: [0, -4] });
 
   // Morph target geometry: the entry pill (148x45, centered ~49.3% down) traveling and
   // shrinking into the orb's resting spot (61x61 circle, bottom:34, centered). Only
@@ -133,15 +217,17 @@ export default function App() {
               style={StyleSheet.absoluteFill}
             />
             {entryStars.map((star, index) => (
-              <View
+              <Shimmer
                 key={index}
-                style={[
-                  styles.star,
-                  { left: star.left, top: star.top, width: star.size, height: star.size, opacity: star.opacity },
-                ]}
+                left={star.left}
+                top={star.top}
+                size={star.size}
+                baseOpacity={star.opacity}
+                delay={(index % 8) * 280}
+                dotStyle={styles.star}
               />
             ))}
-            <View pointerEvents="none" style={styles.horizon}>
+            <RNAnimated.View pointerEvents="none" style={[styles.horizon, { transform: [{ translateY: domeBob }] }]}>
               <Svg width="100%" height="100%" viewBox="0 0 393 265" preserveAspectRatio="none">
                 <Defs>
                   <SvgGradient id="horizon-fill" x1="0" y1="0" x2="0" y2="1">
@@ -156,11 +242,11 @@ export default function App() {
                   strokeOpacity={0.08}
                   strokeWidth={2}
                 />
-                <Path
+                <AnimatedPath
                   d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225"
                   fill="none"
                   stroke="#8e71ff"
-                  strokeOpacity={0.12}
+                  strokeOpacity={entryGlowOpacity as any}
                   strokeWidth={18}
                 />
                 <Path
@@ -183,7 +269,7 @@ export default function App() {
                   strokeWidth={5}
                 />
               </Svg>
-            </View>
+            </RNAnimated.View>
           </Animated.View>
         )}
 
@@ -197,12 +283,17 @@ export default function App() {
               style={StyleSheet.absoluteFill}
             />
             {responseStars.map(([x, y], index) => (
-              <View
+              <Shimmer
                 key={index}
-                style={[styles.responseStar, { left: (width * x) / 100, top: (height * y) / 100 }]}
+                left={(width * x) / 100}
+                top={(height * y) / 100}
+                size={3}
+                baseOpacity={0.45}
+                delay={(index % 8) * 280}
+                dotStyle={styles.responseStar}
               />
             ))}
-            <View pointerEvents="none" style={styles.responseHorizon}>
+            <RNAnimated.View pointerEvents="none" style={[styles.responseHorizon, { transform: [{ translateY: domeBob }] }]}>
               <Svg width="100%" height="100%" viewBox="0 0 393 265" preserveAspectRatio="none">
                 <Defs>
                   <SvgGradient id="horizon-fill-response" x1="0" y1="0" x2="0" y2="1">
@@ -217,11 +308,11 @@ export default function App() {
                   strokeOpacity={0.08}
                   strokeWidth={2}
                 />
-                <Path
+                <AnimatedPath
                   d="M-25 85 Q196 -65 418 85"
                   fill="none"
                   stroke="#387eff"
-                  strokeOpacity={0.45}
+                  strokeOpacity={responseGlowOpacity as any}
                   strokeWidth={5}
                 />
                 <Path
@@ -244,7 +335,7 @@ export default function App() {
                   strokeWidth={5}
                 />
               </Svg>
-            </View>
+            </RNAnimated.View>
           </Animated.View>
         )}
 
