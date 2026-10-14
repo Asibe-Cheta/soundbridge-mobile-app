@@ -692,12 +692,18 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 38 * DOME_SCALE, left: -72 * DOME_SCALE, width: 520 * DOME_SCALE, height: 170 * DOME_SCALE,
     borderTopWidth: 3 * DOME_SCALE, borderTopLeftRadius: 260 * DOME_SCALE, borderTopRightRadius: 260 * DOME_SCALE,
     borderTopColor: 'rgba(190,174,255,0.82)',
+    // Near-invisible non-zero background — a border-only view with no fill gets an
+    // unreliable/degenerate CALayer shadowPath on iOS, collapsing the blur below to
+    // almost nothing. This gives iOS real content to compute a proper shadow path
+    // from without changing anything visible.
+    backgroundColor: 'rgba(0,0,0,0.001)',
     shadowColor: '#9b83ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 12 * DOME_SCALE,
   },
   risingGlow: {
     position: 'absolute', top: 31 * DOME_SCALE, left: -72 * DOME_SCALE, width: 520 * DOME_SCALE, height: 170 * DOME_SCALE,
     borderTopWidth: 18 * DOME_SCALE, borderTopLeftRadius: 260 * DOME_SCALE, borderTopRightRadius: 260 * DOME_SCALE,
     borderTopColor: 'rgba(116,88,255,0.28)',
+    backgroundColor: 'rgba(0,0,0,0.001)',
     shadowColor: '#8065ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 25 * DOME_SCALE,
   },
   shimmerField: {
