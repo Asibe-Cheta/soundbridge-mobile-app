@@ -177,6 +177,7 @@ import PromotionReachDemoScreen from './src/screens/PromotionReachDemoScreen'; /
 import WhosComingDemoScreen from './src/screens/WhosComingDemoScreen'; // TEMPORARY — ad demo, see file header
 import BridgeRedesignTestScreen from './src/screens/BridgeRedesignTestScreen'; // TEMPORARY — private preview, see file header
 import BridgeRedesignTestScreenV2 from './src/screens/BridgeRedesignTestScreenV2'; // TEMPORARY — private preview, fresh screen file per Justice's request
+import AuraBridgeScreen from './src/screens/AuraBridgeScreen'; // TEMPORARY — verbatim Aura-generated screen, unmodified, see Justice's request
 import EventPollSetupScreen from './src/screens/EventPollSetupScreen';
 import PollResultsScreen from './src/screens/PollResultsScreen';
 import CreatePlaylistScreen from './src/screens/CreatePlaylistScreen';
@@ -1396,6 +1397,7 @@ function AppNavigator() {
             <Stack.Screen name="WhosComingDemo" component={WhosComingDemoScreen} options={{ headerShown: false }} />
             <Stack.Screen name="BridgeRedesignTest" component={BridgeRedesignTestScreen} options={{ headerShown: false }} />
             <Stack.Screen name="BridgeRedesignTestV2" component={BridgeRedesignTestScreenV2} options={{ headerShown: false }} />
+            <Stack.Screen name="AuraBridge" component={AuraBridgeScreen} options={{ headerShown: false }} />
             <Stack.Screen name="BrandingCustomization" component={BrandingCustomizationScreen} />
             <Stack.Screen name="TracksList" component={TracksListScreen} />
             <Stack.Screen name="FollowersList" component={FollowersListScreen} />
