@@ -64,8 +64,6 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>('entry');
   const morph = useSharedValue(0);
 
-  if (!fontsLoaded) return <View style={styles.screen} />;
-
   // Morph target geometry: the entry pill (148x45, centered ~49.3% down) traveling and
   // shrinking into the orb's resting spot (61x61 circle, bottom:34, centered). Only
   // transform (translateY/scaleX/scaleY) is animated here — never width/height/borderRadius
@@ -101,6 +99,12 @@ export default function App() {
   const responseFadeStyle = useAnimatedStyle(() => ({
     opacity: interpolate(morph.value, [0.6, 1], [0, 1], Extrapolation.CLAMP),
   }));
+
+  // Moved below all hook calls — an early return before useAnimatedStyle calls meant this
+  // component called a different number of hooks on the font-not-loaded-yet render vs every
+  // render after, which is exactly what crashed the app ("Rendered more hooks than during
+  // the previous render"). All hooks must run unconditionally on every render.
+  if (!fontsLoaded) return <View style={styles.screen} />;
 
   return (
     <TouchableWithoutFeedback onPress={() => setMenuOpen(false)} accessible={false}>
