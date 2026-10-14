@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { Feather } from '@expo/vector-icons';
 import Svg, { Defs, LinearGradient as SvgGradient, Path, Stop } from 'react-native-svg';
 
@@ -104,11 +105,13 @@ export default function App() {
             accessibilityRole="button"
             onPress={() => setAnswered(!answered)}
             activeOpacity={0.8}
-            style={styles.typeButton}
+            style={styles.typeButtonShadow}
           >
-            <Text style={styles.typeText}>
-              {answered ? 'Someone like you.' : "What's your type?"}
-            </Text>
+            <BlurView intensity={15} tint="dark" style={styles.typeButton}>
+              <Text style={styles.typeText}>
+                {answered ? 'Someone like you.' : "What's your type?"}
+              </Text>
+            </BlurView>
           </TouchableOpacity>
           <View pointerEvents="none" style={styles.nearStar} />
         </View>
@@ -209,37 +212,43 @@ const styles = StyleSheet.create({
     transform: [{ translateX: -74 }, { translateY: -22.5 }],
     zIndex: 10,
   },
+  // Ported from the actual CSS this time: the halo is a `::before` with `filter: blur(18px)`,
+  // not a box-shadow. box-shadow (RN's shadowRadius) only casts a blurred copy OUTSIDE a
+  // shape while the shape's own fill edge stays perfectly sharp — that mismatch, not a value
+  // being too low, is why every shadowRadius boost still showed a visible rounded-rect edge.
+  // `filter: blur()` blurs the element's own pixels in place, which RN's `filter` style
+  // (Fabric/New Architecture, RN 0.78+) supports directly.
   glow: {
     position: 'absolute',
-    top: -10,
-    bottom: -10,
-    left: -12,
-    right: -12,
-    borderRadius: 40,
-    // Lower fill alpha so the flat rect's own edge stops being the visible shape — iOS's
-    // native shadow blur renders markedly weaker than the same shadowRadius does in a CSS
-    // preview (confirmed on the other Bridge screens via Aura/Figma's own computed CSS
-    // matching already-ported values exactly), so the blur alone wasn't strong enough to
-    // melt that edge away. Boosting shadowRadius/shadowOpacity compensates.
-    backgroundColor: 'rgba(121,96,255,0.03)',
-    shadowColor: '#7960ff',
-    shadowOpacity: 1,
-    shadowRadius: 48,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  typeButton: {
+    top: -12,
+    bottom: -12,
+    left: -20,
+    right: -20,
+    borderRadius: 999,
+    backgroundColor: 'rgba(121,96,255,0.5)',
+    filter: [{ blur: 18 }],
+  } as any,
+  // Shadow lives on this outer wrapper; the BlurView (backdrop-filter equivalent) below
+  // needs overflow:'hidden' to clip to the pill shape, and overflow:'hidden' clips a view's
+  // own shadow on iOS too, so the two can't share one layer (same split used elsewhere).
+  typeButtonShadow: {
     width: 148,
     height: 45,
-    alignItems: 'center',
-    justifyContent: 'center',
     borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(163,145,255,0.3)',
-    backgroundColor: 'rgba(104,81,204,0.35)',
     shadowColor: '#7f60ff',
     shadowOpacity: 0.35,
     shadowRadius: 22,
     shadowOffset: { width: 0, height: 0 },
+  },
+  typeButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(163,145,255,0.3)',
+    backgroundColor: 'rgba(104,81,204,0.35)',
   },
   typeText: { fontSize: 12, fontWeight: '500', color: '#c1b1ff' },
   nearStar: {
