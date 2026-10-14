@@ -551,6 +551,11 @@ export default function BridgeRedesignTestScreenV2() {
           </View>
         </View>
 
+        {/* TEMPORARY — delivery proof marker, delete once build-reaches-device is confirmed */}
+        <View style={{ backgroundColor: '#FF0000', paddingVertical: 10, alignItems: 'center' }}>
+          <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '900' }}>BUILD MARKER — V2.0016</Text>
+        </View>
+
         {phase === 'chat' && (
           <ScrollView
             style={styles.chatScroll}
