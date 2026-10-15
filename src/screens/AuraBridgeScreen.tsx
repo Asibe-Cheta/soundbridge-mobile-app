@@ -37,17 +37,19 @@ import Svg, {
 
 type Phase = 'entry' | 'morphing' | 'response';
 
+// Sizes/opacities boosted from the original Aura values (2-4px, 0.1-0.45) per Justice's
+// request to make the shimmers clearly visible — positions unchanged.
 const entryStars = [
-  { left: '23%', top: '33.5%', size: 3, opacity: 0.35 },
-  { left: '57%', top: '34.8%', size: 4, opacity: 0.4 },
-  { left: '59%', top: '34%', size: 2, opacity: 0.2 },
-  { left: '27.5%', top: '41.9%', size: 3, opacity: 0.45 },
-  { left: '25.5%', top: '42.7%', size: 2, opacity: 0.3 },
-  { left: '43%', top: '42.7%', size: 2, opacity: 0.15 },
-  { left: '46%', top: '42.1%', size: 2, opacity: 0.15 },
-  { left: '61%', top: '43%', size: 3, opacity: 0.25 },
-  { left: '63%', top: '42.2%', size: 2, opacity: 0.2 },
-  { left: '65%', top: '41.5%', size: 2, opacity: 0.1 },
+  { left: '23%', top: '33.5%', size: 5, opacity: 0.7 },
+  { left: '57%', top: '34.8%', size: 6, opacity: 0.8 },
+  { left: '59%', top: '34%', size: 4, opacity: 0.5 },
+  { left: '27.5%', top: '41.9%', size: 5, opacity: 0.85 },
+  { left: '25.5%', top: '42.7%', size: 4, opacity: 0.6 },
+  { left: '43%', top: '42.7%', size: 4, opacity: 0.45 },
+  { left: '46%', top: '42.1%', size: 4, opacity: 0.45 },
+  { left: '61%', top: '43%', size: 5, opacity: 0.55 },
+  { left: '63%', top: '42.2%', size: 4, opacity: 0.5 },
+  { left: '65%', top: '41.5%', size: 4, opacity: 0.4 },
 ] as const;
 
 // Response-phase star field — ported from Aura's own RN conversion (pixel-position pairs,
@@ -121,7 +123,8 @@ function Shimmer({
 }
 
 // Literal conversion of Aura's @keyframes dome-pulse: a ring expanding from the orb's
-// position (scale 1→14) while fading in then out (opacity 0→.4→.8→.65→0), 9s linear loop,
+// position (scale 1→14) while fading in then out (opacity 0→.4→.8→.65→0), sped up from
+// Aura's original 9s to 5.5s per Justice's request, linear loop,
 // two instances offset by half a cycle. Only opacity/transform are animated (both
 // native-driver-supported) — unlike the strokeOpacity approach tried earlier, which never
 // visibly animated.
@@ -132,7 +135,7 @@ function DomePulseRing({ startDelay }: { startDelay: number }) {
     let loopAnim: RNAnimated.CompositeAnimation | null = null;
     const timer = setTimeout(() => {
       loopAnim = RNAnimated.loop(
-        RNAnimated.timing(progress, { toValue: 1, duration: 9000, easing: RNEasing.linear, useNativeDriver: true }),
+        RNAnimated.timing(progress, { toValue: 1, duration: 5500, easing: RNEasing.linear, useNativeDriver: true }),
       );
       loopAnim.start();
     }, startDelay);
@@ -166,6 +169,23 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>('entry');
   const morph = useSharedValue(0);
 
+  // Entry screen's dome pulsing in place — opacity + a uniform scale (keeps the curve's own
+  // proportions intact, never distorting it into anything else), unlike the response screen's
+  // circles. Only opacity/transform are animated (native-driver-supported), same reliable
+  // technique as DomePulseRing, since the earlier strokeOpacity attempt never actually rendered.
+  const entryDomePulse = useRef(new RNAnimated.Value(0)).current;
+  useEffect(() => {
+    const pulseAnim = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(entryDomePulse, { toValue: 1, duration: 1800, easing: RNEasing.inOut(RNEasing.ease), useNativeDriver: true }),
+        RNAnimated.timing(entryDomePulse, { toValue: 0, duration: 1800, easing: RNEasing.inOut(RNEasing.ease), useNativeDriver: true }),
+      ]),
+    );
+    pulseAnim.start();
+    return () => pulseAnim.stop();
+  }, [entryDomePulse]);
+  const entryDomeOpacity = entryDomePulse.interpolate({ inputRange: [0, 1], outputRange: [0.75, 1] });
+  const entryDomeScale = entryDomePulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
 
   // Morph target geometry: the entry pill (148x45, centered ~49.3% down) traveling and
   // shrinking into the orb's resting spot (61x61 circle, bottom:34, centered). Only
@@ -246,7 +266,10 @@ export default function App() {
                 dotStyle={styles.star}
               />
             ))}
-            <View pointerEvents="none" style={styles.horizon}>
+            <RNAnimated.View
+              pointerEvents="none"
+              style={[styles.horizon, { opacity: entryDomeOpacity, transform: [{ scale: entryDomeScale }] }]}
+            >
               <Svg width="100%" height="100%" viewBox="0 0 393 265" preserveAspectRatio="none">
                 <Defs>
                   <SvgGradient id="horizon-fill" x1="0" y1="0" x2="0" y2="1">
@@ -288,7 +311,7 @@ export default function App() {
                   strokeWidth={5}
                 />
               </Svg>
-            </View>
+            </RNAnimated.View>
           </Animated.View>
         )}
 
@@ -306,55 +329,12 @@ export default function App() {
                 key={index}
                 left={(width * x) / 100}
                 top={(height * y) / 100}
-                size={3}
-                baseOpacity={0.45}
+                size={5}
+                baseOpacity={0.8}
                 delay={(index % 8) * 280}
                 dotStyle={styles.responseStar}
               />
             ))}
-            <View pointerEvents="none" style={styles.responseHorizon}>
-              <Svg width="100%" height="100%" viewBox="0 0 393 265" preserveAspectRatio="none">
-                <Defs>
-                  <SvgGradient id="horizon-fill-response" x1="0" y1="0" x2="0" y2="1">
-                    <Stop offset="0" stopColor="#0b1649" stopOpacity={0.5} />
-                    <Stop offset="1" stopColor="#100c48" stopOpacity={0.05} />
-                  </SvgGradient>
-                </Defs>
-                <Path
-                  d="M-25 85 Q196 -65 418 85 L418 265 L-25 265Z"
-                  fill="url(#horizon-fill-response)"
-                  stroke="#43309b"
-                  strokeOpacity={0.08}
-                  strokeWidth={2}
-                />
-                <Path
-                  d="M-25 85 Q196 -65 418 85"
-                  fill="none"
-                  stroke="#387eff"
-                  strokeOpacity={0.45}
-                  strokeWidth={5}
-                />
-                <Path
-                  d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225 L419 265 L-25 265Z"
-                  fill="#110c49"
-                  fillOpacity={0}
-                />
-                <Path
-                  d="M-25 85 Q196 -65 418 85"
-                  fill="none"
-                  stroke="#549aff"
-                  strokeOpacity={0.5}
-                  strokeWidth={2}
-                />
-                <Path
-                  d="M-25 232 Q26 191 89 191 L304 191 Q369 192 419 233"
-                  fill="none"
-                  stroke="#493095"
-                  strokeOpacity={0}
-                  strokeWidth={5}
-                />
-              </Svg>
-            </View>
           </Animated.View>
         )}
 
@@ -444,7 +424,7 @@ export default function App() {
         {phase !== 'entry' && (
           <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { overflow: 'hidden' }, orbRevealStyle]}>
             <DomePulseRing startDelay={0} />
-            <DomePulseRing startDelay={4500} />
+            <DomePulseRing startDelay={2750} />
           </Animated.View>
         )}
 
@@ -530,13 +510,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 3,
     height: 3,
-    borderRadius: 2,
-    backgroundColor: 'rgba(224,242,254,0.45)',
+    borderRadius: 10,
+    // Near-opaque — Shimmer's own `opacity` prop (up to baseOpacity) already handles the
+    // twinkle fade, so a low alpha baked in here on top of that was making the dots much
+    // dimmer than intended (the two multiply).
+    backgroundColor: 'rgba(224,242,254,0.95)',
   },
   horizon: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '31%' },
-  // Reverted to the original SVG dome per Justice's request — Aura's plain-view version
-  // (a single huge-borderRadius box) looked worse than this, which was already right.
-  responseHorizon: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '40%' },
   // Shrinks/travels via transform only (see startMorph's comment) from the entry pill's
   // geometry down into the orb's resting spot — never a real circle mid-transition since
   // borderRadius stays a flat 9999 throughout, same tradeoff the original pill-to-bar morph
