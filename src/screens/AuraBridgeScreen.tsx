@@ -59,9 +59,6 @@ const responseStars = [
   [80, 84.8], [76, 90], [80, 90.2],
 ] as const;
 
-// For animating an SVG prop (strokeOpacity) that isn't part of RN's native-driver style set.
-const AnimatedPath = RNAnimated.createAnimatedComponent(Path);
-
 // Twinkles (opacity+scale pulse) AND drifts (small position float) at once, per Justice's
 // request — purely additive motion, no change to each dot's base left/top/size/color.
 function Shimmer({
@@ -123,6 +120,45 @@ function Shimmer({
   );
 }
 
+// Literal conversion of Aura's @keyframes dome-pulse: a ring expanding from the orb's
+// position (scale 1→14) while fading in then out (opacity 0→.4→.8→.65→0), 9s linear loop,
+// two instances offset by half a cycle. Only opacity/transform are animated (both
+// native-driver-supported) — unlike the strokeOpacity approach tried earlier, which never
+// visibly animated.
+function DomePulseRing({ startDelay }: { startDelay: number }) {
+  const progress = useRef(new RNAnimated.Value(0)).current;
+
+  useEffect(() => {
+    let loopAnim: RNAnimated.CompositeAnimation | null = null;
+    const timer = setTimeout(() => {
+      loopAnim = RNAnimated.loop(
+        RNAnimated.timing(progress, { toValue: 1, duration: 9000, easing: RNEasing.linear, useNativeDriver: true }),
+      );
+      loopAnim.start();
+    }, startDelay);
+    return () => { clearTimeout(timer); loopAnim?.stop(); };
+  }, [startDelay, progress]);
+
+  const opacity = progress.interpolate({
+    inputRange: [0, 0.08, 0.45, 0.75, 1],
+    outputRange: [0, 0.4, 0.8, 0.65, 0],
+  });
+  const scale = progress.interpolate({
+    inputRange: [0, 0.08, 0.45, 0.75, 1],
+    outputRange: [1, 1.3, 5.5, 10, 14],
+  });
+
+  return (
+    <RNAnimated.View
+      pointerEvents="none"
+      style={[
+        styles.domePulseRing,
+        { opacity, transform: [{ translateX: -32 }, { scale }] },
+      ]}
+    />
+  );
+}
+
 export default function App() {
   const { width, height } = useWindowDimensions();
   const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium });
@@ -130,23 +166,6 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>('entry');
   const morph = useSharedValue(0);
 
-  // Slow 0→1→0 breathing driver shared by both domes' glow stroke + a subtle vertical bob —
-  // only the dome's existing colored glow stroke pulses, nothing about its shape/position at
-  // rest changes.
-  const domeBreath = useRef(new RNAnimated.Value(0)).current;
-  useEffect(() => {
-    const breathAnim = RNAnimated.loop(
-      RNAnimated.sequence([
-        RNAnimated.timing(domeBreath, { toValue: 1, duration: 3200, easing: RNEasing.inOut(RNEasing.ease), useNativeDriver: false }),
-        RNAnimated.timing(domeBreath, { toValue: 0, duration: 3200, easing: RNEasing.inOut(RNEasing.ease), useNativeDriver: false }),
-      ]),
-    );
-    breathAnim.start();
-    return () => breathAnim.stop();
-  }, [domeBreath]);
-  const entryGlowOpacity = domeBreath.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.2] });
-  const responseGlowOpacity = domeBreath.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.6] });
-  const domeBob = domeBreath.interpolate({ inputRange: [0, 1], outputRange: [0, -4] });
 
   // Morph target geometry: the entry pill (148x45, centered ~49.3% down) traveling and
   // shrinking into the orb's resting spot (61x61 circle, bottom:34, centered). Only
@@ -227,7 +246,7 @@ export default function App() {
                 dotStyle={styles.star}
               />
             ))}
-            <RNAnimated.View pointerEvents="none" style={[styles.horizon, { transform: [{ translateY: domeBob }] }]}>
+            <View pointerEvents="none" style={styles.horizon}>
               <Svg width="100%" height="100%" viewBox="0 0 393 265" preserveAspectRatio="none">
                 <Defs>
                   <SvgGradient id="horizon-fill" x1="0" y1="0" x2="0" y2="1">
@@ -242,11 +261,11 @@ export default function App() {
                   strokeOpacity={0.08}
                   strokeWidth={2}
                 />
-                <AnimatedPath
+                <Path
                   d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225"
                   fill="none"
                   stroke="#8e71ff"
-                  strokeOpacity={entryGlowOpacity as any}
+                  strokeOpacity={0.12}
                   strokeWidth={18}
                 />
                 <Path
@@ -269,7 +288,7 @@ export default function App() {
                   strokeWidth={5}
                 />
               </Svg>
-            </RNAnimated.View>
+            </View>
           </Animated.View>
         )}
 
@@ -293,7 +312,7 @@ export default function App() {
                 dotStyle={styles.responseStar}
               />
             ))}
-            <RNAnimated.View pointerEvents="none" style={[styles.responseHorizon, { transform: [{ translateY: domeBob }] }]}>
+            <View pointerEvents="none" style={styles.responseHorizon}>
               <Svg width="100%" height="100%" viewBox="0 0 393 265" preserveAspectRatio="none">
                 <Defs>
                   <SvgGradient id="horizon-fill-response" x1="0" y1="0" x2="0" y2="1">
@@ -308,11 +327,11 @@ export default function App() {
                   strokeOpacity={0.08}
                   strokeWidth={2}
                 />
-                <AnimatedPath
+                <Path
                   d="M-25 85 Q196 -65 418 85"
                   fill="none"
                   stroke="#387eff"
-                  strokeOpacity={responseGlowOpacity as any}
+                  strokeOpacity={0.45}
                   strokeWidth={5}
                 />
                 <Path
@@ -335,7 +354,7 @@ export default function App() {
                   strokeWidth={5}
                 />
               </Svg>
-            </RNAnimated.View>
+            </View>
           </Animated.View>
         )}
 
@@ -419,6 +438,13 @@ export default function App() {
                 Generating responses
               </Text>
             </Pressable>
+          </Animated.View>
+        )}
+
+        {phase !== 'entry' && (
+          <Animated.View pointerEvents="none" style={orbRevealStyle}>
+            <DomePulseRing startDelay={0} />
+            <DomePulseRing startDelay={4500} />
           </Animated.View>
         )}
 
@@ -575,4 +601,16 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   orbGradient: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  // Base box for DomePulseRing — no transform here (see its own comment re: the earlier
+  // transform-merge bug); left:'50%' + the animated translateX:-32 together center it.
+  domePulseRing: {
+    position: 'absolute',
+    bottom: 22,
+    left: '50%',
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 1,
+    borderColor: 'rgba(96,165,250,0.5)',
+  },
 });
