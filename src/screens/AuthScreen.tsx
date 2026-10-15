@@ -663,6 +663,7 @@ export default function AuthScreen() {
                 secureTextEntry={!showPassword}
                 autoCapitalize="none"
                 autoCorrect={false}
+                importantForAutofill="no"
               />
               <TouchableOpacity
                 style={styles.eyeButton}
@@ -695,6 +696,7 @@ export default function AuthScreen() {
             secureTextEntry={!showPassword}
             autoCapitalize="none"
             autoCorrect={false}
+            importantForAutofill="no"
           />
           <TouchableOpacity
             style={styles.eyeButton}
