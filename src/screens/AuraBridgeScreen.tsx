@@ -7,9 +7,11 @@ import {
   Image,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TouchableOpacity,
   TouchableWithoutFeedback,
   useWindowDimensions,
   View,
@@ -35,7 +37,7 @@ import Svg, {
   Stop,
 } from 'react-native-svg';
 
-type Phase = 'entry' | 'morphing' | 'response';
+type Phase = 'entry' | 'morphing' | 'response' | 'results';
 
 // Sizes/opacities boosted from the original Aura values (2-4px, 0.1-0.45) per Justice's
 // request to make the shimmers clearly visible — positions unchanged.
@@ -162,12 +164,200 @@ function DomePulseRing({ startDelay }: { startDelay: number }) {
   );
 }
 
+// ─── Results cards — ported verbatim from BridgeRedesignTestScreenV2.tsx (same mock data,
+// same components/styles) per Justice's request that the results screen match exactly. ────
+function CountUpNumber({ to, suffix = '%', style }: { to: number; suffix?: string; style?: any }) {
+  const [display, setDisplay] = useState(0);
+  useEffect(() => {
+    const DURATION = 900;
+    const start = Date.now();
+    let frame: ReturnType<typeof requestAnimationFrame>;
+    const tick = () => {
+      const elapsed = Date.now() - start;
+      const t = Math.min(1, elapsed / DURATION);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(Math.round(eased * to));
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [to]);
+
+  return (
+    <Text style={style}>
+      {display}
+      <Text style={[style, styles.statSuffix]}>{suffix}</Text>
+    </Text>
+  );
+}
+
+const BELL_CURVE = [2,3,4,6,9,13,19,27,37,48,58,67,73,75,74,70,63,54,44,34,25,17,11,7,4,3,2];
+
+interface StatTab {
+  key: string;
+  tabLabel: string;
+  value: number;
+  suffix: string;
+  caption: string;
+}
+
+function StatToggleCard({
+  tabs,
+  maturityLeft,
+  maturityRight,
+}: {
+  tabs: [StatTab, StatTab];
+  maturityLeft: { title: string; sub: string };
+  maturityRight: { title: string; sub: string };
+}) {
+  const [activeKey, setActiveKey] = useState(tabs[0].key);
+  const active = tabs.find(t => t.key === activeKey) ?? tabs[0];
+
+  return (
+    <View style={styles.insightCardWrap}>
+      <View style={styles.tabPill}>
+        {tabs.map(tab => (
+          activeKey === tab.key ? (
+            <LinearGradient
+              key={tab.key}
+              colors={['#35C9FC', '#1B6FFF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.tabOptionActive}
+            >
+              <TouchableOpacity style={styles.tabOptionActiveTouch} onPress={() => setActiveKey(tab.key)}>
+                <Text style={styles.tabOptionTextActive}>{tab.tabLabel}</Text>
+              </TouchableOpacity>
+            </LinearGradient>
+          ) : (
+            <TouchableOpacity key={tab.key} style={styles.tabOption} onPress={() => setActiveKey(tab.key)}>
+              <Text style={styles.tabOptionText}>{tab.tabLabel}</Text>
+            </TouchableOpacity>
+          )
+        ))}
+      </View>
+
+      <View style={styles.moreOptionsPill}>
+        <View style={styles.moreOptionsDot} />
+        <View style={styles.moreOptionsDot} />
+        <View style={styles.moreOptionsDot} />
+      </View>
+
+      <LinearGradient
+        colors={['#333563', '#202A4D', '#2D3565']}
+        locations={[0, 0.7, 1]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.statCard}
+      >
+        <TouchableOpacity style={styles.statCardExpand} activeOpacity={0.7}>
+          <Ionicons name="arrow-up-outline" size={16} color="#F4F2FF" style={{ transform: [{ rotate: '45deg' }] }} />
+        </TouchableOpacity>
+        <CountUpNumber to={active.value} suffix={active.suffix} style={styles.statNumber} />
+        <Text style={styles.statLabel}>{active.caption}</Text>
+        <View style={styles.bellCurveRow}>
+          {BELL_CURVE.map((h, i) => (
+            <View
+              key={i}
+              style={[styles.bellCurveBar, { height: Math.max(2, h * 0.9), opacity: 0.3 + (h / 75) * 0.7 }]}
+            />
+          ))}
+        </View>
+      </LinearGradient>
+
+      <View style={styles.maturityRow}>
+        <View style={styles.maturityPill}>
+          <MaturityRing />
+          <View>
+            <Text style={styles.maturityTitle}>{maturityLeft.title}</Text>
+            <Text style={styles.maturitySub}>{maturityLeft.sub}</Text>
+          </View>
+        </View>
+        <Ionicons name="chevron-forward-outline" size={14} color="#74788F" />
+        <View style={styles.maturityPill}>
+          <MaturityRing />
+          <View>
+            <Text style={styles.maturityTitle}>{maturityRight.title}</Text>
+            <Text style={styles.maturitySub}>{maturityRight.sub}</Text>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function MaturityRing() {
+  return (
+    <View style={styles.maturityRingOuter}>
+      <View style={styles.maturityRingInner} />
+    </View>
+  );
+}
+
+function GuidanceCard() {
+  return (
+    <View style={styles.guidanceCardWrap}>
+      <GuidanceSection
+        icon="people"
+        iconColor="#FF6FB8"
+        title="Collaboration"
+        text="Once there's more activity here, this gets specific to who you actually overlap with. Right now, the highest-leverage move is reaching out to one or two artists in a similar genre."
+      />
+      <View style={styles.guidanceDivider} />
+      <GuidanceSection
+        icon="time"
+        iconColor="#F5B84D"
+        title="Release timing"
+        text="There's no personalised timing data yet — that becomes real once there's enough release history to see a pattern. Generally, releasing consistently on the same day each cycle tends to work better than chasing a single best time."
+      />
+    </View>
+  );
+}
+
+function GuidanceSection({ icon, iconColor, title, text }: { icon: any; iconColor: string; title: string; text: string }) {
+  return (
+    <View style={styles.guidanceSection}>
+      <View style={styles.guidanceHeaderRow}>
+        <View style={[styles.guidanceIconWrap, { backgroundColor: `${iconColor}22` }]}>
+          <Ionicons name={icon} size={16} color={iconColor} />
+        </View>
+        <Text style={styles.guidanceTitle}>{title}</Text>
+        <View style={styles.guidanceBadge}>
+          <Text style={styles.guidanceBadgeText}>General guidance</Text>
+        </View>
+      </View>
+      <Text style={styles.guidanceText}>{text}</Text>
+    </View>
+  );
+}
+
+function AiBubble({ text }: { text: string }) {
+  return (
+    <View style={styles.aiBubbleRow}>
+      <BlurView intensity={30} tint="dark" style={styles.aiBubble}>
+        <Text style={styles.aiBubbleText}>{text}</Text>
+        <View style={styles.reactionRow}>
+          <View style={styles.reactionPill}><Ionicons name="heart" size={11} color="#fff" /></View>
+          <View style={styles.reactionPill}><Ionicons name="sparkles" size={11} color="#fff" /></View>
+        </View>
+      </BlurView>
+    </View>
+  );
+}
+
 export default function App() {
   const { width, height } = useWindowDimensions();
   const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium });
   const [menuOpen, setMenuOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>('entry');
   const morph = useSharedValue(0);
+
+  // Cycles 1→2→3→1... for the "Generating responses" ellipsis.
+  const [dotCount, setDotCount] = useState(1);
+  useEffect(() => {
+    const id = setInterval(() => setDotCount(d => (d % 3) + 1), 450);
+    return () => clearInterval(id);
+  }, []);
 
   // Entry screen's dome pulsing in place — opacity + a uniform scale (keeps the curve's own
   // proportions intact, never distorting it into anything else), unlike the response screen's
@@ -202,6 +392,10 @@ export default function App() {
     setPhase('morphing');
     morph.value = withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) });
     setTimeout(() => setPhase('response'), 680);
+    // "Generating" dwell time before the results cards appear — same mock-delay idea as the
+    // other Bridge screen's startMorph, just a bit longer since there's a visible loading
+    // state (ellipsis + pulsing orb) to actually show here.
+    setTimeout(() => setPhase('results'), 3400);
   };
 
   // transform arrays in a style array fully REPLACE each other (not merged key-by-key) —
@@ -376,6 +570,33 @@ export default function App() {
               </Pressable>
             </View>
           )}
+
+          {phase === 'results' && (
+            <ScrollView
+              style={styles.resultsScroll}
+              contentContainerStyle={styles.resultsScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <AiBubble text="Here's what stands out across your plays, earnings, and audience, plus a couple of things to focus on next." />
+              <StatToggleCard
+                tabs={[
+                  { key: 'performance', tabLabel: 'Performance', value: 248, suffix: '', caption: 'Total plays across your tracks (all-time)' },
+                  { key: 'earnings', tabLabel: 'Earnings', value: 18, suffix: '%', caption: 'Earnings growth vs last month' },
+                ]}
+                maturityLeft={{ title: 'Last month', sub: '£42 earned' }}
+                maturityRight={{ title: 'This month', sub: '£50 earned' }}
+              />
+              <StatToggleCard
+                tabs={[
+                  { key: 'audience', tabLabel: 'Audience', value: 6, suffix: '', caption: 'Paying fans in your top city (Manchester)' },
+                  { key: 'followers', tabLabel: 'Followers', value: 12, suffix: '%', caption: 'Follower growth vs last month' },
+                ]}
+                maturityLeft={{ title: 'Last month', sub: '34 followers' }}
+                maturityRight={{ title: 'This month', sub: '38 followers' }}
+              />
+              <GuidanceCard />
+            </ScrollView>
+          )}
         </SafeAreaView>
 
         {phase !== 'response' && (
@@ -403,9 +624,9 @@ export default function App() {
           </Animated.View>
         )}
 
-        {phase !== 'entry' && (
+        {phase === 'response' && (
           <Animated.View
-            pointerEvents={phase === 'response' ? 'auto' : 'none'}
+            pointerEvents="auto"
             style={[styles.invitation, { top: height * 0.81 - 25.5 }, responseFadeStyle]}
           >
             <Pressable
@@ -415,20 +636,20 @@ export default function App() {
               style={styles.generatingButton}
             >
               <Text accessibilityLiveRegion="polite" style={styles.generatingText}>
-                Generating responses
+                {`Generating responses${'.'.repeat(dotCount)}`}
               </Text>
             </Pressable>
           </Animated.View>
         )}
 
-        {phase !== 'entry' && (
+        {phase === 'response' && (
           <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { overflow: 'hidden' }, orbRevealStyle]}>
             <DomePulseRing startDelay={0} />
             <DomePulseRing startDelay={2750} />
           </Animated.View>
         )}
 
-        {phase !== 'entry' && (
+        {phase === 'response' && (
           <Animated.View
             pointerEvents="none"
             accessible
@@ -593,4 +814,54 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(96,165,250,0.5)',
   },
+
+  // ─── Results cards — styles ported verbatim from BridgeRedesignTestScreenV2.tsx. ──────
+  resultsScroll: { flex: 1 },
+  resultsScrollContent: { paddingHorizontal: 18, paddingTop: 16, paddingBottom: 40, gap: 14 },
+  aiBubbleRow: { alignItems: 'flex-start' },
+  aiBubble: { maxWidth: '85%', borderRadius: 15, padding: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', overflow: 'hidden' },
+  aiBubbleText: { color: 'rgba(255,255,255,0.9)', fontSize: 14, lineHeight: 20 },
+  reactionRow: { flexDirection: 'row', gap: 6, marginTop: 10 },
+  reactionPill: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.1)' },
+
+  insightCardWrap: { gap: 10 },
+  tabPill: { flexDirection: 'row', backgroundColor: 'rgba(83,77,206,0.27)', borderRadius: 999, borderWidth: 1, borderColor: 'rgba(103,91,221,0.31)', padding: 6, gap: 6 },
+  tabOption: { flex: 1, paddingVertical: 12, borderRadius: 999, alignItems: 'center' },
+  tabOptionActive: { flex: 1, borderRadius: 999, overflow: 'hidden' },
+  tabOptionActiveTouch: { paddingVertical: 12, alignItems: 'center' },
+  tabOptionText: { color: '#BFC3F6', fontSize: 13, fontWeight: '500' },
+  tabOptionTextActive: { color: '#F4F2FF', fontSize: 13, fontWeight: '600' },
+
+  moreOptionsPill: {
+    alignSelf: 'center',
+    width: 50, height: 28, borderRadius: 999,
+    backgroundColor: '#000000',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
+  },
+  moreOptionsDot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#D5D5E7' },
+
+  statCard: { borderRadius: 30, padding: 20, paddingTop: 24, overflow: 'hidden' },
+  statCardExpand: { position: 'absolute', top: 20, right: 20, width: 49, height: 49, borderRadius: 20, backgroundColor: 'rgba(83,98,142,0.44)', alignItems: 'center', justifyContent: 'center' },
+  statNumber: { color: '#E5E4F9', fontSize: 71, fontWeight: '200' },
+  statSuffix: { color: '#68709F', fontSize: 59, fontWeight: '200' },
+  statLabel: { color: '#9BA4C6', fontSize: 13, marginTop: 4 },
+  bellCurveRow: { flexDirection: 'row', alignItems: 'flex-end', height: 80, marginTop: 16, gap: 3 },
+  bellCurveBar: { flex: 1, backgroundColor: '#36B8FF', borderRadius: 2, minHeight: 2 },
+
+  maturityRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#15161C', borderRadius: 999, borderWidth: 1, borderColor: '#2C2E3A', padding: 10, justifyContent: 'space-between' },
+  maturityPill: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#303139', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 12, flex: 1 },
+  maturityRingOuter: { width: 19, height: 19, borderRadius: 9.5, borderWidth: 2, borderColor: 'rgba(140,136,76,0.44)', alignItems: 'center', justifyContent: 'center' },
+  maturityRingInner: { width: 13, height: 13, borderRadius: 6.5, borderWidth: 2.5, borderColor: '#D2CB62' },
+  maturityTitle: { color: '#F4F2FF', fontSize: 12, fontWeight: '600' },
+  maturitySub: { color: '#A2A3B3', fontSize: 10 },
+
+  guidanceCardWrap: { backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', padding: 18, gap: 16 },
+  guidanceSection: { gap: 8 },
+  guidanceDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.08)' },
+  guidanceHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  guidanceIconWrap: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  guidanceTitle: { color: '#F4F2FF', fontSize: 14, fontWeight: '600', flex: 1 },
+  guidanceBadge: { backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  guidanceBadgeText: { color: 'rgba(244,242,255,0.55)', fontSize: 10, fontWeight: '600' },
+  guidanceText: { color: 'rgba(244,242,255,0.75)', fontSize: 13, lineHeight: 19 },
 });
