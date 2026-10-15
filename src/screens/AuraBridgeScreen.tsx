@@ -442,7 +442,7 @@ export default function App() {
         )}
 
         {phase !== 'entry' && (
-          <Animated.View pointerEvents="none" style={orbRevealStyle}>
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { overflow: 'hidden' }, orbRevealStyle]}>
             <DomePulseRing startDelay={0} />
             <DomePulseRing startDelay={4500} />
           </Animated.View>
