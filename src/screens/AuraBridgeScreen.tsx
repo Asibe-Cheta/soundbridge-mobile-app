@@ -164,6 +164,82 @@ function DomePulseRing({ startDelay }: { startDelay: number }) {
   );
 }
 
+// Entry screen's dome — rendered twice, staggered by half a cycle, so one rises and fades
+// as the other is doing the same slightly out of phase (never both fully invisible at once).
+// Each instance is the dome's own full curve shape (not a circle, per Justice's explicit
+// "with its shape, not the circle"), rising from just below its resting position and fading
+// out as it settles, then resetting — same opacity/transform-only technique already proven
+// reliable on DomePulseRing.
+function RisingDome({ startDelay }: { startDelay: number }) {
+  const progress = useRef(new RNAnimated.Value(0)).current;
+
+  useEffect(() => {
+    let loopAnim: RNAnimated.CompositeAnimation | null = null;
+    const timer = setTimeout(() => {
+      loopAnim = RNAnimated.loop(
+        RNAnimated.timing(progress, { toValue: 1, duration: 3200, easing: RNEasing.linear, useNativeDriver: true }),
+      );
+      loopAnim.start();
+    }, startDelay);
+    return () => { clearTimeout(timer); loopAnim?.stop(); };
+  }, [startDelay, progress]);
+
+  const opacity = progress.interpolate({
+    inputRange: [0, 0.18, 0.6, 1],
+    outputRange: [0, 1, 1, 0],
+  });
+  const translateY = progress.interpolate({
+    inputRange: [0, 0.18, 1],
+    outputRange: [20, 0, -10],
+  });
+
+  return (
+    <RNAnimated.View pointerEvents="none" style={[styles.horizon, { opacity, transform: [{ translateY }] }]}>
+      <Svg width="100%" height="100%" viewBox="0 0 393 265" preserveAspectRatio="none">
+        <Defs>
+          <SvgGradient id="horizon-fill" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor="#2d2085" stopOpacity={0.2} />
+            <Stop offset="1" stopColor="#100c48" stopOpacity={0.05} />
+          </SvgGradient>
+        </Defs>
+        <Path
+          d="M-30 64 Q196 -26 423 64 L423 265 L-30 265Z"
+          fill="url(#horizon-fill)"
+          stroke="#43309b"
+          strokeOpacity={0.08}
+          strokeWidth={2}
+        />
+        <Path
+          d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225"
+          fill="none"
+          stroke="#8e71ff"
+          strokeOpacity={0.12}
+          strokeWidth={18}
+        />
+        <Path
+          d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225 L419 265 L-25 265Z"
+          fill="#110c49"
+          fillOpacity={0.6}
+        />
+        <Path
+          d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225"
+          fill="none"
+          stroke="#8d74dd"
+          strokeOpacity={0.5}
+          strokeWidth={3}
+        />
+        <Path
+          d="M-25 232 Q26 191 89 191 L304 191 Q369 192 419 233"
+          fill="none"
+          stroke="#493095"
+          strokeOpacity={0.35}
+          strokeWidth={5}
+        />
+      </Svg>
+    </RNAnimated.View>
+  );
+}
+
 // ─── Results cards — ported verbatim from BridgeRedesignTestScreenV2.tsx (same mock data,
 // same components/styles) per Justice's request that the results screen match exactly. ────
 function CountUpNumber({ to, suffix = '%', style }: { to: number; suffix?: string; style?: any }) {
@@ -351,6 +427,9 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>('entry');
   const morph = useSharedValue(0);
+  // Drives the generating-state -> results crossfade (separate from `morph`, which is done
+  // once the entry pill has morphed and stays at 1 indefinitely after that).
+  const resultsAppear = useSharedValue(0);
 
   // Cycles 1→2→3→1... for the "Generating responses" ellipsis.
   const [dotCount, setDotCount] = useState(1);
@@ -358,24 +437,6 @@ export default function App() {
     const id = setInterval(() => setDotCount(d => (d % 3) + 1), 450);
     return () => clearInterval(id);
   }, []);
-
-  // Entry screen's dome pulsing in place — opacity + a uniform scale (keeps the curve's own
-  // proportions intact, never distorting it into anything else), unlike the response screen's
-  // circles. Only opacity/transform are animated (native-driver-supported), same reliable
-  // technique as DomePulseRing, since the earlier strokeOpacity attempt never actually rendered.
-  const entryDomePulse = useRef(new RNAnimated.Value(0)).current;
-  useEffect(() => {
-    const pulseAnim = RNAnimated.loop(
-      RNAnimated.sequence([
-        RNAnimated.timing(entryDomePulse, { toValue: 1, duration: 1800, easing: RNEasing.inOut(RNEasing.ease), useNativeDriver: true }),
-        RNAnimated.timing(entryDomePulse, { toValue: 0, duration: 1800, easing: RNEasing.inOut(RNEasing.ease), useNativeDriver: true }),
-      ]),
-    );
-    pulseAnim.start();
-    return () => pulseAnim.stop();
-  }, [entryDomePulse]);
-  const entryDomeOpacity = entryDomePulse.interpolate({ inputRange: [0, 1], outputRange: [0.75, 1] });
-  const entryDomeScale = entryDomePulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
 
   // Morph target geometry: the entry pill (148x45, centered ~49.3% down) traveling and
   // shrinking into the orb's resting spot (61x61 circle, bottom:34, centered). Only
@@ -395,7 +456,10 @@ export default function App() {
     // "Generating" dwell time before the results cards appear — same mock-delay idea as the
     // other Bridge screen's startMorph, just a bit longer since there's a visible loading
     // state (ellipsis + pulsing orb) to actually show here.
-    setTimeout(() => setPhase('results'), 3400);
+    setTimeout(() => {
+      setPhase('results');
+      resultsAppear.value = withTiming(1, { duration: 500, easing: Easing.out(Easing.cubic) });
+    }, 3400);
   };
 
   // transform arrays in a style array fully REPLACE each other (not merged key-by-key) —
@@ -424,6 +488,17 @@ export default function App() {
   }));
   const responseFadeStyle = useAnimatedStyle(() => ({
     opacity: interpolate(morph.value, [0.6, 1], [0, 1], Extrapolation.CLAMP),
+  }));
+  // Generating pill/orb/rings: fades in with the morph (same as responseFadeStyle), then
+  // fades back out as resultsAppear rises — a real crossfade instead of the abrupt unmount
+  // that made the transition look like it "just disappeared" with nothing replacing it.
+  const generatingGroupStyle = useAnimatedStyle(() => {
+    const fadeIn = interpolate(morph.value, [0.6, 1], [0, 1], Extrapolation.CLAMP);
+    const fadeOut = interpolate(resultsAppear.value, [0, 1], [1, 0], Extrapolation.CLAMP);
+    return { opacity: fadeIn * fadeOut };
+  });
+  const resultsFadeInStyle = useAnimatedStyle(() => ({
+    opacity: resultsAppear.value,
   }));
 
   // Moved below all hook calls — an early return before useAnimatedStyle calls meant this
@@ -460,52 +535,8 @@ export default function App() {
                 dotStyle={styles.star}
               />
             ))}
-            <RNAnimated.View
-              pointerEvents="none"
-              style={[styles.horizon, { opacity: entryDomeOpacity, transform: [{ scale: entryDomeScale }] }]}
-            >
-              <Svg width="100%" height="100%" viewBox="0 0 393 265" preserveAspectRatio="none">
-                <Defs>
-                  <SvgGradient id="horizon-fill" x1="0" y1="0" x2="0" y2="1">
-                    <Stop offset="0" stopColor="#2d2085" stopOpacity={0.2} />
-                    <Stop offset="1" stopColor="#100c48" stopOpacity={0.05} />
-                  </SvgGradient>
-                </Defs>
-                <Path
-                  d="M-30 64 Q196 -26 423 64 L423 265 L-30 265Z"
-                  fill="url(#horizon-fill)"
-                  stroke="#43309b"
-                  strokeOpacity={0.08}
-                  strokeWidth={2}
-                />
-                <Path
-                  d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225"
-                  fill="none"
-                  stroke="#8e71ff"
-                  strokeOpacity={0.12}
-                  strokeWidth={18}
-                />
-                <Path
-                  d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225 L419 265 L-25 265Z"
-                  fill="#110c49"
-                  fillOpacity={0.6}
-                />
-                <Path
-                  d="M-25 224 Q26 183 89 183 L304 183 Q369 184 419 225"
-                  fill="none"
-                  stroke="#8d74dd"
-                  strokeOpacity={0.5}
-                  strokeWidth={3}
-                />
-                <Path
-                  d="M-25 232 Q26 191 89 191 L304 191 Q369 192 419 233"
-                  fill="none"
-                  stroke="#493095"
-                  strokeOpacity={0.35}
-                  strokeWidth={5}
-                />
-              </Svg>
-            </RNAnimated.View>
+            <RisingDome startDelay={0} />
+            <RisingDome startDelay={1600} />
           </Animated.View>
         )}
 
@@ -572,34 +603,36 @@ export default function App() {
           )}
 
           {phase === 'results' && (
-            <ScrollView
-              style={styles.resultsScroll}
-              contentContainerStyle={styles.resultsScrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              <AiBubble text="Here's what stands out across your plays, earnings, and audience, plus a couple of things to focus on next." />
-              <StatToggleCard
-                tabs={[
-                  { key: 'performance', tabLabel: 'Performance', value: 248, suffix: '', caption: 'Total plays across your tracks (all-time)' },
-                  { key: 'earnings', tabLabel: 'Earnings', value: 18, suffix: '%', caption: 'Earnings growth vs last month' },
-                ]}
-                maturityLeft={{ title: 'Last month', sub: '£42 earned' }}
-                maturityRight={{ title: 'This month', sub: '£50 earned' }}
-              />
-              <StatToggleCard
-                tabs={[
-                  { key: 'audience', tabLabel: 'Audience', value: 6, suffix: '', caption: 'Paying fans in your top city (Manchester)' },
-                  { key: 'followers', tabLabel: 'Followers', value: 12, suffix: '%', caption: 'Follower growth vs last month' },
-                ]}
-                maturityLeft={{ title: 'Last month', sub: '34 followers' }}
-                maturityRight={{ title: 'This month', sub: '38 followers' }}
-              />
-              <GuidanceCard />
-            </ScrollView>
+            <Animated.View style={[{ flex: 1 }, resultsFadeInStyle]}>
+              <ScrollView
+                style={styles.resultsScroll}
+                contentContainerStyle={styles.resultsScrollContent}
+                showsVerticalScrollIndicator={false}
+              >
+                <AiBubble text="Here's what stands out across your plays, earnings, and audience, plus a couple of things to focus on next." />
+                <StatToggleCard
+                  tabs={[
+                    { key: 'performance', tabLabel: 'Performance', value: 248, suffix: '', caption: 'Total plays across your tracks (all-time)' },
+                    { key: 'earnings', tabLabel: 'Earnings', value: 18, suffix: '%', caption: 'Earnings growth vs last month' },
+                  ]}
+                  maturityLeft={{ title: 'Last month', sub: '£42 earned' }}
+                  maturityRight={{ title: 'This month', sub: '£50 earned' }}
+                />
+                <StatToggleCard
+                  tabs={[
+                    { key: 'audience', tabLabel: 'Audience', value: 6, suffix: '', caption: 'Paying fans in your top city (Manchester)' },
+                    { key: 'followers', tabLabel: 'Followers', value: 12, suffix: '%', caption: 'Follower growth vs last month' },
+                  ]}
+                  maturityLeft={{ title: 'Last month', sub: '34 followers' }}
+                  maturityRight={{ title: 'This month', sub: '38 followers' }}
+                />
+                <GuidanceCard />
+              </ScrollView>
+            </Animated.View>
           )}
         </SafeAreaView>
 
-        {phase !== 'response' && (
+        {(phase === 'entry' || phase === 'morphing') && (
           <Animated.View style={[styles.morphProxy, morphProxyStyle]}>
             <Svg pointerEvents="none" style={styles.morphGlow} width="100%" height="100%">
               <Defs>
@@ -624,10 +657,10 @@ export default function App() {
           </Animated.View>
         )}
 
-        {phase === 'response' && (
+        {(phase === 'response' || phase === 'results') && (
           <Animated.View
-            pointerEvents="auto"
-            style={[styles.invitation, { top: height * 0.81 - 25.5 }, responseFadeStyle]}
+            pointerEvents="none"
+            style={[styles.invitation, { top: height * 0.81 - 25.5 }, generatingGroupStyle]}
           >
             <Pressable
               disabled
@@ -642,19 +675,19 @@ export default function App() {
           </Animated.View>
         )}
 
-        {phase === 'response' && (
-          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { overflow: 'hidden' }, orbRevealStyle]}>
+        {(phase === 'response' || phase === 'results') && (
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { overflow: 'hidden' }, generatingGroupStyle]}>
             <DomePulseRing startDelay={0} />
             <DomePulseRing startDelay={2750} />
           </Animated.View>
         )}
 
-        {phase === 'response' && (
+        {(phase === 'response' || phase === 'results') && (
           <Animated.View
             pointerEvents="none"
             accessible
             accessibilityLabel="Generating response"
-            style={[styles.orb, orbRevealStyle]}
+            style={[styles.orb, generatingGroupStyle]}
           >
             <LinearGradient
               colors={['#17216e', '#6237c3', '#bd43d4']}
@@ -673,7 +706,10 @@ export default function App() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#050719', overflow: 'hidden' },
-  safeArea: { zIndex: 20 },
+  // flex:1 is load-bearing: without it SafeAreaView shrinks to fit the header alone, and the
+  // results ScrollView added as its sibling gets zero height to render into — which is why
+  // the results screen never appeared at all, not just "ungracefully".
+  safeArea: { flex: 1, zIndex: 20 },
   header: {
     paddingHorizontal: 24,
     paddingTop: 16,
