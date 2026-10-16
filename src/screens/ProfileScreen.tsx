@@ -2147,20 +2147,6 @@ export default function ProfileScreen() {
             <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Instruments</Text>
             <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
           </TouchableOpacity>
-          {/* Step 6: Analytics - Track Your Growth */}
-          <WalkthroughableTouchable
-            order={6}
-            name="analytics_insights"
-            text="See who's engaging with your drops, where your audience is, top-performing content, and earnings over time. Use this data to grow your network strategically and book more paid work."
-          >
-            <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('AnalyticsDashboard' as never)}>
-              <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
-                <Ionicons name="bar-chart-outline" size={18} color="#10B981" />
-              </View>
-              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>Analytics</Text>
-              <Ionicons name="chevron-forward" size={15} color={theme.colors.textSecondary} />
-            </TouchableOpacity>
-          </WalkthroughableTouchable>
           <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={() => navigation.navigate('CreatorInsightsDashboard' as never)}>
             <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
               <Ionicons name="stats-chart-outline" size={18} color="#8B5CF6" />
