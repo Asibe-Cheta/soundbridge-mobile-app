@@ -177,20 +177,24 @@ function RisingDome({ startDelay }: { startDelay: number }) {
     let loopAnim: RNAnimated.CompositeAnimation | null = null;
     const timer = setTimeout(() => {
       loopAnim = RNAnimated.loop(
-        RNAnimated.timing(progress, { toValue: 1, duration: 3200, easing: RNEasing.linear, useNativeDriver: true }),
+        RNAnimated.timing(progress, { toValue: 1, duration: 2000, easing: RNEasing.linear, useNativeDriver: true }),
       );
       loopAnim.start();
     }, startDelay);
     return () => { clearTimeout(timer); loopAnim?.stop(); };
   }, [startDelay, progress]);
 
+  // Rises a long way — from just beneath its resting spot up past the vertical middle of
+  // the screen, roughly to just under the "What's your type?" button — fading in as it
+  // leaves the bottom and fading out as it reaches the top of its travel, continuously
+  // moving throughout (no flat/static-looking plateau) so the motion stays obvious.
   const opacity = progress.interpolate({
-    inputRange: [0, 0.18, 0.6, 1],
-    outputRange: [0, 1, 1, 0],
+    inputRange: [0, 0.15, 0.75, 1],
+    outputRange: [0, 1, 0.85, 0],
   });
   const translateY = progress.interpolate({
-    inputRange: [0, 0.18, 1],
-    outputRange: [20, 0, -10],
+    inputRange: [0, 1],
+    outputRange: [50, -240],
   });
 
   return (
@@ -536,7 +540,7 @@ export default function App() {
               />
             ))}
             <RisingDome startDelay={0} />
-            <RisingDome startDelay={1600} />
+            <RisingDome startDelay={1000} />
           </Animated.View>
         )}
 
@@ -563,7 +567,7 @@ export default function App() {
           </Animated.View>
         )}
 
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} pointerEvents="box-none">
           <View style={styles.header}>
             <View style={styles.headerPill}>
               <Pressable
