@@ -169,6 +169,14 @@ export class AnalyticsService {
   }
 
   /**
+   * Force an immediate flush instead of waiting for the 30s interval — used to verify
+   * a test event actually reaches the backend (VOTE_FOR_SOUNDBRIDGE.MD Step 7/8).
+   */
+  async flushNow(): Promise<void> {
+    await this.flushEvents();
+  }
+
+  /**
    * Clear events queue
    */
   clearQueue(): void {

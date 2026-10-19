@@ -139,6 +139,7 @@ class DeepLinkingService {
     'ig-live-sept4': 'CampaignIGLive',
     'video-content-teaser': 'CampaignVideoTease',
     'earning-reminder': 'CampaignEarningReminder',
+    'vote': 'Vote',
   };
 
   private async parseUrl(url: string): Promise<DeepLinkData | null> {
@@ -232,6 +233,9 @@ class DeepLinkingService {
         case 'campaigns':
         case 'campaign':
           return this.parseCampaignUrl(rest);
+
+        case 'vote':
+          return await this.parseVoteUrl();
 
         default:
           console.log('⚠️ Unknown deep link section:', section);
@@ -431,6 +435,26 @@ class DeepLinkingService {
   resolveCampaignScreen(slug: string | undefined): string | undefined {
     if (!slug) return undefined;
     return DeepLinkingService.CAMPAIGN_SCREENS[slug];
+  }
+
+  /**
+   * /vote — "Vote for SoundBridge" campaign (VOTE_FOR_SOUNDBRIDGE.MD). The Vote screen
+   * only exists in the authenticated stack, so a logged-out tap defers to Auth and
+   * stores a flag App.tsx drains right after login, mirroring the existing
+   * pendingPasswordReset pattern for "resume this specific screen once authenticated".
+   */
+  private async parseVoteUrl(): Promise<DeepLinkData> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        await AsyncStorage.setItem('pendingVoteDeepLink', '1');
+        return { screen: 'Auth' };
+      }
+    } catch {
+      await AsyncStorage.setItem('pendingVoteDeepLink', '1');
+      return { screen: 'Auth' };
+    }
+    return { screen: 'Vote' };
   }
 
   private async parseArtistUrl(pathSegments: string[]): Promise<DeepLinkData> {

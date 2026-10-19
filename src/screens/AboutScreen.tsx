@@ -21,6 +21,7 @@ import BackButton from '../components/BackButton';
 import { SystemTypography as Typography } from '../constants/Typography';
 import { getAudioLogs, clearAudioLogs } from '../lib/audioDebugLog';
 import { formatOtaDebugReport, showOtaDebugAlert } from '../services/otaDiagnosticsService';
+import { analyticsService } from '../services/analytics/analyticsService';
 
 const features = [
   { icon: 'musical-notes-outline', title: 'Discover Music', description: 'Explore tracks from independent artists worldwide.' },
@@ -99,6 +100,7 @@ export default function AboutScreen() {
     { label: 'IG Live (Sept 4)', campaignId: 'ig-live-sept4', title: '[TEST] IG Live', body: 'Tap to verify routing to CampaignIGLive.' },
     { label: 'Video Content Teaser', campaignId: 'video-content-teaser', title: '[TEST] Video Teaser', body: 'Tap to verify routing to CampaignVideoTease.' },
     { label: 'Earning Reminder', campaignId: 'earning-reminder', title: '[TEST] Earning Reminder', body: 'Tap to verify routing to CampaignEarningReminder.' },
+    { label: 'Vote for SoundBridge', campaignId: 'vote', title: '[TEST] Vote', body: 'Tap to verify routing to the Vote screen.' },
   ];
 
   const showCampaignTestMenu = useCallback(() => {
@@ -122,6 +124,28 @@ export default function AboutScreen() {
     );
   }, []);
 
+  // Verifies the dormant analyticsService actually reaches the backend before the Vote
+  // campaign relies on it (VOTE_FOR_SOUNDBRIDGE.MD Step 7/8) — sends one real event,
+  // force-flushes immediately, and reports pass/fail instead of silently assuming either.
+  const testAnalyticsEvent = useCallback(async () => {
+    try {
+      const { supabase } = await import('../lib/supabase');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        Alert.alert('Analytics Test', 'Not signed in — analyticsService silently drops events when unauthenticated (see flushEvents). Sign in and try again.');
+        return;
+      }
+      await analyticsService.trackUserAction('vote_analytics_test', { firedAt: new Date().toISOString() });
+      await analyticsService.flushNow();
+      Alert.alert(
+        'Analytics Test',
+        'Event sent and flush completed with no client-side error — the request reached /api/analytics/events and got a response.\n\nThis does NOT confirm it was actually stored server-side — check the backend/web team for that.',
+      );
+    } catch (e: any) {
+      Alert.alert('Analytics Test FAILED', `The event did not send cleanly: ${e?.message || String(e)}`);
+    }
+  }, []);
+
   const handleVersionTap = useCallback(async () => {
     tapCountRef.current += 1;
     if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
@@ -142,6 +166,7 @@ export default function AboutScreen() {
         { text: 'Clear', style: 'destructive', onPress: () => clearAudioLogs() },
         { text: 'BG Isolate', onPress: () => showBgIsolateMenu() },
         { text: 'Test Campaign', onPress: () => showCampaignTestMenu() },
+        { text: 'Test Analytics', onPress: () => testAnalyticsEvent() },
         {
           text: 'Session D',
           onPress: () => {
@@ -157,7 +182,7 @@ export default function AboutScreen() {
         { text: 'OK' },
       ]);
     }
-  }, [navigation, showBgIsolateMenu, showCampaignTestMenu]);
+  }, [navigation, showBgIsolateMenu, showCampaignTestMenu, testAnalyticsEvent]);
 
   const nativeVersion = Application.nativeApplicationVersion ?? '?';
   const nativeBuild = Application.nativeBuildVersion ?? '?';

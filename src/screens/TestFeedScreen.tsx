@@ -53,6 +53,9 @@ import { useToast } from '../contexts/ToastContext';
 import { checkShouldShowTour } from '../services/tourService';
 import { SkeletonFeed } from '../components/SkeletonLoader';
 import GoogleCalendarNudgeBanner from '../components/GoogleCalendarNudgeBanner';
+import VoteCampaignBanner from '../components/VoteCampaignBanner';
+import { voteBannerService } from '../services/VoteBannerService';
+import { analyticsService } from '../services/analytics/analyticsService';
 import GoogleCalendarPrivacyModal from '../components/GoogleCalendarPrivacyModal';
 import { calendarNudgeService } from '../services/CalendarNudgeService';
 import { calendarIntegrationService } from '../services/CalendarIntegrationService';
@@ -807,6 +810,21 @@ export default function TestFeedScreen() {
   const [showCalendarPrivacy, setShowCalendarPrivacy] = useState(false);
   const [calendarBusy, setCalendarBusy] = useState(false);
   const calendarNudgeCheckedRef = useRef(false);
+
+  // "Vote for SoundBridge" home banner (VOTE_FOR_SOUNDBRIDGE.MD Step 6).
+  const [showVoteBanner, setShowVoteBanner] = useState(false);
+  useFocusEffect(useCallback(() => {
+    voteBannerService.shouldShow().then(setShowVoteBanner).catch(() => {});
+  }, []));
+  const handleVoteBannerPress = useCallback(() => {
+    analyticsService.trackUserAction('vote_banner_tapped');
+    (navigation as any).navigate('Vote');
+  }, [navigation]);
+  const handleVoteBannerDismiss = useCallback(() => {
+    analyticsService.trackUserAction('vote_banner_dismissed');
+    voteBannerService.recordDismissed();
+    setShowVoteBanner(false);
+  }, []);
   const flatListRef = useRef<any>(null);
   useScrollToTop(flatListRef);
 
@@ -1267,6 +1285,13 @@ export default function TestFeedScreen() {
                 <GoogleCalendarNudgeBanner
                   onConnect={handleCalendarNudgeConnect}
                   onDismiss={handleCalendarNudgeDismiss}
+                />
+              )}
+
+              {showVoteBanner && activeFilter === 'For You' && (
+                <VoteCampaignBanner
+                  onPress={handleVoteBannerPress}
+                  onDismiss={handleVoteBannerDismiss}
                 />
               )}
 

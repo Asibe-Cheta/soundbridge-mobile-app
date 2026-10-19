@@ -12,6 +12,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { StripeProvider } from '@stripe/stripe-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 // Cache-bust for EAS Android asset pipeline retry — 2026-07-31
 import { CopilotProvider, walkthroughable } from 'react-native-copilot';
 import { useTheme } from './src/contexts/ThemeContext';
@@ -66,6 +67,7 @@ import AboutScreen from './src/screens/AboutScreen';
 import CampaignIGLiveScreen from './src/screens/CampaignIGLiveScreen';
 import CampaignVideoTeaseScreen from './src/screens/CampaignVideoTeaseScreen';
 import CampaignEarningReminderScreen from './src/screens/CampaignEarningReminderScreen';
+import VoteScreen from './src/screens/VoteScreen';
 import MinimalAudioTestScreen from './src/screens/MinimalAudioTestScreen';
 import SessionDBlankScreen from './src/screens/SessionDBlankScreen';
 import TermsOfServiceScreen from './src/screens/TermsOfServiceScreen';
@@ -908,6 +910,18 @@ function AppNavigator() {
     }
   }, [pendingPasswordReset, user, needsOnboarding]);
 
+  // Resume a /vote deep link (web path or push) that was opened while logged out —
+  // VOTE_FOR_SOUNDBRIDGE.MD Step 4. Same shape as the pendingPasswordReset effect above.
+  React.useEffect(() => {
+    if (!user || needsOnboarding || !navigationRef.current) return;
+    AsyncStorage.getItem('pendingVoteDeepLink').then(flag => {
+      if (flag === '1' && navigationRef.current) {
+        navigationRef.current.navigate('Vote' as never);
+        AsyncStorage.removeItem('pendingVoteDeepLink').catch(() => {});
+      }
+    }).catch(() => {});
+  }, [user, needsOnboarding]);
+
   // Handle navigation ready
   const onNavigationReady = React.useCallback(() => {
     console.log('✅ Navigation ready');
@@ -1186,6 +1200,12 @@ function AppNavigator() {
       // Marketing campaign landing pages (e.g. IG Live promo)
       case 'campaign': {
         const campaignScreen = deepLinkingService.resolveCampaignScreen(data.campaignId || data.entityId);
+        if (campaignScreen === 'Vote' && !user) {
+          // Vote only lives in the authenticated stack — defer and resume after login,
+          // same as the pendingPasswordReset pattern just below.
+          AsyncStorage.setItem('pendingVoteDeepLink', '1').catch(() => {});
+          break;
+        }
         if (campaignScreen) {
           navigationRef.current.navigate(campaignScreen as never, {} as never);
         }
@@ -1318,6 +1338,7 @@ function AppNavigator() {
             <Stack.Screen name="CampaignIGLive" component={CampaignIGLiveScreen} />
             <Stack.Screen name="CampaignVideoTease" component={CampaignVideoTeaseScreen} />
             <Stack.Screen name="CampaignEarningReminder" component={CampaignEarningReminderScreen} />
+            <Stack.Screen name="Vote" component={VoteScreen} />
             <Stack.Screen
               name="MinimalAudioTest"
               component={MinimalAudioTestScreen}
