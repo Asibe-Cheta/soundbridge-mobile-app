@@ -69,14 +69,28 @@ serve(async (req) => {
     // Eligible: has a push token, hasn't already received this specific push number,
     // and notification_preferences.enabled isn't explicitly false (missing row or
     // null = enabled by default, matching the mobile app's own ?? true fallback).
+    // Three separate queries joined in code, not a PostgREST embedded select — there's no
+    // detectable FK relationship between profiles and notification_preferences in the
+    // schema cache (confirmed via a real dry run), so profiles.select('...,
+    // notification_preferences(enabled)') fails outright rather than just omitting the join.
     const { data: candidates, error: candidatesError } = await supabase
       .from('profiles')
-      .select('id, expo_push_token, notification_preferences(enabled)')
+      .select('id, expo_push_token')
       .not('expo_push_token', 'is', null);
 
     if (candidatesError) {
       return json({ success: false, error: candidatesError.message }, 500);
     }
+
+    const { data: disabledPrefs, error: prefsError } = await supabase
+      .from('notification_preferences')
+      .select('user_id')
+      .eq('enabled', false);
+
+    if (prefsError) {
+      return json({ success: false, error: prefsError.message }, 500);
+    }
+    const disabledIds = new Set((disabledPrefs ?? []).map((r: { user_id: string }) => r.user_id));
 
     const { data: alreadySent, error: alreadySentError } = await supabase
       .from('vote_campaign_pushes')
@@ -92,8 +106,8 @@ serve(async (req) => {
       .filter((row: any) => {
         if (!row.expo_push_token) return false;
         if (alreadySentIds.has(row.id)) return false;
-        const prefs = Array.isArray(row.notification_preferences) ? row.notification_preferences[0] : row.notification_preferences;
-        return prefs?.enabled !== false;
+        if (disabledIds.has(row.id)) return false;
+        return true;
       })
       .map((row: any) => ({ id: row.id, expo_push_token: row.expo_push_token }));
 
