@@ -14,6 +14,26 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { useAuth } from '../contexts/AuthContext';
+
+// Phase 3 item 1: tag paid-tier support mailto links so priority users can
+// be spotted in the inbox. Free users get no tag at all (subject/body
+// unchanged), per spec.
+function tierLabel(tier: string | null | undefined): string | null {
+  if (tier === 'premium') return 'Premium';
+  if (tier === 'unlimited') return 'Unlimited';
+  return null;
+}
+
+function buildMailto(address: string, baseSubject: string, tier: string | null | undefined): string {
+  const label = tierLabel(tier);
+  const subject = label ? `[${label}] ${baseSubject}` : baseSubject;
+  const params = [`subject=${encodeURIComponent(subject)}`];
+  if (label) {
+    params.push(`body=${encodeURIComponent(`Tier: ${label}\n\n`)}`);
+  }
+  return `mailto:${address}?${params.join('&')}`;
+}
 
 interface FAQItem {
   question: string;
@@ -109,6 +129,8 @@ const faqData: FAQItem[] = [
 
 export default function HelpSupportScreen() {
   const navigation = useNavigation();
+  const { userProfile } = useAuth();
+  const tier = userProfile?.subscription_tier;
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedFAQ, setExpandedFAQ] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
@@ -133,7 +155,7 @@ export default function HelpSupportScreen() {
       'Contact Support',
       'Choose how you\'d like to reach us',
       [
-        { text: 'Email', onPress: () => Linking.openURL('mailto:contact@soundbridge.live') },
+        { text: 'Email', onPress: () => Linking.openURL(buildMailto('contact@soundbridge.live', 'Support request', tier)) },
         { text: 'Twitter', onPress: () => Linking.openURL('https://twitter.com/soundbridge') },
         { text: 'Discord', onPress: () => Linking.openURL('https://discord.gg/soundbridge') },
         { text: 'Cancel', style: 'cancel' },
@@ -146,7 +168,7 @@ export default function HelpSupportScreen() {
       'Report a Bug',
       'Help us improve SoundBridge by reporting bugs',
       [
-        { text: 'Email Bug Report', onPress: () => Linking.openURL('mailto:bugs@soundbridge.live?subject=Bug Report') },
+        { text: 'Email Bug Report', onPress: () => Linking.openURL(buildMailto('bugs@soundbridge.live', 'Bug Report', tier)) },
         { text: 'GitHub Issues', onPress: () => Linking.openURL('https://github.com/soundbridge/mobile/issues') },
         { text: 'Cancel', style: 'cancel' },
       ]
@@ -158,7 +180,7 @@ export default function HelpSupportScreen() {
       'Feature Request',
       'We\'d love to hear your ideas!',
       [
-        { text: 'Email Request', onPress: () => Linking.openURL('mailto:features@soundbridge.live?subject=Feature Request') },
+        { text: 'Email Request', onPress: () => Linking.openURL(buildMailto('features@soundbridge.live', 'Feature Request', tier)) },
         { text: 'Community Forum', onPress: () => Linking.openURL('https://community.soundbridge.live') },
         { text: 'Cancel', style: 'cancel' },
       ]
@@ -326,7 +348,7 @@ export default function HelpSupportScreen() {
             
             <TouchableOpacity
               style={styles.contactButton}
-              onPress={() => Linking.openURL('mailto:contact@soundbridge.live')}
+              onPress={() => Linking.openURL(buildMailto('contact@soundbridge.live', 'Support request', tier))}
             >
               <Ionicons name="mail" size={20} color="#FFFFFF" />
               <Text style={styles.contactButtonText}>Email Support</Text>
