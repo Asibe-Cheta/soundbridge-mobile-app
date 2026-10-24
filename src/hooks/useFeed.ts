@@ -4,6 +4,7 @@ import { feedService } from '../services/api/feedService';
 import { realtimeService } from '../services/realtime/realtimeService';
 import { feedCacheService } from '../services/feedCacheService';
 import { useAuth } from '../contexts/AuthContext';
+import { applyFeedPriorityBoost } from '../utils/feedPriorityRanking';
 
 export const useFeed = () => {
   const { user, session, loading: authLoading } = useAuth();
@@ -68,10 +69,14 @@ export const useFeed = () => {
       }
       
       setError(null);
-      const { posts: newPosts, hasMore: more } = await feedService.getFeedPosts(
+      const { posts: rawPosts, hasMore: more } = await feedService.getFeedPosts(
         pageNum,
         10
       );
+      // Priority in feed (Premium/Unlimited): reorder this page only, client
+      // side, no extra query. See feedPriorityRanking.ts for the bonus
+      // values and the real data behind them.
+      const newPosts = applyFeedPriorityBoost(rawPosts);
 
       if (isFirstPage) {
         // Merge reactions from current displayed posts into fresh API data.
