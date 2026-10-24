@@ -63,6 +63,7 @@ import {
   SERVICE_CATEGORY_OPTIONS,
 } from '../services/ServiceDiscoveryService';
 import ExternalEventCard, { ExternalEvent } from '../components/ExternalEventCard';
+import { pickTierFeaturedCreator } from '../services/DiscoverFeaturedService';
 import ClaimEventModal from '../modals/ClaimEventModal';
 import { useSearchHistory } from '../hooks/useSearchHistory';
 import SearchHistoryPanel from '../components/SearchHistoryPanel';
@@ -117,6 +118,8 @@ interface Creator {
   genre?: string;
   location?: string;
   institution_badge?: string | null;
+  /** True when this card is a Premium/Unlimited tier-featured pick (Phase 3 item 3), not organic. */
+  tierFeatured?: boolean;
 }
 
 interface Event {
@@ -1255,6 +1258,29 @@ function DiscoverScreen() {
         setFeaturedArtists(transformedArtists);
         await contentCacheService.saveCache('ARTISTS', cacheKey, transformedArtists);
         console.log('✅ DiscoverScreen: Successfully set featured artists with real stats:', transformedArtists.length);
+
+        // Tier-featured creator (Phase 3 item 3) — best-effort, prepended once
+        // resolved. Never blocks the organic list above; falls back silently
+        // (nothing added) if no one's eligible or the migration hasn't run yet.
+        pickTierFeaturedCreator(userProfile?.country).then((featured) => {
+          if (!featured) return;
+          setFeaturedArtists((prev) => {
+            if (prev.some((c) => c.id === featured.id)) return prev;
+            const card: Creator = {
+              id: featured.id,
+              username: featured.username,
+              display_name: featured.display_name || featured.username,
+              bio: 'Music creator',
+              avatar_url: featured.avatar_url ?? undefined,
+              followers_count: featured.followers_count,
+              tracks_count: featured.tracks_count,
+              events_count: featured.events_count,
+              institution_badge: featured.institution_badge,
+              tierFeatured: true,
+            };
+            return [card, ...prev];
+          });
+        }).catch(() => {});
       } else if (error) {
         console.log('❌ DiscoverScreen: Database error, using mock data:', error.message);
         // Use mock data on error
@@ -2081,6 +2107,7 @@ function DiscoverScreen() {
                       creator={artist}
                       isFirst={index === 0}
                       onPress={() => handleCreatorPress(artist)}
+                      badgeLabel={artist.tierFeatured ? 'FEATURED' : 'RISING'}
                     />
                   )}
                   keyExtractor={(item) => item.id}
