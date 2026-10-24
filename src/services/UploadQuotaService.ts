@@ -161,9 +161,11 @@ export async function getUploadQuota(
 
     const quota: UploadQuota = {
       tier,
-      upload_limit: tier === 'free' ? 3 : null,
+      // Storage-based only for every tier, dev mode included — see the
+      // matching fix on the production RevenueCat/fallback paths below.
+      upload_limit: null,
       uploads_this_month: 0,
-      remaining: tier === 'free' ? 3 : null,
+      remaining: null,
       reset_date: null,
       is_unlimited: tier === 'unlimited',
       can_upload: storageQuota.can_upload,
@@ -342,9 +344,14 @@ export async function getUploadQuota(
       const storageQuota = await getStorageQuotaCached(userId, 'free', forceRefresh);
       const quota: UploadQuota = {
         tier: 'free',
-        upload_limit: 3,
+        // Storage-based only (250MB), like every other tier — no separate
+        // upload-count cap. A hard "3 uploads lifetime" cap existed here
+        // before but was never an advertised limit anywhere in the app
+        // (Upgrade screen, onboarding, TestUploadScreen all describe Free
+        // as 250MB / ~30-40 tracks) — confirmed unintended, removed.
+        upload_limit: null,
         uploads_this_month: backendQuota?.uploads_this_month ?? 0,
-        remaining: 3 - (backendQuota?.uploads_this_month ?? 0),
+        remaining: null,
         reset_date: null,
         is_unlimited: false,
         can_upload: storageQuota.can_upload,
@@ -434,12 +441,17 @@ export async function getUploadQuota(
 
   const defaultQuota: UploadQuota = {
     tier: 'free',
-    upload_limit: 3, // Free tier: 3 uploads lifetime
+    // Storage-based only (250MB), matching every other tier and the
+    // advertised Free-tier copy — see the comment on the equivalent branch
+    // above. The old `storage_used < 3` check here compared bytes to the
+    // literal number 3, so it was false (blocking all uploads) the moment
+    // storage_used exceeded 2 bytes — a real bug, not just stale copy.
+    upload_limit: null,
     uploads_this_month: 0,
-    remaining: 3,
+    remaining: null,
     reset_date: null,
     is_unlimited: false,
-    can_upload: storageQuota.can_upload && storageQuota.storage_used < 3, // Storage + count check
+    can_upload: storageQuota.can_upload,
     storage: storageQuota,
   };
   setCachedQuota(userId, defaultQuota);
