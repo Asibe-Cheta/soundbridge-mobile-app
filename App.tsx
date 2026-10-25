@@ -928,13 +928,14 @@ function AppNavigator() {
     syncActiveRoute();
     deepLinkingService.setNavigationReady();
 
-    // Check for pending deep links from notifications
+    // Check for pending deep links from notifications. Route everything through
+    // handleNotificationNavigation — it has per-type auth guards (e.g. Vote only
+    // lives in the authenticated stack and defers via pendingVoteDeepLink until
+    // auth hydrates). deepLinkingService.handleUrl() has no such guard, so a cold
+    // start whose auth hasn't hydrated yet by the time onNavigationReady fires
+    // would silently fail to navigate (e.g. the vote campaign push deep link).
     notificationService.getPendingDeepLink().then(data => {
       if (data && navigationRef.current) {
-        if (data.deepLink) {
-          deepLinkingService.handleUrl(data.deepLink);
-          return;
-        }
         handleNotificationNavigation(data);
       }
     });
@@ -1200,6 +1201,15 @@ function AppNavigator() {
       // Marketing campaign landing pages (e.g. IG Live promo)
       case 'campaign': {
         const campaignScreen = deepLinkingService.resolveCampaignScreen(data.campaignId || data.entityId);
+        if (campaignScreen === 'Vote') {
+          // Tracked here (not in VoteScreen) so it fires on the tap itself, even if
+          // the user is logged out and the actual screen visit is deferred below —
+          // the dashboard wants "notification tapped", not "screen eventually seen".
+          analyticsService.trackUserAction('vote_notification_tapped', {
+            pushNumber: (data as any).pushNumber,
+            source: 'push_notification',
+          });
+        }
         if (campaignScreen === 'Vote' && !user) {
           // Vote only lives in the authenticated stack — defer and resume after login,
           // same as the pendingPasswordReset pattern just below.

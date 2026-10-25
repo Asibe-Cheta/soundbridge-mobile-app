@@ -166,19 +166,23 @@ export async function formatOtaDebugReport(): Promise<string> {
   const storedLogs = await getOtaLogs();
   const errors = nativeErrorLines(nativeEntries);
 
+  // Order matters: the final string is tail-truncated (see .slice(-3800) below,
+  // and showOtaDebugAlert's .slice(-3500) on top of that). Native log entries can
+  // each be huge (one entry is a full Swift-interpolated state dump), so the most
+  // diagnostically important sections go LAST to guarantee they survive truncation.
   const sections = [
-    '--- Native snapshot (live) ---',
-    ...formatSnapshotLines(snapshot),
-    errors.length ? '\n--- Native errors ---' : '',
-    ...errors.slice(0, 8),
+    storedLogs.length
+      ? `--- Stored OTA trace (${Math.min(storedLogs.length, 15)} recent) ---`
+      : '',
+    ...storedLogs.slice(-15),
     nativeEntries.length
       ? `\n--- Native log (${Math.min(nativeEntries.length, 12)} recent) ---`
       : '\n--- Native log ---\n(none)',
     ...nativeEntries.slice(-12).map(formatNativeLogEntry),
-    storedLogs.length
-      ? `\n--- Stored OTA trace (${Math.min(storedLogs.length, 15)} recent) ---`
-      : '',
-    ...storedLogs.slice(-15),
+    errors.length ? '\n--- Native errors ---' : '',
+    ...errors.slice(0, 8),
+    '\n--- Native snapshot (live) ---',
+    ...formatSnapshotLines(snapshot),
   ].filter((line) => line !== '');
 
   return sections.join('\n').slice(-3800);

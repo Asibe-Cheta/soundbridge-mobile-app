@@ -8,9 +8,10 @@ import { getVoteCountdown } from '../utils/voteCountdown';
 interface Props {
   onPress: () => void;
   onDismiss: () => void;
+  onMarkVoted: () => void;
 }
 
-export default function VoteCampaignBanner({ onPress, onDismiss }: Props) {
+export default function VoteCampaignBanner({ onPress, onDismiss, onMarkVoted }: Props) {
   const { theme } = useTheme();
   const countdown = getVoteCountdown();
   if (countdown.closed) return null;
@@ -24,6 +25,14 @@ export default function VoteCampaignBanner({ onPress, onDismiss }: Props) {
       activeOpacity={0.85}
     >
       <Text style={[styles.text, { color: theme.colors.text }]} numberOfLines={2}>{text}</Text>
+      <TouchableOpacity
+        style={styles.dismissBtn}
+        onPress={onMarkVoted}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        accessibilityLabel="I've voted"
+      >
+        <Ionicons name="checkmark-circle-outline" size={18} color={theme.colors.primary} />
+      </TouchableOpacity>
       <TouchableOpacity
         style={styles.dismissBtn}
         onPress={onDismiss}

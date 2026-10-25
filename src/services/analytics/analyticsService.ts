@@ -3,6 +3,14 @@ import { apiFetch } from '../../lib/apiClient';
 import { AppState } from 'react-native';
 import { audioLog } from '../../lib/audioDebugLog';
 
+const VOTE_CAMPAIGN_IMMEDIATE_FLUSH_ACTIONS = new Set([
+  'vote_notification_tapped',
+  'vote_now_tapped',
+  'vote_link_copied',
+  'vote_link_shared',
+  'vote_marked_voted',
+]);
+
 export interface AnalyticsEvent {
   category: string;
   action: string;
@@ -74,8 +82,16 @@ export class AnalyticsService {
 
       this.eventsQueue.push(event);
 
-      // Flush immediately for important events
-      if (category === 'Error' || category === 'Purchase') {
+      // Flush immediately for important events. Vote campaign events are included
+      // because vote_notification_tapped specifically fires right after a
+      // background->foreground transition (the notification tap) — the worst case
+      // for the normal 30s interval timer, which pauses while backgrounded and can
+      // leave real campaign taps sitting queued for an unpredictable extra stretch.
+      if (
+        category === 'Error' ||
+        category === 'Purchase' ||
+        VOTE_CAMPAIGN_IMMEDIATE_FLUSH_ACTIONS.has(action)
+      ) {
         await this.flushEvents();
       }
     } catch (error) {

@@ -24,3 +24,22 @@ The mobile app already resolves `soundbridge.live/campaigns/<slug>` to an in-app
 ---
 
 Mobile side is otherwise self-contained for this campaign — nothing else needed from the web team to ship it.
+
+---
+
+## Update 2026-10-22: dashboard tracking for notification taps + link taps
+
+**Priority:** MEDIUM — not blocking the campaign (it's already running), but needed to answer "how many people engaged and when."
+
+The app already sends these events to `POST /api/analytics/events` (body: `{ events: [{ category, action, label, value, properties, timestamp }] }`), all with `category: "User Action"` and a client-generated ISO `timestamp`:
+
+| `action`                  | fires when                                              | `properties`                                  |
+|---------------------------|-----------------------------------------------------------|------------------------------------------------|
+| `vote_notification_tapped`| user taps the push notification (new, just added)       | `{ pushNumber: 1 \| 2 \| 3 \| undefined, source: "push_notification" }` |
+| `vote_now_tapped`         | user taps "Vote now" in the app (this is the actual link-out to theeasies.com) | `{ source: "vote_screen" }`                |
+| `vote_link_copied`        | user taps "Copy link"                                    | `{ source: "vote_screen" }`                     |
+| `vote_link_shared`        | user taps "Share"                                        | `{ source: "vote_screen" }`                     |
+
+**The ask:** surface counts of each `action` above (grouped by `pushNumber` where present) plus a simple timestamp view, on whatever admin dashboard already shows analytics — so we can see tap volume per push and roughly when people engaged.
+
+**One caveat to know about:** `flushEvents()` silently drops the whole queue if the user isn't authenticated at flush time (no local persistence/retry) — so logged-out taps on the notification or the deep link won't reach you. If that gap matters for accurate counts, let us know and we can look at queuing them until sign-in instead, but didn't want to change that behavior unasked.
