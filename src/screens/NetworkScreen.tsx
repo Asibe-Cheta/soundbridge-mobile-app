@@ -21,6 +21,7 @@ import { useNetwork } from '../hooks/useNetwork';
 import { subscriptionService, UsageLimits } from '../services/SubscriptionService';
 import { opportunityService, OpportunityPost } from '../services/OpportunityService';
 import ConnectionSuggestionCard from '../components/ConnectionSuggestionCard';
+import { getSuggestedCollaborators, dismissSuggestion as dismissBridgeSuggestion, SuggestedCollaborator } from '../services/BridgeCollabService';
 import ConnectionCard from '../components/ConnectionCard';
 import ConnectionRequestCard from '../components/ConnectionRequestCard';
 import OpportunityCard from '../components/OpportunityCard';
@@ -72,6 +73,22 @@ export default function NetworkScreen() {
   const [communities, setCommunities] = useState<CommunityItem[]>([]);
   const [communitiesLoading, setCommunitiesLoading] = useState(false);
   const [communitiesLoaded, setCommunitiesLoaded] = useState(false);
+
+  // "Suggested by Bridge" (Premium/Unlimited) — Phase 4 item 2.
+  const [bridgeSuggestions, setBridgeSuggestions] = useState<SuggestedCollaborator[]>([]);
+  const tier = userProfile?.subscription_tier;
+  const hasBridgeCollabAccess = tier === 'premium' || tier === 'unlimited';
+
+  useEffect(() => {
+    if (!hasBridgeCollabAccess || !user?.id) return;
+    getSuggestedCollaborators(user.id).then(setBridgeSuggestions).catch(() => {});
+  }, [hasBridgeCollabAccess, user?.id]);
+
+  const handleDismissBridgeSuggestion = (suggestedId: string) => {
+    if (!user?.id) return;
+    setBridgeSuggestions((prev) => prev.filter((s) => s.id !== suggestedId));
+    dismissBridgeSuggestion(user.id, suggestedId);
+  };
 
   // Service Provider Prompt Modal
   const {
@@ -442,6 +459,31 @@ export default function NetworkScreen() {
           {/* Tab 1: Connections */}
           {activeTab === 'connections' && (
             <>
+              {/* Suggested by Bridge (Premium/Unlimited) — Phase 4 item 2 */}
+              {hasBridgeCollabAccess && bridgeSuggestions.length > 0 && (
+                <View style={styles.section}>
+                  <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+                    Suggested by Bridge
+                  </Text>
+                  {bridgeSuggestions.map((s) => (
+                    <ConnectionSuggestionCard
+                      key={s.id}
+                      suggestion={{
+                        id: s.id,
+                        username: s.username,
+                        display_name: s.display_name ?? s.username,
+                        avatar_url: s.avatar_url ?? undefined,
+                        headline: s.role ?? undefined,
+                        mutual_connections: 0,
+                        reason: s.explanation,
+                      }}
+                      onConnect={handleConnect}
+                      onRemove={handleDismissBridgeSuggestion}
+                    />
+                  ))}
+                </View>
+              )}
+
               {/* Suggestions Section */}
               {suggestions.length > 0 && (
                 <View style={styles.section}>
