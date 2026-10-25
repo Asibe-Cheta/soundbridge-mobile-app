@@ -1819,7 +1819,7 @@ export default function ProfileScreen() {
           <WalkthroughableTouchable
             order={5}
             name="create_events_targeted"
-            text="Create events and sell tickets directly to YOUR followers. Your events appear in their feeds FIRST - targeted audience, not random. Keep 95% of ticket sales (97% for Unlimited). Build your network through live events."
+            text="Create events and sell tickets directly to YOUR followers. Your events appear in their feeds FIRST - targeted audience, not random. Keep 85% of ticket sales, just a 15% platform fee. Build your network through live events."
           >
             <TouchableOpacity style={[styles.groupedRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]} onPress={handleCreateEvent}>
               <View style={[styles.rowIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
