@@ -330,18 +330,38 @@ export default function EventsAnalyticsOverviewScreen({ navigation }: any) {
     );
   };
 
+  // Matches the Audience Intelligence screen's locked state: sample metric
+  // chips (blurred, not real numbers), one explanatory line, upgrade button.
   const renderLockedMetrics = () => (
-    <TouchableOpacity
-      style={[styles.lockedRow, { borderTopColor: theme.colors.border }]}
-      onPress={() => navigation.navigate('Upgrade' as never)}
-      activeOpacity={0.7}
-    >
-      <Text style={styles.lockedCrown}>👑</Text>
+    <View style={[styles.lockedWrap, { borderTopColor: theme.colors.border }]}>
+      <View style={styles.lockedChipsRow}>
+        {[
+          { icon: '👁', label: 'views' },
+          { icon: '🎟', label: 'sold' },
+          { icon: '💷', label: 'revenue' },
+          { icon: '↗️', label: 'shares' },
+        ].map((m, i) => (
+          <React.Fragment key={m.label}>
+            {i > 0 && <View style={[styles.chipDivider, { backgroundColor: theme.colors.border }]} />}
+            <View style={styles.chip}>
+              <Text style={styles.chipIcon}>{m.icon}</Text>
+              <Text style={[styles.chipValueBlurred, { color: theme.colors.textSecondary }]}>████</Text>
+              <Text style={[styles.chipLabel, { color: theme.colors.textSecondary }]}>{m.label}</Text>
+            </View>
+          </React.Fragment>
+        ))}
+      </View>
       <Text style={[styles.lockedText, { color: theme.colors.textSecondary }]}>
         View how this event performed and get insight on what to do next
       </Text>
-      <Ionicons name="chevron-forward" size={12} color={theme.colors.textSecondary} />
-    </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.lockedUpgradeBtn, { backgroundColor: theme.colors.primary }]}
+        onPress={() => navigation.navigate('Upgrade' as never)}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.lockedUpgradeBtnText}>Upgrade to Premium</Text>
+      </TouchableOpacity>
+    </View>
   );
 
   const renderMetricChips = (analytics: EventAnalytics | null) => {
@@ -681,21 +701,35 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
 
-  // Locked metrics row
-  lockedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  // Locked metrics (blurred sample data + explainer + upgrade button)
+  lockedWrap: {
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
+    gap: 10,
   },
-  lockedCrown: {
-    fontSize: 12,
+  lockedChipsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  chipValueBlurred: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 1,
   },
   lockedText: {
-    flex: 1,
     fontSize: 12,
+    lineHeight: 16,
+  },
+  lockedUpgradeBtn: {
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  lockedUpgradeBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
   },
 
   // Promotion reach row

@@ -39,7 +39,7 @@ const CREATOR_PERKS = [
   {
     icon: 'ticket-outline' as const,
     title: 'Host Paid Events',
-    description: 'Sell tickets and keep 95% of revenue',
+    description: 'Sell tickets and get paid directly',
   },
   {
     icon: 'musical-notes-outline' as const,

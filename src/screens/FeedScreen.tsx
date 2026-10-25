@@ -581,7 +581,7 @@ export default function FeedScreen() {
                   <WalkthroughableView
                     order={1}
                     name="create_drop_earn"
-                    text="Tap here to drop content and GET TIPPED! Share music, updates, or studio sessions. Unlike Spotify's £0.003/stream, fans tip you directly - you keep 95%. Build your network and grow your profile while earning real money."
+                    text="Tap here to drop content and GET TIPPED! Share music, updates, or studio sessions. Unlike Spotify's £0.003/stream, fans tip you directly - creators keep 85 to 90% of every tip. Build your network and grow your profile while earning real money."
                   >
                     <CreatePostPrompt onPress={handleCreatePost} />
                   </WalkthroughableView>

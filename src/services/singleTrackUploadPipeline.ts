@@ -555,7 +555,7 @@ export function buildQuotaBlockMessage(quota: UploadQuota): string {
     return 'You\'ve reached your 250MB storage limit. Upgrade to Premium for 2GB or Unlimited for 10GB of storage.';
   }
   if (tier === 'premium') {
-    return 'You\'ve uploaded 7 tracks this month. Your limit resets on your renewal date. Upgrade to Unlimited for unlimited uploads anytime.';
+    return 'You\'ve reached your 2GB storage limit. Upgrade to Unlimited for 10GB of storage.';
   }
   return 'You have reached your upload limit. Please upgrade to continue uploading.';
 }

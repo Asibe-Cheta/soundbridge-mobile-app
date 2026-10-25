@@ -978,7 +978,7 @@ const PostCard = memo(function PostCard({
           <WalkthroughableTouchable
             order={2}
             name="tip_button_location"
-            text="This 💰 icon is where you tip creators to support their work. When others tip YOUR drops, you keep 95%. Tap it to see how tipping works - this is how you earn on SoundBridge while growing your professional network."
+            text="This 💰 icon is where you tip creators to support their work. When others tip YOUR drops, creators keep 85 to 90% of every tip. Tap it to see how tipping works - this is how you earn on SoundBridge while growing your professional network."
           >
             <TouchableOpacity
               style={styles.interactionButton}

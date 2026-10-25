@@ -746,52 +746,6 @@ class SubscriptionService {
   }
 
   /**
-   * Get plan features
-   */
-  getPlanFeatures(plan: string): string[] {
-    switch (plan.toLowerCase()) {
-      case 'premium':
-        return [
-          '7 uploads per month (resets on renewal)',
-          'Pro badge on profile',
-          'Custom profile URL',
-          'Featured on Discover 1x/month',
-          'Advanced analytics',
-          'Priority in feed',
-          '60-second audio previews',
-          'AI collaboration matching',
-          'Priority support'
-        ];
-      case 'unlimited':
-        return [
-          'UNLIMITED track uploads',
-          'Unlimited badge on profile',
-          'Featured on Discover 2x/month',
-          'Top priority in feed',
-          'All Premium features',
-          'Social media post generator',
-          'Custom promo codes',
-          'Email list export',
-          'Highest priority support'
-        ];
-      // Legacy support
-      case 'pro':
-        return this.getPlanFeatures('premium');
-      case 'enterprise':
-        return this.getPlanFeatures('unlimited');
-      default:
-        return [
-          '3 track uploads (lifetime)',
-          'Basic profile & networking',
-          'Receive tips (keep 95%)',
-          'Create & sell event tickets',
-          'Basic analytics',
-          'Community support'
-        ];
-    }
-  }
-
-  /**
    * Extract price amount from price string (e.g., "$9.99/month" -> 9.99)
    */
   private extractPriceAmount(priceString: string): number {

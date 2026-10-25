@@ -36,6 +36,7 @@ import { supabase } from '../lib/supabase';
 import { config } from '../config/environment';
 import { deepLinkingService } from '../services/DeepLinkingService';
 import { communityEntryService } from '../services/CommunityEntryService';
+import { subscriptionPlans } from '../constants/subscriptionPlans';
 import * as ImagePicker from 'expo-image-picker';
 
 const { width, height } = Dimensions.get('window');
@@ -6483,30 +6484,12 @@ export default function OnboardingScreen() {
                 Perfect for getting started
               </Text>
               <View style={styles.tierFeatures}>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>250MB storage (~30-40 tracks)</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Unlimited event promotion</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Create & sell event tickets</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Basic analytics</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Professional networking</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Transaction fees apply (you still make money)</Text>
-                </View>
+                {subscriptionPlans.find(p => p.id === 'free')!.features.map((feature, i) => (
+                  <View key={i} style={styles.tierFeatureItem}>
+                    <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                    <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>{feature}</Text>
+                  </View>
+                ))}
               </View>
               <View style={styles.tierPricing}>
                 <Text style={[styles.tierPricingText, { color: theme.colors.text, fontSize: 32, fontWeight: '700' }]}>£0</Text>
@@ -6538,46 +6521,12 @@ export default function OnboardingScreen() {
                 Everything you need to grow your career
               </Text>
               <View style={styles.tierFeatures}>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>2GB storage (~200 tracks)</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Unlimited uploads*</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Receive tips from fans (keep 95%)</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Pro badge on profile</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Custom profile URL</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Boosted visibility (48hrs monthly)</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>AI-optimized feed, audio & live</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Advanced analytics dashboard</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>AI collaboration matching</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Priority support</Text>
-                </View>
+                {subscriptionPlans.find(p => p.id === 'premium')!.features.map((feature, i) => (
+                  <View key={i} style={styles.tierFeatureItem}>
+                    <Ionicons name="checkmark-circle" size={18} color="#8B5CF6" />
+                    <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>{feature}</Text>
+                  </View>
+                ))}
               </View>
               <View style={styles.tierPricing}>
                 <Text style={[styles.tierPricingText, { color: theme.colors.text, fontSize: 32, fontWeight: '700' }]}>£6.99</Text>
@@ -6610,42 +6559,12 @@ export default function OnboardingScreen() {
                 For serious creators and professionals
               </Text>
               <View style={styles.tierFeatures}>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>UNLIMITED track uploads</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Unlimited badge on profile</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Featured on Discover 2x/month</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Top priority in feed</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Fan subscriptions (earn monthly)</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Custom promo codes</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Email list export</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Lower fees (3% vs 5%)</Text>
-                </View>
-                <View style={styles.tierFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
-                  <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>Highest priority support</Text>
-                </View>
+                {subscriptionPlans.find(p => p.id === 'unlimited')!.features.map((feature, i) => (
+                  <View key={i} style={styles.tierFeatureItem}>
+                    <Ionicons name="checkmark-circle" size={18} color="#F59E0B" />
+                    <Text style={[styles.tierFeatureText, { color: theme.colors.text }]}>{feature}</Text>
+                  </View>
+                ))}
               </View>
               <View style={styles.tierPricing}>
                 <Text style={[styles.tierPricingText, { color: theme.colors.text, fontSize: 32, fontWeight: '700' }]}>£12.99</Text>
