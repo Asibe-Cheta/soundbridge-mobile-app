@@ -177,9 +177,12 @@ interface Playlist {
 
 type TabType = 'Music' | 'Albums' | 'Podcasts' | 'Mixtapes' | 'Audio Books' | 'Artists' | 'Events' | 'Playlists' | 'Services' | 'Venues';
 
-// Shown in place of a section's own "nothing here yet" copy when the device is
-// offline, so a connectivity problem never reads as an honest content-empty state.
-const OFFLINE_EMPTY_MESSAGE = "You're offline — check your connection and try again";
+// Shown in place of a section's own "nothing here yet" copy whenever the real
+// cause is connectivity, not content — covers both hard offline (NetInfo) and a
+// section whose own load timed out/failed (poor reception: "connected" but the
+// request never completed), so neither case is misread as "there's genuinely
+// nothing here."
+const CONNECTION_EMPTY_MESSAGE = "Having trouble connecting — check your connection and try again";
 
 const DISCOVER_MOCK_TRACKS: AudioTrack[] = [
   {
@@ -439,6 +442,25 @@ function DiscoverScreen() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Per-section connection problems — NetInfo's isConnected only catches hard
+  // offline (airplane mode, no radio). Poor reception still reports "connected"
+  // while the actual request times out or throws, which is exactly the case
+  // loadQueriesInParallel's _timedOut map exists to surface. A section in here
+  // shows CONNECTION_EMPTY_MESSAGE instead of its normal "nothing here" copy,
+  // and is cleared the next time that section's load succeeds.
+  const [connectionIssues, setConnectionIssues] = useState<Set<string>>(new Set());
+  const markConnectionIssues = (timedOutMap: Record<string, boolean> | undefined) => {
+    if (!timedOutMap) return;
+    setConnectionIssues(prev => {
+      const next = new Set(prev);
+      for (const [key, failed] of Object.entries(timedOutMap)) {
+        if (failed) next.add(key);
+        else next.delete(key);
+      }
+      return next;
+    });
+  };
 
   // Content states
   const [trendingTracks, setTrendingTracks] = useState<AudioTrack[]>([]);
@@ -752,9 +774,15 @@ function DiscoverScreen() {
               fallback: [],
             },
           });
-          setTrendingTracks(musicResults.trending?.data || musicResults.trending || DISCOVER_MOCK_TRACKS);
-          setRecentTracks(musicResults.recent?.data || musicResults.recent || DISCOVER_MOCK_TRACKS);
-          setFeaturedArtists(musicResults.artists?.data || musicResults.artists || DISCOVER_MOCK_ARTISTS);
+          {
+            const trendingData = musicResults.trending?.data || musicResults.trending || [];
+            const recentData = musicResults.recent?.data || musicResults.recent || [];
+            const artistsData = musicResults.artists?.data || musicResults.artists || [];
+            markConnectionIssues(musicResults._timedOut);
+            setTrendingTracks(trendingData.length > 0 ? trendingData : (musicResults._timedOut.trending ? [] : DISCOVER_MOCK_TRACKS));
+            setRecentTracks(recentData.length > 0 ? recentData : (musicResults._timedOut.recent ? [] : DISCOVER_MOCK_TRACKS));
+            setFeaturedArtists(artistsData.length > 0 ? artistsData : (musicResults._timedOut.artists ? [] : DISCOVER_MOCK_ARTISTS));
+          }
           loadingManager.setLoading('tracks', false, 0);
           loadingManager.setLoading('artists', false, 0);
           break;
@@ -775,6 +803,7 @@ function DiscoverScreen() {
               fallback: [],
             },
           });
+          markConnectionIssues({ featuredAlbums: albumsResult._timedOut.featured, recentAlbums: albumsResult._timedOut.recent });
           setFeaturedAlbums(albumsResult.featured?.data || albumsResult.featured || []);
           setRecentAlbums(albumsResult.recent?.data || albumsResult.recent || []);
           loadingManager.setLoading('albums', false, 0);
@@ -868,7 +897,11 @@ function DiscoverScreen() {
               fallback: [],
             },
           });
-          setFeaturedArtists(artistsResult.artists?.data || artistsResult.artists || DISCOVER_MOCK_ARTISTS);
+          {
+            const artistsData = artistsResult.artists?.data || artistsResult.artists || [];
+            markConnectionIssues(artistsResult._timedOut);
+            setFeaturedArtists(artistsData.length > 0 ? artistsData : (artistsResult._timedOut.artists ? [] : DISCOVER_MOCK_ARTISTS));
+          }
           loadingManager.setLoading('artists', false, 0);
           break;
 
@@ -884,14 +917,15 @@ function DiscoverScreen() {
               fallback: user?.id ? [] : DISCOVER_MOCK_EVENTS,
             },
           });
+          markConnectionIssues(eventsResult._timedOut);
           const eventsData = eventsResult.events?.data || eventsResult.events || [];
-          setEvents(user?.id ? eventsData : (eventsData.length > 0 ? eventsData : DISCOVER_MOCK_EVENTS));
+          setEvents(user?.id ? eventsData : (eventsData.length > 0 ? eventsData : (eventsResult._timedOut.events ? [] : DISCOVER_MOCK_EVENTS)));
           loadExternalEvents();
           loadingManager.setLoading('events', false, 0);
           break;
         }
 
-        case 'Playlists':
+        case 'Playlists': {
           loadingManager.setLoading('playlists', true, 5000);
           const playlistsResult = await loadQueriesInParallel({
             playlists: {
@@ -901,25 +935,36 @@ function DiscoverScreen() {
               fallback: [],
             },
           });
-          setPlaylists(playlistsResult.playlists?.data || playlistsResult.playlists || DISCOVER_MOCK_PLAYLISTS);
+          markConnectionIssues(playlistsResult._timedOut);
+          const playlistsData = playlistsResult.playlists?.data || playlistsResult.playlists || [];
+          setPlaylists(playlistsData.length > 0 ? playlistsData : (playlistsResult._timedOut.playlists ? [] : DISCOVER_MOCK_PLAYLISTS));
           loadingManager.setLoading('playlists', false, 0);
           break;
+        }
 
         case 'Services': {
           loadingManager.setLoading('services', true, 8000);
-          const savedPrefs = user?.id
-            ? await serviceDiscoveryService.getServicePreferences(user.id)
-            : null;
-          const resolvedPrefs = savedPrefs ?? DEFAULT_SERVICE_PREFS;
-          setServicePrefs(resolvedPrefs);
-          const loc = await serviceDiscoveryService.requestLocation();
-          const providers = await serviceDiscoveryService.getServiceProviders(
-            loc?.lat ?? null,
-            loc?.lng ?? null,
-            resolvedPrefs
-          );
-          setServiceProviders(providers);
-          loadingManager.setLoading('services', false, 0);
+          try {
+            const savedPrefs = user?.id
+              ? await serviceDiscoveryService.getServicePreferences(user.id)
+              : null;
+            const resolvedPrefs = savedPrefs ?? DEFAULT_SERVICE_PREFS;
+            setServicePrefs(resolvedPrefs);
+            const loc = await serviceDiscoveryService.requestLocation();
+            const providers = await serviceDiscoveryService.getServiceProviders(
+              loc?.lat ?? null,
+              loc?.lng ?? null,
+              resolvedPrefs
+            );
+            setServiceProviders(providers);
+            markConnectionIssues({ services: false });
+          } catch (servicesError) {
+            console.error('❌ DiscoverScreen: Error loading service providers:', servicesError);
+            setServiceProviders([]);
+            markConnectionIssues({ services: true });
+          } finally {
+            loadingManager.setLoading('services', false, 0);
+          }
           break;
         }
 
@@ -1001,11 +1046,12 @@ function DiscoverScreen() {
               fallback: DISCOVER_MOCK_PLAYLISTS,
             },
           });
+          markConnectionIssues(allResults._timedOut);
           setTrendingTracks(allResults.trending?.data || allResults.trending || DISCOVER_MOCK_TRACKS);
           setRecentTracks(allResults.recent?.data || allResults.recent || DISCOVER_MOCK_TRACKS);
           setFeaturedArtists(allResults.artists?.data || allResults.artists || DISCOVER_MOCK_ARTISTS);
           const eventsData = allResults.events?.data || allResults.events || [];
-          setEvents(user?.id ? eventsData : (eventsData.length > 0 ? eventsData : DISCOVER_MOCK_EVENTS));
+          setEvents(user?.id ? eventsData : (eventsData.length > 0 ? eventsData : (allResults._timedOut.events ? [] : DISCOVER_MOCK_EVENTS)));
           loadExternalEvents();
           setPlaylists(allResults.playlists?.data || allResults.playlists || DISCOVER_MOCK_PLAYLISTS);
           break;
@@ -1015,7 +1061,11 @@ function DiscoverScreen() {
       console.log('✅ DiscoverScreen: Content loaded');
     } catch (error) {
       console.error('❌ DiscoverScreen: Error loading content:', error);
-      // Set fallback data
+      // A throw this far out (e.g. waitForValidSession) means none of the
+      // per-section timeout tracking above ran — treat every section this
+      // screen can show as a connection problem rather than silently masking
+      // it with mock data or an empty logged-in events list.
+      markConnectionIssues({ trending: true, recent: true, artists: true, events: true, playlists: true });
       setTrendingTracks(DISCOVER_MOCK_TRACKS);
       setRecentTracks(DISCOVER_MOCK_TRACKS);
       setFeaturedArtists(DISCOVER_MOCK_ARTISTS);
@@ -1380,14 +1430,18 @@ function DiscoverScreen() {
         });
 
         setEvents(transformedEvents);
+        markConnectionIssues({ events: false });
         await contentCacheService.saveCache('EVENTS', cacheKey, transformedEvents);
         console.log('✅ DiscoverScreen: Successfully set events:', transformedEvents.length);
       } else if (user?.id) {
-        // Strict personalization: do not fallback to unfiltered or mock events for logged-in users
+        // Strict personalization: do not fallback to unfiltered or mock events for logged-in users,
+        // but a real fetch error still means "couldn't load," not "genuinely no events for you."
         if (error) {
           console.log('⚠️ DiscoverScreen: Personalized events error:', error.message);
+          markConnectionIssues({ events: true });
         } else {
           console.log('ℹ️ DiscoverScreen: No personalized events found');
+          markConnectionIssues({ events: false });
         }
         setEvents([]);
       } else if (error) {
@@ -1413,6 +1467,7 @@ function DiscoverScreen() {
       console.error('❌ DiscoverScreen: Error loading events:', error);
       if (user?.id) {
         // Strict personalization: do not show fallback events for logged-in users
+        markConnectionIssues({ events: true });
         setEvents([]);
       } else {
         // Provide fallback data for anonymous users
@@ -1545,14 +1600,17 @@ function DiscoverScreen() {
       if (providers && providers.length > 0) {
         console.log('✅ DiscoverScreen: Service providers loaded:', providers.length);
         setServiceProviders(providers);
+        markConnectionIssues({ services: false });
         await contentCacheService.saveCache('SERVICES', cacheKey, providers);
       } else {
         console.log('ℹ️ DiscoverScreen: No service providers found');
         setServiceProviders([]);
+        markConnectionIssues({ services: false });
       }
     } catch (error) {
       console.error('❌ DiscoverScreen: Error loading service providers:', error);
       setServiceProviders([]);
+      markConnectionIssues({ services: true });
     } finally {
       setLoadingServices(false);
       console.log('🏁 DiscoverScreen: Service providers loading completed');
@@ -2073,7 +2131,7 @@ function DiscoverScreen() {
                   ItemSeparatorComponent={() => <View style={{ width: 16 }} />}
                 />
         ) : (
-                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'Nothing trending right now'}</Text>
+                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>{(isOffline || connectionIssues.has('trending')) ? CONNECTION_EMPTY_MESSAGE : 'Nothing trending right now'}</Text>
         )}
             </View>
 
@@ -2116,7 +2174,7 @@ function DiscoverScreen() {
                   ItemSeparatorComponent={() => <View style={{ width: 16 }} />}
                 />
         ) : (
-                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'No featured artists yet'}</Text>
+                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>{(isOffline || connectionIssues.has('artists')) ? CONNECTION_EMPTY_MESSAGE : 'No featured artists yet'}</Text>
               )}
             </View>
 
@@ -2217,7 +2275,7 @@ function DiscoverScreen() {
         ) : (
                 <View style={styles.emptyState}>
                   <Ionicons name="musical-notes" size={48} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'No recent music yet'}</Text>
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>{(isOffline || connectionIssues.has('recent')) ? CONNECTION_EMPTY_MESSAGE : 'No recent music yet'}</Text>
                 </View>
               )}
             </View>
@@ -2295,7 +2353,7 @@ function DiscoverScreen() {
                 <View style={styles.emptyState}>
                   <Ionicons name="albums" size={48} color={theme.colors.textSecondary} />
                   <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
-                    {isOffline ? OFFLINE_EMPTY_MESSAGE : 'No featured albums yet'}
+                    {(isOffline || connectionIssues.has('featuredAlbums')) ? CONNECTION_EMPTY_MESSAGE : 'No featured albums yet'}
                   </Text>
                 </View>
               )}
@@ -2373,7 +2431,7 @@ function DiscoverScreen() {
                 <View style={styles.emptyState}>
                   <Ionicons name="albums" size={48} color={theme.colors.textSecondary} />
                   <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
-                    {isOffline ? OFFLINE_EMPTY_MESSAGE : 'No recent albums yet'}
+                    {(isOffline || connectionIssues.has('recentAlbums')) ? CONNECTION_EMPTY_MESSAGE : 'No recent albums yet'}
                   </Text>
                 </View>
               )}
@@ -2696,7 +2754,7 @@ function DiscoverScreen() {
         ) : (
                 <View style={styles.emptyState}>
                   <Ionicons name="trending-up" size={48} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'No top artists yet'}</Text>
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>{(isOffline || connectionIssues.has('artists')) ? CONNECTION_EMPTY_MESSAGE : 'No top artists yet'}</Text>
                 </View>
               )}
       </View>
@@ -2805,7 +2863,7 @@ function DiscoverScreen() {
               ) : (
                 <View style={styles.emptyState}>
                   <Ionicons name="calendar" size={48} color={theme.colors.textSecondary} />
-                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'No events found'}</Text>
+                  <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>{(isOffline || connectionIssues.has('events')) ? CONNECTION_EMPTY_MESSAGE : 'No events found'}</Text>
                 </View>
               )}
             </WalkthroughableView>
@@ -2874,7 +2932,7 @@ function DiscoverScreen() {
                   ))}
                 </View>
               ) : (
-                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'No playlists yet'}</Text>
+                <Text style={[styles.quietEmpty, { color: theme.colors.textSecondary }]}>{(isOffline || connectionIssues.has('playlists')) ? CONNECTION_EMPTY_MESSAGE : 'No playlists yet'}</Text>
               )}
             </View>
           </>
@@ -3032,7 +3090,7 @@ function DiscoverScreen() {
                     </>
                   ) : (
                     <>
-                      <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>{isOffline ? OFFLINE_EMPTY_MESSAGE : 'No services listed in your area yet'}</Text>
+                      <Text style={[styles.emptyStateText, { color: theme.colors.text }]}>{(isOffline || connectionIssues.has('services')) ? CONNECTION_EMPTY_MESSAGE : 'No services listed in your area yet'}</Text>
                       <Text style={[styles.emptyStateSubtext, { color: theme.colors.textSecondary }]}>
                         Be the first to offer your services on SoundBridge.
                       </Text>

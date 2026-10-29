@@ -80,9 +80,9 @@ interface ParallelQueryConfig<T> {
  */
 export async function loadQueriesInParallel<T extends Record<string, any>>(
   queries: Record<string, ParallelQueryConfig<any>>
-): Promise<T> {
+): Promise<T & { _timedOut: Record<string, boolean> }> {
   const queryEntries = Object.entries(queries);
-  
+
   const results = await Promise.allSettled(
     queryEntries.map(async ([key, { query, timeout, fallback, name }]) => {
       try {
@@ -91,36 +91,45 @@ export async function loadQueriesInParallel<T extends Record<string, any>>(
           fallback,
           retries: 1,
         });
-        
+
         if (result.timedOut) {
           console.warn(`[${name}] Query timed out, using fallback`);
         }
-        
+
         if (result.error && !result.timedOut) {
           console.error(`[${name}] Query error:`, result.error);
         }
-        
-        return { key, name, data: result.data ?? fallback, error: result.error };
+
+        // timedOut covers both "ran out of time" and "the query itself threw" —
+        // withQueryTimeout only sets it once Promise.race rejects, which happens
+        // either way. Both are connectivity-shaped failures from the caller's
+        // point of view, as opposed to a query that completed and legitimately
+        // returned nothing.
+        return { key, name, data: result.data ?? fallback, error: result.error, timedOut: !!result.timedOut };
       } catch (error) {
         console.error(`[${name}] Unexpected error:`, error);
-        return { key, name, data: fallback, error };
+        return { key, name, data: fallback, error, timedOut: true };
       }
     })
   );
 
   // Convert array of results to object keyed by name
   const dataObject: any = {};
+  const timedOutMap: Record<string, boolean> = {};
   results.forEach((result, index) => {
     const finalKey = queryEntries[index][0];
-    
+
     if (result.status === 'fulfilled') {
       dataObject[finalKey] = result.value.data;
+      timedOutMap[finalKey] = result.value.timedOut;
     } else {
       dataObject[finalKey] = queryEntries[index][1].fallback;
+      timedOutMap[finalKey] = true;
     }
   });
+  dataObject._timedOut = timedOutMap;
 
-  return dataObject as T;
+  return dataObject as T & { _timedOut: Record<string, boolean> };
 }
 
 // ========================================
