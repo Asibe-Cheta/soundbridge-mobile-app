@@ -54,7 +54,12 @@ export default function LiveTippingModal({
   const [loading, setLoading] = useState(false);
   const [processingMessage, setProcessingMessage] = useState<string | null>(null);
 
-  const quickAmounts = [1, 5, 10, 20, 50];
+  // Matches MINIMUM_TIP_AMOUNTS.usd in the web app (src/lib/platform-fees.ts) —
+  // card tips below $5 lose money after Stripe's fixed per-transaction fee.
+  // This modal has no Gift Bundle option (unlike TipModal.tsx), so the floor
+  // applies unconditionally here.
+  const MINIMUM_LIVE_TIP = 5;
+  const quickAmounts = [5, 10, 20, 50];
 
   // Check if Stripe is configured
   const stripeConfigured = useMemo(() => {
@@ -110,8 +115,8 @@ export default function LiveTippingModal({
       return;
     }
 
-    if (amount < 1) {
-      Alert.alert('Minimum Tip', 'Minimum tip amount is $1');
+    if (amount < MINIMUM_LIVE_TIP) {
+      Alert.alert('Minimum Tip', `Minimum tip amount is $${MINIMUM_LIVE_TIP}`);
       return;
     }
 

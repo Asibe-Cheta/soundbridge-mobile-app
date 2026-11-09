@@ -55,7 +55,13 @@ export default function TipModal({ visible, creatorId, creatorName, onClose, onT
   const [giftBundleBalance, setGiftBundleBalance] = useState(0);
   const [payFromGiftBundle, setPayFromGiftBundle] = useState(false);
 
-  const presetAmounts = [1, 3, 5, 10, 20];
+  // Matches MINIMUM_TIP_AMOUNTS.usd in the web app (src/lib/platform-fees.ts) —
+  // card tips below $5 lose money after Stripe's fixed per-transaction fee.
+  // Does not apply when payFromGiftBundle is true (checked in handleSendTip) —
+  // Gift Bundle tips carry no per-tip Stripe fee, so smaller amounts are fine
+  // there even though these presets no longer offer them directly.
+  const MINIMUM_CARD_TIP = 5;
+  const presetAmounts = [5, 10, 20, 50];
   const isDark = theme.isDark;
 
   const stripeConfigured = useMemo(() => {
@@ -118,6 +124,10 @@ export default function TipModal({ visible, creatorId, creatorName, onClose, onT
 
     if (!Number.isFinite(amount) || amount <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid tip amount');
+      return;
+    }
+    if (!payFromGiftBundle && amount < MINIMUM_CARD_TIP) {
+      Alert.alert('Minimum Tip', `Minimum card tip is $${MINIMUM_CARD_TIP}. For smaller tips, pay from your Gift Bundle instead.`);
       return;
     }
 
