@@ -52,6 +52,8 @@ export default function GiftBundleModal({ visible, onClose, onCredited }: GiftBu
   const [loading, setLoading] = useState(false);
   const [processingMessage, setProcessingMessage] = useState<string | null>(null);
 
+  // Matches MINIMUM_GIFT_BUNDLE_TOPUP_USD in the web app (src/lib/platform-fees.ts).
+  const MINIMUM_TOPUP = 5;
   const presetAmounts = [30, 50];
   const isDark = theme.isDark;
 
@@ -151,6 +153,10 @@ export default function GiftBundleModal({ visible, onClose, onCredited }: GiftBu
     }
     if (!Number.isFinite(finalAmount) || finalAmount <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid amount');
+      return;
+    }
+    if (finalAmount < MINIMUM_TOPUP) {
+      Alert.alert('Minimum Top-Up', `Minimum Gift Bundle top-up is $${MINIMUM_TOPUP}.`);
       return;
     }
 
@@ -274,12 +280,12 @@ export default function GiftBundleModal({ visible, onClose, onCredited }: GiftBu
                 style={[
                   styles.sendButton,
                   {
-                    backgroundColor: finalAmount > 0 ? theme.colors.primary : theme.colors.surface,
+                    backgroundColor: finalAmount >= MINIMUM_TOPUP ? theme.colors.primary : theme.colors.surface,
                     opacity: loading ? 0.7 : 1,
                   },
                 ]}
                 onPress={handleConfirmPress}
-                disabled={finalAmount <= 0 || loading}
+                disabled={finalAmount < MINIMUM_TOPUP || loading}
                 activeOpacity={0.85}
               >
                 {loading ? (
