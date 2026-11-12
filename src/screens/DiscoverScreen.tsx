@@ -2944,7 +2944,7 @@ function DiscoverScreen() {
             <WalkthroughableView
               order={12}
               name="service_providers"
-              text="Find professional services here: Mixing engineers, producers, studio spaces, photographers, videographers. Browse portfolios, read reviews, and hire directly. Post YOUR services to earn money from your skills - even non-music skills pay here!"
+              text="Find professional services here: Mixing engineers, producers, studio spaces, photographers, videographers. Browse portfolios and reviews, and get in touch. Post YOUR services to earn money from your skills - even non-music skills pay here!"
               style={[styles.section, styles.firstSection]}
             >
               <View style={styles.sectionHeader}>
