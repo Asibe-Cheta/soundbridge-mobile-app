@@ -63,7 +63,8 @@ export default function TermsOfServiceScreen() {
 
           <Text style={styles.sectionTitle}>6. Revenue Sharing</Text>
           <Text style={styles.paragraph}>
-            SoundBridge operates on a fair revenue-sharing model where artists retain 90% of streaming revenue generated from their content. 
+            SoundBridge operates on a fair revenue-sharing model where creators keep 85% of tips, sales, tickets, and services, with a 15% platform fee.
+            SoundBridge does not collect, hold, or pay streaming royalties on your behalf.
             Detailed payout information is available in your creator dashboard.
           </Text>
 
