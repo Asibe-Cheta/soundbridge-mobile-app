@@ -65,7 +65,7 @@ const howItWorksFaqData: FAQItem[] = [
   {
     category: 'How SoundBridge Works',
     question: 'Can I earn from my music without having thousands of streams?',
-    answer: 'Yes. When a listener feels something while playing your music on SoundBridge they can tip you directly. You keep up to 90% of every tip instantly. There is no stream threshold to reach, no eligibility requirement, and no waiting period. Your first listener can be your first payment.',
+    answer: 'Yes. When a listener feels something while playing your music on SoundBridge they can tip you directly. You keep 85% of every tip instantly. There is no stream threshold to reach, no eligibility requirement, and no waiting period. Your first listener can be your first payment.',
   },
   {
     category: 'How SoundBridge Works',
@@ -80,7 +80,7 @@ const howItWorksFaqData: FAQItem[] = [
   {
     category: 'How SoundBridge Works',
     question: 'How does the service marketplace work?',
-    answer: 'If you offer professional services such as session work, mixing, production, vocal coaching or sound engineering you can list them on SoundBridge with your rates and availability. Other creators, event organisers and industry professionals can find and book you directly through the platform without you needing to cold pitch anyone.',
+    answer: 'If you offer professional services such as session work, mixing, production, vocal coaching or sound engineering you can list them on SoundBridge with your rates and availability. Other creators, event organisers and industry professionals can find and discover you on the platform without you needing to cold pitch anyone. In-app booking is coming soon.',
   },
 ];
 

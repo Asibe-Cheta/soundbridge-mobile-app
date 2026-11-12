@@ -75,7 +75,7 @@ export interface PayoutHistoryResponse {
  *
  * Creator revenue balance comes from creator_revenue table populated by:
  * - Tips from LiveTippingService
- * - Event ticket sales (95% after 5% platform fee)
+ * - Event ticket sales (85% after 15% platform fee)
  * - Service provider bookings
  * - Premium content purchases
  */

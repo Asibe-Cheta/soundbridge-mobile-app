@@ -2030,7 +2030,7 @@ export default function OnboardingScreen() {
         >
           {/* Main Headline */}
           <Text style={styles.newWelcomeHeadline}>
-            LinkedIn for{'\n'}audio creators
+            Creator networking{'\n'}that pays
           </Text>
           
           {/* Sub-headline */}
@@ -2209,7 +2209,7 @@ export default function OnboardingScreen() {
                   </View>
                 </View>
                 <Text style={styles.roleDescription}>
-                  Find talent and book collaborations.
+                  Find talent and start collaborations.
                 </Text>
               </View>
             </TouchableOpacity>

@@ -74,7 +74,7 @@ export const subscriptionPlans: Plan[] = [
     color: '#F59E0B',
     features: [
       'Unlimited tracks, up to 10 GB storage',
-      '90% creator share on tips and transactions',
+      '85% creator share on tips and transactions',
       'Unlimited badge on profile',
       'Featured on Discover 2x per month',
       'Top priority in feed',

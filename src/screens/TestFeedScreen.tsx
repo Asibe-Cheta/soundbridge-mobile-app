@@ -1356,7 +1356,7 @@ export default function TestFeedScreen() {
                   <WalkthroughableView
                     order={1}
                     name="create_drop_earn"
-                    text="Tap here to drop content and GET TIPPED! Share music, updates, or studio sessions. Creators keep 85 to 90% of every tip. Build your network and grow."
+                    text="Tap here to drop content and GET TIPPED! Share music, updates, or studio sessions. Creators keep 85% of every tip. Build your network and grow."
                   >
                     <TouchableOpacity onPress={handleCreatePost} activeOpacity={0.82} style={[styles.createPromptCard, {
                       backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',

@@ -1815,7 +1815,7 @@ export default function UploadScreen() {
     const tourProps = type === 'audioFile' ? {
       order: 14,
       name: 'upload_reach_audience',
-      text: 'Select your audio file here to begin uploading. Your track reaches YOUR followers FIRST (targeted, not random like Spotify). Free: 3 tracks, Premium: 10, Unlimited: ∞. Start distributing FREE and earning 95% from tips now!',
+      text: 'Select your audio file here to begin uploading. Your track reaches YOUR followers FIRST (targeted, not random like Spotify). Free: 3 tracks, Premium: 10, Unlimited: ∞. Start distributing FREE and earning 85% from tips now!',
     } : {};
 
     return (
@@ -3230,7 +3230,7 @@ export default function UploadScreen() {
             <WalkthroughableTouchable
               order={15}
               name="ready_to_earn"
-              text="Tap Publish when ready! Your music goes LIVE instantly. Followers see it FIRST in their feed. You earn from: Tips (95% yours), Event tickets (95%), Paid collaborations, Services marketplace. You're ready to EARN. Welcome to SoundBridge! 🎉"
+              text="Tap Publish when ready! Your music goes LIVE instantly. Followers see it FIRST in their feed. You earn from: Tips (85% yours), Event tickets (85%), Paid collaborations. You're ready to EARN. Welcome to SoundBridge! 🎉"
               style={[styles.publishButton, isUploading && styles.publishButtonDisabled, { alignSelf: 'stretch' }]}
               onPress={handleUpload}
               disabled={isUploading}

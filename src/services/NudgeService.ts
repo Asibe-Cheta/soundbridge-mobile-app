@@ -76,7 +76,7 @@ const NUDGES: NudgeDef[] = [
   {
     id: NUDGE.FAN_INVITE,
     title: 'Know someone who loves music?',
-    body: 'Invite them to SoundBridge. When they listen to your tracks and tip you, you keep between 85 and 90% instantly.',
+    body: 'Invite them to SoundBridge. When they listen to your tracks and tip you, you keep 85% instantly.',
     screen: 'ShareProfile',
   },
 

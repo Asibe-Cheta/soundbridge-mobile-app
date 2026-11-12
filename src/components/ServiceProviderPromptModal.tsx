@@ -31,7 +31,7 @@ const SERVICE_EXAMPLES = [
 
 const VALUE_PROPS = [
   { icon: '✨', text: "It's completely FREE" },
-  { icon: '💰', text: 'Keep 95% of what you earn' },
+  { icon: '💰', text: 'Keep 85% of what you earn' },
   { icon: '🎯', text: 'Get discovered by those who need your services' },
 ];
 

@@ -18,8 +18,8 @@ export interface ContentPurchase {
   content_type: ContentType;
   price_paid: number;
   currency: string;
-  platform_fee: number;        // 10% of price
-  creator_earnings: number;     // 90% of price
+  platform_fee: number;        // 15% of price
+  creator_earnings: number;     // 85% of price
   transaction_id: string;       // Stripe transaction reference
   status: PurchaseStatus;
   purchased_at: string;
