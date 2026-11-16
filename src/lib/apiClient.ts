@@ -135,10 +135,34 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 
       // Prefer the backend's own error message when it gave us one — far more
       // useful for diagnosing e.g. a validation failure than a generic fallback.
+      // Checks several shapes beyond the simple {error}/{message} case, since a
+      // validation failure (Zod and similar) commonly comes back as {errors:[...]},
+      // {errors:{field: msg}}, {issues:[...]}, or a bare array — any of which used
+      // to fall through to the unhelpful generic "API request failed" and mask the
+      // real, specific reason (e.g. which field failed validation).
       let backendMessage: string | undefined;
       if (typeof errorBody === 'object' && errorBody !== null) {
         const errorObj = errorBody as any;
         backendMessage = errorObj.error || errorObj.message || errorObj.error?.message;
+
+        if (!backendMessage) {
+          const list = Array.isArray(errorBody) ? errorBody
+            : Array.isArray(errorObj.errors) ? errorObj.errors
+            : Array.isArray(errorObj.issues) ? errorObj.issues
+            : null;
+          if (list && list.length > 0) {
+            backendMessage = list
+              .map((item: any) => (typeof item === 'string' ? item : item?.message || item?.error))
+              .filter(Boolean)
+              .join('; ') || undefined;
+          } else if (errorObj.errors && typeof errorObj.errors === 'object') {
+            // {errors: {field: "message", ...}} — field-keyed validation errors
+            const entries = Object.entries(errorObj.errors as Record<string, unknown>);
+            backendMessage = entries
+              .map(([field, msg]) => `${field}: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`)
+              .join('; ') || undefined;
+          }
+        }
       }
 
       // Provide more specific error messages for common status codes
