@@ -58,6 +58,31 @@ function formatNaturalDate(eventDate: string): string {
   });
 }
 
+// Mirrors CreateEventScreen.tsx's CATEGORY_ENUM_TO_LABEL (mobile) exactly — the raw
+// value in events.category is a DB enum (Secular, Gospel, Christian, Hip-Hop, ...),
+// never meant to be shown to a user as-is. Notification copy was putting that raw
+// word directly into push text (e.g. "...hosting a Secular ..."); this maps it back
+// to the same friendly label shown in the category picker before it's used in copy.
+const CATEGORY_LABELS: Record<string, string> = {
+  Secular: 'Music Concert',
+  Other: 'Other',
+  Carnival: 'Carnival',
+  Gospel: 'Gospel Concert',
+  Classical: 'Instrumental',
+  Jazz: 'Jazz Room',
+  Conference: 'Conference',
+  Christian: 'Other',
+  'Hip-Hop': 'Other',
+  Afrobeat: 'Other',
+  Rock: 'Other',
+  Pop: 'Other',
+};
+
+function getCategoryLabel(category: string | null): string {
+  if (!category) return 'event';
+  return CATEGORY_LABELS[category] || category;
+}
+
 function getEventCity(event: Event): string {
   if (event?.city) return event.city;
   if (event?.location) {
@@ -88,6 +113,7 @@ function buildEventNotification(event: Event, creatorName: string) {
   const city = getEventCity(event);
   const naturalDate = formatNaturalDate(event.event_date);
   const cta = getCTA(event);
+  const categoryLabel = getCategoryLabel(event.category);
 
   const eventDate = new Date(event.event_date);
   const daysUntil =
@@ -96,7 +122,7 @@ function buildEventNotification(event: Event, creatorName: string) {
 
   if (isUrgent) {
     return {
-      title: `Don't miss out! ${creatorName}'s ${event.category} is ${naturalDate}`,
+      title: `Don't miss out! ${creatorName}'s ${categoryLabel} is ${naturalDate}`,
       body: `${event.title} in ${city}. Limited spots available!`,
     };
   }
@@ -105,29 +131,29 @@ function buildEventNotification(event: Event, creatorName: string) {
   switch (templateType) {
     case 0:
       return {
-        title: `${creatorName} is hosting a ${event.category} ${naturalDate}!`,
+        title: `${creatorName} is hosting a ${categoryLabel} ${naturalDate}!`,
         body: `${event.title} in ${city}. ${cta}`,
       };
     case 1:
       return {
-        title: `${creatorName} has a ${event.category} coming up!`,
+        title: `${creatorName} has a ${categoryLabel} coming up!`,
         body: `${event.title} in ${city} ${naturalDate}. ${cta}`,
       };
     case 2:
       return {
         title: `Hey! ${creatorName} has something for you`,
-        body: `${event.category}: ${event.title} in ${city} ${naturalDate}`,
+        body: `${categoryLabel}: ${event.title} in ${city} ${naturalDate}`,
       };
     case 3:
       return {
-        title: `${event.category} happening in ${city} ${naturalDate}!`,
+        title: `${categoryLabel} happening in ${city} ${naturalDate}!`,
         body: `${creatorName} presents: ${event.title}. ${cta}`,
       };
     case 4:
     default:
       return {
         title: `${event.title} - ${naturalDate}`,
-        body: `${creatorName}'s ${event.category} in ${city}. ${cta}`,
+        body: `${creatorName}'s ${categoryLabel} in ${city}. ${cta}`,
       };
   }
 }
@@ -201,12 +227,17 @@ serve(async (req) => {
 
     console.log(`📍 Found ${nearbyUsers.length} nearby users in ${event.city}`);
 
-    // Filter users by time window and daily quota
+    // Filter users by time window and daily quota. Dedupe is no longer a
+    // prior SELECT here — the claim insert below (upsert + ignoreDuplicates
+    // against the (user_id, event_id, type) unique constraint,
+    // notification_history_user_event_type_unique) is the dedupe now, and is
+    // atomic against a concurrent/overlapping run in a way a prior SELECT
+    // never could be.
     const eligibleUsers: EligibleUser[] = [];
 
     for (const user of nearbyUsers as EligibleUser[]) {
-      // Check time window
-      if (!isWithinTimeWindow(user.start_hour, user.end_hour)) {
+      // Check time window (in the user's own timezone, not always UTC)
+      if (!isWithinTimeWindow(user.start_hour, user.end_hour, user.timezone)) {
         console.log(`⏰ User ${user.username} outside time window, skipping`);
         continue;
       }
@@ -235,28 +266,77 @@ serve(async (req) => {
       );
     }
 
-    // Build notification messages
     const creatorName = event.creator.display_name || event.creator.username;
     const deepLink = `soundbridge://event/${event.id}`;
     const { title, body } = buildEventNotification(event, creatorName);
 
-    const messages = eligibleUsers.map(user => ({
-      to: user.expo_push_token,
-      sound: 'default',
-      title,
-      body,
-      data: {
+    // Claim-before-send: the INSERT itself is the atomic decision. A second
+    // overlapping run racing on the exact same (user, event, type) gets zero
+    // rows back from the upsert and skips, instead of both independently
+    // deciding "not sent yet" from a prior SELECT. Mirrors
+    // record_notification_sent's own column set exactly (notification_type =
+    // type, sent_at/created_at = now, read = false), since this replaces
+    // that RPC call for this write.
+    const claims: { user: EligibleUser; claimId: string; data: Record<string, unknown> }[] = [];
+    for (const user of eligibleUsers) {
+      const claimedAt = new Date().toISOString();
+      const data = {
         type: 'event',
         eventId: event.id,
         eventTitle: event.title,
         eventCategory: event.category,
         eventLocation: event.location,
         city: event.city,
-        creatorName: creatorName,
+        creatorName,
         distance: user.distance_km,
         deepLink,
-        url: deepLink
-      },
+        url: deepLink,
+      };
+      const { data: claimedRows } = await supabase
+        .from('notification_history')
+        .upsert(
+          {
+            user_id: user.user_id,
+            event_id: event.id,
+            type: 'event_announcement',
+            notification_type: 'event_announcement',
+            title,
+            body,
+            data,
+            sent_at: claimedAt,
+            created_at: claimedAt,
+            read: false,
+          },
+          { onConflict: 'user_id,event_id,type', ignoreDuplicates: true }
+        )
+        .select('id');
+      if (claimedRows && claimedRows.length > 0) {
+        claims.push({ user, claimId: claimedRows[0].id, data });
+      }
+      // No row back => already claimed (this event, this user, this type) —
+      // by this function's own earlier run. The unique constraint matches
+      // on the literal type string, not the 'event' vs 'event_announcement'
+      // alias the read-based checks elsewhere in this codebase understand —
+      // so this only fully replaces that protection once the one-off
+      // backfill migration (20261116030000) has actually been run,
+      // collapsing every legacy 'event' row into 'event_announcement'.
+      // Until then, an event whose only existing record is still the
+      // legacy type could claim and re-send here.
+    }
+
+    if (claims.length === 0) {
+      return new Response(
+        JSON.stringify({ success: true, notificationsSent: 0 }),
+        { headers: { 'Content-Type': 'application/json' }, status: 200 }
+      );
+    }
+
+    const messages = claims.map(({ user, data }) => ({
+      to: user.expo_push_token,
+      sound: 'default',
+      title,
+      body,
+      data,
       url: deepLink,
       channelId: 'events'
     }));
@@ -264,37 +344,29 @@ serve(async (req) => {
     // Send push notifications via Expo
     const results = await sendPushNotifications(messages);
 
-    // Record notification history
-    for (let i = 0; i < eligibleUsers.length; i++) {
-      const user = eligibleUsers[i];
+    for (let i = 0; i < claims.length; i++) {
+      const { user, claimId } = claims[i];
       const result = results[i];
 
-      await supabase.rpc('record_notification_sent', {
-        p_user_id: user.user_id,
-        p_event_id: event.id,
-        p_type: 'event',
-        p_title: messages[i].title,
-        p_body: messages[i].body,
-        p_data: JSON.stringify(messages[i].data)
-      });
-
-      // Dual-write to notifications table so in-app list and bell badge show event notifications (mobile)
-      const { error: notifErr } = await supabase.from('notifications').insert({
-        user_id: user.user_id,
-        type: 'event',
-        title: messages[i].title,
-        body: messages[i].body,
-        data: messages[i].data,
-        read: false
-      });
-      if (notifErr) {
-        console.warn(`⚠️ Could not write to notifications table for ${user.username}:`, notifErr.message);
-      }
-
-      // Log individual result
       if (result.status === 'ok') {
+        // Dual-write to notifications table so in-app list and bell badge show event notifications (mobile)
+        const { error: notifErr } = await supabase.from('notifications').insert({
+          user_id: user.user_id,
+          type: 'event',
+          title: messages[i].title,
+          body: messages[i].body,
+          data: messages[i].data,
+          read: false
+        });
+        if (notifErr) {
+          console.warn(`⚠️ Could not write to notifications table for ${user.username}:`, notifErr.message);
+        }
         console.log(`✉️ Sent to ${user.username} (${user.city}, ${user.distance_km}km)`);
       } else {
+        // Release this run's own claim by id — a failed push becomes
+        // retryable on the next event-created webhook/run, instead of
+        // permanently marked done the way an unconditional record used to.
+        await supabase.from('notification_history').delete().eq('id', claimId);
         console.error(`❌ Failed to send to ${user.username}:`, result.message);
       }
     }
