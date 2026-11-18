@@ -28,6 +28,9 @@ Notifications.setNotificationHandler({
 
 export type NotificationType =
   | 'event'
+  | 'event_announcement'
+  | 'event_reminder_48h'
+  | 'event_reminder_day_of'
   | 'tip'
   | 'message'
   | 'collaboration_request'
@@ -1189,7 +1192,14 @@ class NotificationService {
 
       // If no direct URL, construct from type and entity ID
       if (!deepLinkUrl) {
-        if ((data.type === 'event' || data.type === 'event_reminder') && data.eventId) {
+        if (
+          (data.type === 'event' ||
+            data.type === 'event_reminder' ||
+            data.type === 'event_announcement' ||
+            data.type === 'event_reminder_48h' ||
+            data.type === 'event_reminder_day_of') &&
+          data.eventId
+        ) {
           deepLinkUrl = `soundbridge://event/${data.eventId}`;
         } else if (
           (data.type === 'track_approved' || data.type === 'track_featured' || data.type === 'moderation') &&
@@ -1234,6 +1244,11 @@ class NotificationService {
           deepLinkUrl = `soundbridge://campaigns/${data.campaignId || data.entityId}`;
         } else if (data.type && data.entityId) {
           deepLinkUrl = this.generateDeepLink(data.type, data.entityId);
+        } else if (data.eventId) {
+          // Safe default: any payload carrying an event id still resolves to the
+          // event, even for a type string this file doesn't otherwise recognise
+          // (e.g. a future reminder variant) — better than silently dropping the tap.
+          deepLinkUrl = `soundbridge://event/${data.eventId}`;
         }
       }
 
@@ -1248,6 +1263,16 @@ class NotificationService {
         console.log('🔗 Using navigation callback for immediate navigation');
         this.navigationCallback(dataWithUrl);
         return;
+      }
+
+      // No navigation callback registered — most likely a logged-out tap (the
+      // callback in App.tsx is only wired up once a user session exists).
+      // Persist the event id on its own key so a dedicated resume effect can
+      // pick it up once the user logs in, instead of relying on pendingDeepLink,
+      // which is only ever re-read once, at the first NavigationContainer
+      // onReady.
+      if (data.eventId) {
+        await AsyncStorage.setItem('pendingEventDeepLink', String(data.eventId));
       }
 
       // PRIORITY 2: Try to open deep link via URL scheme

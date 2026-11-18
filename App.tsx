@@ -922,6 +922,20 @@ function AppNavigator() {
     }).catch(() => {});
   }, [user, needsOnboarding]);
 
+  // Resume an event notification tap that arrived while the user was logged
+  // out (cold start, or a live tap before the navigation callback was wired
+  // up) — same pendingVoteDeepLink pattern as above.
+  React.useEffect(() => {
+    if (!user || needsOnboarding || !navigationRef.current) return;
+    AsyncStorage.getItem('pendingEventDeepLink').then(id => {
+      if (id && navigationRef.current) {
+        EventPromotionTrackingService.trackView(id, 'notification');
+        navigationRef.current.navigate('EventDetails' as never, { eventId: id } as never);
+        AsyncStorage.removeItem('pendingEventDeepLink').catch(() => {});
+      }
+    }).catch(() => {});
+  }, [user, needsOnboarding]);
+
   // Handle navigation ready
   const onNavigationReady = React.useCallback(() => {
     console.log('✅ Navigation ready');
@@ -935,11 +949,21 @@ function AppNavigator() {
     // start whose auth hasn't hydrated yet by the time onNavigationReady fires
     // would silently fail to navigate (e.g. the vote campaign push deep link).
     notificationService.getPendingDeepLink().then(data => {
-      if (data && navigationRef.current) {
-        handleNotificationNavigation(data);
+      if (!data || !navigationRef.current) return;
+      if (!user) {
+        // Not logged in yet — EventDetails and friends only exist in the
+        // authenticated stack. getPendingDeepLink() already removed this from
+        // storage, so hand the event id to the pendingEventDeepLink resume
+        // effect above instead of dropping it.
+        const pendingId = data.eventId || data.entityId || data.event_id || data.id;
+        if (pendingId) {
+          AsyncStorage.setItem('pendingEventDeepLink', String(pendingId)).catch(() => {});
+        }
+        return;
       }
+      handleNotificationNavigation(data);
     });
-  }, [syncActiveRoute]);
+  }, [syncActiveRoute, user]);
 
   // Handle navigation from notification data (when no deepLink URL is provided)
   const handleNotificationNavigation = (data: any) => {
@@ -955,6 +979,9 @@ function AppNavigator() {
       case 'event_1_week':
       case 'event_24_hours':
       case 'event_day':
+      case 'event_announcement':
+      case 'event_reminder_48h':
+      case 'event_reminder_day_of':
         console.log('🔔 Event notification - Full data:', JSON.stringify(data, null, 2));
         console.log('🔔 Event notification - eventId:', data.eventId);
         console.log('🔔 Event notification - entityId:', data.entityId);
@@ -1222,8 +1249,21 @@ function AppNavigator() {
         break;
       }
 
-      default:
-        console.log('⚠️ Unknown notification type for navigation:', data.type);
+      default: {
+        // Safe default: still open the event if the payload carries an id,
+        // even for a type string this switch doesn't otherwise recognise —
+        // keeps a future reminder/announcement variant from silently failing.
+        const fallbackEventId = data.eventId || data.entityId || data.event_id || data.id;
+        if (fallbackEventId) {
+          if (__DEV__) {
+            console.log('🔔 Unrecognised notification type with eventId, opening EventDetails:', data.type);
+          }
+          EventPromotionTrackingService.trackView(fallbackEventId, 'notification');
+          navigationRef.current.navigate('EventDetails' as never, { eventId: fallbackEventId } as never);
+        } else {
+          console.log('⚠️ Unknown notification type for navigation:', data.type);
+        }
+      }
     }
   };
 

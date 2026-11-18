@@ -75,6 +75,7 @@ export default function EventDetailsScreen() {
 
   const [event, setEvent] = useState<Event | null>(initialEvent || null);
   const [loading, setLoading] = useState(!initialEvent);
+  const [loadError, setLoadError] = useState<'not_found' | 'network_error' | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [isAttending, setIsAttending] = useState(false);
   const [purchasingTicket, setPurchasingTicket] = useState(false);
@@ -161,6 +162,7 @@ export default function EventDetailsScreen() {
   const loadEventDetails = async () => {
     if (initialEvent) return; // Skip if we already have event data
 
+    setLoadError(null);
     try {
       console.log('🔧 Loading event details for eventId:', eventId);
       console.log('🔧 eventId type:', typeof eventId);
@@ -168,8 +170,8 @@ export default function EventDetailsScreen() {
 
       // Validate eventId before querying
       if (!eventId || eventId === 'undefined' || eventId === 'null') {
-        console.error('❌ Invalid eventId received:', eventId);
-        Alert.alert('Error', `Invalid event ID received: "${eventId}"`);
+        if (__DEV__) console.error('❌ Invalid eventId received:', eventId);
+        setLoadError('not_found');
         setLoading(false);
         return;
       }
@@ -203,11 +205,13 @@ export default function EventDetailsScreen() {
       setEvent(fullEventData);
       console.log('✅ Event details loaded:', fullEventData.title);
     } catch (error: any) {
-      console.error('❌ Error loading event details:', error);
-      console.error('❌ Error message:', error?.message);
-      console.error('❌ Error code:', error?.code);
-      console.error('❌ eventId that failed:', eventId);
-      Alert.alert('Error', 'Failed to load event details');
+      if (__DEV__) {
+        console.error('❌ Error loading event details:', error, 'eventId:', eventId);
+      }
+      // Supabase's .single() returns PGRST116 when no row matches (deleted or
+      // never existed) — that is not a network problem, so it gets its own
+      // friendly state instead of a generic error with a dead end.
+      setLoadError(error?.code === 'PGRST116' ? 'not_found' : 'network_error');
     } finally {
       setLoading(false);
     }
@@ -626,7 +630,7 @@ export default function EventDetailsScreen() {
     );
   }
 
-  if (!event) {
+  if (loadError === 'not_found' || (!event && !loadError)) {
     return (
       <View style={styles.container}>
         <LinearGradient
@@ -640,16 +644,54 @@ export default function EventDetailsScreen() {
           <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
           <View style={styles.errorContainer}>
             <Ionicons name="calendar-outline" size={64} color={theme.colors.textSecondary} />
-            <Text style={[styles.errorText, { color: theme.colors.text }]}>Event not found</Text>
-            <BackButton
-              style={{ marginTop: 24 }}
-              onPress={() => navigation.goBack()}
-              accessibilityLabel="Return to previous screen"
-            />
+            <Text style={[styles.errorText, { color: theme.colors.text }]}>This event is no longer available</Text>
+            <Text style={[styles.errorSubtext, { color: theme.colors.textSecondary }]}>The organiser may have removed it.</Text>
+            <TouchableOpacity
+              style={[styles.errorActionButton, { backgroundColor: theme.colors.primary }]}
+              onPress={() => navigation.navigate('Feed' as never)}
+              accessibilityLabel="Go to Feed"
+            >
+              <Text style={styles.errorActionButtonText}>Go to Feed</Text>
+            </TouchableOpacity>
           </View>
         </SafeAreaView>
       </View>
     );
+  }
+
+  if (loadError === 'network_error') {
+    return (
+      <View style={styles.container}>
+        <LinearGradient
+          colors={[theme.colors.backgroundGradient.start, theme.colors.backgroundGradient.middle, theme.colors.backgroundGradient.end]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          locations={[0, 0.5, 1]}
+          style={styles.mainGradient}
+        />
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
+          <StatusBar barStyle={theme.isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
+          <View style={styles.errorContainer}>
+            <Ionicons name="cloud-offline-outline" size={64} color={theme.colors.textSecondary} />
+            <Text style={[styles.errorText, { color: theme.colors.text }]}>Could not load this event</Text>
+            <Text style={[styles.errorSubtext, { color: theme.colors.textSecondary }]}>Check your connection and try again.</Text>
+            <TouchableOpacity
+              style={[styles.errorActionButton, { backgroundColor: theme.colors.primary }]}
+              onPress={() => { setLoading(true); loadEventDetails(); }}
+              accessibilityLabel="Retry"
+            >
+              <Text style={styles.errorActionButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  if (!event) {
+    // Unreachable in practice (every path above either sets event or returns
+    // on loadError), kept only so TypeScript can narrow `event` below.
+    return null;
   }
 
   return (
@@ -1078,7 +1120,23 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorSubtext: {
+    fontSize: 14,
     marginBottom: 24,
+    textAlign: 'center',
+  },
+  errorActionButton: {
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 24,
+  },
+  errorActionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   header: {
     flexDirection: 'row',
