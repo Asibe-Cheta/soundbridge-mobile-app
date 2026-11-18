@@ -6368,7 +6368,7 @@ export default function OnboardingScreen() {
             <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 15, textAlign: 'center', marginBottom: 30, lineHeight: 22 }}>
               {isCreatorType
                 ? 'With alerts off, fans miss your events and you miss sales and growth nudges.'
-                : 'With alerts off, you miss events matched to you, deals, and gigs that others will see first.'}
+                : "Turn this on so we can tell you about events near you and when artists you follow post. Leave it off and you'll hear about things after everyone else."}
             </Text>
 
             {/* FOMO bullets */}

@@ -55,6 +55,7 @@ import { SkeletonFeed } from '../components/SkeletonLoader';
 import GoogleCalendarNudgeBanner from '../components/GoogleCalendarNudgeBanner';
 import VoteCampaignBanner from '../components/VoteCampaignBanner';
 import { voteBannerService } from '../services/VoteBannerService';
+import { notificationReAskService } from '../services/NotificationReAskService';
 import { analyticsService } from '../services/analytics/analyticsService';
 import GoogleCalendarPrivacyModal from '../components/GoogleCalendarPrivacyModal';
 import { calendarNudgeService } from '../services/CalendarNudgeService';
@@ -894,16 +895,26 @@ export default function TestFeedScreen() {
     if (user?.id) AsyncStorage.setItem(`audio_lover_welcome_dismissed_${user.id}`, '1').catch(() => {});
   }, [user?.id]);
 
+  // Was previously unconditional every session — showed this sheet on every
+  // single Feed visit whenever permission wasn't granted, with no memory of
+  // ever having shown it before. Now: only once they've shown real intent by
+  // viewing at least EVENT_VIEWS_BEFORE_REASK events, and if they tap "Not
+  // now" it comes back after REASK_AFTER_DISMISS_DAYS rather than never
+  // again — only an actual Allow/Open Settings action suppresses it for
+  // good (see NotificationReAskService).
   useFocusEffect(useCallback(() => {
     if (!user?.id || notifCheckedThisSession.current) return;
     notifCheckedThisSession.current = true;
     (async () => {
       try {
         const { status } = await Notifications.getPermissionsAsync();
-        if (status !== 'granted') {
-          setNotifAlreadyDenied(status === 'denied');
-          setTimeout(() => setShowNotifModal(true), 1500);
-        }
+        if (status === 'granted') return;
+
+        const shouldShow = await notificationReAskService.shouldShow(user.id);
+        if (!shouldShow) return;
+
+        setNotifAlreadyDenied(status === 'denied');
+        setTimeout(() => setShowNotifModal(true), 1500);
       } catch {}
     })();
   }, [user?.id]));
@@ -1634,12 +1645,18 @@ export default function TestFeedScreen() {
               ))}
               <Text style={{ color: 'rgba(255,255,255,0.28)', fontSize: 12, textAlign: 'center', marginTop: 4, marginBottom: 20, lineHeight: 17 }}>You choose categories and quiet hours — we don't blast you.</Text>
               <TouchableOpacity style={{ borderRadius: 999, overflow: 'hidden', marginBottom: 12 }} activeOpacity={0.85}
-                onPress={async () => { setShowNotifModal(false); if (notifAlreadyDenied) Linking.openSettings(); else await Notifications.requestPermissionsAsync(); }}>
+                onPress={async () => {
+                  setShowNotifModal(false);
+                  if (user?.id) notificationReAskService.markActed(user.id);
+                  if (notifAlreadyDenied) Linking.openSettings(); else await Notifications.requestPermissionsAsync();
+                }}>
                 <LinearGradient colors={['#EC4899', '#9333EA']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ paddingVertical: 16, alignItems: 'center', borderRadius: 999 }}>
                   <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>{notifAlreadyDenied ? 'Open Settings' : 'Allow notifications'}</Text>
                 </LinearGradient>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setShowNotifModal(false)} activeOpacity={0.6} style={{ alignItems: 'center', paddingVertical: 8 }}>
+              <TouchableOpacity
+                onPress={() => { setShowNotifModal(false); if (user?.id) notificationReAskService.markDismissed(user.id); }}
+                activeOpacity={0.6} style={{ alignItems: 'center', paddingVertical: 8 }}>
                 <Text style={{ color: 'rgba(255,255,255,0.32)', fontSize: 14 }}>Not now</Text>
               </TouchableOpacity>
             </View>

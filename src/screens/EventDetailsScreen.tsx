@@ -27,6 +27,7 @@ import { deepLinkingService } from '../services/DeepLinkingService';
 import eventBookmarkService from '../services/EventBookmarkService';
 import eventAnalyticsService, { EventAnalytics } from '../services/EventAnalyticsService';
 import { userBehaviourService } from '../services/UserBehaviourService';
+import { notificationReAskService } from '../services/NotificationReAskService';
 import EventShareSheet from '../components/EventShareSheet';
 import EventAnalyticsCard from '../components/EventAnalyticsCard';
 import WhosComingVisualization from '../components/WhosComingVisualization';
@@ -111,6 +112,9 @@ export default function EventDetailsScreen() {
     if (event?.id && user?.id) {
       const city = event.venue || event.location || null;
       userBehaviourService.recordEventView(user.id, event.id, city);
+      // Local-only counter gating the notification permission re-ask card
+      // (NotificationPermissionReAskBanner, shown on the Feed screen).
+      notificationReAskService.recordEventView(user.id);
     }
   }, [event?.id]);
 
