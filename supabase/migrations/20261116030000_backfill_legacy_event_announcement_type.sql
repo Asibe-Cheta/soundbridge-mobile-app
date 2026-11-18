@@ -1,0 +1,23 @@
+-- One-off backfill: notification_history rows written before this session
+-- renamed the announcement type from 'event' to 'event_announcement' still
+-- carry the old value. The code fix (deployed to send-event-reminders and
+-- send-event-notifications) now treats 'event' as an alias of
+-- 'event_announcement' in every dedupe/cap check, so this backfill is not
+-- required for correctness going forward — it exists only to collapse the
+-- two values into one going forward, so notification_history stops carrying
+-- a dead legacy value.
+--
+-- Scoped to event_id IS NOT NULL deliberately: 'event' may also appear on
+-- rows unrelated to event announcements (anything with no event_id), which
+-- this must not touch.
+--
+-- Run the read-only count first. Only run the UPDATE below once you've
+-- looked at that number and it's what you expect.
+
+-- Step 1 (read-only):
+-- SELECT count(*) FROM notification_history WHERE type = 'event' AND event_id IS NOT NULL;
+
+-- Step 2 (the actual backfill, run only after approving the count above):
+-- UPDATE notification_history
+-- SET type = 'event_announcement'
+-- WHERE type = 'event' AND event_id IS NOT NULL;
