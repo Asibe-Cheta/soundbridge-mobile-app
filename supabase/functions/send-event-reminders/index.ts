@@ -149,7 +149,28 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 function getCategoryLabel(category: string | null): string {
   if (!category) return 'event';
-  return CATEGORY_LABELS[category] || category;
+  const label = CATEGORY_LABELS[category] || category;
+  // 'Other' is a real DB enum value but not a word — "a Other"/"an Other"
+  // reads as broken English, so it falls back to the same generic 'event'
+  // label used for a missing category.
+  return label === 'Other' ? 'event' : label;
+}
+
+// "a"/"an" by the label's actual leading sound, not the raw category word —
+// matters once 'Other'/missing collapse to 'event' (needs "an") while most
+// real labels (Carnival, Jazz Room, ...) still need "a". Approximate (English
+// has silent-H exceptions this won't catch), same tradeoff as the rest of
+// this file's copy generation.
+function withArticle(label: string): string {
+  return `${/^[aeiou]/i.test(label) ? 'an' : 'a'} ${label}`;
+}
+
+// Collapses internal double-spaces and trims ends — a profile's display_name
+// can carry stray whitespace (e.g. a trailing space from a first/last name
+// field that was never fully entered), which otherwise shows up verbatim in
+// push copy as "Name  is hosting...".
+function cleanName(name: string | null | undefined): string {
+  return (name ?? '').replace(/\s+/g, ' ').trim();
 }
 
 interface EventRow {
@@ -191,7 +212,7 @@ function buildCopy(type: ReminderType, event: EventRow, creatorName: string, cit
   }
   // event_announcement — same style as send-event-notifications' own copy.
   return {
-    title: `${creatorName} is hosting a ${categoryLabel}`,
+    title: `${creatorName} is hosting ${withArticle(categoryLabel)}`,
     body: `${event.title} in ${city}. Join in.`,
   };
 }
@@ -364,7 +385,7 @@ serve(async (req) => {
       // history row is written with a `_test`-suffixed type further down.
       const isTest = !!testOnlyUserIds;
 
-      const creatorName = event.creator?.display_name || event.creator?.username || 'A creator';
+      const creatorName = cleanName(event.creator?.display_name) || cleanName(event.creator?.username) || 'A creator';
       const city = getEventCity(event);
       const { title, body } = buildCopy(type, event, creatorName, city);
       const deepLink = `soundbridge://event/${event.id}`;
