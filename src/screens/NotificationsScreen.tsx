@@ -357,6 +357,9 @@ export default function NotificationsScreen() {
               } else {
                 navigation.navigate('Discover' as never);
               }
+            })
+            .catch(() => {
+              navigation.navigate('Discover' as never);
             });
         }
         break;
