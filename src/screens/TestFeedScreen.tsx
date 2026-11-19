@@ -1405,113 +1405,126 @@ export default function TestFeedScreen() {
               }]}>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsContent}>
                   {FILTER_TABS.map(tab => (
-                    <TouchableOpacity key={tab} onPress={() => setActiveFilter(tab)} style={styles.tab}>
+                    <TouchableOpacity
+                      key={tab}
+                      onPress={() => setActiveFilter(tab)}
+                      style={styles.tab}
+                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected: activeFilter === tab }}
+                    >
                       <Text style={[styles.tabText,
                         activeFilter === tab
-                          ? { color: theme.colors.text, fontWeight: '500' }
-                          : { color: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)' },
+                          ? { color: theme.colors.text, fontWeight: '600' }
+                          : { color: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)' },
                       ]}>
                         {tab}
                       </Text>
+                      <View style={[styles.tabUnderline, { backgroundColor: activeFilter === tab ? '#DC2626' : 'transparent' }]} />
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
               </View>
 
-              {/* Event Organiser banners — shown only to event_organiser users */}
-              {userProfile?.onboarding_user_type === 'event_organiser' && (
-                <View style={cardStyles.partnerCarouselWrapper}>
-                  <ScrollView
-                    ref={eoCardScrollRef}
-                    horizontal
-                    snapToInterval={CARD_SNAP}
-                    snapToAlignment="start"
-                    decelerationRate="fast"
-                    showsHorizontalScrollIndicator={false}
-                    scrollEventThrottle={16}
-                    onScroll={handleEoCardScroll}
-                  >
-                    <CreateEventCard onPress={() => (navigation as any).navigate('CreateEvent')} />
-                    <DiscoverTalentCard onPress={() => (navigation as any).navigate('TalentDiscovery')} />
-                  </ScrollView>
-                  <View style={cardStyles.partnerCarouselDots}>
-                    {Array.from({ length: EO_CARD_COUNT }).map((_, i) => (
-                      <View
-                        key={i}
-                        style={[cardStyles.partnerCarouselDot, eoCardIndex === i && cardStyles.partnerCarouselDotActive]}
-                      />
-                    ))}
+              {/* Promo banners — For You only, so switching tabs visibly changes content */}
+              {activeFilter === 'For You' && (
+                <>
+                  {/* Event Organiser banners — shown only to event_organiser users */}
+                  {userProfile?.onboarding_user_type === 'event_organiser' && (
+                    <View style={cardStyles.partnerCarouselWrapper}>
+                      <ScrollView
+                        ref={eoCardScrollRef}
+                        horizontal
+                        snapToInterval={CARD_SNAP}
+                        snapToAlignment="start"
+                        decelerationRate="fast"
+                        showsHorizontalScrollIndicator={false}
+                        scrollEventThrottle={16}
+                        onScroll={handleEoCardScroll}
+                      >
+                        <CreateEventCard onPress={() => (navigation as any).navigate('CreateEvent')} />
+                        <DiscoverTalentCard onPress={() => (navigation as any).navigate('TalentDiscovery')} />
+                      </ScrollView>
+                      <View style={cardStyles.partnerCarouselDots}>
+                        {Array.from({ length: EO_CARD_COUNT }).map((_, i) => (
+                          <View
+                            key={i}
+                            style={[cardStyles.partnerCarouselDot, eoCardIndex === i && cardStyles.partnerCarouselDotActive]}
+                          />
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Discover Talent entry point for industry professionals — single banner, same component as the event organiser carousel above */}
+                  {userProfile?.onboarding_user_type === 'industry_professional' && (
+                    <View style={cardStyles.partnerCarouselWrapper}>
+                      <DiscoverTalentCard onPress={() => (navigation as any).navigate('TalentDiscovery')} />
+                    </View>
+                  )}
+
+                  {/* Musician banners — Create an Event + Earn from Events (Tip Room) */}
+                  {userProfile?.onboarding_user_type === 'music_creator' && (
+                    <View style={cardStyles.partnerCarouselWrapper}>
+                      <ScrollView
+                        ref={musicianCardScrollRef}
+                        horizontal
+                        snapToInterval={CARD_SNAP}
+                        snapToAlignment="start"
+                        decelerationRate="fast"
+                        showsHorizontalScrollIndicator={false}
+                        scrollEventThrottle={16}
+                        onScroll={handleMusicianCardScroll}
+                      >
+                        <CreateEventCard onPress={() => (navigation as any).navigate('CreateEvent')} />
+                        <EarnFromEventsCard onPress={() => (navigation as any).navigate('LiveSessions', { initialTab: 'tip_room' })} />
+                      </ScrollView>
+                      <View style={cardStyles.partnerCarouselDots}>
+                        {Array.from({ length: MUSICIAN_CARD_COUNT }).map((_, i) => (
+                          <View
+                            key={i}
+                            style={[cardStyles.partnerCarouselDot, musicianCardIndex === i && cardStyles.partnerCarouselDotActive]}
+                          />
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Live Audio + Partner Banner Carousel — Screen 02 card design */}
+                  <LiveAudioCard onPress={() => navigation.navigate('LiveSessions' as never)} />
+                  <View style={cardStyles.partnerCarouselWrapper}>
+                    <ScrollView
+                      ref={cardScrollRef}
+                      horizontal
+                      snapToInterval={CARD_SNAP}
+                      snapToAlignment="start"
+                      decelerationRate="fast"
+                      showsHorizontalScrollIndicator={false}
+                      scrollEventThrottle={16}
+                      onScroll={handleCardScroll}
+                      onScrollBeginDrag={handleCardDragStart}
+                      onMomentumScrollEnd={handleCardMomentumEnd}
+                    >
+                      <SoundAcademyCard carousel onPress={() => {
+                        proResourceAnalytics.track('explore_courses_tap');
+                        (navigation as any).navigate('ProResources');
+                      }} />
+                      <AbbeyRoadCard carousel onPress={() => {
+                        proResourceAnalytics.track('ari_explore_tap');
+                        (navigation as any).navigate('ProResources');
+                      }} />
+                    </ScrollView>
+                    <View style={cardStyles.partnerCarouselDots}>
+                      {[0, 1].map(i => (
+                        <View
+                          key={i}
+                          style={[cardStyles.partnerCarouselDot, cardIndex === i && cardStyles.partnerCarouselDotActive]}
+                        />
+                      ))}
+                    </View>
                   </View>
-                </View>
+                </>
               )}
-
-              {/* Discover Talent entry point for industry professionals — single banner, same component as the event organiser carousel above */}
-              {userProfile?.onboarding_user_type === 'industry_professional' && (
-                <View style={cardStyles.partnerCarouselWrapper}>
-                  <DiscoverTalentCard onPress={() => (navigation as any).navigate('TalentDiscovery')} />
-                </View>
-              )}
-
-              {/* Musician banners — Create an Event + Earn from Events (Tip Room) */}
-              {userProfile?.onboarding_user_type === 'music_creator' && (
-                <View style={cardStyles.partnerCarouselWrapper}>
-                  <ScrollView
-                    ref={musicianCardScrollRef}
-                    horizontal
-                    snapToInterval={CARD_SNAP}
-                    snapToAlignment="start"
-                    decelerationRate="fast"
-                    showsHorizontalScrollIndicator={false}
-                    scrollEventThrottle={16}
-                    onScroll={handleMusicianCardScroll}
-                  >
-                    <CreateEventCard onPress={() => (navigation as any).navigate('CreateEvent')} />
-                    <EarnFromEventsCard onPress={() => (navigation as any).navigate('LiveSessions', { initialTab: 'tip_room' })} />
-                  </ScrollView>
-                  <View style={cardStyles.partnerCarouselDots}>
-                    {Array.from({ length: MUSICIAN_CARD_COUNT }).map((_, i) => (
-                      <View
-                        key={i}
-                        style={[cardStyles.partnerCarouselDot, musicianCardIndex === i && cardStyles.partnerCarouselDotActive]}
-                      />
-                    ))}
-                  </View>
-                </View>
-              )}
-
-              {/* Live Audio + Partner Banner Carousel — Screen 02 card design */}
-              <LiveAudioCard onPress={() => navigation.navigate('LiveSessions' as never)} />
-              <View style={cardStyles.partnerCarouselWrapper}>
-                <ScrollView
-                  ref={cardScrollRef}
-                  horizontal
-                  snapToInterval={CARD_SNAP}
-                  snapToAlignment="start"
-                  decelerationRate="fast"
-                  showsHorizontalScrollIndicator={false}
-                  scrollEventThrottle={16}
-                  onScroll={handleCardScroll}
-                  onScrollBeginDrag={handleCardDragStart}
-                  onMomentumScrollEnd={handleCardMomentumEnd}
-                >
-                  <SoundAcademyCard carousel onPress={() => {
-                    proResourceAnalytics.track('explore_courses_tap');
-                    (navigation as any).navigate('ProResources');
-                  }} />
-                  <AbbeyRoadCard carousel onPress={() => {
-                    proResourceAnalytics.track('ari_explore_tap');
-                    (navigation as any).navigate('ProResources');
-                  }} />
-                </ScrollView>
-                <View style={cardStyles.partnerCarouselDots}>
-                  {[0, 1].map(i => (
-                    <View
-                      key={i}
-                      style={[cardStyles.partnerCarouselDot, cardIndex === i && cardStyles.partnerCarouselDotActive]}
-                    />
-                  ))}
-                </View>
-              </View>
 
               {/* Section label above posts — Screen 01 number/label pattern */}
               <View style={styles.sectionLabel}>
@@ -1806,8 +1819,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   tabsContent: { paddingHorizontal: 16, paddingVertical: 4, gap: 4 },
-  tab: { paddingHorizontal: 10, paddingVertical: 12 },
+  tab: { paddingHorizontal: 14, paddingVertical: 14, alignItems: 'center', gap: 6 },
   tabText: { fontSize: 22, letterSpacing: -0.3, lineHeight: 28 },
+  tabUnderline: { height: 3, width: 24, borderRadius: 1.5 },
 
   // ── Section divider ───────────────────────────────────────
   sectionLabel: {
