@@ -128,15 +128,15 @@ BEGIN
   FROM events e
   LEFT JOIN (
     SELECT
-      event_id,
+      efi_src.event_id AS impression_event_id,
       count(*) AS shown_count,
-      max(shown_at) AS last_shown_at,
-      bool_or(tapped_at IS NOT NULL) AS was_tapped,
-      bool_or(dismissed_at IS NOT NULL) AS was_dismissed
-    FROM event_feed_impressions
-    WHERE user_id = p_user_id
-    GROUP BY event_id
-  ) efi ON efi.event_id = e.id
+      max(efi_src.shown_at) AS last_shown_at,
+      bool_or(efi_src.tapped_at IS NOT NULL) AS was_tapped,
+      bool_or(efi_src.dismissed_at IS NOT NULL) AS was_dismissed
+    FROM event_feed_impressions efi_src
+    WHERE efi_src.user_id = p_user_id
+    GROUP BY efi_src.event_id
+  ) efi ON efi.impression_event_id = e.id
   WHERE
     e.creator_id != p_user_id
     AND e.status = 'active'
