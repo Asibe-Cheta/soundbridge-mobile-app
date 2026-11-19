@@ -98,54 +98,61 @@ LIMIT 20;
 -- (RLS enabled, no policies — not readable via the API, only direct DB
 -- access) so the rollback below can delete precisely those rows and
 -- nothing a live edge function writes before or after.
--- ============================================================
--- CREATE TABLE notifications_backfill_ids_20261119 AS
--- WITH ins AS (
---   INSERT INTO notifications (user_id, type, title, body, data, read, created_at, dedupe_key)
---   SELECT
---     nh.user_id,
---     CASE WHEN nh.type = 'event' THEN 'event_announcement' ELSE nh.type END,
---     nh.title,
---     nh.body,
---     nh.data,
---     (nh.sent_at::date < current_date),
---     nh.sent_at,
---     (CASE WHEN nh.type = 'event' THEN 'event_announcement' ELSE nh.type END) || ':' || nh.event_id::text
---   FROM notification_history nh
---   JOIN events e ON e.id = nh.event_id
---   WHERE nh.type IN ('event_announcement', 'event', 'event_reminder_48h', 'event_reminder_day_of')
---     AND nh.sent_at >= now() - interval '14 days'
---     AND e.event_date >= now()
---     AND e.cancelled_at IS NULL
---     AND NOT EXISTS (
---       SELECT 1 FROM notifications n
---       WHERE n.user_id = nh.user_id
---         AND (
---           n.dedupe_key = (CASE WHEN nh.type = 'event' THEN 'event_announcement' ELSE nh.type END) || ':' || nh.event_id::text
---           OR (
---             (CASE WHEN nh.type = 'event' THEN 'event_announcement' ELSE nh.type END) = 'event_announcement'
---             AND n.type IN ('event', 'event_announcement')
---             AND (n.data->>'eventId') = nh.event_id::text
---           )
---         )
---     )
---   ON CONFLICT (user_id, dedupe_key) DO NOTHING
---   RETURNING id
--- )
--- SELECT id FROM ins;
 --
--- ALTER TABLE notifications_backfill_ids_20261119 ENABLE ROW LEVEL SECURITY;
+-- Active below (not commented out) — reviewed and approved 2026-11-19
+-- after confirming PREVIEW 1 = 6 and fixing the notifications_type_check
+-- constraint. If you run this file again later for a different window,
+-- re-check the previews first; this INSERT is not meant to be rerun blind.
+-- ============================================================
+CREATE TABLE notifications_backfill_ids_20261119 AS
+WITH ins AS (
+  INSERT INTO notifications (user_id, type, title, body, data, read, created_at, dedupe_key)
+  SELECT
+    nh.user_id,
+    CASE WHEN nh.type = 'event' THEN 'event_announcement' ELSE nh.type END,
+    nh.title,
+    nh.body,
+    nh.data,
+    (nh.sent_at::date < current_date),
+    nh.sent_at,
+    (CASE WHEN nh.type = 'event' THEN 'event_announcement' ELSE nh.type END) || ':' || nh.event_id::text
+  FROM notification_history nh
+  JOIN events e ON e.id = nh.event_id
+  WHERE nh.type IN ('event_announcement', 'event', 'event_reminder_48h', 'event_reminder_day_of')
+    AND nh.sent_at >= now() - interval '14 days'
+    AND e.event_date >= now()
+    AND e.cancelled_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM notifications n
+      WHERE n.user_id = nh.user_id
+        AND (
+          n.dedupe_key = (CASE WHEN nh.type = 'event' THEN 'event_announcement' ELSE nh.type END) || ':' || nh.event_id::text
+          OR (
+            (CASE WHEN nh.type = 'event' THEN 'event_announcement' ELSE nh.type END) = 'event_announcement'
+            AND n.type IN ('event', 'event_announcement')
+            AND (n.data->>'eventId') = nh.event_id::text
+          )
+        )
+    )
+  ON CONFLICT (user_id, dedupe_key) DO NOTHING
+  RETURNING id
+)
+SELECT id FROM ins;
+
+ALTER TABLE notifications_backfill_ids_20261119 ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================
--- VERIFICATION — run after the INSERT
+-- VERIFICATION — run after the INSERT (active)
 -- ============================================================
--- SELECT n.id, n.user_id, n.type, n.title, n.created_at, n.read, n.dedupe_key
--- FROM notifications n
--- JOIN notifications_backfill_ids_20261119 t ON t.id = n.id
--- ORDER BY n.created_at DESC;
+SELECT n.id, n.user_id, n.type, n.title, n.created_at, n.read, n.dedupe_key
+FROM notifications n
+JOIN notifications_backfill_ids_20261119 t ON t.id = n.id
+ORDER BY n.created_at DESC;
 
 -- ============================================================
--- ROLLBACK — deletes only the rows this specific run created
+-- ROLLBACK — deletes only the rows this specific run created.
+-- Left commented out deliberately: this is a separate, opt-in action,
+-- never something to run as part of the same pass as the INSERT above.
 -- ============================================================
 -- DELETE FROM notifications
 -- WHERE id IN (SELECT id FROM notifications_backfill_ids_20261119);
