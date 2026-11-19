@@ -33,6 +33,10 @@ interface EventMiniCardProps {
     tickets_available?: number | null;
     country: string | null;
   };
+  // Fires before navigating — lets a caller record a tap (e.g. for
+  // frequency-capped impression tracking) without this card needing to
+  // know anything about who's tracking it.
+  onPress?: () => void;
 }
 
 function formatShortDate(dateStr: string): string {
@@ -61,7 +65,7 @@ function getCTALabel(event: EventMiniCardProps['event']): string {
   return 'Learn More';
 }
 
-export default function EventMiniCard({ event }: EventMiniCardProps) {
+export default function EventMiniCard({ event, onPress }: EventMiniCardProps) {
   const { theme } = useTheme();
   const navigation = useNavigation();
   const isDark = theme.isDark;
@@ -74,8 +78,10 @@ export default function EventMiniCard({ event }: EventMiniCardProps) {
     : 'Free';
   const ctaLabel = getCTALabel(event);
 
-  const handlePress = () =>
+  const handlePress = () => {
+    onPress?.();
     (navigation as any).navigate('EventDetails', { eventId: event.id });
+  };
 
   return (
     <TouchableOpacity

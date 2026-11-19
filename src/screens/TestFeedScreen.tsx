@@ -37,6 +37,7 @@ import { useFeed } from '../hooks/useFeed';
 import PostCard from '../components/PostCard';
 import EventPostCard from '../components/EventPostCard';
 import EventsStrip from '../components/EventsStrip';
+import NearbyEventsCard from '../components/NearbyEventsCard';
 import EarlyAdopterConversionModal from '../components/EarlyAdopterConversionModal';
 import { useEarlyAdopterConversion } from '../hooks/useEarlyAdopterConversion';
 import CreatePostModal from '../components/CreatePostModal';
@@ -1429,6 +1430,9 @@ export default function TestFeedScreen() {
               {/* Promo banners — For You only, so switching tabs visibly changes content */}
               {activeFilter === 'For You' && (
                 <>
+                  {/* Happening near you — shown to everyone eligible, not role-gated */}
+                  {user?.id && <NearbyEventsCard userId={user.id} />}
+
                   {/* Event Organiser banners — shown only to event_organiser users */}
                   {userProfile?.onboarding_user_type === 'event_organiser' && (
                     <View style={cardStyles.partnerCarouselWrapper}>

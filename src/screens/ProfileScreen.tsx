@@ -185,6 +185,18 @@ export default function ProfileScreen() {
       navigation.setParams({ openShareCard: undefined } as never);
     }
   }, [route.params, profile]);
+
+  // Deep link / nav param support: { openEditLocation: true } opens the
+  // profile edit form directly, for the "Set your location" prompt in the
+  // Feed's Happening near you module — the location field lives in this
+  // same edit form, there's no separate location-only screen.
+  useEffect(() => {
+    const params = route.params as { openEditLocation?: boolean } | undefined;
+    if (params?.openEditLocation && profile && !isEditing) {
+      handleEditProfile();
+      navigation.setParams({ openEditLocation: undefined } as never);
+    }
+  }, [route.params, profile]);
   const [showNudgeModal, setShowNudgeModal] = useState(false);
   const [showFanPageModal, setShowFanPageModal] = useState(false);
   const [nudgeDismissedThisSession, setNudgeDismissedThisSession] = useState(false);
