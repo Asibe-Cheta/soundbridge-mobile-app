@@ -460,6 +460,31 @@ serve(async (req) => {
       for (let i = 0; i < claims.length; i++) {
         if (receipts[i]?.status === 'ok') {
           sent++;
+          // Dual-write to notifications so it shows in the in-app inbox and
+          // bell badge, same as send-event-notifications already does.
+          // Skipped for _test sends — those are allow-listed test traffic,
+          // not real user-facing notifications. dedupe_key makes this
+          // idempotent on its own unique index even though the
+          // notification_history claim above already prevents a genuine
+          // resend from reaching this point.
+          if (!isTest) {
+            const { user } = claims[i];
+            const { error: notifErr } = await supabase.from('notifications').upsert(
+              {
+                user_id: user.user_id,
+                type,
+                title,
+                body,
+                data: { type, eventId: event.id, eventTitle: event.title, city, deepLink, url: deepLink },
+                read: false,
+                dedupe_key: `${type}:${event.id}`,
+              },
+              { onConflict: 'user_id,dedupe_key', ignoreDuplicates: true }
+            );
+            if (notifErr) {
+              console.warn(`⚠️ Could not write to notifications table for ${user.username}:`, notifErr.message);
+            }
+          }
         } else {
           failed++;
           // Release by this run's own claim id, never by (user, event,

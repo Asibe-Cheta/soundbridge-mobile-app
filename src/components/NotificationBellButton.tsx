@@ -10,7 +10,6 @@ import {
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Rect } from 'react-native-svg';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -21,35 +20,6 @@ import { supabase } from '../lib/supabase';
 interface NotificationBellButtonProps {
   size?: number;
   color?: string;
-}
-
-// Bar heights as fractions of total height — classic sound wave shape
-const WAVE_BARS = [0.45, 0.75, 1.0, 0.75, 0.45];
-const BAR_W = 3;
-const BAR_GAP = 2;
-
-function SoundWaveIcon({ size, color }: { size: number; color: string }) {
-  const totalW = WAVE_BARS.length * BAR_W + (WAVE_BARS.length - 1) * BAR_GAP;
-  return (
-    <Svg width={size} height={size} viewBox={`0 0 ${totalW} ${size}`}>
-      {WAVE_BARS.map((frac, i) => {
-        const barH = Math.round(frac * size);
-        const x = i * (BAR_W + BAR_GAP);
-        const y = (size - barH) / 2;
-        return (
-          <Rect
-            key={i}
-            x={x}
-            y={y}
-            width={BAR_W}
-            height={barH}
-            rx={BAR_W / 2}
-            fill={color}
-          />
-        );
-      })}
-    </Svg>
-  );
 }
 
 export default function NotificationBellButton({ size = 24, color }: NotificationBellButtonProps) {
@@ -165,7 +135,7 @@ export default function NotificationBellButton({ size = 24, color }: Notificatio
         accessibilityLabel={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
         accessibilityRole="button"
       >
-        <SoundWaveIcon size={size} color={iconColor} />
+        <Ionicons name="notifications-outline" size={size} color={iconColor} />
         {unreadCount > 0 && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>
@@ -238,7 +208,7 @@ export default function NotificationBellButton({ size = 24, color }: Notificatio
                 activeOpacity={0.7}
               >
                 <View style={[styles.menuIconContainer, { backgroundColor: theme.colors.primary + '25' }]}>
-                  <SoundWaveIcon size={18} color={theme.colors.primary} />
+                  <Ionicons name="notifications-outline" size={18} color={theme.colors.primary} />
                 </View>
                 <View style={styles.menuTextContainer}>
                   <Text style={[styles.menuItemTitle, { color: theme.colors.text }]}>

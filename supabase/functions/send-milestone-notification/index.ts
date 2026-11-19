@@ -125,6 +125,26 @@ serve(async (req) => {
         if (receipts[i]?.status === 'ok') {
           sent++;
           nudgeRows.push({ user_id: eligible[i].id, nudge_id: nudgeId, sent_at: nowIso });
+
+          // Dual-write to notifications so it shows in the in-app inbox and
+          // bell badge. dedupe_key makes this idempotent on its own unique
+          // index in case this function is ever invoked more than once for
+          // the same milestone before platform_milestone_broadcasts catches it.
+          const { error: notifErr } = await supabase.from('notifications').upsert(
+            {
+              user_id: eligible[i].id,
+              type: 'milestone',
+              title,
+              body,
+              data: { type: 'milestone', nudgeId, screen: 'ShareProfile', deepLink, url: deepLink },
+              read: false,
+              dedupe_key: `milestone:${nudgeId}`,
+            },
+            { onConflict: 'user_id,dedupe_key', ignoreDuplicates: true }
+          );
+          if (notifErr) {
+            console.warn(`Could not write to notifications table for ${eligible[i].id}:`, notifErr.message);
+          }
         } else {
           failed++;
           console.error(`Failed to send milestone push to ${eligible[i].id}:`, receipts[i]?.message);

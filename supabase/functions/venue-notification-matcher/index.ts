@@ -157,6 +157,30 @@ serve(async (req) => {
     const receipts = await sendPushNotifications(messages)
     const sent = receipts.filter((r) => r.status === 'ok').length
 
+    // Dual-write to notifications so it shows in the in-app inbox and bell
+    // badge. dedupe_key makes a duplicate insert a no-op if this function is
+    // ever invoked twice for the same venue (there is no existing claim
+    // table for the push itself here, unlike the event-reminder path).
+    const recipients = profiles.filter((p) => p.expo_push_token)
+    for (let i = 0; i < recipients.length; i++) {
+      if (receipts[i]?.status !== 'ok') continue
+      const { error: notifErr } = await supabase.from('notifications').upsert(
+        {
+          user_id: recipients[i].id,
+          type: 'venue_match',
+          title: messages[i].title,
+          body: messages[i].body,
+          data: messages[i].data,
+          read: false,
+          dedupe_key: `venue_match:${venue.id}`,
+        },
+        { onConflict: 'user_id,dedupe_key', ignoreDuplicates: true }
+      )
+      if (notifErr) {
+        console.warn(`Could not write to notifications table for ${recipients[i].id}:`, notifErr.message)
+      }
+    }
+
     console.log(`venue-notification-matcher: matched ${matchingUserIds.length} users, sent ${sent} notifications`)
 
     return new Response(JSON.stringify({ matched: matchingUserIds.length, sent }), {

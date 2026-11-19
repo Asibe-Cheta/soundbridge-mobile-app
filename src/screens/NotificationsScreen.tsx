@@ -294,6 +294,9 @@ export default function NotificationsScreen() {
       // Event notifications
       case 'event':
       case 'event_reminder':
+      case 'event_announcement':
+      case 'event_reminder_48h':
+      case 'event_reminder_day_of':
       case 'event_2_weeks':
       case 'event_1_week':
       case 'event_24_hours':
@@ -301,6 +304,60 @@ export default function NotificationsScreen() {
         const eventId = data?.eventId || data?.entityId || data?.event_id;
         if (eventId) {
           navigation.navigate('EventDetails' as never, { eventId } as never);
+        }
+        break;
+      }
+
+      // Platform growth-milestone broadcast — opens the share-profile screen
+      // named in data.screen, same as a nudge notification.
+      case 'milestone':
+        navigation.navigate((data?.screen || 'Profile') as never, (data?.screenParams ?? {}) as never);
+        break;
+
+      // Venue match — fetch the venue from Supabase then open VenueDetail,
+      // same fetch-then-navigate shape as App.tsx's OS-push tap handler for
+      // this type, since VenueDetailScreen needs the full venue object.
+      case 'venue_match': {
+        const vId = data?.venueId || data?.venue_id || data?.entityId;
+        if (vId) {
+          supabase
+            .from('venues')
+            .select('id, name, description, address, city, country, venue_type, capacity, latitude, longitude, hourly_rate, daily_rate, currency, photo_url, photos, rating, website, contact_email, contact_phone, external_booking_link, owner_id')
+            .eq('id', vId)
+            .single()
+            .then(({ data: venueRow }) => {
+              if (venueRow) {
+                const addrLine = typeof venueRow.address === 'object' && venueRow.address !== null
+                  ? (venueRow.address as any).line1
+                  : (typeof venueRow.address === 'string' ? venueRow.address : null);
+                const venue = {
+                  id: venueRow.id,
+                  source: 'soundbridge' as const,
+                  name: venueRow.name,
+                  address: [addrLine, venueRow.city, venueRow.country].filter(Boolean).join(', '),
+                  city: venueRow.city,
+                  latitude: venueRow.latitude,
+                  longitude: venueRow.longitude,
+                  venue_type: venueRow.venue_type,
+                  daily_rate: venueRow.daily_rate,
+                  hourly_rate: venueRow.hourly_rate,
+                  currency: venueRow.currency ?? 'GBP',
+                  photo_url: venueRow.photo_url,
+                  photos: venueRow.photos,
+                  rating: venueRow.rating,
+                  description: venueRow.description,
+                  website: venueRow.website,
+                  contact_email: venueRow.contact_email,
+                  contact_phone: venueRow.contact_phone,
+                  external_booking_link: venueRow.external_booking_link,
+                  capacity: venueRow.capacity,
+                  owner_id: venueRow.owner_id,
+                };
+                navigation.navigate('VenueDetail' as never, { venue } as never);
+              } else {
+                navigation.navigate('Discover' as never);
+              }
+            });
         }
         break;
       }
@@ -516,7 +573,14 @@ export default function NotificationsScreen() {
         return 'chatbubble';
       case 'event':
       case 'event_reminder':
+      case 'event_announcement':
+      case 'event_reminder_48h':
+      case 'event_reminder_day_of':
         return 'calendar';
+      case 'milestone':
+        return 'trending-up';
+      case 'venue_match':
+        return 'location';
       case 'collaboration_request':
         return 'people';
       case 'collaboration_accepted':
@@ -566,7 +630,14 @@ export default function NotificationsScreen() {
         return '#8B5CF6';
       case 'event':
       case 'event_reminder':
+      case 'event_announcement':
+      case 'event_reminder_48h':
+      case 'event_reminder_day_of':
         return '#F59E0B';
+      case 'milestone':
+        return '#DC2626';
+      case 'venue_match':
+        return '#0EA5E9';
       case 'collaboration_request':
       case 'new_follower':
       case 'connection_request':
