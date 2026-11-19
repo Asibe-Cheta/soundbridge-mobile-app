@@ -391,11 +391,11 @@ async function fetchCreatorContext(userId: string, session: Session): Promise<Cr
     availabilityTotals.anyTime += stat.availabilityBreakdown.any_time;
     availabilityTotals.notSure += stat.availabilityBreakdown.not_sure;
     for (const loc of stat.locationBreakdown) {
-      if (!loc.city && !loc.country) continue;
-      const key = `${loc.city}|${loc.country}`;
+      if (!loc.city) continue;
+      const key = `${loc.city}|${loc.country ?? ''}`;
       const existing = cityTotals.get(key);
       if (existing) existing.count += loc.count;
-      else cityTotals.set(key, { city: loc.city, country: loc.country, count: loc.count });
+      else cityTotals.set(key, { city: loc.city, country: loc.country ?? '', count: loc.count });
     }
   }
   const liveInterestCities = Array.from(cityTotals.values())
@@ -740,7 +740,7 @@ Total earnings (net, wallet): ${tipsDisplay}
 Monthly trend (revenue, new followers — real month-over-month, plays not included): ${ctx.monthlyGrowth.length > 0 ? ctx.monthlyGrowth.map(m => `${m.month}: ${symbol}${m.revenue.toFixed(2)} revenue${m.revenueChange != null ? ` (${m.revenueChange >= 0 ? '+' : ''}${m.revenueChange.toFixed(0)}% vs previous month)` : ''}, ${m.newFollowers} new followers${m.followerChange != null ? ` (${m.followerChange >= 0 ? '+' : ''}${m.followerChange.toFixed(0)}% vs previous month)` : ''}`).join('; ') : 'Not enough history yet'}
 Top fan cities (real paying fans — tips + ticket buyers, NOT the creator's own location): ${ctx.topFanCities.length > 0 ? ctx.topFanCities.map(c => `${c.city}, ${c.country} (${c.fanCount} fans, ${symbol}${c.totalSpent.toFixed(2)} spent)`).join('; ') : 'None yet'}
 Top individual fans: ${ctx.topFans.length > 0 ? ctx.topFans.map(f => `${f.username}${f.city ? ` (${f.city}${f.country ? `, ${f.country}` : ''})` : ''} — ${symbol}${f.totalSpent.toFixed(2)}`).join('; ') : 'None yet'}
-Live-interest cities (listeners who said yes to seeing you live, from the "want to hear them live?" prompt): ${ctx.liveInterestCities.length > 0 ? ctx.liveInterestCities.map(c => `${c.city}, ${c.country} (${c.count})`).join('; ') : 'None yet'}
+Live-interest cities (listeners who said yes to seeing you live, from the "want to hear them live?" prompt): ${ctx.liveInterestCities.length > 0 ? ctx.liveInterestCities.map(c => `${c.city}${c.country ? `, ${c.country}` : ''} (${c.count})`).join('; ') : 'None yet'}
 Live-interest total "yes" responses: ${ctx.liveInterestTotalYes}
 Live-interest availability (when interested listeners say they're free): ${availabilityLabel(ctx.liveInterestAvailability)}
 Top affinity fans (highest repeat engagement): ${ctx.topAffinityFans.length > 0 ? ctx.topAffinityFans.map(f => `${f.username} — ${f.repeatListens} repeat listens, ${f.tipsSent} tips sent`).join('; ') : 'Not enough activity yet'}
@@ -842,7 +842,7 @@ Top track: ${ctx.topTracks[0] ? `"${ctx.topTracks[0].title}" (${ctx.topTracks[0]
 Top track quality signal: ${ctx.trackQuality[0] ? `"${ctx.trackQuality[0].title}" — ${ctx.trackQuality[0].uniqueListeners} unique listeners, ${ctx.trackQuality[0].repeatListens} repeat listens, ${ctx.trackQuality[0].shareCount} shares, ${ctx.trackQuality[0].bookmarkCount} bookmarks` : 'not enough activity yet'}
 Earnings (net): ${chatTipsDisplay}
 Top fan cities (real paying fans): ${ctx.topFanCities.length > 0 ? ctx.topFanCities.map(c => `${c.city}, ${c.country} (${c.fanCount} fans)`).join('; ') : 'none yet'}
-Live-interest cities (real listener interest in seeing you live): ${ctx.liveInterestCities.length > 0 ? ctx.liveInterestCities.map(c => `${c.city}, ${c.country} (${c.count})`).join('; ') : 'none yet'}
+Live-interest cities (real listener interest in seeing you live): ${ctx.liveInterestCities.length > 0 ? ctx.liveInterestCities.map(c => `${c.city}${c.country ? `, ${c.country}` : ''} (${c.count})`).join('; ') : 'none yet'}
 Followers: ${ctx.followersCount}, Following: ${ctx.followingCount}
 Posts: ${ctx.totalPosts}${ctx.postTypes.length > 0 ? ` (${ctx.postTypes.join(', ')})` : ''}
 Events created: ${ctx.createdEvents.length > 0 ? ctx.createdEvents.map(e => `"${e.title}" — ${e.attendees} attendees`).join('; ') : 'none'}

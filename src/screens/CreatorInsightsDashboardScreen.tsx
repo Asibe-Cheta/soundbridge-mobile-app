@@ -322,7 +322,7 @@ const CreatorInsightsDashboardScreen = ({ navigation }: any) => {
               <View>
                 <Text style={[styles.fanName, { color: theme.colors.text }]}>{fan.username}</Text>
                 <Text style={[styles.fanLocation, { color: theme.colors.textSecondary }]}>
-                  {fan.city ? `${fan.city}, ${fan.country}` : 'Unknown location'}
+                  {fan.city ? `${fan.city}${fan.country ? `, ${fan.country}` : ''}` : 'Unknown location'}
                 </Text>
               </View>
             </View>
