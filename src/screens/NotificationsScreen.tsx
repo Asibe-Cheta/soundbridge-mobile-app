@@ -300,7 +300,8 @@ export default function NotificationsScreen() {
       case 'event_2_weeks':
       case 'event_1_week':
       case 'event_24_hours':
-      case 'event_day': {
+      case 'event_day':
+      case 'event_attendance': {
         const eventId = data?.eventId || data?.entityId || data?.event_id;
         if (eventId) {
           navigation.navigate('EventDetails' as never, { eventId } as never);
@@ -580,6 +581,8 @@ export default function NotificationsScreen() {
       case 'event_reminder_48h':
       case 'event_reminder_day_of':
         return 'calendar';
+      case 'event_attendance':
+        return 'people';
       case 'milestone':
         return 'trending-up';
       case 'venue_match':
@@ -637,6 +640,8 @@ export default function NotificationsScreen() {
       case 'event_reminder_48h':
       case 'event_reminder_day_of':
         return '#F59E0B';
+      case 'event_attendance':
+        return '#10B981';
       case 'milestone':
         return '#DC2626';
       case 'venue_match':

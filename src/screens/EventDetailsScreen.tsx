@@ -278,10 +278,19 @@ export default function EventDetailsScreen() {
         if (error) throw error;
 
         setIsAttending(false);
-        setEvent(prev => prev ? { 
-          ...prev, 
-          current_attendees: Math.max(0, (prev.current_attendees || 0) - 1) 
+        setEvent(prev => prev ? {
+          ...prev,
+          current_attendees: Math.max(0, (prev.current_attendees || 0) - 1)
         } : null);
+
+        // Best effort — never block un-attending on this.
+        const { error: notifErr } = await supabase
+          .from('notifications')
+          .delete()
+          .eq('dedupe_key', `event_attendance:${eventId}:${user.id}`);
+        if (notifErr) {
+          console.warn('[EventAttendance] failed to remove organizer notification:', notifErr.message);
+        }
       } else {
         // Add attendance
         const { error } = await supabase
@@ -295,14 +304,45 @@ export default function EventDetailsScreen() {
         if (error) throw error;
 
         setIsAttending(true);
-        setEvent(prev => prev ? { 
-          ...prev, 
-          current_attendees: (prev.current_attendees || 0) + 1 
+        setEvent(prev => prev ? {
+          ...prev,
+          current_attendees: (prev.current_attendees || 0) + 1
         } : null);
+
+        notifyOrganizerOfAttendance();
       }
     } catch (error) {
       console.error('❌ Error updating attendance:', error);
       Alert.alert('Error', 'Failed to update attendance status');
+    }
+  };
+
+  // Best effort, non-blocking — an insert failure here must never stop the
+  // attend action itself or get surfaced to the attendee.
+  const notifyOrganizerOfAttendance = async () => {
+    if (!event || !user?.id) return;
+    const organizerId = event.creator_id || event.organizer_id;
+    if (!organizerId || organizerId === user.id) return;
+
+    const attendeeName = userProfile?.display_name || userProfile?.username || 'Someone';
+    try {
+      const { error } = await supabase.from('notifications').upsert(
+        {
+          user_id: organizerId,
+          type: 'event_attendance',
+          title: 'New attendee',
+          body: `${attendeeName} is attending ${event.title}`,
+          data: { type: 'event_attendance', eventId, eventTitle: event.title, attendeeId: user.id },
+          read: false,
+          dedupe_key: `event_attendance:${eventId}:${user.id}`,
+        },
+        { onConflict: 'user_id,dedupe_key', ignoreDuplicates: true }
+      );
+      if (error) {
+        console.warn('[EventAttendance] failed to notify organizer:', error.message);
+      }
+    } catch (err) {
+      console.warn('[EventAttendance] notifyOrganizerOfAttendance error:', err);
     }
   };
 
