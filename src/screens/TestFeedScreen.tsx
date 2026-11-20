@@ -1251,6 +1251,11 @@ export default function TestFeedScreen() {
                     />
                   )}
                 </View>
+                {user && activeFilter === 'For You' && index === 5 && (
+                  <View style={styles.eventsStripWrap}>
+                    <NearbyEventsCard userId={user.id} />
+                  </View>
+                )}
                 {user && activeFilter === 'For You' && (index + 1) % 8 === 0 && (
                   <View style={styles.eventsStripWrap}>
                     <EventsStrip userId={user.id} />
@@ -1430,9 +1435,6 @@ export default function TestFeedScreen() {
               {/* Promo banners — For You only, so switching tabs visibly changes content */}
               {activeFilter === 'For You' && (
                 <>
-                  {/* Happening near you — shown to everyone eligible, not role-gated */}
-                  {user?.id && <NearbyEventsCard userId={user.id} />}
-
                   {/* Event Organiser banners — shown only to event_organiser users */}
                   {userProfile?.onboarding_user_type === 'event_organiser' && (
                     <View style={cardStyles.partnerCarouselWrapper}>
