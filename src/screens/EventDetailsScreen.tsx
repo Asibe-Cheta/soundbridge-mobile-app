@@ -12,6 +12,7 @@ import {
   RefreshControl,
   Linking,
   StatusBar,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -89,6 +90,8 @@ export default function EventDetailsScreen() {
   const [bookmarkLoading, setBookmarkLoading] = useState(false);
   const [showShareSheet, setShowShareSheet] = useState(false);
   const [showFullScreenImage, setShowFullScreenImage] = useState(false);
+  const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null);
+  const { width: screenWidth } = useWindowDimensions();
   const [analytics, setAnalytics] = useState<EventAnalytics | null>(null);
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
@@ -804,13 +807,27 @@ export default function EventDetailsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* Event Image */}
+        {/* Event Image — sized to the image's own aspect ratio (not a fixed
+            box) so the full flyer always shows, never cropped or letterboxed */}
         {(event.image_url || event.cover_image_url) && (
-          <TouchableOpacity activeOpacity={0.9} onPress={() => setShowFullScreenImage(true)}>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => setShowFullScreenImage(true)}
+            style={styles.eventImageWrap}
+          >
             <Image
               source={{ uri: event.image_url || event.cover_image_url }}
-              style={styles.eventImage}
-              resizeMode="contain"
+              style={[
+                styles.eventImage,
+                imageAspectRatio
+                  ? { height: (screenWidth - 32) / imageAspectRatio }
+                  : { height: screenWidth - 32 },
+              ]}
+              resizeMode="cover"
+              onLoad={e => {
+                const { width, height } = e.nativeEvent.source;
+                if (width && height) setImageAspectRatio(width / height);
+              }}
             />
           </TouchableOpacity>
         )}
@@ -1223,9 +1240,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
   },
+  eventImageWrap: {
+    marginHorizontal: 16,
+    marginTop: 12,
+  },
   eventImage: {
     width: '100%',
-    height: 200,
+    borderRadius: 16,
     backgroundColor: '#0A0A0F',
   },
   contentContainer: {
