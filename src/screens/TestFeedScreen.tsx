@@ -1253,7 +1253,7 @@ export default function TestFeedScreen() {
                 </View>
                 {user && activeFilter === 'For You' && index === 5 && (
                   <View style={styles.eventsStripWrap}>
-                    <NearbyEventsCard userId={user.id} debugVisible={!!userProfile?.is_internal_team} />
+                    <NearbyEventsCard userId={user.id} debugVisible={user.id === 'bd8a455d-a54d-45c5-968d-e4cf5e8d928e'} />
                   </View>
                 )}
                 {user && activeFilter === 'For You' && (index + 1) % 8 === 0 && (
