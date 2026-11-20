@@ -9,14 +9,16 @@ import EventMiniCard from './EventMiniCard';
 
 interface NearbyEventsCardProps {
   userId: string;
+  debugVisible?: boolean;
 }
 
-export default function NearbyEventsCard({ userId }: NearbyEventsCardProps) {
+export default function NearbyEventsCard({ userId, debugVisible }: NearbyEventsCardProps) {
   const { theme } = useTheme();
   const navigation = useNavigation();
   const [events, setEvents] = useState<NearbyEvent[]>([]);
   const [needsLocationPrompt, setNeedsLocationPrompt] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [debug, setDebug] = useState('');
   const shownLogged = useRef(new Set<string>());
 
   useEffect(() => {
@@ -26,6 +28,7 @@ export default function NearbyEventsCard({ userId }: NearbyEventsCardProps) {
       if (!mounted) return;
       setEvents(result.events);
       setNeedsLocationPrompt(result.needsLocationPrompt);
+      setDebug(result.debug);
       setLoaded(true);
     });
     return () => { mounted = false; };
@@ -53,6 +56,14 @@ export default function NearbyEventsCard({ userId }: NearbyEventsCardProps) {
   };
 
   if (!loaded) return null;
+
+  if (debugVisible && events.length === 0 && !needsLocationPrompt) {
+    return (
+      <View style={styles.promptCard}>
+        <Text style={{ color: '#F59E0B', fontSize: 12 }}>[NearbyEvents debug] {debug}</Text>
+      </View>
+    );
+  }
 
   if (needsLocationPrompt) {
     return (

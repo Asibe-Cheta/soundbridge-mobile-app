@@ -19,6 +19,7 @@ export interface NearbyEvent {
 export interface NearbyEventsResult {
   events: NearbyEvent[];
   needsLocationPrompt: boolean;
+  debug: string;
 }
 
 class NearbyEventsService {
@@ -31,7 +32,7 @@ class NearbyEventsService {
         .single();
 
       if (profileError) {
-        return { events: [], needsLocationPrompt: false };
+        return { events: [], needsLocationPrompt: false, debug: `profile select failed: ${profileError.message}` };
       }
 
       const hasProfileLocation = !!(profile?.city || profile?.location || (profile?.latitude && profile?.longitude));
@@ -55,7 +56,7 @@ class NearbyEventsService {
       }
 
       if (!hasProfileLocation && overrideLat === null) {
-        return { events: [], needsLocationPrompt: true };
+        return { events: [], needsLocationPrompt: true, debug: 'no profile location and no device location' };
       }
 
       const { data, error } = await supabase.rpc('get_nearby_events_for_user', {
@@ -67,13 +68,14 @@ class NearbyEventsService {
 
       if (error) {
         console.warn('[NearbyEvents] get_nearby_events_for_user failed:', error.message);
-        return { events: [], needsLocationPrompt: false };
+        return { events: [], needsLocationPrompt: false, debug: `rpc error: ${error.message} (code ${error.code ?? 'n/a'})` };
       }
 
-      return { events: (data ?? []) as NearbyEvent[], needsLocationPrompt: false };
-    } catch (err) {
+      const events = (data ?? []) as NearbyEvent[];
+      return { events, needsLocationPrompt: false, debug: `rpc ok, ${events.length} row(s)` };
+    } catch (err: any) {
       console.warn('[NearbyEvents] getNearbyEvents error:', err);
-      return { events: [], needsLocationPrompt: false };
+      return { events: [], needsLocationPrompt: false, debug: `thrown: ${err?.message ?? String(err)}` };
     }
   }
 
