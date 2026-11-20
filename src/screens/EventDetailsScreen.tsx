@@ -28,6 +28,7 @@ import eventBookmarkService from '../services/EventBookmarkService';
 import eventAnalyticsService, { EventAnalytics } from '../services/EventAnalyticsService';
 import { userBehaviourService } from '../services/UserBehaviourService';
 import { notificationReAskService } from '../services/NotificationReAskService';
+import FullScreenImageModal from '../modals/FullScreenImageModal';
 import EventShareSheet from '../components/EventShareSheet';
 import EventAnalyticsCard from '../components/EventAnalyticsCard';
 import WhosComingVisualization from '../components/WhosComingVisualization';
@@ -87,6 +88,7 @@ export default function EventDetailsScreen() {
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [bookmarkLoading, setBookmarkLoading] = useState(false);
   const [showShareSheet, setShowShareSheet] = useState(false);
+  const [showFullScreenImage, setShowFullScreenImage] = useState(false);
   const [analytics, setAnalytics] = useState<EventAnalytics | null>(null);
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
@@ -764,10 +766,13 @@ export default function EventDetailsScreen() {
       >
         {/* Event Image */}
         {(event.image_url || event.cover_image_url) && (
-          <Image 
-            source={{ uri: event.image_url || event.cover_image_url }} 
-            style={styles.eventImage} 
-          />
+          <TouchableOpacity activeOpacity={0.9} onPress={() => setShowFullScreenImage(true)}>
+            <Image
+              source={{ uri: event.image_url || event.cover_image_url }}
+              style={styles.eventImage}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
         )}
 
         <View style={styles.contentContainer}>
@@ -830,14 +835,16 @@ export default function EventDetailsScreen() {
           </View>
 
           {/* Attendees */}
-          {event.max_attendees && (
+          {(event.max_attendees || (event.current_attendees ?? 0) > 0) && (
             <View style={styles.infoSection}>
               <View style={styles.infoRow}>
                 <Ionicons name="people-outline" size={20} color={theme.colors.primary} />
                 <View style={styles.infoContent}>
                   <Text style={[styles.infoTitle, { color: theme.colors.text }]}>Attendees</Text>
                   <Text style={[styles.infoText, { color: theme.colors.textSecondary }]}>
-                    {event.current_attendees || 0} / {event.max_attendees} attending
+                    {event.max_attendees
+                      ? `${event.current_attendees || 0} / ${event.max_attendees} attending`
+                      : `${event.current_attendees} attending`}
                   </Text>
                 </View>
               </View>
@@ -1084,6 +1091,14 @@ export default function EventDetailsScreen() {
           event={event}
         />
       )}
+
+      {event && (event.image_url || event.cover_image_url) && (
+        <FullScreenImageModal
+          visible={showFullScreenImage}
+          imageUrls={[event.image_url || event.cover_image_url || '']}
+          onClose={() => setShowFullScreenImage(false)}
+        />
+      )}
     </View>
   );
 }
@@ -1171,6 +1186,7 @@ const styles = StyleSheet.create({
   eventImage: {
     width: '100%',
     height: 200,
+    backgroundColor: '#0A0A0F',
   },
   contentContainer: {
     padding: 16,
