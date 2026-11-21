@@ -9,6 +9,7 @@ import { notificationService, NotificationData } from './NotificationService';
 import { supabase } from '../lib/supabase';
 import { referralService } from './ReferralService';
 import { communityEntryService } from './CommunityEntryService';
+import { resolveProfileIdByUsername } from './UsernameResolver';
 
 export interface DeepLinkData {
   screen: string;
@@ -163,16 +164,14 @@ class DeepLinkingService {
       const [section, ...rest] = pathSegments;
 
       // Handle @username profile links e.g. soundbridge.live/@asibe_cheta
+      // Falls back to username_history so a link printed before a rename
+      // still resolves to the right profile instead of landing on Feed.
       if (section.startsWith('@')) {
         const username = section.slice(1);
         try {
-          const { data } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('username', username)
-            .single();
-          if (data?.id) {
-            return { screen: 'CreatorProfile', params: { creatorId: data.id } };
+          const creatorId = await resolveProfileIdByUsername(username);
+          if (creatorId) {
+            return { screen: 'CreatorProfile', params: { creatorId } };
           }
         } catch (_) {}
         return { screen: 'Feed' };
@@ -463,21 +462,19 @@ class DeepLinkingService {
     return this.handleArtistFanLanding(username);
   }
 
-  /** Fan page / community entry — persist creator and open profile when possible */
+  /** Fan page / community entry — persist creator and open profile when possible.
+   * Falls back to username_history so a link printed before a rename still
+   * resolves to the right profile. */
   private async handleArtistFanLanding(username: string): Promise<DeepLinkData> {
     const normalized = username.toLowerCase().trim();
     if (!normalized) return { screen: 'Feed' };
 
     try {
-      const { data } = await supabase
-        .from('profiles')
-        .select('id')
-        .ilike('username', normalized)
-        .maybeSingle();
-      await this.saveDeferredArtistLink(normalized, data?.id);
-      console.log('🔗 Fan landing attribution stored:', normalized, data?.id ?? 'no id');
-      if (data?.id) {
-        return { screen: 'CreatorProfile', params: { creatorId: data.id, fromFanLanding: true } };
+      const creatorId = await resolveProfileIdByUsername(normalized);
+      await this.saveDeferredArtistLink(normalized, creatorId ?? undefined);
+      console.log('🔗 Fan landing attribution stored:', normalized, creatorId ?? 'no id');
+      if (creatorId) {
+        return { screen: 'CreatorProfile', params: { creatorId, fromFanLanding: true } };
       }
     } catch (_) {
       await this.saveDeferredArtistLink(normalized);

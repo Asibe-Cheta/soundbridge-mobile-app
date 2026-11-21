@@ -22,6 +22,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
+import * as MediaLibrary from 'expo-media-library';
+import * as ExpoSharing from 'expo-sharing';
+import * as Print from 'expo-print';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { dbHelpers, supabase } from '../lib/supabase';
@@ -33,6 +37,21 @@ import RadioLabCard from '../components/RadioLabCard';
 import { isCreator as hasCreatorAccess } from '../utils/roles';
 
 const TIP_BASE_URL = 'https://soundbridge.live/tip';
+
+// Same defensive lazy-require as ShareMyCardModal.tsx, in case the native
+// module isn't linked in some build.
+let captureRef: ((ref: any, opts?: any) => Promise<string>) | null = null;
+try {
+  captureRef = require('react-native-view-shot').captureRef;
+} catch {}
+
+const EXPORT_CARD_WIDTH = 320;
+const EXPORT_QR_SIZE = 220;
+// Points at 72pt/inch — standard page sizes for the PDF export.
+const PDF_PAGE_SIZES: Record<'A6' | 'A4', { width: number; height: number }> = {
+  A6: { width: 298, height: 420 },
+  A4: { width: 595, height: 842 },
+};
 
 interface TipStats {
   todayAmount: number;
@@ -61,6 +80,8 @@ export default function LiveSessionsScreen({ navigation }: any) {
 
   const [tipStats, setTipStats] = useState<TipStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const exportCardRef = useRef<View>(null);
 
   const sessionsSubscriptionRef = useRef<any>(null);
 
@@ -195,6 +216,121 @@ export default function LiveSessionsScreen({ navigation }: any) {
     } catch {}
   };
 
+  // Captures the hidden white export card (QR + artist name, not the
+  // themed on-screen card) as a PNG, writes it to a named cache file, and
+  // returns both the file uri and the raw base64 (base64 needed to embed
+  // inline in the PDF's HTML).
+  const captureExportCard = async (): Promise<{ uri: string; base64: string } | null> => {
+    if (!captureRef) {
+      Alert.alert('App update required', 'QR image export needs a newer version of the app.');
+      return null;
+    }
+    if (!exportCardRef.current) return null;
+    try {
+      const base64 = await captureRef(exportCardRef.current, {
+        format: 'png',
+        quality: 1,
+        result: 'base64',
+        pixelRatio: 4, // 320pt * 4 = 1280px, clears the 1200px minimum
+      });
+      const uri = `${FileSystem.cacheDirectory}sb-tiproom-qr-${userProfile?.username ?? 'me'}.png`;
+      await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
+      return { uri, base64 };
+    } catch (err) {
+      console.error('[TipRoom] captureExportCard error:', err);
+      return null;
+    }
+  };
+
+  const handleSaveQrImage = async () => {
+    if (exportBusy) return;
+    setExportBusy(true);
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission required', 'Allow photo library access to save your Tip Room QR code.');
+        return;
+      }
+      const result = await captureExportCard();
+      if (!result) {
+        Alert.alert('Error', 'Could not create the QR image. Please try again.');
+        return;
+      }
+      await MediaLibrary.saveToLibraryAsync(result.uri);
+      Alert.alert('Saved', 'Your Tip Room QR code has been saved to your photos.');
+    } catch {
+      Alert.alert('Error', 'Could not save the QR image. Please try again.');
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
+  const handleShareQrImage = async () => {
+    if (exportBusy) return;
+    setExportBusy(true);
+    try {
+      const result = await captureExportCard();
+      if (!result) {
+        Alert.alert('Error', 'Could not create the QR image. Please try again.');
+        return;
+      }
+      const canShare = await ExpoSharing.isAvailableAsync();
+      if (canShare) {
+        await ExpoSharing.shareAsync(result.uri, { mimeType: 'image/png', dialogTitle: 'Share Tip Room QR' });
+      } else {
+        await Share.share({ url: result.uri });
+      }
+    } catch {
+      Alert.alert('Error', 'Could not share the QR image. Please try again.');
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
+  const handleSharePdf = (size: 'A6' | 'A4') => async () => {
+    if (exportBusy) return;
+    setExportBusy(true);
+    try {
+      const result = await captureExportCard();
+      if (!result) {
+        Alert.alert('Error', 'Could not create the QR PDF. Please try again.');
+        return;
+      }
+      const { width, height } = PDF_PAGE_SIZES[size];
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8" />
+        <style>
+          @page { size: ${width}pt ${height}pt; margin: 0; }
+          body { margin: 0; width: ${width}pt; height: ${height}pt; display: flex; align-items: center; justify-content: center; background: #ffffff; }
+          img { width: ${Math.round(width * 0.7)}pt; height: auto; }
+        </style>
+      </head><body>
+        <img src="data:image/png;base64,${result.base64}" />
+      </body></html>`;
+      const { uri } = await Print.printToFileAsync({ html, width, height, base64: false });
+      const dest = `${FileSystem.cacheDirectory}sb-tiproom-qr-${size}.pdf`;
+      await FileSystem.moveAsync({ from: uri, to: dest });
+      const canShare = await ExpoSharing.isAvailableAsync();
+      if (canShare) {
+        await ExpoSharing.shareAsync(dest, { mimeType: 'application/pdf', dialogTitle: `Share Tip Room QR (${size})`, UTI: 'com.adobe.pdf' });
+      } else {
+        Alert.alert('Sharing not available', 'Your device does not support file sharing.');
+      }
+    } catch (err) {
+      console.error('[TipRoom] handleSharePdf error:', err);
+      Alert.alert('Error', 'Could not create the QR PDF. Please try again.');
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
+  const handleSharePdfPrompt = () => {
+    Alert.alert('Share as PDF', 'Choose a page size.', [
+      { text: 'A6 (small card)', onPress: handleSharePdf('A6') },
+      { text: 'A4 (full page)', onPress: handleSharePdf('A4') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
   const formatCurrency = (amount: number) =>
     `£${amount.toFixed(2)}`;
 
@@ -326,6 +462,73 @@ export default function LiveSessionsScreen({ navigation }: any) {
           <Ionicons name="share-social-outline" size={18} color="#fff" />
           <Text style={styles.shareBtnText}>Share Tip Room Link</Text>
         </TouchableOpacity>
+
+        {/* Export actions — Save/Share the QR as an image, or as a PDF */}
+        {tipRoomUrl && (
+          <View style={styles.exportRow}>
+            <TouchableOpacity
+              style={[styles.exportBtn, { borderColor: theme.colors.border }]}
+              onPress={handleSaveQrImage}
+              disabled={exportBusy}
+              activeOpacity={0.8}
+            >
+              {exportBusy ? (
+                <ActivityIndicator size="small" color={theme.colors.textSecondary} />
+              ) : (
+                <>
+                  <Ionicons name="download-outline" size={16} color={theme.colors.text} />
+                  <Text style={[styles.exportBtnText, { color: theme.colors.text }]}>Save Image</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.exportBtn, { borderColor: theme.colors.border }]}
+              onPress={handleShareQrImage}
+              disabled={exportBusy}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="image-outline" size={16} color={theme.colors.text} />
+              <Text style={[styles.exportBtnText, { color: theme.colors.text }]}>Share Image</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.exportBtn, { borderColor: theme.colors.border }]}
+              onPress={handleSharePdfPrompt}
+              disabled={exportBusy}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="document-outline" size={16} color={theme.colors.text} />
+              <Text style={[styles.exportBtnText, { color: theme.colors.text }]}>Share PDF</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Hidden capture target for exports — always white/black regardless
+            of theme (a QR needs to scan reliably on paper), laid out
+            off-screen so captureRef can measure it without showing a
+            second, visually-redundant QR card to the user. collapsable=
+            false on both the wrapper and the target is required on
+            Android, otherwise the view-flattening optimiser can drop a
+            plain View with no visible styling before captureRef runs. */}
+        {tipRoomUrl && (
+          <View style={styles.exportCardOffscreen} collapsable={false} pointerEvents="none">
+            <View ref={exportCardRef} collapsable={false} style={styles.exportCard}>
+              <QRCode
+                value={tipRoomUrl}
+                size={EXPORT_QR_SIZE}
+                backgroundColor="#ffffff"
+                color="#000000"
+                logo={require('../../assets/images/logos/logo-trans-lockup.png')}
+                logoSize={44}
+                logoBackgroundColor="#ffffff"
+                logoBorderRadius={4}
+                logoMargin={3}
+              />
+              <Text style={styles.exportCardName} numberOfLines={1}>
+                {userProfile?.display_name || userProfile?.username}
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Stats */}
         <Text style={[styles.statsHeading, { color: theme.colors.text }]}>Tips received</Text>
@@ -515,9 +718,34 @@ const styles = StyleSheet.create({
   qrPlaceholder: { alignItems: 'center', gap: 12, paddingVertical: 16 },
   shareBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, borderRadius: 28, paddingVertical: 15, marginBottom: 36,
+    gap: 8, borderRadius: 28, paddingVertical: 15, marginBottom: 12,
   },
   shareBtnText: { color: '#fff', fontSize: 15, fontWeight: '700', fontFamily: Typography.body.fontFamily },
+  exportRow: {
+    flexDirection: 'row', gap: 8, marginBottom: 36,
+  },
+  exportBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 11,
+  },
+  exportBtnText: { fontSize: 12.5, fontWeight: '600', fontFamily: Typography.body.fontFamily },
+  exportCardOffscreen: {
+    position: 'absolute', top: -4000, left: 0,
+  },
+  exportCard: {
+    width: EXPORT_CARD_WIDTH,
+    backgroundColor: '#ffffff',
+    paddingVertical: 32,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  exportCardName: {
+    marginTop: 16,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111111',
+    fontFamily: Typography.body.fontFamily,
+  },
   statsHeading: {
     fontSize: 18, fontWeight: '700', letterSpacing: -0.3, marginBottom: 14,
     fontFamily: Typography.body.fontFamily,

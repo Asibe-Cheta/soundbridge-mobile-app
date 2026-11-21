@@ -81,12 +81,14 @@ import {
   calendarIntegrationService,
   type CalendarConnectionStatus,
 } from '../services/CalendarIntegrationService';
+import { isReservedUsername } from '../constants/reservedUsernames';
 
 const { width } = Dimensions.get('window');
 
 interface UserProfile {
   id: string;
   username: string;
+  username_changed_at?: string | null;
   display_name: string;
   first_name?: string | null;
   last_name?: string | null;
@@ -212,6 +214,15 @@ export default function ProfileScreen() {
   // ── Username change (post-onboarding) ──────────────────────────────────────
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
   const [checkingUsername, setCheckingUsername] = useState(false);
+  // First change is always allowed (username_changed_at starts null for
+  // every account). Hard block, not a warning — matches the server-side
+  // trigger, which is the real enforcement; this is just so the message
+  // shows immediately instead of only after a failed save.
+  const usernameCooldownUntil = profile?.username_changed_at
+    ? new Date(new Date(profile.username_changed_at).getTime() + 30 * 24 * 60 * 60 * 1000)
+    : null;
+  const usernameLocked = !!(usernameCooldownUntil && usernameCooldownUntil > new Date());
+  const usernameReserved = !!(editingProfile.username && isReservedUsername(editingProfile.username));
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [becomingServiceProvider, setBecomingServiceProvider] = useState(false);
   const [showBecomeCreatorModal, setShowBecomeCreatorModal] = useState(false);
@@ -1246,7 +1257,7 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (!isEditing) return;
     const candidate = editingProfile.username;
-    if (!candidate || candidate.length < 3 || candidate === profile?.username) {
+    if (!candidate || candidate.length < 3 || candidate === profile?.username || isReservedUsername(candidate)) {
       setUsernameAvailable(null);
       return;
     }
@@ -1258,11 +1269,23 @@ export default function ProfileScreen() {
 
   const handleSaveProfile = async () => {
     if (!user?.id || !editingProfile || !session) return;
+    const usernameChanged = editingProfile.username !== profile?.username;
+    if (usernameChanged && usernameLocked && usernameCooldownUntil) {
+      Alert.alert(
+        'Username Locked',
+        `You can next change your username on ${usernameCooldownUntil.toLocaleDateString()}.`
+      );
+      return;
+    }
+    if (usernameChanged && usernameReserved) {
+      Alert.alert('Username Reserved', 'This username is reserved and cannot be used.');
+      return;
+    }
     if (usernameAvailable === false) {
       Alert.alert('Username Taken', 'Please choose a different username before saving.');
       return;
     }
-    
+
     try {
       console.log('🔧 Saving profile changes...');
       
@@ -2817,30 +2840,12 @@ export default function ProfileScreen() {
               <View style={styles.profileInfoOverlay}>
                 {isEditing ? (
                   <>
-                    <TextInput
-                      style={[styles.editInputOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)', color: '#FFFFFF' }]}
-                      value={editingProfile.display_name}
-                      onChangeText={(text) => setEditingProfile(prev => ({ ...prev, display_name: text }))}
-                      placeholder="Display Name"
-                      placeholderTextColor="rgba(255, 255, 255, 0.7)"
-                    />
-                    <TextInput
-                      style={[styles.editInputOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)', color: '#FFFFFF' }]}
-                      value={editingProfile.username ?? ''}
-                      onChangeText={(text) => setEditingProfile(prev => ({ ...prev, username: text.toLowerCase().replace(/[^a-z0-9_]/g, '') }))}
-                      placeholder="Username"
-                      placeholderTextColor="rgba(255, 255, 255, 0.7)"
-                      autoCapitalize="none"
-                    />
-                    {checkingUsername ? (
-                      <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: -6, marginBottom: 8 }}>Checking...</Text>
-                    ) : usernameAvailable === true ? (
-                      <Text style={{ color: '#10B981', fontSize: 12, marginTop: -6, marginBottom: 8 }}>✓ Available</Text>
-                    ) : usernameAvailable === false ? (
-                      <Text style={{ color: '#EF4444', fontSize: 12, marginTop: -6, marginBottom: 8 }}>✗ Already taken</Text>
-                    ) : (editingProfile.username?.length ?? 0) > 0 && (editingProfile.username?.length ?? 0) < 3 ? (
-                      <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: -6, marginBottom: 8 }}>Minimum 3 characters</Text>
-                    ) : null}
+                    {/* Display Name and Username moved out of this overlay —
+                        see editBasicInfoSection below the banner. This overlay
+                        is position: absolute, bottom: 0 and grows upward as
+                        edit-mode content gets taller; on short screens the
+                        earliest fields got pushed above the banner's own top
+                        edge and were unreachable even by scrolling. */}
                     <TextInput
                       style={[styles.editInputOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)', color: '#FFFFFF' }]}
                       value={editingProfile.first_name ?? ''}
@@ -2954,6 +2959,52 @@ export default function ProfileScreen() {
             </View>
           </View>
         </View>
+
+        {/* Display Name + Username — normal (non-overlay) section, not
+            clipped on short screens the way the photo-overlay fields were */}
+        {isEditing && (
+          <View style={[styles.editBasicInfoSection, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <Text style={[styles.editBasicInfoLabel, { color: theme.colors.textSecondary }]}>Display Name</Text>
+            <TextInput
+              style={[styles.editBasicInfoInput, { color: theme.colors.text, borderColor: theme.colors.border }]}
+              value={editingProfile.display_name}
+              onChangeText={(text) => setEditingProfile(prev => ({ ...prev, display_name: text }))}
+              placeholder="Display Name"
+              placeholderTextColor={theme.colors.textSecondary}
+              maxLength={60}
+            />
+
+            <Text style={[styles.editBasicInfoLabel, { color: theme.colors.textSecondary, marginTop: 14 }]}>Username</Text>
+            <View style={[styles.editBasicInfoInput, styles.usernameInputRow, { borderColor: theme.colors.border }]}>
+              <Text style={[styles.usernameAtSign, { color: theme.colors.textSecondary }]}>@</Text>
+              <TextInput
+                style={[styles.usernameInputField, { color: theme.colors.text }]}
+                value={editingProfile.username ?? ''}
+                onChangeText={(text) => setEditingProfile(prev => ({ ...prev, username: text.toLowerCase().replace(/[^a-z0-9_]/g, '') }))}
+                placeholder="username"
+                placeholderTextColor={theme.colors.textSecondary}
+                autoCapitalize="none"
+                maxLength={30}
+                editable={!usernameLocked}
+              />
+            </View>
+            {usernameLocked && usernameCooldownUntil ? (
+              <Text style={[styles.usernameHintText, { color: '#F59E0B' }]}>
+                You can next change your username on {usernameCooldownUntil.toLocaleDateString()}.
+              </Text>
+            ) : usernameReserved ? (
+              <Text style={[styles.usernameHintText, { color: '#EF4444' }]}>This username is reserved.</Text>
+            ) : checkingUsername ? (
+              <Text style={[styles.usernameHintText, { color: theme.colors.textSecondary }]}>Checking...</Text>
+            ) : usernameAvailable === true ? (
+              <Text style={[styles.usernameHintText, { color: '#10B981' }]}>Available</Text>
+            ) : usernameAvailable === false ? (
+              <Text style={[styles.usernameHintText, { color: '#EF4444' }]}>Already taken</Text>
+            ) : (editingProfile.username?.length ?? 0) > 0 && (editingProfile.username?.length ?? 0) < 3 ? (
+              <Text style={[styles.usernameHintText, { color: theme.colors.textSecondary }]}>Minimum 3 characters</Text>
+            ) : null}
+          </View>
+        )}
 
         {/* Tabs - Scroll up with content */}
         <View style={[styles.tabsContainer, { backgroundColor: theme.colors.surface }]}>
@@ -3355,6 +3406,46 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  editBasicInfoSection: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 16,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  editBasicInfoLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  editBasicInfoInput: {
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    lineHeight: 22,
+    borderWidth: 1,
+  },
+  usernameInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  usernameAtSign: {
+    fontSize: 16,
+    marginRight: 2,
+  },
+  usernameInputField: {
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 22,
+    padding: 0,
+  },
+  usernameHintText: {
+    fontSize: 12,
+    marginTop: 6,
   },
   bioInputOverlay: {
     height: 80,
