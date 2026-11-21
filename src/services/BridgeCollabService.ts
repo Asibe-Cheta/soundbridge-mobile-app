@@ -22,8 +22,12 @@ import { supabase } from '../lib/supabase';
 
 const DAILY_EXPLANATION_CAP = 5;
 
-const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+// Gemini calls go through the gemini-proxy edge function now — no key in
+// the app bundle. This local AsyncStorage cap stays as a fast client-side
+// short-circuit to avoid a network round-trip in the common case; the
+// proxy's own per-user server-side cap is the real enforcement and is what
+// actually prevents abuse (this local one is easily cleared/bypassed by
+// reinstalling the app).
 
 export interface SuggestedCollaborator {
   id: string;
@@ -81,8 +85,6 @@ async function generateExplanation(
   current: { display_name?: string | null; role?: string | null; genre?: string | null; location?: string | null },
   candidate: CandidateRow
 ): Promise<string> {
-  if (!GEMINI_API_KEY) return genericExplanation(current, candidate);
-
   const dailyCount = await getDailyCount();
   if (dailyCount >= DAILY_EXPLANATION_CAP) return genericExplanation(current, candidate);
 
@@ -94,15 +96,12 @@ Creator B: name=${candidate.display_name ?? candidate.username}, role=${candidat
 
 Reply with only the sentence, no quotes, no preamble.`;
 
-    const res = await fetch(GEMINI_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    const { data, error } = await supabase.functions.invoke('gemini-proxy', {
+      body: { feature: 'bridge_collab_explanation', contents: [{ parts: [{ text: prompt }] }] },
     });
-    if (!res.ok) return genericExplanation(current, candidate);
+    if (error) return genericExplanation(current, candidate);
 
-    const json = await res.json();
-    const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    const text: string | undefined = data?.text?.trim();
     if (!text) return genericExplanation(current, candidate);
 
     await incrementDailyCount();

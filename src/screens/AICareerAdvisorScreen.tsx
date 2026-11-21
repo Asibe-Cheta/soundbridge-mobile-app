@@ -228,22 +228,52 @@ function getPromptChips(ctx: CreatorContext | null, cards: InsightCardData[]): s
   return Array.from(new Set(chips)).slice(0, 4);
 }
 
-const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+// Gemini calls go through the gemini-proxy edge function — the API key
+// lives only in that function's secret now, never in the app bundle.
+// This wrapper mimics the fetch Response shape (.ok/.status/.json/.text)
+// so callGeminiAnalysis and callGeminiChat below are unchanged.
+type GeminiProxyResponse = {
+  ok: boolean;
+  status: number;
+  json: () => Promise<any>;
+  text: () => Promise<string>;
+};
 
-async function geminiPost(body: object, maxRetries = 3): Promise<Response> {
-  let lastError: Error | null = null;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 2000));
-    const res = await fetch(GEMINI_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (res.status !== 503) return res;
-    lastError = new Error(`Gemini error 503: service temporarily unavailable`);
+async function geminiPost(
+  body: object,
+  feature: 'career_advisor_analysis' | 'career_advisor_chat'
+): Promise<GeminiProxyResponse> {
+  const { data, error } = await supabase.functions.invoke('gemini-proxy', {
+    body: { feature, ...body },
+  });
+
+  if (error) {
+    let status = 500;
+    let message = error.message ?? 'Request failed';
+    try {
+      const ctx: any = (error as any).context;
+      if (ctx?.json) {
+        const errBody = await ctx.json();
+        status = ctx.status ?? status;
+        message = errBody?.message ?? message;
+      }
+    } catch {
+      // Fall through with the generic message above.
+    }
+    return {
+      ok: false,
+      status,
+      text: async () => message,
+      json: async () => ({ message }),
+    };
   }
-  throw lastError ?? new Error('Gemini unavailable after retries');
+
+  return {
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify(data),
+    json: async () => ({ candidates: [{ content: { parts: [{ text: data?.text ?? '' }] } }] }),
+  };
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -616,8 +646,6 @@ function detectProactiveWelcome(ctx: Pick<CreatorContext, 'totalTracks' | 'bio' 
 }
 
 async function callGeminiAnalysis(ctx: CreatorContext): Promise<InsightCardData[]> {
-  if (!GEMINI_API_KEY) throw new Error('Gemini API key not configured. Add EXPO_PUBLIC_GEMINI_API_KEY to .env.');
-
   const hasData = ctx.totalTracks > 0;
 
   const symbol = ctx.earningsCurrency === 'GBP' ? '£' : ctx.earningsCurrency === 'EUR' ? '€' : '$';
@@ -758,7 +786,7 @@ Matching venues (real, within their preferences): ${ctx.matchingVenues.length > 
     systemInstruction: { parts: [{ text: systemPrompt }] },
     contents: [{ role: 'user', parts: [{ text: userContent }] }],
     generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
-  });
+  }, 'career_advisor_analysis');
 
   if (!res.ok) {
     const errText = await res.text();
@@ -794,8 +822,6 @@ async function callGeminiChat(
   newMessage: string,
   analysisCards: InsightCardData[]
 ): Promise<{ reply: string; dataBacked: boolean | null }> {
-  if (!GEMINI_API_KEY) throw new Error('Gemini API key not configured.');
-
   const chatSymbol = ctx.earningsCurrency === 'GBP' ? '£' : ctx.earningsCurrency === 'EUR' ? '€' : '$';
   const chatTipsDisplay = ctx.totalEarned > 0
     ? `${chatSymbol}${ctx.totalEarned.toFixed(2)} ${ctx.earningsCurrency} total earned`
@@ -863,7 +889,7 @@ Matching venues: ${ctx.matchingVenues.length > 0 ? ctx.matchingVenues.map(v => `
     systemInstruction: { parts: [{ text: systemPrompt }] },
     contents,
     generationConfig: { temperature: 0.75, maxOutputTokens: 600 },
-  });
+  }, 'career_advisor_chat');
 
   if (!res.ok) {
     const errText = await res.text();
